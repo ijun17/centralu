@@ -1546,14 +1546,14 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 | 이유 | 정해지는 때 | 지워지는 때 |
 |---|---|---|
 | `network` | 돌던 턴이 네트워크 때문에 오류로 끝날 때(`endedTurn`과 함께 `interruptionAfter`. 충돌 `adapter_crashed`와 쉬는 동안의 오류는 해당하지 않는다): 오류 코드(`ECONNREFUSED`, `ENOTFOUND` 등), Claude의 "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed"(CLI가 연결 실패를 말로 옮기는 함수에서 읽은 문구. "Unable to connect to API: SSL …"은 네트워크가 아니라 설정 문제다), 컴퓨터 잠자기, Codex의 "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network"(`isNetworkFailure`. 실제 저장소와 host.log에서 측정한 문장들). 도구의 문장만 보고 충돌에 붙는 stderr 끝부분은 보지 않는다(`failureSentence`). "connection closed", "network error" 같은 일반적인 말은 그 문장들 안에서만 센다. MCP 서버나 개발 서버도 그런 말을 할 수 있기 때문이다 | 세션이 다시 일할 때(`working`, 출력), 또는 턴이 다른 식으로 끝날 때 |
-| `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …") | 같음 |
+| `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …"). 연결된 허브의 업데이트가 끊은 턴은 이어 가며 표시하지 않고, 잇지 못했을 때만 표시한다(#1618) | 같음 |
 | `interrupted` | 턴이 `interrupted_by_tool` 이유(`INTERRUPTED_BY_TOOL`)로 `waiting_input`에서 끝날 때: 우리가 `turn/interrupt`를 보내지 않은 턴에 온 Codex의 `turn/completed {status: "interrupted"}` | 같음 |
 | `reconnecting` | 도구가 `RECONNECTING_FLAG_MS`(5분) 동안 `retrying`에 머물 때: Codex는 네트워크를 끝없이 기다린다. 살아 있는 동안만이며 저장하지 않는다 | 활동이 `retrying`에서 벗어나거나 턴이 끝날 때 |
 
 | 결정 | 이유 |
 |---|---|
 | 턴 도중 취소된 앱 요청은 세션을 중단하기 전에 기다림을 실패로 끝낸다 | Claude 어댑터는 CLI가 중단을 확인하는 즉시, 턴의 결과보다 먼저 턴을 끝내므로, 기다림이 취소를 "끝나기 전에 멈춤"으로 읽었다 |
-| 분류해서 보여 주고, 스스로 다시 보내지 않는다 | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나이고, 두 쪽 모두 같은 문장이다: "Continue where you stopped. Check what already happened before repeating a step." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
+| 분류해서 보여 주고, 스스로 다시 보내지 않는다. 연결된 허브의 업데이트가 끊은 턴만은 예외로, 다음 호스트가 같은 문장으로 한 번 이어 간다(2026-10-26 소유자 결정, #1618) | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나이고, 두 쪽 모두 같은 문장이다: "Continue where you stopped. Check what already happened before repeating a step." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
 | Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 오케스트레이터는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
 | Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). 메모의 `turn/start`가 오가는 사이에 누른 Stop은 답이 알려 준 턴을 중단하고, 이것도 우리 것으로 센다(`takeInputTurn`) | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |
 | 사람의 Stop과 오케스트레이터의 `agent_session stop`은 아무것도 정하지 않는다 | 본인이 알고 있다. 자기 행동을 표시하면 소음이 된다 |
@@ -1803,7 +1803,7 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 **원격 업데이트는 턴이 끝나길 기다린다**(#1399). 원격에는 키퍼가 없어 에이전트를 새 호스트로 넘길 수 없다. 그래서 업데이트는 새 버전을 옆에 설치한 뒤,
 그쪽에서 턴이 도는 세션(working, 승인·질문 대기, 백그라운드 작업)이 없어질 때까지 15초마다 `host.activity`를 읽으며 기다리고(행의 작업은 `wait_idle`),
 그다음에야 호스트를 멈춘다. 터미널과 프로젝트 명령은 몇 시간씩 열려 있으므로 기다리지 않는다. `machines.cancelUpdate`(또는 취소된 오케스트레이터 호출)가
-기다림을 끝내며 아무것도 바꾸지 않은 채 실패한다. `machines.update { when: 'now' }`(사람의 선택)는 기다리지 않고 멈추며, 몇 세션의 턴이 끝났는지 `note`에 적는다.
+기다림을 끝내며 아무것도 바꾸지 않은 채 실패한다. `machines.update { when: 'now' }`(사람의 선택)는 기다리지 않고 멈추며, 몇 세션의 턴이 끝났는지(닫힌 터미널·프로젝트 명령 수와 함께) `note`에 적고, 끊긴 턴은 다음 호스트가 이어 간다(아래, #1618).
 읽기가 한 번이라도 성공한 뒤에는 실패한 읽기가 아무것도 증명하지 않으므로(바쁘거나 끊긴 원격도 실패한다) 실패한 읽기를 지나서도 계속 기다리고(행의 작업은 `wait_unread`),
 성공한 읽기가 "턴 없음"을 보일 때만(두 번째 읽기도) 멈춘다. 한 번도 읽지 못한 기기는 기다리지 않는다. `MachineInfo.updateWaits`가 없는 이전 허브는 바로 멈추므로 창은 그 허브에 "한가할 때"를 약속하지 않는다.
 `when`이 없으면 `idle`이다(이전 창의 뜻). 오케스트레이터의 `install_machine`(update)은 턴이 도는 세션이 있으면 카드에 그렇게 적고 허용은 "한가할 때 업데이트"를 뜻한다.
@@ -1812,14 +1812,66 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 허브와 같은 채널의 더 오래된 릴리스를 돌리는 연결된 기기는 누구의 클릭 없이 허브의 버전으로 올라간다. 조건은 `LinkedMachine.followsHub` 한 곳에만 있다:
 자동 업데이트가 켜져 있고(허브가 스왑을 위해 드레인하는 동안은 꺼진 것으로 읽는다), 허브가 그 기기를 업데이트할 수 있고, 사람이 허브가 설치한 것을
 지우지 않았고, 어느 쪽도 로컬 빌드가 아니며, `versions.older`가 `remote`일 때. 허브는 연결될 때마다(허브 자신의 업데이트 뒤 새 호스트가 다시 연결할 때도)
-그리고 사람이 자동 업데이트를 켤 때 `machines.update { when: 'idle' }`과 같은 업데이트를 스스로 시작한다. 이 업데이트는 턴을 기다리고, 무엇이 도는지
-물을 수 없는 호스트는 멈추지 않으며(멈추기 전에 실패하고 아무것도 바뀌지 않는다), 기다리는 동안 자동 업데이트가 꺼지거나 스왑이 시작되면 그만둔다.
-사람의 Update와 달리 터미널과 프로젝트 명령도 닫히길 기다리며(어느 것도 닫지 않고, 터미널이나 명령이 턴과 상관없이 끊김 없이 30분 열려 있으면 그만둔다(#1579). 행과 로그는 무엇이 붙잡는지(턴이 도는 세션 `wait_idle`, 열린 터미널·명령 `wait_open`)와 그 수 `operation.count`를 따로 말한다. 열린 터미널·명령의 행 문구: "Updating to <v>: waiting for <N> open terminals or commands there (Cancel, then Update, closes them)…", 하나면 "1 open terminal or command there (… closes it)"; 소유자 결정 2026-10-26), 무엇이 도는지 읽을 수 없는 기기에는
-아무것도 설치하기 전에 실패한다. 허브 버전마다 한 번, 실패하면 10분 뒤 한 번 더 시도하고, 사람이 기다림을 취소하면 그 버전에는 다시 하지 않는다.
-그렇게 끝난 버전에서는 `followsHub`가 거짓이라 에이전트도 카드 없이 다시 시작할 수 없다. 제한된 호출자의 `machines.cancelUpdate`(everyday)도
-이 업데이트를 다음 허브 버전까지 멈출 수 있다. 실패는 행에 `MachineInfo.followHub`로
+그리고 사람이 자동 업데이트를 켤 때 `machines.update { when: 'now' }`과 같은 업데이트를 스스로 시작한다(`unasked`, `LinkedMachine.stopAtOnce`).
+이 업데이트는 기다리지 않는다(2026-10-26 소유자 결정, #1618): 예전에는 턴(#1399)과 터미널·프로젝트 명령(`OPEN_WORK_WAIT_MS`, #1579)을 기다렸고,
+늘 바쁜 기기는 끝내 업데이트되지 않았다(두 기기가 몇 시간씩 묶였다, #1614). 이제 멈추기 직전에 답의 문장을 위해 무엇이 도는지 한 번 읽고 호스트를 멈춘다: 돌던 턴은
+끊기고 다음 호스트가 이어 가며(아래), 터미널과 프로젝트 명령은 닫힌다. 무엇이 도는지 물을 수 없는 호스트는 멈추지 않는다: 설치 전과 멈추기 전에 읽고
+(실패하면 두 번 더), 읽지 못하면 아무것도 바꾸지 않은 채 실패한다. 이 허브는 `wait_open` 단계를 더는 보이지 않으며, 창은 이전 허브를 위해 그 문구를 둔다.
+허브 버전마다 한 번, 실패하면 10분 뒤 한 번 더 시도한다(#1618 이전 허브의 이 업데이트는 기다리는 동안 취소할 수 있었고, 취소하면 그 버전은 끝났다).
+그렇게 끝난 버전에서는 `followsHub`가 거짓이라 에이전트도 카드 없이 다시 시작할 수 없다. 실패는 행에 `MachineInfo.followHub`로
 보인다. 에이전트(제한된 자격)의 `machines.update`도 `when`이 `idle`이거나 없고 `followsHub`가 참이면 카드 없이 돌고(`transport/method-rights.ts`의 `RightsHost`),
 오케스트레이터의 `install_machine`(update)도 같은 확인으로 카드를 건너뛴다. `now`, 롤백, 제거, 설치, `acceptVersions`는 계속 묻는다.
+
+**업데이트가 끊은 턴은 이어진다**(#1618, 2026-10-26 소유자 결정). 기다리지 않는 업데이트(사람의 `now`, 아무도 승인하지 않은 모든 업데이트)는
+그쪽에서 돌던 턴을 끊는다. 그 업데이트가 띄운 호스트가 각 턴을 사람의 Continue처럼 한 번 이어 간다.
+- **어느 턴.** 정의는 하나이고, 멈추는 호스트가 멈추는 순간에 기록한다: 세션들을 놓을 때 턴 중인 세션들(idle.ts의 `cutTurns`: working, 또는 승인·질문
+  대기, `turnCut`). 마지막 호출을 받은 뒤, 프로세스들이 끝나는 바로 그 단계에서 읽는다(`SessionManager.disposeAll`). 그래서 허브가 무엇이 도는지 읽은 뒤
+  시작한 턴도 들어가고, 호스트가 멈추기 전에 받은 사람의 Stop은 그 세션을 뺀다. 백그라운드 작업만 있는 세션은 턴이 아니므로 이어 가지 않는다.
+- **업데이트라고 알린다.** 그 폴더에서 호스트가 다시 시작하는 허브의 모든 멈춤(업데이트, 확인 실패 뒤 되돌리기, 롤백. 제거는 아니다)은
+  `CENTRALU_STOP_FOR=update`로 `serve --stop`을 돌리고(`stopCommand`, `stopRemoteHost`), 런처는 이를 `host.stop { forUpdate: true }`(추가 필드)로 넘긴다.
+  프로세스들이 끝나고 마지막 출력이 기록되면, 호스트는 그 턴들을 자기만의 목록 `<data>/update-resume.<uuid>.json`(`{ v: 1, turns: [{ id, seq }] }`,
+  lifecycle/update-resume.ts)으로 쓰고, 각 턴에 그때 그 대화의 마지막 행(`seq`)을 붙인다. 목록은 새 이름으로 한 번 쓰이고, 앞선 멈춤이 남긴 목록 옆에 놓인다:
+  다른 프로세스가 잡고 있을 수 있는 파일 위로 이름을 바꿔 덮지 않는다. 쓰지 못한 목록은 폴더가 낸 오류 그대로 로그에 남고, 그 턴은 늘 그랬듯 끝난다.
+  런처가 물을 수 없던 호스트(대신 끝낸다), 사람의 멈춤, #1618 이전 호스트는 아무것도 쓰지 않고, 그 턴은 늘 그랬듯 끝난다.
+- **각각 한 번, 그 턴만**(#1626 리뷰). 그 폴더에서 다음으로 시작하는 호스트는 세션을 만들기 전에 목록을 모두 읽되 가져가지 않는다. 목록의 세션은 그 대화가
+  아직 적힌 행에서 끝날 때만 그 멈춤이 끊은 턴이다. 그것이 성립하는 까닭은 다음 시작이 목록의 세션마다 늘 행을 하나 쓰기 때문이다: Continue의 줄,
+  또는 잃었거나 더는 목록의 그 턴이 아닌 세션의 중단 표시(롤백 뒤 옛 호스트의 시작도 자기 중단 표시를 쓴다). 그래서 어떤 턴이 오든 그 전에 대화가 이미
+  표시된 행을 지난다. "턴은 입력을 먼저 기록한다"에 기대지 않는다: CLI가 백그라운드 작업 뒤에 스스로 시작하는 턴과 Centralu의 자체 압축은 행 없이 시작한다.
+  그래서 남겨진 목록(지울 때 바이러스 검사기가 열고 있던 것, 롤백 뒤 #1618 이전 호스트가 읽지 않은 것)은 나중 턴을 잇지 않고, 그런 턴을 끊은 사람의
+  멈춤은 종료로 알려진다. 시작이 점유(`EBUSY`, 방금 쓴 파일을 연 바이러스 검사기) 때문에 읽지 못한 목록은 200ms 간격으로 최대 다섯 번 다시 읽고, 실패마다
+  로그에 남긴다. 그래도 점유된 목록은 그 자리에 남아 나중 시작이 읽으며, 이 시작이 끊긴 것으로 찾은 세션의 턴은 종료처럼 중단 표시가 붙고(호스트는 목록이
+  어느 세션을 가리키는지 알 수 없다) 로그가 그 까닭을 말한다. 목록은 거기 적힌
+  턴이 모두 처리되면 지워진다(`UpdateResumeLists.done`): Continue가 들어갔거나, 잃었다고 보고했거나, 시작이 끊긴 턴으로 찾지 못했을 때. 지우지 못한 목록은
+  로그에 남고 해가 없으며 나중 시작에서 지워진다. 쓰는 중에 죽은 호스트가 남긴 목록은 JSON이 아니어서 다음 시작에서 지워진다. 그 전에 멈추는 호스트(확인에
+  실패해 업데이트가 이전 것을 되돌릴 때, 두 번째 업데이트, 롤백)는 목록들을 남기고 자기가 끊는 턴(이어 가던 턴 포함)으로 자기 목록을 쓰므로, 그다음
+  호스트가 잇는다. 호스트가 떠나는 중에 도구가 받은 Continue는 그다음 호스트에 맡겨지고, 그 호스트가 메모를 보내고 줄을 쓰고 요청자에게도 알린다: 두 번째 업데이트로 떠나는 호스트는 그것에 대해 자기 줄을 쓰지 않으므로 대화에는 Continue가 한 번 보인다. 사람의 종료나 교체는 목록을 쓰지 않으므로 그때는 줄을 쓴다: 남아 있는 목록의 표시를 대화가 지나가게 하는 행이 그것이다. 만료는 없다: 목록은 언제 오든
+  다음 시작의 것이며, 그 기기 자신의 시계로 다뤄진다. 다른 형식의 목록은 아무것도 잇지 않고 그것을 쓴 호스트에 남겨 둔다.
+- **이어 가기.** 목록의 세션이 프로세스 없이 턴 중이면 `working`으로 남고("stopped" 표시도, 종료 알림도 없다), 빚진 보고와 맡은 턴은 유지된 프로세스의
+  것처럼 지켜진다. 시작이 끝나면 깨워서 Centralu의 채널로(`deliverMail`, 사람의 메시지가 아니다) Centralu의 메모를 넣는다: "Centralu on this machine was
+  updated while your turn was running, which stopped the turn before it finished. Continue where you stopped. Check what already happened before
+  repeating a step." 메모가 들어가기 전 다른 곳에서 온 깨우기(기기가 돌아온 것을 본 창)도 턴의 상태를 유지하므로(`RestartPolicy.continuingTurns`)
+  그사이 기기를 읽는 허브가 끝난 턴으로 읽지 않고, 메모는 한 번 들어간다. 창은 프로세스 없이 턴 중인 세션을 깨우지 않는다: 기기가 스스로 잇고,
+  "<기기> is back, resuming N sessions"는 창이 깨우는 것만 센다. 대화에는 "Centralu was updated during this turn, which stopped it; Centralu continued it
+  on the new version."이 남는다.
+- **멈춤은 빚을 지킨다.** 종료하는 호스트의 실패한 위임 대기는 더는 자식의 보고나 턴을 정산하지 않는다(`DelegationFlow`, `closing`): 저장소에 남은
+  표시로 다음 시작이 그 턴을 멈춘 것으로 알릴지(종료) 이어 갈지(업데이트) 정한다. 사람이 맡긴 작업은 받은편지함에 "stopped" 보고가 가지 않고,
+  보고는 이어 간 턴의 끝 하나다.
+- **잇지 않는 것.** 호스트가 멈출 때 턴 중이 아닌 세션: 사람이 멈췄고 호스트가 그 Stop을 받았거나, 보관·삭제됐다. 호스트가 멈출 때 아직 오는 중인 Stop은
+  받지 못한다: 그 세션은 목록에 들어가 이어진다. 턴은 끝났지만 백그라운드 작업(개발 서버, 감시)이 돌던 세션은 프로세스와 함께 그 작업을 잃고 이어지지
+  않는다: 이어 갈 턴이 없었다. 도구가 다시 이어 받지 못한 세션은 유지된 프로세스를 다시 붙이지 못했을 때처럼 끝난다(`turnLostInSwap`): `quit`, 보고나
+  요청자에게 멈췄다고 알린다.
+- **호출자.** 같은 기기의 요청자는 한 번 "The assigned work's turn was cut short by an update of Centralu on its machine, and Centralu continued it
+  there on the new version"과 보고가 아직 오는지를 듣는다(`ChildReports.tellCutByUpdate`, outcome `resumed`, 스레드는 진행 중으로 남는다). 스스로도
+  이어 가는 요청자에게는 알리지 않는다(자기 메모가 자식들을 덮는다). 허브의 호출자(그 기기에 start_agent로 만든 자식)는 기기의 호스트가 끊긴 턴을
+  잇는 호스트라면, 허브 자신의 업데이트나 롤백이 첫 단계부터 링크가 돌아올 때까지 링크를 잡는 동안 링크가 끊겼다는 말을 듣지 않는다
+  (`RemoteAgents.updateHolds`). 새 호스트의 `hello_ok`는 시작부터, 어떤 hello에 답하기도 전에, Continue가 들어갔든 아니든 자기가 이어 가는 턴을 이름 댄다
+  (`updateContinued`, 시작이 각 턴을 맡은 시각, 그 호스트의 시계. 잃은 것으로 드러난 턴은 더는 이름 대지 않는다). 그래서 Continue와 다시 연결의 순서는
+  상관없다. 링크가 돌아와
+  자식이 다시 턴 중이고 거기 이름이 있으면, 업데이트가 턴을 끊고 Centralu가 이어 갔다는 말을 한 번 듣는다. 기기가 돌아오지 않은 채 끝난 업데이트는
+  링크를 놓고, 그때 끊겼다고 알린다. 어느 쪽이든 빚진 보고는 이어 간 턴의 끝이다: 보고는 하나이고, 끊긴 턴을 "finished"라고 하지 않는다.
+- **다루지 않는 것.** 잇지 못한 뒤 링크가 돌아왔을 때 쉬고 있는 기기의 자식은 예전처럼 쉬는 것으로 보고된다: `host.sessions`도 hello도 그 손실을 싣지
+  않는다(이어 간 턴이 그사이 끝난 자식은 finished로 보고되며, 실제로 끝났다). #1618 이전 호스트를 돌리는 기기는 멈출 때 아무것도 적지 않는다: 허브의
+  문장은 턴을 잃었다고 하고, 허브의 호출자는 예전처럼 끊겼다는 말을 듣는다. `pnpm remote-dev`(`dev-build.ts`)는 바로 멈추고 아무것도 잇지 않는다.
 
 **버전은 연결 전에 확인한다**(계획 문서 §4). 연결 줄은 돌고 있는 원격 호스트의 `version`과 `protocolVersion`을
 싣고, 허브는 소켓을 열기 전에 자기 것과 비교하며, 연 뒤에는 `hello_ok.build`로 한 번 더 본다. 프로토콜이 다르면
@@ -2176,9 +2228,11 @@ UI는 `supported: false`를 에러가 아니라 안내로 그린다.
 `scripts/probe-codex-compaction.mts`). 읽는 쪽은 이것을 이벤트 줄(`role: 'system', event`인
 `HistoryMessage`)로 바꾸고, 호스트는 그것을 같은 이벤트가 실시간으로 남기는 것과 똑같은 행(기록 종류, 압축이면
 `marker`, 이벤트 자체가 payload)으로 저장한다. 그래서 화면도 인계 기준점(pivot)도 다시 읽은 압축이나 도구 호출과
-실시간으로 본 것을 구별하지 못한다. 한 번만 저장한다: 따라잡기는 우리 마지막 메시지 바로 뒤의 이벤트 줄 가운데 우리
-기록이 그 자리에 이미 가진 것(압축은 수로, 도구 호출과 결과는 id로 맞춘다. 이 호스트가 실시간으로 본 것은 양쪽에 다
-있다)을 건너뛰고 나머지를 붙인다. Claude 기록에는 압축 행이 없으므로(`getSessionMessages`가 시스템 행을 버린다),
+실시간으로 본 것을 구별하지 못한다. 한 번만 저장한다: 따라잡기는 말로 찾은 우리 마지막 메시지와, Centralu가 준 id로 아는
+Centralu가 마지막으로 쓴 입력(`centraluInputId`, Claude Code가 그 줄의 `uuid`로 지키는 고정된 마지막 묶음. #1626 리뷰: Centralu의
+채널로 들어간 메모는 그 말의 행을 남기지 않아, 말로만 기준을 잡으면 사람의 메시지로 붙었다) 가운데 나중 것 뒤에서 시작한다.
+그 뒤 어디에 있든 우리 기록이 이미 가진 도구 호출과 결과는 id로, 우리 마지막 메시지 바로 뒤의 압축은 수로 건너뛰고(이 호스트가
+실시간으로 본 것은 양쪽에 다 있다) 나머지를 붙인다. CLI 자신의 "[Request interrupted by user]" 줄은 사람의 메시지로 다시 읽지 않는다. 도구가 Centralu의 id를 지키지 않는 곳(Codex, 이를 지키지 않는 Claude Code 버전, 충돌이 id 없이 남긴 기록)에서는 Centralu 자신의 Continue 메모를 정확한 글로 안다: 읽는 쪽이 그것을 Centralu의 입력으로 표시하고, 따라잡기는 그 뒤에서 시작하며, 사람의 메시지로 저장되지 않는다(Claude 읽기는 CLI가 id를 지키지 않았다고 로그에 남긴다). 남는 것은 에이전트의 첫 말 전에 충돌한 Codex다: 메모 앞의 CLI 줄이 한 번 붙을 수 있다. Claude 기록에는 압축 행이 없으므로(`getSessionMessages`가 시스템 행을 버린다),
 읽는 쪽은 CLI의 요약이 사용자 턴으로 서 있는 자리에 압축을 표시한다.
 
 ### 8.4 가져온 세션의 정체성

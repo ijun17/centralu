@@ -54,6 +54,8 @@ export type DelegationHost = {
   firstTool: (preferred?: ToolName | null) => ToolName | null
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handingOver: boolean
+  /** The host is quitting or handing its sessions over (`disposing || handingOver`) */
+  readonly closing: boolean
   readonly handles: Map<string, SessionHandle>
   readonly linkedReader: LinkedSessions | null
   readonly memoryGate: MemoryGate | null

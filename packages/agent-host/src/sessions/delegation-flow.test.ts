@@ -140,6 +140,8 @@ describe('the place a start holds', () => {
  */
 describe("a child's turn and the call waiting on it", () => {
   let handingOver = false
+  /** The host is quitting (`disposeAll`) */
+  let quitting = false
   let running: BackgroundTask[] = []
   let cards: RoutedCard[] = []
   let raiseCard: () => void = () => {}
@@ -151,6 +153,7 @@ describe("a child's turn and the call waiting on it", () => {
 
   beforeEach(() => {
     handingOver = false
+    quitting = false
     running = []
     cards = []
     interrupted = []
@@ -181,6 +184,9 @@ describe("a child's turn and the call waiting on it", () => {
       handles: new Map([['child', { interrupt: () => void interrupted.push('child') } as unknown as SessionHandle]]),
       get handingOver() {
         return handingOver
+      },
+      get closing() {
+        return handingOver || quitting
       },
       autoBoundaryOpen: () => false,
       routedCards: () => cards,
@@ -354,7 +360,7 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.awaitingReport.get('other')).toBe('someone')
   })
 
-  it("a host handing over keeps the turn's link for the next host; one that is not lets it go", async () => {
+  it("a host handing over or quitting keeps the turn's link for the next host; one that is not lets it go", async () => {
     const flow = flowWith()
     meta.set('kept', session('kept', { askedBy: 'caller' }))
     const leaving = flow.startDelegation('caller>kept', 'caller', 'kept', target(), false)
@@ -363,8 +369,21 @@ describe("a child's turn and the call waiting on it", () => {
     await leaving.outcome
     await flush()
     expect(children.turnOwners.get('kept')?.callerId).toBe('caller')
-
     handingOver = false
+
+    // A quit's failed wait neither (#1618): the next start tells the turn stopped, or continues it after an update, for its caller
+    meta.set('cut', session('cut', { askedBy: 'caller' }))
+    const quit = flow.startDelegation('caller>cut', 'caller', 'cut', target(), true)
+    children.markReport('cut', 'caller')
+    quitting = true
+    quit.wait.fail(new Error('Centralu is shutting down'))
+    await quit.outcome
+    await flush()
+    expect(children.turnOwners.get('cut')?.callerId).toBe('caller')
+    expect(children.awaitingReport.get('cut')).toBe('caller')
+    expect(reported.filter((r) => r.sessionId === 'cut')).toEqual([])
+    quitting = false
+
     const ended = flow.startDelegation('caller>child', 'caller', 'child', target(), false)
     ended.wait.fail(new Error('stopped'))
     await ended.outcome

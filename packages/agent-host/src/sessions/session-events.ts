@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
+import { centraluInputId } from '../adapters/input-receipts.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
@@ -663,10 +663,11 @@ export class SessionEvents {
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
+    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`), with Centralu's mark
+    // as every input the adapter names itself, so its line reads back as one Centralu wrote (`centraluInputId`)
     // Also a hub's message at rest: the turn that runs it may open after another's (#1604)
     const hubInput = from?.sessionId === HUB_SENDER
-    const inputId = joins || hubInput ? randomUUID() : undefined
+    const inputId = joins || hubInput ? centraluInputId() : undefined
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (inputId && from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
@@ -688,7 +689,8 @@ export class SessionEvents {
    */
   async deliverMail(
     sessionId: string,
-    input: { text: string; quiet: boolean; line: string },
+    /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean },
     gate: { leaving(): boolean; atRest(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -721,8 +723,16 @@ export class SessionEvents {
       this.host.cardRests.turnAsked(sessionId)
       await takeInput(handle, input.text, late)
     }
+    /*
+     * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists
+     * the turn again and the host after continues it with a note and a line of its own, so the conversation shows one
+     * Continue. Only for that stop: a person's quit or a swap lists nothing, so its line is the row that carries the
+     * conversation past the mark of the list still standing, and it is written. Only for the update's note: a mail the tool
+     * took stays recorded by its line, which is its only trace
+     */
+    if (input.skipLine?.()) return
     // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
-    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'mail', text: input.line })
+    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
   }
 
   /**

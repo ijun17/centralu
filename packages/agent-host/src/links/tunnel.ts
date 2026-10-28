@@ -517,10 +517,13 @@ export function detachCommand(spec: RemoteSpec, from: string | null = null): str
  * As the hub's own stop (`CENTRALU_STOP_BY=hub`, #1143): `serve --stop` then leaves no mark of the person's stop, and
  * the hub's next start (the update's) is not refused as one. An older serve ignores the variable and marks nothing
  * anyway. A command of the person's own runs as given, in a shell this cannot know, so it gets no variable; the hub
- * installs and updates nothing on such a machine
+ * installs and updates nothing on such a machine.
+ *
+ * `forUpdate` (#1618): `CENTRALU_STOP_FOR=update` too, for a stop after which the hub starts a host there again (update.ts
+ * `stopRemoteHost`): the host lists the turns it ends, which the next one continues. An older serve ignores it
  */
-export function stopCommand(spec: RemoteSpec): string {
-  return remoteCommand(spec, 'serve --stop', true)
+export function stopCommand(spec: RemoteSpec, o: { forUpdate: boolean }): string {
+  return remoteCommand(spec, 'serve --stop', o.forUpdate ? 'update' : 'stop')
 }
 
 /** `centralu serve` in the foreground, found the same way: a host bound to the forward's own ssh session */
@@ -552,21 +555,24 @@ function remoteCommand(
     | 'serve --autostart off'
     | 'serve --autostart remove'
     | 'serve --autostart status',
-  /** The hub's own stop (`stopCommand`): said to `serve` as `CENTRALU_STOP_BY=hub` */
-  hubStop = false,
+  /**
+   * The hub's own stop (`stopCommand`): said to `serve` as `CENTRALU_STOP_BY=hub`, and one a host starts again after as
+   * `CENTRALU_STOP_FOR=update` too (#1618)
+   */
+  hubStop: 'stop' | 'update' | null = null,
 ): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${hubStop === 'update' ? "$env:CENTRALU_STOP_FOR = 'update'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
         "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${hubStop === 'update' ? 'CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
     `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`

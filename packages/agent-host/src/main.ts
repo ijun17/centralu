@@ -64,7 +64,7 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { clearStoppedMark, markQuit } from './lifecycle/stopped-mark.js'
+import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -287,6 +287,8 @@ process.on('exit', ownership.release)
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
+// The turns an update cut when it stopped the host before this one, and where this one lists those its own update stop ends (#1618)
+const updateResume = dbPath === ':memory:' ? undefined : updateResumeFolder(dirname(dbPath))
 
 start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))
@@ -356,7 +358,7 @@ const mgr = new SessionManager(
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
-  held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},
+  { ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}), ...(updateResume ? { updateResume } : {}) },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
 mgr.useProjectsHome(() => projectsHome())
@@ -661,8 +663,10 @@ if (launch.underKeeper) {
  */
 let stopNow: (() => void) | null = null
 let stopAsked = false
-const stopFromRequest = () => {
-  console.error('[agent-host] asked to stop (centralu serve --stop)')
+const stopFromRequest = (o: { forUpdate: boolean }) => {
+  console.error(`[agent-host] asked to stop (centralu serve --stop${o.forUpdate ? ', for an update' : ''})`)
+  // A linked hub's update: the turns this stop ends are listed for the host it starts next (#1618)
+  if (o.forUpdate) mgr.stopForUpdate()
   if (stopNow) stopNow()
   else stopAsked = true
 }
@@ -771,7 +775,7 @@ const router: Router = new Router({
     inlineViews,
     heldPids: held?.heldPids,
     machines: links,
-    stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
+    stopHost: launch.startedByServe && !launch.underKeeper ? (o) => stopFromRequest(o) : undefined,
     // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
     stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
     // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
@@ -839,6 +843,8 @@ const server = new HostServer({
   // Which Windows logon it runs in, for a hub linked to it (#1224); asked with the elevation
   logon: () => logon,
   handover: () => handover,
+  // The turns this host continued after an update cut them, for a linked hub's callers (#1618)
+  updateContinued: () => mgr.updateContinued(),
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })

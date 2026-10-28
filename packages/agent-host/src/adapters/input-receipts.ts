@@ -9,14 +9,53 @@ export function isUuid(s: string): s is ReturnType<typeof randomUUID> {
 
 export type InputReceipt = { id: ReturnType<typeof randomUUID>; done: Promise<void>; cancelled: boolean; completed: boolean }
 
+/** The last group of every input id Centralu mints (see `centraluInputId`) */
+const CENTRALU_INPUT_MARK = 'ce47a1ce47a1'
+
+/**
+ * An id for an input Centralu writes into a tool's conversation, carrying Centralu's mark (#1618 review). Claude Code
+ * keeps the id a stream-json input names as that line's `uuid` in its transcript, and the SDK's `getSessionMessages`
+ * gives it back (measured with CLI 2.1.296 and SDK 0.3.263), so a catch-up tells the lines Centralu wrote (the person's
+ * messages, its mail and notes) from the ones written elsewhere by the id alone. A note sent through Centralu's channel
+ * leaves no row of its words, and anchoring on the words alone read it as the person's and stored what followed it
+ * twice. Still a version 4 UUID, which the CLI takes, with 74 random bits.
+ */
+export function centraluInputId(): ReturnType<typeof randomUUID> {
+  const id = randomUUID()
+  return `${id.slice(0, 8)}-${id.slice(9, 13)}-${id.slice(14, 18)}-${id.slice(19, 23)}-${CENTRALU_INPUT_MARK}`
+}
+
+/** Whether a line's id is one `centraluInputId` minted: an input Centralu wrote */
+export function isCentraluInputId(id: unknown): boolean {
+  return typeof id === 'string' && id.length === 36 && id.toLowerCase().endsWith(`-${CENTRALU_INPUT_MARK}`)
+}
+
+/**
+ * What a session whose turn a linked hub's update cut is sent when the next host continues it (#1618): the same Continue
+ * the person's button sends, after why. It goes in through Centralu's channel, never as the person's message.
+ */
+export const UPDATE_CONTINUE_TEXT =
+  '[Centralu] Centralu on this machine was updated while your turn was running, which stopped the turn before it finished. ' +
+  'Continue where you stopped. Check what already happened before repeating a step.'
+
+/**
+ * Whether a line read back is Centralu's own Continue note, by its exact text: Centralu's own words, which the person does
+ * not type. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
+ * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
+ * catch-up anchors after it and never stores it as the person's message (#1626 review).
+ */
+export function isUpdateContinueNote(text: string): boolean {
+  return text.trim() === UPDATE_CONTINUE_TEXT
+}
+
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
 export class InputReceipts {
   private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver; accepted?: true }>()
   private ended = new Set<string>()
 
-  /** `named`: the id the caller gave the input, which the tool then names back; none, one is made */
+  /** `named`: the id the caller gave the input, which the tool then names back; none, one is made (with Centralu's mark) */
   create(observer?: InputObserver, named?: ReturnType<typeof randomUUID>): InputReceipt {
-    const id = named ?? randomUUID()
+    const id = named ?? centraluInputId()
     let resolve!: () => void
     let reject!: (e: Error) => void
     const done = new Promise<void>((yes, no) => { resolve = yes; reject = no })

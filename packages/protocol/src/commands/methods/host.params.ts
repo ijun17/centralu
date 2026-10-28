@@ -297,8 +297,14 @@ export const hostParams = {
    * command can start), so a turn cannot slip in between the check and the stop. Otherwise `{ ok: false, busy, calls }`
    * and nothing changes. A host older than `ifIdle` ignores it and stops; the hand-over sends it only to a host that says
    * its logon, which came with it
+   *
+   * `forUpdate` (#1618, additive): a linked hub stops this host to update it, roll it back or put a version back, and starts
+   * one again in this folder. As it lets its sessions go, this host writes those in a turn to a list of its own in the
+   * folder, each with the last row of its conversation (docs/agent-host.md §4.8), so the host that starts next continues
+   * each of those turns once, while its conversation still ends there. A host
+   * older than it ignores it and stops, and its turns end as a stop's always did
    */
-  'host.stop': z.object({ ifIdle: z.boolean().optional() }),
+  'host.stop': z.object({ ifIdle: z.boolean().optional(), forUpdate: z.boolean().optional() }),
   /**
    * What a `serve` in the person's Windows sign-in says about taking over from this host (#1224): this host keeps it,
    * says it in its hellos and sends `host_handover`, so a hub's row can say it. `handover: null` clears it. Additive

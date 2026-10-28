@@ -284,7 +284,8 @@ function wholeCommand(o: {
     expect(r).toMatchObject({ machine: 'Box', current: { version, node: node(), source: { kind: 'dev', commit, dirty: false } }, previous: { version: BASE, node: node() } })
     // The release stopped itself through its own launcher while the hold kept the hub's links from starting one, then
     // the dev build started and answered as itself; the hold is gone afterwards
-    expect(events()).toEqual([`stop ${BASE} (held)`, `start ${version}`])
+    // Through the update's steps, so the stop is for an update (#1618): the dev build's host continues the turns it cut
+    expect(events()).toEqual([`stop ${BASE} (held) (for update)`, `start ${version}`])
     expect(running()).toBe(version)
     expect(existsSync(remote('hold.json'))).toBe(false)
     expect(said.filter((l) => /^Box: [a-z_]+$/.test(l))).toEqual(['Box: build', 'Box: stop', 'Box: backup', 'Box: switch', 'Box: start', 'Box: check', 'Box: prune'])

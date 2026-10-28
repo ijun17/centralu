@@ -107,9 +107,14 @@ export class DelegationFlow {
     if (!joinedTurn) this.host.children.ownTurn(sessionId, callerId, false)
     void d.outcome.then((r) => {
       if (this.host.agentRuns.get(sessionId) === wait) this.host.agentRuns.delete(sessionId)
-      // A swap's failed waits are not the turn's end: the next host keeps the link while the kept turn runs
+      /*
+       * A swap's or a quit's failed waits are not the turn's end: the next host keeps the link while a kept turn runs, and
+       * decides at its start what became of one the quit cut (told as stopped, or continued after an update, #1618). The
+       * report it owes and whose the turn is stay recorded for it
+       */
+      if (this.host.closing) return
       // The delegation's owner now: a handoff may have moved it (#693)
-      if (!joinedTurn && !this.host.handingOver) this.host.children.releaseTurn(sessionId, d.callerId)
+      if (!joinedTurn) this.host.children.releaseTurn(sessionId, d.callerId)
       // Queued notes can finish after the original turn. Report only the whole delegation's ending.
       /*
        * A turn that completed was reported by `onEvent` as it ended, unless notes held it (`tracksInputs`): judged
@@ -122,7 +127,7 @@ export class DelegationFlow {
        * and paused for the work's last turn end, in the store, and the call that reads the answer says so
        * (`AskProjectFlow.awaitDelegation`). A start_agent child's is `awaitAgent`'s and the report's own
        */
-      if (!agent && r.ok && !joinedTurn && !this.host.handingOver && this.host.meta.has(d.callerId) && !this.host.children.pausedReports.has(sessionId)) {
+      if (!agent && r.ok && !joinedTurn && this.host.meta.has(d.callerId) && !this.host.children.pausedReports.has(sessionId)) {
         const left = this.host.ownTasksRunning(sessionId)
         if (left.length) {
           this.host.children.markReport(sessionId, d.callerId)

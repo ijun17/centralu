@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
+import { isCentraluInputId } from '../adapters/input-receipts.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { PAUSED_REPORT_SETTLE_MS } from './manager.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
@@ -412,7 +413,8 @@ describe('a child that waits on its own background work (#721)', () => {
         tracking(child)
         await w.mgr.send(child, 'and tell me a joke')
         const id = lastId(child)
-        expect(id).toBeDefined()
+        // Named with Centralu's mark, as every input Centralu writes, so its transcript line reads back as Centralu's (#1618 review)
+        expect(isCentraluInputId(id)).toBe(true)
         // The work's turn ends without taking it in (the final answer was being written)
         pauseOnVerify(child)
         await w.until(() => reportsTo(caller, child).length === 1)

@@ -117,3 +117,6 @@ export function interruptionWords(i: Interruption): string {
       return `reconnecting to its API for ${Math.max(1, Math.round((Date.now() - i.at) / 60_000))} min`
   }
 }
+
+/** The line the conversation shows where that note went in */
+export const UPDATE_CONTINUE_LINE = 'Centralu was updated during this turn, which stopped it; Centralu continued it on the new version.'

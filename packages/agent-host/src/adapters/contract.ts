@@ -269,7 +269,16 @@ export type ExternalSessionSummary = {
  */
 export type HistoryEvent = Extract<NormalizedEvent, { type: 'tool_call' | 'tool_result' | 'compaction' }>
 export type HistoryMessage =
-  | { role: 'user' | 'assistant'; text: string; ts?: number }
+  | {
+      role: 'user' | 'assistant'
+      text: string
+      ts?: number
+      /**
+       * An input Centralu itself wrote into the conversation (the person's message, a caller's, its mail or note), known
+       * by the id Centralu gave the line, not by its words (#1618 review). Absent where the tool keeps no id of ours.
+       */
+      sent?: true
+    }
   | { role: 'system'; event: HistoryEvent; ts?: number }
 
 export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string; setup?: ToolSetup }

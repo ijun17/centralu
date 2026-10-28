@@ -6,6 +6,8 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  * links/*.test.ts). It answers what it is sent from a script:
  *
  *   a message containing "approve"   asks to run `echo linked`, then says "approved"/"denied"
+ *   a message containing "long job"  starts a turn that does not end while its process lives, until `finish`; so does
+ *                                    the Continue a long job cut by a stopped host is sent
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
  *
@@ -84,6 +86,11 @@ class ScriptedHandle implements SessionHandle {
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })
       return
     }
+    // A long job, or one continued after its host was stopped: the turn runs until it is ended (`finish`) or its process goes (#1618)
+    if (/\blong job\b/i.test(text) || text.includes('Continue where you stopped')) {
+      this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: 'working on it…' })
+      return
+    }
     if (/question/i.test(text)) {
       this.questions.add(id)
       this.emit({
@@ -95,6 +102,11 @@ class ScriptedHandle implements SessionHandle {
       return
     }
     this.say(`echo: ${text}`)
+  }
+
+  /** Ends a long job's turn with this answer */
+  finish(text: string): void {
+    this.say(text)
   }
 
   private say(text: string): void {

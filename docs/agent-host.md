@@ -2925,14 +2925,14 @@ tool-neutral (`sessions/interruptions.ts`):
 | Reason | Set when | Cleared when |
 |---|---|---|
 | `network` | a running turn ends in an error the network caused (`interruptionAfter` with `endedTurn`; a crash, `adapter_crashed`, and an error at rest are not): the error codes (`ECONNREFUSED`, `ENOTFOUND`, ...), Claude's "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed" (the wordings read in the CLI's own connection-failure function; "Unable to connect to API: SSL …" is a setting, not the network), the computer sleeping, Codex's "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network" (`isNetworkFailure`; the sentences measured in the real store and host.log). Only the tool's sentence counts, not the stderr tail a crash carries (`failureSentence`); generic words ("connection closed", "network error") count only inside those sentences, since an MCP server or a dev server can say them | the session works again (`working`, output), or a turn ends otherwise |
-| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached. A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
+| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached, or a turn a linked hub's update cut could not be continued (§4.8, #1618; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
 | `interrupted` | a turn ends `waiting_input` with the reason `interrupted_by_tool` (`INTERRUPTED_BY_TOOL`): Codex's `turn/completed {status: "interrupted"}` for a turn no `turn/interrupt` of ours preceded | the same |
 | `reconnecting` | the tool has stayed `retrying` for `RECONNECTING_FLAG_MS` (5 minutes): Codex waits for the network without end. Live only, never stored | the activity moves off `retrying` or the turn ends |
 
 | Decision | Why |
 |---|---|
 | An app request cancelled mid-turn fails its wait before it interrupts the session | Claude's adapter ends the turn as soon as the CLI confirms the interrupt, before the turn's result, so the wait read the cancel as "stopped before it finished" |
-| Classify and surface; never resend by itself | A resent turn can repeat side effects (a push, a comment, a release). Continuing is one message from the person or the asker, the same sentence both ways: "Continue where you stopped. Check what already happened before repeating a step." Auto-resend on reconnect could come later as an opt-in |
+| Classify and surface; never resend by itself, except the turns a linked hub's update cut (owner, 2026-10-26, #1618: §4.8, "Continuing the turns an update cut"), which the next host continues once with the same sentence | A resent turn can repeat side effects (a push, a comment, a release). Continuing is one message from the person or the asker, the same sentence both ways: "Continue where you stopped. Check what already happened before repeating a step." Auto-resend on reconnect could come later as an opt-in |
 | A Codex `interrupted` turn ends as a Stop does (`state_change waiting_input`), not as `turn_complete` | `turn_complete` is "finished": the orchestrator was told the work was done. A wait on the turn (`AgentRunWait`) ends on the interrupt, since no `turn_complete` follows it now |
 | The Codex adapter tells its own interrupts from Codex's and logs which (`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). A Stop that lands while a note's `turn/start` is in flight interrupts the turn the answer names, and counts as ours too (`takeInputTurn`) | The real case could not tell whether the person's Stop, the host or the CLI sent it |
 | The person's Stop, and an orchestrator's `agent_session stop`, set nothing | They know; flagging their own act would be noise |
@@ -3478,14 +3478,14 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | Step | Update | Rollback | Uninstall |
 |---|---|---|---|
 | Install beside | `machines.install`'s steps with `activate: false`: the new version lands in `versions/<v>/`, nothing points at it, nothing is removed, and no launcher is written yet, so the lookup still finds what runs | — | — |
-| Wait | **Until no session there is in a turn** (#1399): `HostControl.beforeStop`, after the install beside and before anything is held or stopped, reads `host.activity` every 15 s and goes on once working, approvals, questions and background work are all 0 (terminals and project commands stay open for hours and are not waited for). The row's operation says `wait_idle` meanwhile, and `machines.cancelUpdate` (or an orchestrator's cancelled call) ends the wait: the update fails saying it was cancelled and nothing was switched. `when: 'now'` (the person's choice) skips the wait and the answer's `note` says how many sessions' turns it ended. Once a reading says none, it is read again about 3 s later, right before the host is held and stopped (the stop takes seconds, and `host.stop { ifIdle }`, which would be atomic, counts terminals and commands too). A machine that cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and a machine none of whose readings has succeeded is read again twice, then not waited for either (waiting on what was never seen would never end). Once one reading has succeeded, a failed one proves nothing (a busy or dropped remote fails them too), so the wait goes on through failed readings, the row saying `wait_unread` ("it cannot read what runs there now"), and the host is stopped only on a successful reading of no session in a turn, the second one too; Cancel and `when: 'now'` are the ways out. `MachineInfo.updateWaits` (set by every hub that waits) lets a window promise the wait: an older hub sends nothing and stops at once, so the window words the plain Update there. When `install_machine` has answered "still under way", how the update ends is told to the orchestrator as a message in its conversation, a failure too. Removing the machine or stopping the hub ends the wait ("nothing was switched"). The wait is not kept across a restart of the hub (the version stays installed beside, harmless). `pnpm remote-dev` (`dev-build.ts`), rollback and uninstall do not wait. An older hub ignores `when` and stops at once; an older window shows the step as `wait_idle` and has no Cancel. `install_machine` (update) answers after about 200 s that the update is still under way, since a tool call that long is cut by its caller while the update goes on; the window's `machines.update` has the long call budget, and a wait that outlasts it is the row's to show | — | — |
+| Wait | **Until no session there is in a turn** (#1399): `HostControl.beforeStop`, after the install beside and before anything is held or stopped, reads `host.activity` every 15 s and goes on once working, approvals, questions and background work are all 0 (terminals and project commands stay open for hours and are not waited for). The row's operation says `wait_idle` meanwhile, and `machines.cancelUpdate` (or an orchestrator's cancelled call) ends the wait: the update fails saying it was cancelled and nothing was switched. `when: 'now'` (the person's choice) skips the wait, the answer's `note` says how many sessions' turns it ended (and how many terminals and project commands closed), and the next host continues those turns (below, #1618). Once a reading says none, it is read again about 3 s later, right before the host is held and stopped (the stop takes seconds, and `host.stop { ifIdle }`, which would be atomic, counts terminals and commands too). A machine that cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and a machine none of whose readings has succeeded is read again twice, then not waited for either (waiting on what was never seen would never end). Once one reading has succeeded, a failed one proves nothing (a busy or dropped remote fails them too), so the wait goes on through failed readings, the row saying `wait_unread` ("it cannot read what runs there now"), and the host is stopped only on a successful reading of no session in a turn, the second one too; Cancel and `when: 'now'` are the ways out. `MachineInfo.updateWaits` (set by every hub that waits) lets a window promise the wait: an older hub sends nothing and stops at once, so the window words the plain Update there. When `install_machine` has answered "still under way", how the update ends is told to the orchestrator as a message in its conversation, a failure too. Removing the machine or stopping the hub ends the wait ("nothing was switched"). The wait is not kept across a restart of the hub (the version stays installed beside, harmless). `pnpm remote-dev` (`dev-build.ts`), rollback and uninstall do not wait. An older hub ignores `when` and stops at once; an older window shows the step as `wait_idle` and has no Cancel. `install_machine` (update) answers after about 200 s that the update is still under way, since a tool call that long is cut by its caller while the update goes on; the window's `machines.update` has the long call budget, and a wait that outlasts it is the row's to show | — | — |
 | Hold | The link stops reconnecting and starting a host of its own (Reconnect included) until the check; it would otherwise start the old version between the stop and the switch | the same | the same |
 | Stop | `centralu serve --stop` through the lookup: the running version stops itself in order (§4.7). Not stopped: the call fails and nothing is switched | the same | the same; not stopped, nothing is removed |
 | Boot entry | — | — | `serve --autostart remove` through the lookup (§4.7), after the stop; `off` of a serve from before `remove`, where `off` removed the entry. Not removed: nothing is removed. A version older than `--autostart` is passed by (it cannot have written one from here) |
-| Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
+| Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none. The stop before it was `serve --stop` with `CENTRALU_STOP_FOR=update`, so the host it stopped wrote the turns it ended to a list of its own, `<data>/update-resume.<uuid>.json` (#1618, below) | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
 | Start | `serve --detach` (`Tunnel.startHost`) | the same | — |
 | Check | The link opens again; only a hello whose `build.version` is the target ends it, within 30 s | the same | — |
-| After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
+| After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence. That stop is for an update too: the turns the new host had not continued, and those it was running, stay listed for the version put back (one from before #1618 ignores the list) | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
 
 **Following the hub** (#1508, owner 2026-10-24). While the hub's "Automatic updates" are on (`updates.autoApply`;
 `LinkDeps.autoUpdate`, which main.ts reads as off while the hub drains for a swap), a linked machine on an older release
@@ -3497,17 +3497,19 @@ the person did not remove what the hub installed there, neither side runs a loca
 - **When.** At every connect (`connectedNow`, after the hello and the lists): that is also how the hub's own update
   reaches its machines, since the next host links again and finds them older. And when the person turns automatic
   updates on (`updates.setAutoApply`, `Links.followHub`), for the machines already connected.
-- **What.** The same update as `machines.update { when: 'idle' }`, marked `unasked`: it waits for the turns there as
-  above, and also for terminals and project commands there, which the person's Update stops knowingly and it must not
-  (`OPEN_WORK_WAIT_MS`: once a terminal or command has been open for 30 minutes without a gap, whatever turns run meanwhile (#1579), it gives up, nothing switched, and the row's failure line says why, so the person can press Update, which stops them knowingly). The row and the log say which one holds it: `wait_idle` with `operation.count` sessions in a turn (`turnsRunning`), or, when none is in a turn, `wait_open` with `count` open terminals and commands (`open`). The row reads "Updating to <v>: waiting for <N> open terminals or commands there (Cancel, then Update, closes them)…" (owner, 2026-10-26; "1 open terminal or command there (… closes it)" for one), since Update is disabled while the wait shows and the person's Update then stops the host and ends them. It stops no host it cannot
-  ask what runs (a Centralu from before `host.activity`, or one whose reading fails): that is read before anything is
-  installed, and the update fails, nothing switched, the row saying to update from Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
-  that comes after the hold finds it as it finds the person's update (§4.7).
-- **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); never
-  again for that version after the person cancels its wait (which shows no failure). Every update nobody approved counts as a try for
-  the hub's version, the hub's own and an agent's card-less one alike (`unaskedRun`). A spent version (cancelled, or both
-  tries failed) makes `followsHub` false, so an agent cannot start it again without a card. A limited caller's
-  `machines.cancelUpdate` (everyday) can end it too, until the hub's next version. A retry whose time comes while the
+- **What.** The same update as `machines.update { when: 'now' }`, marked `unasked` (`LinkedMachine.stopAtOnce`): it does not
+  wait (owner, 2026-10-26, #1618). It used to wait for the turns there (#1399) and for terminals and project commands
+  (`OPEN_WORK_WAIT_MS`, #1579), and a machine always busy never updated: two machines were held for hours (#1614). It
+  reads what runs there once, right before the hold, for the answer's sentence, and stops the host: the turns running end
+  and are continued by the next host (below), and terminals and project commands close. It stops no host it cannot ask what runs (a Centralu from
+  before `host.activity`, or one whose reading fails, tried again twice): that is read before anything is installed and
+  again before the hold, and the update fails, nothing switched, the row saying to update from Settings. A swap that comes
+  after the hold finds it as it finds the person's update (§4.7). The `wait_open` step is no longer shown by this hub;
+  a window keeps its words for an older one.
+- **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); an update
+  of this hub's from before #1618 could also be cancelled while it waited, which spent the version. Every update nobody approved counts as a try for
+  the hub's version, the hub's own and an agent's card-less one alike (`unaskedRun`). A spent version (both tries failed)
+  makes `followsHub` false, so an agent cannot start it again without a card. A retry whose time comes while the
   machine is busy or away runs when that ends or at the next connect. A failure shows on the row as `MachineInfo.followHub`
   (`{ version, failed, retryAt }`, additive and optional) while the machine is still behind, and its steps show as any
   update's do.
@@ -3530,7 +3532,85 @@ counts what `hostBusy` counts (`activityCounts`, idle.ts): working sessions, app
 background work, terminals and running commands. While the link is held at `versions_differ` on one protocol (before #689) it asked
 over a short connection of its own. A remote that predates the call answers nothing, and the prompt says "anything
 running". No remote runs a keeper today (plan §10.4), so on Linux and Windows an update ends the agents there; their
-sessions resume on the new host through their stored ids, as after any restart.
+sessions resume on the new host through their stored ids, as after any restart, and the turns it ended are continued.
+
+**Continuing the turns an update cut** (#1618, owner 2026-10-26). An update that does not wait (the person's `now`, and
+every update nobody approved) ends the turns running there; the host it starts takes each of them up again, once, the way
+the person's Continue would.
+
+- **Which.** One definition, recorded by the host that stops, at the moment it stops: the sessions in a turn as it lets
+  its sessions go (`cutTurns` in idle.ts: working, or waiting on an approval or a question, `turnCut`), read in the same
+  step as their processes end and after it took its last call (`SessionManager.disposeAll`). So a turn that began after
+  the hub read what runs is listed too, and a person's Stop the host took before it stopped leaves its session out.
+  Background work alone is not a turn and is not continued.
+- **Told it is an update.** Every stop of the hub's after which a host starts again in that folder (the update's, the
+  put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
+  (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
+  the processes are down and their last output written, the host writes those turns as a list of its own,
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq }] }`, lifecycle/update-resume.ts), each with the last
+  row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
+  nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
+  folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
+  instead), a stop of the person's, or a host from before #1618 writes nothing, and its turns end as a stop's always did.
+- **Taken once each, and only that turn** (#1626 review). The next host to start in that folder reads all the lists
+  before it builds its sessions, without taking them. A listed session is that stop's turn only while its conversation
+  still ends at the listed row. That holds because the next start always writes a row for a listed session: the
+  Continue's line, or the stopped mark of one that is lost or no longer the listed turn (and an older host's start after a
+  rollback writes its own stopped mark), so the conversation is past the row before any later turn. It does not rest
+  on "a turn records its input first": a turn the CLI starts itself after a background task, and Centralu's own
+  compaction, begin with no row. So a list left behind (one a virus scanner held open when it was to go, one a host from
+  before #1618 never read after a rollback) continues no later turn, and a later stop of the person's that cuts one is
+  told as a quit's. A list the start cannot read because it is held (`EBUSY`, a virus scanner that opened the file just
+  written) is read again up to five times 200 ms apart, each failure in the log; one still held stays where it is for a
+  later start, and the turns of sessions this start finds cut are marked stopped like a quit's (the host cannot tell which
+  the list names), with the log saying why. A list goes once each
+  turn it names is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, or the start did
+  not find it cut. One that cannot be removed is said in the log, stays harmless, and goes at a later start; one a host
+  killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
+  update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
+  the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
+  is left to that next host, which sends the note, writes the line and tells the requester: a host leaving for a second
+  update writes no line of its own for it, so the conversation shows one Continue. A person's quit or a swap lists nothing,
+  so there the line is written: it is the row that carries the conversation past the mark of the list still standing. Nothing expires: a list is the next start's, whenever it comes,
+  on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
+- **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
+  notice), its owed report and its delegated turn kept as a kept process's are, and once the start is done it is woken
+  and given Centralu's note through Centralu's channel (`deliverMail`, no message of the person's): "Centralu on this
+  machine was updated while your turn was running, which stopped the turn before it finished. Continue where you stopped.
+  Check what already happened before repeating a step." Until the note is in, a wake from elsewhere (a window that sees
+  the machine back) keeps the turn's state (`RestartPolicy.continuingTurns`), so a hub reading the machine meanwhile does
+  not read the turn as ended, and the note goes in once. A window does not wake a session that is in a turn with no
+  process at all: the machine continues it, and "<machine> is back, resuming N sessions" counts only what the window
+  wakes. The conversation shows "Centralu was updated during this turn, which stopped it; Centralu continued it on the
+  new version."
+- **The stop keeps what is owed.** A quitting host's failed delegation waits no longer settle the child's report or
+  turn (`DelegationFlow`, `closing`): the next start decides, from the marks the store kept, whether the turn is told as
+  stopped (a quit) or continued (an update). Work the person owns gets no "stopped" report in their Inbox; its one report
+  is the continued turn's end.
+- **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
+  Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
+  continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that
+  work with its process and is not continued: nothing was in a turn to continue. One whose tool cannot take it up again
+  ends as a kept process that could not be re-attached does (`turnLostInSwap`): `quit`, and its report or its requester
+  told it stopped.
+- **Its caller.** A requester on the same machine hears once "The assigned work's turn was cut short by an update of
+  Centralu on its machine, and Centralu continued it there on the new version", with whether its report still follows
+  (`ChildReports.tellCutByUpdate`, outcome `resumed`, the thread kept running); a requester continued itself is not
+  told, its own note covers its children. A caller on the hub (a child start_agent made there) is not told that the link
+  dropped while the hub's own update or rollback holds the link, from its first step until the link is back
+  (`RemoteAgents.updateHolds`), when the machine's host is one that continues cut turns. The new host's `hello_ok`
+  names the turns it continues from its start on, before it answers any hello, whether or not the Continue is in yet
+  (`updateContinued`, with when its start took each up, on its clock; one that turns out lost is no longer named), so
+  the order of the Continue and the reconnect does not matter; once the link is back and the child is in
+  its turn again and named there, the caller hears once that the update cut the turn and Centralu continued it. An
+  update that ends with the machine not back lets the link go, and the drop is told then. Either way the report it is
+  owed is the continued turn's end: one report, never "finished" for the cut.
+- **What it does not cover.** A child on the machine found at rest when the link is back after it could not be
+  continued is reported as at rest, as before: neither `host.sessions` nor the hello carries the loss (one whose
+  continued turn ended meanwhile is reported finished, which it is). A machine whose host predates #1618 lists nothing as
+  it stops; the hub's sentence then says the turns were lost, and a caller on the hub hears the drop as before.
+  `pnpm remote-dev` (`dev-build.ts`) goes through the update's steps, so its stop is for an update too: the turns running
+  are listed and the dev build's host continues them like any next host.
 
 | Decision | Why |
 |---|---|
@@ -4049,9 +4129,17 @@ result is text meant for the model, and an image in a result is not brought back
 `scripts/probe-codex-compaction.mts`). The reader turns it into an event line (`HistoryMessage` with
 `role: 'system', event`), and the host stores that as exactly the row the live event leaves (its recorded kind,
 `marker` for a compaction, the event as its payload), so the screen and the handoff pivot cannot tell a read-back
-compaction or tool call from one watched live. Stored once: catching up skips the event lines right after our last
-message that our record already holds there (a compaction by count, a tool call or result by its id; one this host saw
-live is in both), and attaches the rest. A Claude record keeps no compaction row (`getSessionMessages` drops system
+compaction or tool call from one watched live. Stored once: catching up starts after the later of our last message,
+found by its words, and the last input Centralu wrote, known by the id it gave the line (`centraluInputId`, a fixed last
+group that Claude Code keeps as the line's `uuid`; #1626 review: a note sent through Centralu's channel leaves no row of
+its words, and anchoring on words alone attached it as the person's message). It skips each tool call or result our
+record already holds, by its id, wherever it falls after that, and a compaction our record holds right after its last
+message, by count (one this host saw live is in both), and attaches the rest. The CLI's own "[Request interrupted by
+user]" line is not read back as a message of the person's. Where the tool keeps no id of Centralu's (Codex; a Claude Code version that does not keep it;
+a transcript a crash left without it), Centralu's own Continue note is known by its exact text: the readers mark it as
+Centralu's input, the catch-up anchors after it, and it is never stored as a message of the person's (a Claude read says in the
+log that the CLI did not keep the id). What is left there is Codex after a crash before the agent's first words: the CLI's
+lines before the note may be attached once. A Claude record keeps no compaction row (`getSessionMessages` drops system
 rows), so the reader marks one where the CLI's summary stands as a user turn.
 
 ### 8.4 The identity of an imported session

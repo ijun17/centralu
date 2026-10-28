@@ -277,9 +277,12 @@ describe('starting another agent in the same project', () => {
       return p
     })
     await w.mgr.disposeAll()
-    await w.until(() => reports.length > 0)
+    await new Promise((r) => setTimeout(r, 50))
     await Promise.all(reports)
     expect(said()).toEqual([])
+    // Nor settles what the child owes: the next start reads the mark, to tell the turn stopped or continue it (#1618)
+    expect(reports).toEqual([])
+    expect(w.store.children.listReportMarks().map((m) => m.sessionId)).toEqual([child])
   })
 
   it('a safe session in a trusted project still asks (#673)', async () => {

@@ -918,6 +918,10 @@ export class SessionStarts {
         if (kept === null) this.host.restartPolicy.backgroundUnknown.set(sessionId, Date.now())
         // Listed through onEvent, which also keeps the record for the host after this one
         else if (kept.length > 0) this.host.onEvent({ type: 'background_tasks', sessionId, live: kept })
+      } else if (this.host.restartPolicy.continuingTurns.has(sessionId)) {
+        // A turn an update cut, woken to be continued (#1618): it stays in its turn until the note's turn takes over
+        this.host.store.sessions.upsertSession(m)
+        this.host.emit({ type: 'state_change', sessionId, state: m.state, reason: 'continued' })
       } else {
         this.host.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       }

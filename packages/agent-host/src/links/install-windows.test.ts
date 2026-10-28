@@ -213,7 +213,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       const { seen, done } = update('9.9.2')
       expect(await done).toMatchObject({ current: { version: '9.9.2', node: WIN_NODE_V }, previous: { version: '9.9.1', node: WIN_NODE_V } })
       // The old version stopped itself, through its own launcher, then the new one started
-      expect(events()).toEqual(['stop 9.9.1', 'start 9.9.2'])
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
       expect(running()).toBe('9.9.2')
       expect(seen).toEqual(['preflight', 'registry', 'node', 'centralu', 'hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.2', 'prune'])
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.2 ${WIN_NODE_V}\n`)
@@ -249,7 +249,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
         /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\); it runs Centralu 9\.9\.1 again\. The end of its host\.log: host 9\.9\.2: the store was written by a newer Centralu/,
       )
       expect(seen.slice(-5)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back'])
-      expect(events()).toEqual(['stop 9.9.1', 'start 9.9.2', 'stop -', 'start 9.9.1'])
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop - (for update)', 'start 9.9.1'])
       expect(running()).toBe('9.9.1')
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(existsSync(remote('previous'))).toBe(false)
@@ -264,7 +264,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       const r = await rollbackRemote(c, { current: { version: '9.9.2', node: WIN_NODE_V }, previous: { version: '9.9.1', node: WIN_NODE_V } })
       expect(r).toEqual({ current: { version: '9.9.1', node: WIN_NODE_V }, previous: null, removed: [], left: [] })
       expect(seen).toEqual(['hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.1'])
-      expect(events()).toEqual(['stop 9.9.2', 'start 9.9.1'])
+      expect(events()).toEqual(['stop 9.9.2 (for update)', 'start 9.9.1'])
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(existsSync(remote('previous'))).toBe(false)
     }, 180_000 * SLOW)

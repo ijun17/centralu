@@ -1,6 +1,6 @@
 import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
-import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
+import { centraluInputId, InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
@@ -478,8 +478,9 @@ export class ClaudeSession implements SessionHandle {
     this.notify?.()
   }
 
+  /** Every input goes out under an id with Centralu's mark, so its line in the transcript reads back as Centralu's (`centraluInputId`) */
   send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void {
-    this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : randomUUID(), undefined, opts?.origin, opts?.quiet)
+    this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
   }
 
   /** A note read with the next message or at the running turn's next tool round, starting nothing (#1492): quiet input, stamped as Centralu's */
@@ -501,7 +502,7 @@ export class ClaudeSession implements SessionHandle {
     return this.resultInputs
   }
 
-  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt, origin?: InputOrigin, quiet?: boolean): void {
+  private sendInput(text: string, uuid = centraluInputId(), note?: InputReceipt, origin?: InputOrigin, quiet?: boolean): void {
     /*
      * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
      * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model

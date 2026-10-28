@@ -270,7 +270,8 @@ export async function runDetachedChild({ spec, ...opts }) {
  *
  * A stop that went through is remembered in the data folder (`markStopped`, #1143), so a linked hub does not start the
  * host again by itself; the next host that starts here removes the mark. Not for a hub's own stop, which starts the
- * host again itself (an update, a rollback): the hub runs it with `CENTRALU_STOP_BY=hub` (links/tunnel.ts `stopCommand`)
+ * host again itself (an update, a rollback): the hub runs it with `CENTRALU_STOP_BY=hub` (links/tunnel.ts `stopCommand`).
+ * With `CENTRALU_STOP_FOR=update` too (#1618), the host is asked to list the turns it ends, which the next host continues
  */
 export async function runStop({
   env,
@@ -283,7 +284,7 @@ export async function runStop({
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
-  const stopped = await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill })
+  const stopped = await stopServedHost({ dataDir, entry, platform, forUpdate: env.CENTRALU_STOP_FOR === 'update', timeoutMs, graceMs, kill })
   if (stopped.ok && env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, 'stop')
   return answerLine(write, 'stop', stopped)
 }

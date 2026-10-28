@@ -6,6 +6,7 @@ import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { blocksOf, type AssistantBody } from './json.js'
 import { assistantEvents, userEvents } from './model-messages.js'
 import { toolResultEvent } from '../tool-result.js'
+import { isCentraluInputId, isUpdateContinueNote } from '../input-receipts.js'
 
 /**
  * Reads past sessions Claude Code has kept.
@@ -35,7 +36,7 @@ type SdkSessionInfo = {
   createdAt?: unknown
   gitBranch?: unknown
 }
-type SdkSessionMessage = { type?: unknown; message?: unknown }
+type SdkSessionMessage = { type?: unknown; uuid?: unknown; message?: unknown }
 type SessionApi = {
   listSessions?: (o?: Record<string, unknown>) => Promise<SdkSessionInfo[]>
   getSessionMessages?: (id: string, o?: Record<string, unknown>) => Promise<SdkSessionMessage[]>
@@ -146,7 +147,7 @@ export async function readClaudeHistory(
     try {
       const message = readableMessage(r?.message)
       if (r?.type === 'assistant') out.push(...assistantLines(message, agents))
-      else if (r?.type === 'user') out.push(...userLines(message, agents))
+      else if (r?.type === 'user') out.push(...userLines(message, agents, isCentraluInputId(r.uuid)))
     } catch (err) {
       console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)
     }
@@ -205,14 +206,29 @@ function agentResult(e: Extract<NormalizedEvent, { type: 'tool_result' }>, agent
 }
 
 /**
- * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
- * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843).
+ * The line the CLI writes as a user turn where a turn was stopped (measured in transcripts of CLI 2.1.296, also "… for
+ * tool use" when a tool call was cut). Live it is never shown, Centralu says the turn stopped; read back it was a
+ * message of the person's they never wrote (#1618 review). The CLI's own words are the one sign: the row has no id
+ * of ours and the SDK keeps no other field of it.
  */
-function userLines(message: AssistantBody, agents: ReadonlySet<string>): HistoryMessage[] {
+const INTERRUPT_LINE = /^\[Request interrupted by user( for tool use)?\]$/
+
+/**
+ * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
+ * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843). `sent`:
+ * the row's id is one Centralu gave an input it wrote (`centraluInputId`), so its words are marked as Centralu's.
+ */
+function userLines(message: AssistantBody, agents: ReadonlySet<string>, sent: boolean): HistoryMessage[] {
   const raw = userText(message)
   if (COMPACT_SUMMARY.test(raw)) return [{ role: 'system', event: { type: 'compaction', sessionId: HISTORY_SESSION, failed: false } }]
-  const text = stripInjectedBlocks(raw)
-  const out: HistoryMessage[] = text ? [{ role: 'user', text }] : []
+  const text = INTERRUPT_LINE.test(raw) ? '' : stripInjectedBlocks(raw)
+  /*
+   * Centralu's own Continue note is known by its exact text too, where the line lacks the id (another CLI version, a
+   * transcript a crash left without it): never the person's message (#1626 review). The log says why it is known by its text
+   */
+  const note = isUpdateContinueNote(text)
+  if (note && !sent) console.error("[claude] Centralu's Continue note is in the transcript without the input id Centralu gave it: this CLI does not keep it. The catch-up recognises the note by its text")
+  const out: HistoryMessage[] = text ? [{ role: 'user', text, ...(sent || note ? { sent: true as const } : {}) }] : []
   const events = userEvents({ message }, HISTORY_SESSION)
   out.push(...historyEvents(events.map((e) => (e.type === 'tool_result' ? agentResult(e, agents) : e))))
   return out

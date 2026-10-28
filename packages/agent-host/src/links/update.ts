@@ -89,9 +89,15 @@ export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolea
   return null
 }
 
-/** Stops the host there in order. Rejects with a sentence when it is still running afterwards */
-export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'target'>): Promise<{ wasRunning: boolean }> {
-  const r = await c.exec(stopCommand(c.spec))
+/**
+ * Stops the host there in order. Rejects with a sentence when it is still running afterwards.
+ *
+ * `forUpdate` (#1618): a host starts again in the folder after this stop (an update, a rollback, a version put back), so
+ * the stopping host lists the turns it ends and the next one continues each of them once (`CENTRALU_STOP_FOR=update`,
+ * lifecycle/update-resume.ts). Not for an uninstall, after which no host starts there
+ */
+export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'target'>, o: { forUpdate: boolean }): Promise<{ wasRunning: boolean }> {
+  const r = await c.exec(stopCommand(c.spec, o))
   // No Centralu to ask: then nothing of it runs either
   if (r.stdout.includes(NOT_FOUND)) return { wasRunning: false }
   const answer = parseStopLine(r.stdout)
@@ -173,7 +179,7 @@ const restoredNote = (version: string, target: string) =>
 async function startOrRestore(c: HostControl, to: InstalledVersion, from: InstalledVersion | null): Promise<{ why: string | null; note?: string }> {
   const why = await startAndCheck(c, to.version)
   if (!why || !isLocalBuildVersion(from?.version) || isLocalBuildVersion(to.version)) return { why }
-  await stopRemoteHost(c).catch(() => undefined)
+  await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
   let restored = false
   try {
     restored = await restoreStore(c, to)
@@ -204,7 +210,7 @@ async function putBack(
   const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu that was there'
   try {
     // A new host that came up late, or half, goes before the old one starts on the same port
-    await stopRemoteHost(c).catch(() => undefined)
+    await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
     await setPointers(c, to, was.current, was.previous)
     if (restore && was.current) await restoreStore(c, was.current)
     if (was.running) await c.start()
@@ -247,7 +253,7 @@ export async function switchRemote(
   const stoppedTurns = (await c.beforeStop?.()) ?? null
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
   const saveStore = o.saveStore === true && was.current !== null
   if (saveStore && was.current) {
     c.step('backup')
@@ -273,7 +279,7 @@ export async function switchRemote(
 export async function rollbackRemote(c: HostControl, there: { current: InstalledVersion; previous: InstalledVersion }): Promise<InstallResult> {
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
   c.step('switch')
   await setPointers(c, there.previous, there.previous, null)
   // Back from a dev build, the release may not read the store as the dev build left it (#1036)
@@ -311,7 +317,7 @@ export function uninstallCommand(spec: RemoteSpec): RemoteCommand {
 export async function uninstallRemote(c: HostControl): Promise<{ stopped: boolean }> {
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: false })
   c.step('autostart')
   await removeAutostart(c)
   c.step('remove')

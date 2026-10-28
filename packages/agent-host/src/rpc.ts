@@ -88,9 +88,10 @@ export type RpcServices = {
   /**
    * Ends this host the way a signal would (`host.stop`, for `centralu serve --stop`). Called after
    * the answer is on its way. Absent under the app's keeper, which stops a host itself and would only
-   * start it again: the call is refused there
+   * start it again: the call is refused there. `forUpdate` (#1618): a linked hub's update stops it, and the turns it ends are
+   * listed for the host it starts next
    */
-  stopHost?: () => void
+  stopHost?: (o: { forUpdate: boolean }) => void
   /** `host.stop {ifIdle}`'s check and refusal of new work (#1224, lifecycle/stop-gate.ts); without it `ifIdle` is refused */
   stopGate?: StopGate
   /** Where `host.handover` is kept and said (#1224) */
@@ -1099,7 +1100,7 @@ export function createRpcHandler(
       if (!stopHost) {
         throw rpcError('This host runs under the Centralu app, which stops it: quit the app instead')
       }
-      const { ifIdle } = RpcMethods['host.stop'].params.parse(p ?? {})
+      const { ifIdle, forUpdate } = RpcMethods['host.stop'].params.parse(p ?? {})
       if (ifIdle) {
         if (!stopGate) throw rpcError('This host cannot tell whether it is idle')
         // No await from the check to the refusal: nothing can start in between (lifecycle/stop-gate.ts)
@@ -1108,7 +1109,7 @@ export function createRpcHandler(
         stopGate.refuse()
       }
       // After this answer has been written: the shutdown closes the socket it travels on
-      setTimeout(stopHost, 50)
+      setTimeout(() => stopHost({ forUpdate: forUpdate === true }), 50)
       return { ok: true as const }
     },
     'host.handover': async (p) => {

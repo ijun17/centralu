@@ -33,7 +33,7 @@ describe('parseStopLine', () => {
 
 describe('stopRemoteHost tells a person which shim to type (#688)', () => {
   const tooOld = (shell: 'posix' | 'powershell') =>
-    stopRemoteHost({ exec: async () => ({ code: 2, stderr: 'unknown option for serve: --stop', stdout: '' }), spec: { shell }, target: 'box' })
+    stopRemoteHost({ exec: async () => ({ code: 2, stderr: 'unknown option for serve: --stop', stdout: '' }), spec: { shell }, target: 'box' }, { forUpdate: true })
 
   it('names centralu.cmd on a PowerShell machine and centralu elsewhere', async () => {
     await expect(tooOld('powershell')).rejects.toThrow(/stop `centralu\.cmd serve` there/)
@@ -135,7 +135,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     const r = await done
     expect(r).toMatchObject({ current: { version: '9.9.2', node: NODE_V }, previous: { version: '9.9.1', node: NODE_V } })
     // The old version stopped itself (its own serve), then the new one started: the stop ran before the switch
-    expect(events()).toEqual(['stop 9.9.1', 'start 9.9.2'])
+    expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
     expect(running()).toBe('9.9.2')
     expect(seen).toEqual(['preflight', 'registry', 'node', 'centralu', 'hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.2', 'prune'])
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.2 ${NODE_V}\n`)
@@ -151,7 +151,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)
     expect(existsSync(remote('versions', '9.9.2', 'install.json'))).toBe(true)
-    expect(events()).toEqual(['stop 9.9.1'])
+    expect(events()).toEqual(['stop 9.9.1 (for update)'])
   }, 60_000 * SLOW)
 
   it('puts the old version back and starts it when the new one does not answer, with the end of its log', async () => {
@@ -161,7 +161,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
       /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\); it runs Centralu 9\.9\.1 again\. The end of its host\.log: host 9\.9\.2: the store was written by a newer Centralu/,
     )
     expect(seen.slice(-5)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back'])
-    expect(events()).toEqual(['stop 9.9.1', 'start 9.9.2', 'stop -', 'start 9.9.1'])
+    expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop - (for update)', 'start 9.9.1'])
     expect(running()).toBe('9.9.1')
     // The pointers are what they were, and nothing was removed: both versions are still there
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
@@ -177,7 +177,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     const r = await rollbackRemote(c, { current: { version: '9.9.2', node: NODE_V }, previous: { version: '9.9.1', node: NODE_V } })
     expect(r).toEqual({ current: { version: '9.9.1', node: NODE_V }, previous: null, removed: [], left: [] })
     expect(seen).toEqual(['hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.1'])
-    expect(events()).toEqual(['stop 9.9.2', 'start 9.9.1'])
+    expect(events()).toEqual(['stop 9.9.2 (for update)', 'start 9.9.1'])
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)
     // The newer version stays on disk, so updating again does not download it again

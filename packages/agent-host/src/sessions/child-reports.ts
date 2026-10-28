@@ -45,6 +45,7 @@ const NOT_READ = "(not read: the session's last turn was the person's; read_sess
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
   if (work && 'tookOver' in work) return 'took_over'
   if (work && 'swapped' in work) return 'swapped'
+  if (work && 'resumed' in work) return 'resumed'
   if (work && ('machineRemoved' in work || 'linkLost' in work)) return 'stopped'
   if (work && ('paused' in work || 'waitingOn' in work)) return 'paused'
   if (work && 'settled' in work) return 'settled'
@@ -123,6 +124,16 @@ function swappedReportLine(): string {
   return (
     '[Centralu] The assigned work\'s session ended a turn while Centralu was restarting, so that end was not followed. ' +
     'It is most likely the end of the work you gave it; check its last response before relying on it.\n'
+  )
+}
+/**
+ * The first line of what a caller is told when an update of Centralu on the session's machine cut its turn and the host
+ * that update started continued it (#1618). Not a report: the turn goes on, and when one is owed it is that turn's end
+ */
+function resumedReportLine(owed: boolean): string {
+  return (
+    "[Centralu] The assigned work's turn was cut short by an update of Centralu on its machine, and Centralu continued it there on the new version. " +
+    (owed ? 'Its report follows when that turn ends; this is not it, and nothing is needed from you now.\n' : 'Its end is not reported to you; read the session to follow it.\n')
   )
 }
 /**
@@ -400,6 +411,20 @@ export class ChildReports {
   }
 
   /**
+   * A turn of this session that a linked hub's update cut, and this host continued (#1618): its requester hears it once,
+   * so it does not read the session's stop as the end of the work, nor continue it a second time by hand. The report it is
+   * owed, if one is, stays owed: the continued turn's end is it, so it is neither lost nor sent twice
+   */
+  async tellCutByUpdate(sessionId: string, requester: string): Promise<void> {
+    const m = this.host.meta.get(sessionId)
+    if (!m || !this.host.meta.has(requester) || this.host.handingOver) return
+    const { name, project } = this.reportedAs(m)
+    const owed = this.host.children.awaitingReport.get(sessionId) === requester
+    console.error(`[sessions] ${sessionId.slice(0, 8)}: an update cut its turn and it was continued; telling ${requester.slice(0, 8)}`)
+    await this.deliverReport(requester, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: 'state_change' }, { resumed: true, owed }, this.answerSeq(sessionId))
+  }
+
+  /**
    * A report a host swap held back (#646, #1186): its session ended a turn while the old host let go, and the mark the
    * store kept is dropped at start (`restoreReports`), so a later turn is never reported as the work. The caller is
    * told once, here, that a turn ended and where to read it; it used to hear nothing.
@@ -485,6 +510,7 @@ export class ChildReports {
     const outcomeOf = (name: Naming) =>
       work && 'tookOver' in work ? tookOverReportLine(work.paused, name)
       : work && 'swapped' in work ? swappedReportLine()
+      : work && 'resumed' in work ? resumedReportLine(work.owed)
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
       : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined, name)
@@ -543,6 +569,8 @@ export class ChildReports {
     const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
     // Or held over the work it handed on and waits for (§6)
     const handedOn = !!work && 'waitingOn' in work
+    // Or a turn an update cut, which goes on (#1618)
+    const goesOn = !!work && 'resumed' in work
     const reported = this.toMailbox(orchestratorId, sessionId, {
       outcome: outcomeWord(work, stop, ending),
       body: forModel(true),
@@ -550,7 +578,7 @@ export class ChildReports {
       ...(kind ? { error: kindWord(kind) } : {}),
       ...(holding ? { paused: work.paused.length } : {}),
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
-      then: holding || handedOn ? 'running' : 'review',
+      then: holding || handedOn || goesOn ? 'running' : 'review',
     })
     if (reported === 'mailed' || reported === 'closed') return
     await this.tellSession(

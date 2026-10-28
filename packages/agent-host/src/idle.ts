@@ -112,6 +112,20 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
 }
 
 /**
+ * Whether stopping the host now ends this session's turn (#1618): it is in a turn, working or waiting on an approval or a
+ * question. The next host's start finds it so with no process and resets it (`SessionManager`'s start): the one definition
+ * of a turn a stop cut. Background work alone is not a turn: nothing continues it, so it is not listed
+ */
+export function turnCut(s: IdleActivity): boolean {
+  return inTurn(s.state)
+}
+
+/** The sessions whose turns stopping the host now ends (`turnCut`), by id: what an update's stop lists for the next host */
+export function cutTurns(s: ActivitySnapshot): string[] {
+  return s.sessions.flatMap((x) => (x.id !== undefined && turnCut(x) ? [x.id] : []))
+}
+
+/**
  * Whether one session's agent process can be replaced without losing anything (#290, #297): the
  * rule for restarting a single session on a newly installed CLI. The session manager answers with
  * it (`SessionManager.sessionIdle`), adding the facts only it holds: whether a process is running

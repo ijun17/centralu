@@ -179,6 +179,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private logon: HostLogon | null = null
   /** A sign-in's serve waiting to take over from the remote host, as its hello or `host_handover` last said (#1224) */
   private handover: HostHandover | null = null
+  /**
+   * The turns the remote host said in its last hello it continues after an update cut them, with when its start took each
+   * up, on its clock (#1618); null: a host from before that, which continues none
+   */
+  private updateContinued: ReadonlyMap<string, number> | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
   /**
@@ -350,6 +355,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /** The link has just connected, its hello and lists read; `LinkedMachine` looks at the versions then (#1508) */
   protected connectedNow(): void {}
+
+  /** Whether the remote host continues the turns an update's stop cuts (#1618): its last hello said which it continues */
+  continuesCutTurns(): boolean {
+    return this.updateContinued !== null
+  }
+
+  /** When the remote host took up this session's turn (its own id) after an update cut it (#1618); null when it did not */
+  continuedAfterUpdate(sessionId: string): number | null {
+    return this.updateContinued?.get(sessionId) ?? null
+  }
 
   info(): MachineInfo {
     return {
@@ -985,6 +1000,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     this.logon = logon
     this.handover = h.handover ?? null
+    this.updateContinued = h.updateContinued ? new Map(h.updateContinued.map((c) => [c.sessionId, c.at])) : null
     this.switched = null
     this.switchTried = false
     this.switchFailure = null

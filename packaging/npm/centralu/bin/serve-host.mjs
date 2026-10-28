@@ -367,9 +367,9 @@ export function askHostRpc({ port, token, protocolVersion, prove = false, method
  * `{ ok: true }` once the host took it, `{ ok: false, message, protocolVersion? }` otherwise; the
  * last names the host's protocol when the hello was refused for it, so the caller can ask again.
  * `ifIdle` (#1224): only if nothing runs there, checked and acted on by the host in one step; `{ ok: false, busy: true }`
- * when something does.
+ * when something does. `forUpdate` (#1618): a hub's update stops it, and the host lists the turns it ends for the next one.
  */
-export function askHostToStop({ port, token, protocolVersion, prove = false, ifIdle = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, protocolVersion, prove = false, ifIdle = false, forUpdate = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
   // With `prove`, the token goes out only to a host that proved it holds it (#838)
   return helloExchange({
@@ -380,7 +380,7 @@ export function askHostToStop({ port, token, protocolVersion, prove = false, ifI
       unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
       gone: () => done({ ok: false, message: 'the connection closed' }),
       message: (m, ws) => {
-        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: ifIdle ? { ifIdle: true } : {} }))
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: { ...(ifIdle ? { ifIdle: true } : {}), ...(forUpdate ? { forUpdate: true } : {}) } }))
         else if (m.kind === 'res' && m.id === 'stop' && m.ok && m.result?.ok === false) {
           // `ifIdle` and something runs there (#1224): nothing was changed
           done({ ok: false, busy: true, message: 'it has work running', activity: m.result.busy ?? null, calls: m.result.calls ?? 0 })

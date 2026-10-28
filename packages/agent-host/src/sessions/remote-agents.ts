@@ -207,6 +207,10 @@ export class RemoteAgents {
    * turned Auto reconnect off, or disconnected it, while it was down
    */
   private readonly toldDown = new Map<string, boolean>()
+  /** The machines whose link this hub's own update or rollback holds, until it is back (#1618, `linkChanged`) */
+  private readonly updateHolds = new Set<string>()
+  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was taken up: once each */
+  private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
@@ -1187,8 +1191,16 @@ export class RemoteAgents {
    * (`LinkedReports.linkChanged`).
    */
   private linkChanged(machine: unknown): void {
-    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown } | null
-    if (!m || typeof m.id !== 'string' || m.status === 'connected') return
+    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown; operation?: { kind?: unknown } | null } | null
+    if (!m || typeof m.id !== 'string') return
+    /*
+     * This hub's own update or rollback of the machine holds the link from its first step until the link is back (#1618):
+     * the operation ends with the check, before the link has reconnected (`connecting`, `starting`). Anything else, such as
+     * an update that ended with the machine not back, lets it go
+     */
+    if (updating(m.operation)) this.updateHolds.add(m.id)
+    else if (m.status !== 'connecting' && m.status !== 'starting') this.updateHolds.delete(m.id)
+    if (m.status === 'connected') return
     /*
      * Nothing here reconnects it (#1341): the person disconnected it, or its Auto reconnect is off and the attempt that
      * failed or the redials that gave up were the last. Judged by the link and not by the row, which says `unreachable` the
@@ -1214,6 +1226,13 @@ export class RemoteAgents {
       const told = this.toldDown.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
+      /*
+       * This hub's own update or rollback of the machine holds the link (#1618): its stop ends this turn, and the host it starts
+       * continues it, when the machine's host is one that does (its hello's `updateContinued`). The caller hears that once the
+       * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back lets the link go
+       * (`updateHolds`), and the drop is told then as any is. A host from before that is told as before
+       */
+      if (this.updateHolds.has(m.id) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
       this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '
@@ -1261,9 +1280,35 @@ export class RemoteAgents {
       const now = await reader.read(rec.sessionId, 1)
       // Read again: the turn's own end, or another's message, may have come in while the machine was asked
       if (!now.ok || this.host.children.linkedReports.get(rec.sessionId) !== report || !this.gateNow(rec).owned) continue
-      if (inTurn((now.state ?? 'idle') as SessionState)) report.busy = true
-      else this.host.settleLinkedTurn(rec.sessionId)
+      if (inTurn((now.state ?? 'idle') as SessionState)) {
+        report.busy = true
+        this.tellContinued(rec)
+      } else this.host.settleLinkedTurn(rec.sessionId)
     }
+  }
+
+  /**
+   * A child whose turn an update of its machine cut, found in a turn again once the link is back: the host that update
+   * started continued it (#1618). Its caller is told so once, and that the report it is owed is that turn's end, so it
+   * neither waits on a link that came back nor continues the child by hand a second time.
+   *
+   * Whatever the order of the Continue and the reconnect (#1626 review): the machine's host names each turn it continues
+   * from its start on, before it answers any hello, not once the Continue is in (`SessionManager.updateContinued`), so a
+   * link back while the Continue is still on its way is told it too
+   */
+  private tellContinued(rec: RemoteAgent): void {
+    const at = this.host.linkedReader?.continuedAfterUpdate?.(rec.sessionId)
+    if (at == null || this.toldCut.has(`${rec.sessionId}@${at}`)) return
+    this.toldCut.add(`${rec.sessionId}@${at}`)
+    const rest = 'and Centralu continued it there on the new version. Its report comes when that turn ends; nothing is needed from you now.'
+    void this.host.tellSession(
+      rec.callerId,
+      `[Centralu] An update of Centralu on its machine cut the turn "${rec.name}" [${rec.sessionId}] was running there, ${rest}`,
+      { sessionId: rec.sessionId, name: rec.name },
+      true,
+      // What the model reads (#1186): all of it but the name, which is not Centralu's words (#120)
+      `[Centralu] An update of Centralu on its machine cut the turn the session [${rec.sessionId}] was running there, ${rest}`,
+    )
   }
 
   /**
@@ -1392,4 +1437,9 @@ export class RemoteAgents {
     const listed = read.map(({ p, r }) => `"${p.name}" (${r.ok ? shownRemote(r.origin) : 'not read'})`).join(', ')
     return { error: `${machine.name} has no checkout of ${key}, so nothing was started there.${listed ? ` Its projects: ${listed}.` : ' It has no projects.'} The person can clone it there first.` }
   }
+}
+
+/** The row's operation is this hub's update or rollback of the machine, whose stop and start hold the link (#1618) */
+function updating(op: { kind?: unknown } | null | undefined): boolean {
+  return op?.kind === 'update' || op?.kind === 'rollback'
 }

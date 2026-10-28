@@ -1,4 +1,6 @@
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
+import { centraluInputId, isCentraluInputId, UPDATE_CONTINUE_TEXT } from './input-receipts.js'
 import {
   __setSessionApiForTest,
   AGENT_REPORT_NOT_RECORDED,
@@ -120,6 +122,66 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
       { role: 'user', text: 'Take a look at this too' },
       { role: 'user', text: 'This is really my message' },
     ])
+  })
+
+  it("marks the inputs Centralu wrote by the id it gave them, and drops the CLI's line where a turn was stopped (#1618 review)", async () => {
+    const note = '[Centralu] Centralu on this machine was updated while your turn was running. Continue where you stopped.'
+    // The CLI keeps the id a stream-json input names as the line's uuid (measured, CLI 2.1.296); its own lines get random ones
+    const ours = centraluInputId()
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'user', uuid: centraluInputId(), message: { content: 'Make ten Bash calls' } },
+        { type: 'assistant', uuid: randomUUID(), message: { id: 'synthetic-1', model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } },
+        { type: 'user', uuid: ours, message: { content: [{ type: 'text', text: note }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: 'typed in a terminal' } },
+      ],
+    })
+    expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+      { role: 'user', text: 'Make ten Bash calls', sent: true },
+      { role: 'assistant', text: 'No response requested.' },
+      { role: 'user', text: note, sent: true },
+      { role: 'user', text: 'typed in a terminal' },
+    ])
+    expect([isCentraluInputId(ours), isCentraluInputId(randomUUID()), isCentraluInputId(undefined)]).toEqual([true, false, false])
+  })
+
+  it("knows Centralu's Continue note by its text where the line lacks the id, and says why (#1626 review)", async () => {
+    // Another CLI version, or a transcript a crash left without the id: the row's uuid is a random one
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'user', uuid: randomUUID(), message: { content: 'Make ten Bash calls' } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: UPDATE_CONTINUE_TEXT }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: 'typed in a terminal' } },
+      ],
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+        { role: 'user', text: 'Make ten Bash calls' },
+        { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true },
+        { role: 'user', text: 'typed in a terminal' },
+      ])
+      expect(log.mock.calls.flat().join(' ')).toContain('does not keep it')
+      // With the id there is nothing to say
+      log.mockClear()
+      __setSessionApiForTest({
+        listSessions: async () => [],
+        getSessionMessages: async () => [{ type: 'user', uuid: centraluInputId(), message: { content: UPDATE_CONTINUE_TEXT } }],
+      })
+      expect(await readClaudeHistory('s', '/p', 100)).toEqual([{ role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
+      expect(log).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it("knows Centralu's Continue note in a Codex thread by its text, as that tool keeps no id of ours (#1626 review)", () => {
+    const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: UPDATE_CONTINUE_TEXT }] }] }], 10)
+    expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
   })
 
   it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {
