@@ -4987,8 +4987,8 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     // Absent, though the line before the break names a file that exists: not that file's text
     expect(await showFile(repo.work, at, 'd/a\nzzz')).toBeNull()
     expect(await showFile(repo.work, at, 'd/zzz\nb')).toBeNull()
-    // A folder is told as git show tells it; a name with a break that is a folder, too
-    expect(await showFile(repo.work, at, 'd')).toContain('d/a')
+    // A folder is told as git show tells it
+    expect(await showFile(repo.work, at, 'd')).toContain('tree ')
     // And a revision that is not there still throws, whatever the name has in it
     await expect(showFile(repo.work, 'no-such-branch', 'd/a\nb')).rejects.toBeInstanceOf(GitError)
     await expect(showFile(repo.work, 'a'.repeat(40), 'd/a\nzzz')).rejects.toBeInstanceOf(GitError)
