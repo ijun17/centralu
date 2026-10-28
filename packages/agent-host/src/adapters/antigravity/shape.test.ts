@@ -1,16 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
-import { readTextFileFor } from '../acp/session.js'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import { logToolStderr, redactLines, startToolProcess } from '../core/tool-process.js'
-import { agyHome, reachesAgentFolder } from './agent-files.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
-import { AGY_DISABLED_TOOLS, agyStderrLine, readAgyCall } from './shape.js'
-import { driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, folder, link, pathFrom, pathIn, readsWorld, sessionOpts, tempData, tokenPath, write } from './agent-files.test-helpers.js'
+import { agyStderrLine, readAgyCall } from './shape.js'
+import { driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, pathIn, sessionOpts, tempData, tokenPath } from './agent-files.test-helpers.js'
 
 /**
  * What the spike could not make the agent send on cue (docs/plans/antigravity-adapter.md §5, §6): a question to the person
- * (`interaction_*`, read in its binary), reads through Centralu, and the stderr kept out of messages. The frames here are
+ * (`interaction_*`, read in its binary), what Centralu offers at the start, and the stderr kept out of messages. The frames here are
  * written by hand in the shapes the binary and the recordings show, and say so.
  */
 
@@ -90,42 +88,17 @@ describe("Antigravity's questions", () => {
   })
 })
 
-describe('reads through Centralu (`fs/read_text_file`)', () => {
-  function folders() {
-    const f = readsWorld()
-    data.push(f)
-    return f
-  }
-
-  it('reads a file in the project folder, by lines when asked', async () => {
-    const f = folders()
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: f.notes })).resolves.toEqual({ content: 'one\ntwo\nthree\n' })
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: f.notes, line: 2, limit: 1 })).resolves.toEqual({ content: 'two' })
-  })
-
-  it("refuses the agent's own home (its token), even inside the project, and anything outside the project", async () => {
-    const f = folders()
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: f.token })).rejects.toThrow(/agent's own data/)
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: f.outside })).rejects.toThrow(/outside it/)
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: 'notes.txt' })).rejects.toThrow(/absolute/)
-  })
-
-  it('refuses a link in the project that points at the token', async () => {
-    const f = folders()
-    const link = f.link()
-    // Windows without the right to make links: the real-path rule is the one the test above holds
-    if (link === null) return
-    await expect(readTextFileFor(f.project, [f.agent], { sessionId: 's', path: link })).rejects.toThrow(/agent's own data/)
-  })
-
-  it("is answered for the agent: the session's folder only, and never Centralu's Antigravity folder", async () => {
-    const f = folders()
+describe('what Centralu offers the agent at the start', () => {
+  it('advertises no client reads, sends no tool filter, and answers a read request as not offered', async () => {
     const w = world(base)
-    const handle = await w.adapter.createSession(sessionOpts('agy-r', 'normal', { cwd: f.project }), w.emit)
-    const inside = await w.peers[0]!.ask('fs/read_text_file', { sessionId: SID, path: f.notes })
-    expect(inside).toEqual({ content: 'one\ntwo\nthree\n' })
-    const refused = await w.peers[0]!.ask('fs/read_text_file', { sessionId: SID, path: tokenPath(w.home) })
-    expect(refused).toMatchObject({ code: -32002 })
+    const handle = await w.adapter.createSession(sessionOpts('agy-r'), w.emit)
+    const peer = w.peers[0]!
+    const init = (await peer.next((m) => m.method === 'initialize')) as { params: { clientCapabilities: unknown } }
+    expect(init.params.clientCapabilities).toMatchObject({ fs: { readTextFile: false, writeTextFile: false } })
+    const created = (await peer.next((m) => m.method === 'session/new')) as { params: Record<string, unknown> }
+    expect(created.params._meta).toBeUndefined()
+    // The agent reads with its own viewer as shipped; a read sent here anyway is not served
+    expect(await peer.ask('fs/read_text_file', { sessionId: SID, path: tokenPath(w.home) })).toMatchObject({ code: -32601 })
     await handle.dispose()
   })
 })
@@ -240,29 +213,7 @@ const SUBAGENT = {
   ],
 }
 
-describe("Antigravity's subagents", () => {
-  it('are switched off at the server by the names it accepts', () => {
-    // The server's BuiltinTools values (1.4.3): any other name is dropped with "Unknown tool name in disabledTools"
-    const accepted = ['list_directory', 'search_directory', 'find_file', 'view_file', 'create_file', 'edit_file', 'run_command', 'ask_question', 'invoke_subagent', 'run_workflow', 'generate_image', 'search_web', 'read_url_content', 'schedule', 'finish']
-    for (const name of AGY_DISABLED_TOOLS) expect(accepted, name).toContain(name)
-    expect(AGY_DISABLED_TOOLS).toEqual(expect.arrayContaining(['view_file', 'search_directory', 'invoke_subagent', 'run_workflow']))
-  })
-
-  for (const preset of ['safe', 'normal', 'edits', 'auto'] as const) {
-    it(`under ${preset}, and with a saved rule for it, a subagent request is declined without a card`, async () => {
-      const w = world(base, preset)
-      const handle = await w.adapter.createSession(sessionOpts('agy-sub', preset), w.emit)
-      handle.applyRules?.(['invoke_subagent', 'other', '*'])
-      handle.send('go')
-      await w.peers[0]!.next((m) => m.method === 'session/prompt')
-      expect(await w.peers[0]!.ask('session/request_permission', SUBAGENT)).toEqual({ outcome: { outcome: 'selected', optionId: 'reject_once' } })
-      expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
-      await handle.dispose()
-    })
-  }
-})
-
-/** An edit or read request as the agent asks for one under Auto (re-review of #1680: `replace_file_content`, kind `edit`) */
+/** An edit request as the agent asks for one (re-review of #1680: `replace_file_content`, kind `edit`) */
 const touching = (id: string, title: string, kind: string, rawInput: Record<string, unknown>) => ({
   sessionId: SID,
   toolCall: { toolCallId: id, title, kind, status: 'pending', rawInput },
@@ -271,63 +222,46 @@ const touching = (id: string, title: string, kind: string, rawInput: Record<stri
     { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
   ],
 })
-const NO = { outcome: { outcome: 'selected', optionId: 'reject_once' } }
 const YES = { outcome: { outcome: 'selected', optionId: 'allow_once' } }
 
-describe("the agent's own folder, kept from its tools", () => {
-  for (const preset of ['safe', 'normal', 'edits', 'auto'] as const) {
-    it(`under ${preset}, and with a saved rule for it, an edit or read of a file there is declined without a card`, async () => {
-      const w = world(base, preset)
-      const own = pathIn(w.home.geminiHome, 'antigravity-acp')
-      folder(own)
-      write(pathIn(own, 'settings.json'), '{}')
-      const project = pathIn(w.home.root, '..', '..', 'project')
-      folder(project)
-      const handle = await w.adapter.createSession(sessionOpts('agy-own', preset, { cwd: project }), w.emit)
-      handle.applyRules?.(['replace_file_content', 'edit', '*'])
-      handle.send('go')
-      const peer = w.peers[0]!
-      await peer.next((m) => m.method === 'session/prompt')
-      const asks = [
-        // As measured: the edit tool on a file in the token's folder
-        touching('own-1', 'Run replace_file_content?', 'edit', { TargetFile: pathIn(own, 'settings.json'), TargetContent: 'a', ReplacementContent: 'b' }),
-        // The token itself, spelled in another case (one file on macOS and Windows), and a file not there yet
-        touching('own-2', 'Run write_to_file?', 'edit', { TargetFile: tokenPath(w.home).toUpperCase(), CodeContent: 'x' }),
-        touching('own-3', 'Run write_to_file?', 'edit', { TargetFile: pathIn(own, 'new', 'deeper.txt'), CodeContent: 'x' }),
-        // A read by address, the MCP config beside it, and a path climbing out of the session's folder
-        touching('own-4', 'Run read_url_content?', 'fetch', { Url: `file://${tokenPath(w.home)}` }),
-        touching('own-5', 'Run write_to_file?', 'edit', { TargetFile: pathIn(w.home.geminiHome, 'config', 'mcp_config.json'), CodeContent: '{}' }),
-        touching('own-6', 'Run replace_file_content?', 'edit', { TargetFile: pathFrom(project, pathIn(own, 'settings.json')) }),
-        // Another conversation's plan folder
-        touching('own-7', 'Run create_file?', 'edit', { TargetFile: pathIn(own, 'brain', 'another-session', 'plan.md'), CodeContent: '# Plan' }),
-      ]
-      for (const ask of asks) expect(await peer.ask('session/request_permission', ask), ask.toolCall.toolCallId).toEqual(NO)
-      expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
-      await handle.dispose()
-    })
-  }
+/**
+ * Owner decision on #59 (2026-10-28): the agent runs as shipped. A subagent, and a request naming a file in the agent's own
+ * folder, are answered as any other request: under Auto without a card, under the other presets with one
+ */
+describe("requests Centralu once refused (subagents, the agent's own folder)", () => {
+  const asks = (home: ReturnType<typeof world>['home']) => [
+    SUBAGENT,
+    touching('own-1', 'Run replace_file_content?', 'edit', { TargetFile: pathIn(home.geminiHome, 'antigravity-acp', 'settings.json'), TargetContent: 'a', ReplacementContent: 'b' }),
+    touching('own-2', 'Run write_to_file?', 'edit', { TargetFile: tokenPath(home), CodeContent: 'x' }),
+  ]
 
-  it('folds case where no part of the path exists to tell it (macOS and Windows take any case for one file)', async () => {
-    const home = agyHome(pathIn('/', 'no-such-cc-data'), '1.4.3')
-    const token = pathIn(home.geminiHome, 'antigravity-acp', 'acp_token.json')
-    await expect(reachesAgentFolder(home, { rawInput: { TargetFile: token.toUpperCase() } }, SID, '/work')).resolves.toBe(true)
-    await expect(reachesAgentFolder(home, { rawInput: { TargetFile: pathIn('/', 'no-such-cc-data', 'project', 'a.txt') } }, SID, '/work')).resolves.toBe(false)
-  })
-
-  it("lets this conversation's plan through as any edit, but not a link in its folder to the token", async () => {
+  it('under auto, each is allowed without a card', async () => {
     const w = world(base, 'auto')
-    const plans = pathIn(w.home.geminiHome, 'antigravity-acp', 'brain', SID)
-    folder(plans)
-    fakeSignIn(w.home)
-    const handle = await w.adapter.createSession(sessionOpts('agy-plan', 'auto'), w.emit)
+    const handle = await w.adapter.createSession(sessionOpts('agy-sub', 'auto'), w.emit)
     handle.send('go')
     const peer = w.peers[0]!
     await peer.next((m) => m.method === 'session/prompt')
-    // As `/plan` asked (measured on 1.4.3): create_file on brain/<session>/plan.md
-    expect(await peer.ask('session/request_permission', touching('plan-1', 'Run create_file?', 'edit', { TargetFile: pathIn(plans, 'plan.md'), CodeContent: '# Plan' }))).toEqual(YES)
-    if (link(tokenPath(w.home), pathIn(plans, 'notes.md'))) {
-      expect(await peer.ask('session/request_permission', touching('plan-2', 'Run replace_file_content?', 'edit', { TargetFile: pathIn(plans, 'notes.md') }))).toEqual(NO)
-    }
+    for (const ask of asks(w.home)) expect(await peer.ask('session/request_permission', ask), ask.toolCall.toolCallId).toEqual(YES)
+    expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
     await handle.dispose()
   })
+
+  for (const preset of ['safe', 'normal', 'edits'] as const) {
+    it(`under ${preset}, each is a card, and the person's Allow answers it`, async () => {
+      const w = world(base, preset)
+      const handle = await w.adapter.createSession(sessionOpts('agy-sub2', preset), w.emit)
+      handle.send('go')
+      const peer = w.peers[0]!
+      await peer.next((m) => m.method === 'session/prompt')
+      const answeredCards = new Set<string>()
+      for (const ask of asks(w.home)) {
+        const answered = peer.ask('session/request_permission', ask)
+        const card = (await w.event((e) => e.type === 'approval_request' && !answeredCards.has(e.requestId))) as Extract<NormalizedEvent, { type: 'approval_request' }>
+        answeredCards.add(card.requestId)
+        expect(handle.respondApproval(card.requestId, 'allow')).toBe(true)
+        expect(await answered, ask.toolCall.toolCallId).toEqual(YES)
+      }
+      await handle.dispose()
+    })
+  }
 })

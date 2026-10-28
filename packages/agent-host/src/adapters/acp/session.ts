@@ -1,8 +1,4 @@
-import { realpath as realpathCallback } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
-import { promisify } from 'node:util'
-import { isAbsolute, join, relative, sep } from 'node:path'
-import { z } from 'zod'
+import { isAbsolute, join } from 'node:path'
 import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
@@ -17,7 +13,7 @@ import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RESOURCE_NOT_FOUND, RpcError, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
@@ -255,10 +251,10 @@ class AcpWire implements ToolWire {
           {
             protocolVersion: 1,
             clientInfo: { name: 'centralu', version: '1' },
-            // No terminal and no writes: the agent uses its own tools, whose approvals come as `session/request_permission`.
-            // Reads only for a tool whose own viewer is switched off (`clientReads`), held to the session's folder
+            // No terminal, no reads and no writes: the agent uses its own tools, whose approvals come as
+            // `session/request_permission`
             clientCapabilities: {
-              fs: { readTextFile: this.deps.shape?.clientReads !== undefined, writeTextFile: false },
+              fs: { readTextFile: false, writeTextFile: false },
               terminal: false,
               session: { compaction: {} },
             },
@@ -269,8 +265,7 @@ class AcpWire implements ToolWire {
       const version = init.agentInfo?.version ?? (await this.deps.version())
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
-      const meta = this.deps.shape?.sessionMeta?.()
-      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers(), ...(meta ? { _meta: meta } : {}) }
+      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers() }
       if (resume) {
         const caps = init.agentCapabilities
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null
@@ -531,8 +526,6 @@ class AcpWire implements ToolWire {
   }
 
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {
-    const reads = this.deps.shape?.clientReads
-    if (method === 'fs/read_text_file' && reads) return readTextFileFor(this.opts.cwd, reads.refused(), params)
     if (method !== 'session/request_permission') {
       this.unmapped.note(method)
       throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${method}`)
@@ -544,12 +537,6 @@ class AcpWire implements ToolWire {
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
     // A question is the person's to answer under every preset: never an approval, never answered without them
     if (this.deps.shape?.isQuestion?.(req)) return this.ask(req)
-    if (await this.deps.shape?.neverAllowed?.(req, this.opts.cwd)) {
-      // Declined as the person's "no" would be, so the agent carries on with the turn instead of taking it as stopped
-      const no = pick(req.options, 'reject_once')
-      this.normalizer.refuse(req.toolCall.toolCallId)
-      return no ? selected(no) : CANCELLED
-    }
     const call = this.normalizer.call(req.toolCall, true)
     const detail = detailOf(call, this.opts.cwd)
     const edit = this.deps.shape?.editRunsAsNewCall && call.kind === 'edit' ? editPaths(call) : null
@@ -717,59 +704,4 @@ export function detailOf(call: ToolCallFields, cwd: string): ApprovalDetail {
     return fileEditDetail(call.kind === 'delete' ? changes.map((c) => ({ ...c, change: 'delete' as const })) : changes)
   }
   return { kind: 'other', raw: JSON.stringify({ title: call.title, kind: call.kind, input: call.rawInput }).slice(0, 2000) }
-}
-
-/**
- * `fs/read_text_file`, answered by the client (#59, docs/plans/antigravity-adapter.md §5.3): offered to a tool whose own file
- * viewer reads its home without asking (Antigravity 1.4.3 read its token file in the spike, §6 there). The viewer is switched
- * off and reads come here instead, where they are held to one rule: **inside the session's folder, never under a refused
- * folder** (the agent's home, which holds its token). Both sides are compared as real paths, so a link inside the folder that
- * points out of it, or into the agent's home, is refused like the path it points to.
- */
-
-export const ReadTextFileParams = z.looseObject({
-  sessionId: z.string(),
-  path: z.string(),
-  /** 1-based, as ACP's schema says */
-  line: z.number().int().positive().nullish(),
-  limit: z.number().int().positive().nullish(),
-})
-export type ReadTextFileParams = z.infer<typeof ReadTextFileParams>
-
-/** The OS's own real path (Windows: long names and the disk's case), so a short name cannot slip past a refused folder */
-const realPath = promisify(realpathCallback.native)
-
-/** A file larger than this is not read whole into the agent's context (a log, a build output) */
-export const MAX_READ_BYTES = 8 * 1024 * 1024
-
-/** Who refuses a read, in the words the agent passes on to the model */
-const REFUSED = 'Centralu reads files only inside the project folder for this agent'
-
-export async function readTextFileFor(cwd: string, refused: readonly string[], params: unknown): Promise<{ content: string }> {
-  const p = ReadTextFileParams.safeParse(params)
-  if (!p.success) throw new RpcError(-32602, 'fs/read_text_file needs a path')
-  const { path, line, limit } = p.data
-  if (!isAbsolute(path)) throw new RpcError(-32602, 'fs/read_text_file needs an absolute path')
-  const real = await realPath(path).catch(() => null)
-  if (real === null) throw new RpcError(RESOURCE_NOT_FOUND, `No such file: ${path}`)
-  const root = await realPath(cwd).catch(() => null)
-  if (root === null || !inside(root, real)) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is outside it`)
-  for (const folder of refused) {
-    const no = await realPath(folder).catch(() => folder)
-    if (inside(no, real) || real === no) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is the agent's own data`)
-  }
-  const info = await stat(real)
-  if (!info.isFile()) throw new RpcError(RESOURCE_NOT_FOUND, `Not a file: ${path}`)
-  if (info.size > MAX_READ_BYTES) throw new RpcError(-32603, `${path} is ${info.size} bytes; files over ${MAX_READ_BYTES} are not read whole`)
-  const text = await readFile(real, 'utf8')
-  if (!line && !limit) return { content: text }
-  const lines = text.split('\n')
-  const from = (line ?? 1) - 1
-  return { content: lines.slice(from, limit ? from + limit : undefined).join('\n') }
-}
-
-/** Whether `target` is `folder` itself or under it (both real paths) */
-function inside(folder: string, target: string): boolean {
-  const rel = relative(folder, target)
-  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
 }

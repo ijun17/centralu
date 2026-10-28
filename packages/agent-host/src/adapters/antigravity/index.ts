@@ -5,19 +5,22 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import type { AcpProfile } from '../acp/profile.js'
-import { agyHome, agyPlatformKey, browserFolder, reachesAgentFolder, type AgyHome } from './agent-files.js'
+import { agyHome, agyPlatformKey, browserFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
-import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, isAgySubagentCall, readAgyCall } from './shape.js'
+import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
 import { agentSignInUrl, googleAuthorizeUrl, NO_HELPER } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
- * - **Presets: all four.** The agent stays in its `default` mode, where it asks for every command, edit, web fetch and MCP
- *   call (reads and searches do not ask, as under Claude's Safe); Centralu's preset answers each request. Its own
- *   `auto_edit` and `yolo` would skip Centralu, so they are never set, and `allow_always` is never sent (spike §5)
+ * - **Presets: all four.** The agent stays in its `default` mode, where it asks for every command, edit, web fetch, MCP
+ *   call and subagent; Centralu's preset answers each request as it answers any tool's, with no request refused for what
+ *   it names (owner decision on #59, 2026-10-28: the agent runs as shipped). Its own viewer and search read files without
+ *   asking, as under Claude's Safe, its own folder too (plan §4.2); a subagent runs once its card is allowed (or at once
+ *   under Auto), and its events are not read as a child's (`builtInSubagents: false`). Its own `auto_edit` and `yolo`
+ *   would skip Centralu, so they are never set, and `allow_always` is never sent (spike §5)
  * - **Context: exact** (`usage_update {used, size: 1048576}`), no cost
  * - Resume: `session/load` (replays, dropped) under the one `GEMINI_HOME` Centralu keeps
  * - Not offered yet: role text (`_meta.antigravity.systemPrompt.append` exists, unmeasured), untrusted projects (it reads
@@ -121,12 +124,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     shape: {
       readCall: readAgyCall,
       isQuestion: isAgyQuestion,
-      // A subagent (it reads the agent's home with no card), or a file in the agent's own folder but its plan (§4.2)
-      neverAllowed: async (req, cwd) => isAgySubagentCall(req) || (await reachesAgentFolder(home, req.toolCall, req.sessionId, cwd)),
       editRunsAsNewCall: true,
-      // The agent's own folder: its token, its settings, its binaries
-      clientReads: { refused: () => [home.root] },
-      sessionMeta: agySessionMeta,
       stderrLine: agyStderrLine,
       signedOut(label) {
         setup.noteSignedOut()

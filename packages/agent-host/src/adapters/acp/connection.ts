@@ -27,8 +27,6 @@ export class RpcError extends Error {
 export const METHOD_NOT_FOUND = -32601
 /** ACP's code for "authenticate first" (measured on Cursor: `{code: -32000, message: "Authentication required"}`) */
 export const AUTH_REQUIRED = -32000
-/** ACP's code for a session or resource that does not exist */
-export const RESOURCE_NOT_FOUND = -32002
 
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void

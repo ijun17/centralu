@@ -2094,8 +2094,8 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    what the adapter blocks, drops or works around (each with its measurement), and a recorded
    baseline. The weekly drift run then watches the new tool in the other direction as well.
    An ACP tool is a profile on `adapters/acp/`; where its ACP differs from the common shape (its field names, a
-   question sent as a permission request, a permitted call that runs under another id, client reads, `_meta` on the
-   session's start, a sign-in of its own, a log line that must not reach host.log), it fills `AcpProfile.shape`
+   question sent as a permission request, a permitted call that runs under another id, a sign-in of its own, a log line
+   that must not reach host.log), it fills `AcpProfile.shape`
    (`AcpToolShape`) rather than branching the core ([plans/antigravity-acp.md](plans/antigravity-acp.md) §2).
    A tool Centralu installs or signs in itself carries `AgentAdapter.setup` (`ToolSetupControl`): the host answers
    `agents.installTool` and `agents.signIn` through it and pushes its changes as `tool_setup` events. Every tool
