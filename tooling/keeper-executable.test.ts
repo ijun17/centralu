@@ -13,7 +13,8 @@
  * - The keeper links `centralu-keeper-core` and nothing of the window's. One `use centralu_lib` in
  *   the keeper's main, or a GUI crate added to the core crate, and it carries the webview again.
  *
- * `pnpm release:npm` checks the built bundle itself (scripts/release-npm.mts, `checkKeeperExe`);
+ * `pnpm release:npm` checks the built bundle itself (`checkMacKeeperExe` in scripts/release-npm.mts, and
+ * on Linux `keeperProblems` in scripts/host-package.mts);
  * this catches the same mistakes on every pull request, without a release build.
  */
 import { describe, expect, it } from 'vitest'

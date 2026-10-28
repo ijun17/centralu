@@ -321,6 +321,7 @@ or `CC_DATA_DIR`):
   versions/0.1.0-beta.13/
     node_modules/centralu/            the npm shim package: bin/centralu.mjs, serve.mjs (and serve-*.mjs), platform.mjs
     node_modules/@centralu/host-linux-x64/host/   the bundled host, the host-only package (step 5);
+                                      on Linux `centralu-keeper` beside it (remote-keeper.md §7);
                                       versions published before it: @centralu/linux-x64/host/
                                       (Windows: …/win32-x64/Centralu/resources/host/)
     install.json                      version, Node version, both integrities, when, by which hub
@@ -453,8 +454,13 @@ rules end it when no window attaches, and the keeper is still opt-in on Linux (#
 running the real window on a Linux desktop, [spikes/2026-10-linux-keeper.md](../spikes/2026-10-linux-keeper.md) §7).
 The AppImage problem itself (a keeper running from a FUSE mount that disappears with the window) does not arise for a
 host-only install, where the keeper would be a plain file beside `host/`; it links no GUI library, which the release
-already checks (`checkKeeperExe`). So a remote keeper is a release change plus a headless mode, after
+already checks (`keeperProblems`, `scripts/host-package.mts`). So a remote keeper is a release change plus a headless mode, after
 runtime-unification step 4b (owner decision 5). Windows has no keeper at all.
+
+**The design for it is [remote-keeper.md](remote-keeper.md) (#1614, decided 2026-10-26):** a headless keeper on
+Linux and Windows remotes and an update as its host swap; where a swap cannot keep what runs, an update at once that
+resumes the turns it ended; the keeper's own update kept apart from the host's; the keeper as a file beside `host/` in
+the host-only packages; and the steps with their real-machine checks.
 
 ### 10.5 Update, rollback and uninstall
 
