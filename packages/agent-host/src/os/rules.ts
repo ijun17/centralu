@@ -192,8 +192,9 @@ export function isInside(root: string, candidate: string, family: OsFamily, cwd?
 export function retarget(target: string, links: { from: string; to: string }, family: OsFamily): string | null {
   if (!isInside(links.from, target, family)) return null
   const p = pathRules(family)
-  const whole = family === 'windows' ? withoutVerbatimPrefix(p.resolve(target)) : target
-  const rest = p.relative(links.from, whole)
+  // `relative` reads a `\\?\` form as another root: both plain
+  const plain = (path: string) => (family === 'windows' ? withoutVerbatimPrefix(p.resolve(path)) : path)
+  const rest = p.relative(plain(links.from), plain(target))
   return rest === '' ? p.resolve(links.to) : p.join(links.to, rest)
 }
 

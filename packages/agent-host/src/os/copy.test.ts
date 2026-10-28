@@ -283,6 +283,7 @@ describe('with `links`, a link into the tree leads into the copy', () => {
     expect(retarget('/t', links, 'posix')).toBe('/final')
     expect(retarget('/tt/x', links, 'posix')).toBeNull()
     expect(retarget('\\\\?\\c:\\Data\\T\\sub', { from: 'C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe('D:\\new\\sub')
+    expect(retarget('C:\\data\\t\\sub', { from: '\\\\?\\C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe('D:\\new\\sub')
     expect(retarget('C:\\data\\t2', { from: 'C:\\data\\t', to: 'D:\\new' }, 'windows')).toBeNull()
   })
 })
