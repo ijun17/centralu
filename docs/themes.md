@@ -43,9 +43,9 @@ view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
 Dark is a dark floor (`#0f0f0f`) with raised boxes (`#242424`, ΔL* 9.9 above the floor). The
-sidebar and the top bar (`#181818`, darker at the owner's ask, 2026-10-20) stay apart from the conversation by lightness, not only by
-its edge line: a reader once saw the two as "the same colour" at three steps apart with the line between them,
-and the gap is now ΔL* 3.9 with the line between them (it was 6.5 at `#1d1d1d`). Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
+sidebar and the top bar are the floor's own `#0f0f0f` (the owner's ask, 2026-10-27), so only the edge line (`#363636`)
+parts them from the conversation. They were `#181818` (ΔL* 3.9, at the owner's ask of 2026-10-20) and `#1d1d1d` (6.5) before: a reader once saw
+the two as "the same colour" at three steps apart with the line between them, and the owner chose to let the line do it alone. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
 with the inks widened to match: body `#ededed` (16.4:1 on the floor), secondary `#a8a8a8` (8.1:1),
 background `#707070` (3.9:1).

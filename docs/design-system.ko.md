@@ -16,7 +16,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | **흰색 없는 점선 = 실패했고 기다리는 것은 없다.** 실패한 도구 호출, 실패한 백그라운드 작업은 회색 점선이다 | 이미 끝난 실패는 기록이지 행동하라는 부름이 아니다 | `ChatRow.tsx`(도구 카드), `BackgroundTasks.tsx` |
 | **다른 색상은 없다.** 색은 diff의 초록과 빨강(diff 안에서만), `danger`(무언가를 없애는 것, 또는 실패한 것), 터미널의 ANSI 팔레트, 파일 종류 아이콘, 포인터 아래 Windows 자체의 닫기 버튼 빨강뿐이다 | diff의 초록과 빨강은 승인을 판단하는 자리에서 거의 반사이고, 나머지는 밝기와 다툰다 | `tooling/styles.test.ts`가 이유와 함께 등록되지 않은 유채색 hex에 실패한다 |
 
-표면은 바닥에서 위로 오른다: `surface-floor`(대화), `surface-side`(사이드바, 상단 바), `surface-raised`(바닥
+표면은 바닥에서 위로 오른다: `surface-floor`(대화), `surface-side`(사이드바, 상단 바. Dark에서는 바닥과 같은 값이라 가장자리 선만이 가른다), `surface-raised`(바닥
 위에 놓인 것: 입력창, 카드, 메뉴, 입력칸), `surface-selected`(고른 선택지), `surface-hover`(호버와 누름, 사람의
 말풍선). 값과 잰 거리는 [themes.ko.md](themes.ko.md)에 있다.
 
@@ -86,7 +86,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 
 | 규칙 | 이유 | 코드 |
 |---|---|---|
-| **사람의 말풍선은 오른쪽**(`surface-hover`, 폭은 최대 75%), **에이전트의 글은 왼쪽의 전체 폭 말풍선**(`surface-raised`, `line` 테두리). 둘 다 `rounded-bubble`, **꼬리 없음** | 쪽, 폭, 명암이 이미 누가 말했는지 말한다. 꼬리 모서리는 뺐다(*owner, 2026-10-18*). 다른 세션이나 앱이 보낸 메시지는 점선이다 | `ChatRow.tsx`, `ChatStream.tsx` `AnswerBubble` |
+| **사람의 말풍선은 오른쪽**(`surface-hover`, 폭은 최대 75%), **에이전트의 글은 왼쪽의 전체 폭 말풍선**(`surface-raised`, `line` 테두리). 둘 다 `rounded-bubble`, **꼬리 없음** | 쪽, 폭, 명암이 이미 누가 말했는지 말한다. 꼬리 모서리는 뺐다(*owner, 2026-10-18*). 다른 세션, 앱, 스크립트가 보낸 메시지는 출처 줄 아래에 에이전트의 말풍선처럼(`surface-raised`, 실선 `line` 테두리) 그려지고 사람의 `surface-hover`가 아니다(점선은 쓰지 않는다: 점선은 실패나 모름을 뜻한다, #1629) | `ChatRow.tsx`, `bubbleLook.ts`, `ChatStream.tsx` `AnswerBubble` |
 | **말풍선에는 에이전트가 말한 것만.** 도구 호출, 추론 요약, 이미지, 승인, 표식(압축, 넘기기, 오류 한 줄)은 말풍선 **밖**, 페이지에 서서 말풍선을 나눈다 | 말풍선 속 카드는 상자 속 상자로 읽혔고, 그 속 추론은 메시지로 읽혔다 | `ChatStream.tsx` `inBubble` |
 | **시각**은 사람의 말풍선 아래와 답의 **마지막** 말풍선 아래에, 영어 시계 시각으로: "3:42 PM", `text-2xs` `ink-faint` | 채팅 앱이 그렇게 쓴다. 날짜는 구분선이 한 번 말한다 | `format.ts` `formatSaidAt`, `ChatRow.tsx` `SaidAt` |
 | **날짜 구분선**은 하루가 시작되는 곳에: 두 가는 선 사이에 "Saturday, October 18, 2026" | 어떤 시각도 날짜를 지고 다니지 않게 | `ChatStream.tsx` `DayDivider`, `formatDayLong` |

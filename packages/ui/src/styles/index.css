@@ -77,7 +77,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #0f0f0f; /* the app floor */
-  --color-surface-side: #181818; /* the sidebar and the top bar — darker by the owner's ask (2026-10-20), see the session-view block */
+  --color-surface-side: #0f0f0f; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone parts them from the conversation */
   --color-surface-raised: #242424; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #353535; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #424242; /* hover and pressed; also my own message bubble */
@@ -324,14 +324,14 @@
  * between them), until the owner preferred the board's darker floor and the lift was found to
  * leave app panels on a different ground from the sessions beside them.
  *
- * So the sidebar keeps the distance now. Measured as CIELAB lightness (ΔL*), which follows what
- * the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #1d1d1d, conversation #0f0f0f: ΔL* 6.5, twice what the lifted conversation had
- *          from the old sidebar (#1d1d1d and #171717, ΔL* 3.0). Dark was #1a1a1a on #141414
- *          (ΔL* 2.9) until the owner asked for wider steps between the surfaces (#725).
+ * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
+ * what the eye sees at the dark end better than hex steps do:
+ *   Dark   sidebar #0f0f0f, conversation #0f0f0f: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
+ *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#363636)
+ *          alone parts them now.
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
- * The hairline on the sidebar's edge stays; it was never enough on its own.
+ * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
  * signal. Raised sits ΔL* 9.9 above the floor in Dark (#242424 on #0f0f0f) and 4.2 in Light
@@ -741,8 +741,8 @@
    *
    * Bright text on a dark background, but the sidebar background (surface-side) and the chip
    * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
-   * #141414, three before that; Dark is #1d1d1d on #0f0f0f since #725, fourteen), so a single
-   * border did not separate them well.
+   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, and is the same value
+   * since 2026-10-27), so a single border did not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any
@@ -1379,12 +1379,15 @@
  * Light only: a bubble's border a step darker than its own fill, not the hairline every raised surface uses, so a
  * message reads as one soft shape instead of a boxed form (owner, 2026-10-19). Dark keeps the shared line, which
  * already sits close to its fill there. The agent's answer bubble carries `data-bubble`, mine `data-mine-bubble`
- * (the person's message, and the same message pinned at the top).
+ * (the person's message, and the same message pinned at the top). A relayed message
+ * (`data-relayed`: from a session, an app or a script) is drawn as the agent's bubble is (the same fill and edge), so it
+ * takes this softer edge too.
  */
-[data-theme='light'] [data-bubble] {
+[data-theme='light'] [data-bubble],
+[data-theme='light'] [data-relayed] {
   border-color: #e6e6e6;
 }
-[data-theme='light'] [data-mine-bubble]:not(.border-dashed) {
+[data-theme='light'] [data-mine-bubble]:not([data-relayed]) {
   border-color: #cdcdcd;
 }
 /* A tool call's card, the same way: softer than the hairline (owner, 2026-10-19). A failed call keeps its dashed

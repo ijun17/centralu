@@ -18,7 +18,7 @@ were made on the screen and are recorded in the code comments at the place named
 | **No other hues.** The only colours are the diff's green and red (inside a diff only), `danger` (what destroys something, or failed to go through), the terminal's ANSI palette, file-kind icons, and Windows' own close-button red under the pointer | Green and red in a diff are near-reflex where an approval is judged; everything else would compete with brightness | `tooling/styles.test.ts` fails on any chromatic hex not listed there with its reason |
 
 Surfaces climb from the floor up: `surface-floor` (the conversation), `surface-side` (sidebar, top
-bar), `surface-raised` (what rests on the floor: composer, cards, menus, inputs), `surface-selected`
+bar; in Dark the same value as the floor, so the edge line alone parts them), `surface-raised` (what rests on the floor: composer, cards, menus, inputs), `surface-selected`
 (a picked option), `surface-hover` (hover and pressed; the person's bubble). Values and the measured
 distances between them are in [themes.md](themes.md#choosing).
 
@@ -89,7 +89,7 @@ A capsule is `rounded-full`, 1px border, on a translucent `surface-hover` fill; 
 
 | Rule | Why | In code |
 |---|---|---|
-| **The person's bubble on the right** (`surface-hover`, at most 75% wide); **the agent's text in a full-width bubble on the left** (`surface-raised`, `line` border). Both `rounded-bubble`, **no tail** | Side, width and shade already say who spoke; the tail corner was dropped (*owner, 2026-10-18*). A message from another session or an app is dashed | `ChatRow.tsx`, `ChatStream.tsx` `AnswerBubble` |
+| **The person's bubble on the right** (`surface-hover`, at most 75% wide); **the agent's text in a full-width bubble on the left** (`surface-raised`, `line` border). Both `rounded-bubble`, **no tail** | Side, width and shade already say who spoke; the tail corner was dropped (*owner, 2026-10-18*). A message from another session, an app or a script is drawn as the agent's bubble is (`surface-raised`, solid `line` edge) under a source line, not on the person's `surface-hover` (never dashed: dashes mean failed or unknown, #1629) | `ChatRow.tsx`, `bubbleLook.ts`, `ChatStream.tsx` `AnswerBubble` |
 | **Only what the agent said goes in the bubble.** Tool calls, reasoning summaries, images, approvals and markers (compaction, handoff, an error line) stand **outside**, on the page, and split it | A card in the bubble read as a box in a box; reasoning in it read as a message | `ChatStream.tsx` `inBubble` |
 | **Times** under the person's bubble and under the **last** bubble of an answer, as clock time in English: "3:42 PM", `text-2xs` `ink-faint` | Chat apps write it so; the day is said once by a divider | `format.ts` `formatSaidAt`, `ChatRow.tsx` `SaidAt` |
 | **Day dividers** where a day begins: "Saturday, October 18, 2026" between two hairlines | So no time has to carry a date | `ChatStream.tsx` `DayDivider`, `formatDayLong` |

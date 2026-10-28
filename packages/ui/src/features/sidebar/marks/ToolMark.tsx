@@ -45,7 +45,7 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
             this size than the code face; the chip's width is fixed, so a fixed-width face bought nothing here). The chip is 14px inside the ring's 1.5px, so the mark is 17px in
             every look.
 
-            The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
+            The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps (none in Dark since 2026-10-27), so
             a single border does not separate them well. Instead of raising the border brightness
             further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
             a shadow underneath. It reads as a separate object without spending more brightness, and
