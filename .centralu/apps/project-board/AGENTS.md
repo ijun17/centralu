@@ -842,7 +842,9 @@ model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
   leave it. If someone readies it anyway, the next poll here turns it back.
 - **Labels only raise**: an open pull request taken as the record is refused when its highest `tier:<name>` label
   is above auto (`labelTier`).
-- **A fetch that fails** while judging (no network, GitHub down) is refused with "integrate again", not as deep.
+- **A fetch that fails** while judging (no network, GitHub down) is refused with "integrate again", not as deep. A branch not on
+  GitHub is told from one that could not be read by git's exit code (`git ls-remote --exit-code`, `remoteHas` in
+  git.mjs: 2 is not there), never by the text a failed fetch printed, whose first line is not always git's error. A remote that lists neither the branch nor the default branch is not taken as "not there" (a reply with no refs reads as a failure of the moment). The reason of a `retry` carries which fetch it was (the default branch's or the branch's), git's exit code and the last lines of its stderr, and what `ls-remote` answered, so a failure that was read wrongly can be told from the log; `showFile` is one `git cat-file --batch` (a missing file answers null; a revision that is not there, an option in its place, or any other failure throws; a path with a line break goes by `rev-parse --verify` and `git show` instead, since `--batch` reads one name per line).
 - **The record**: a pull request into the default branch the integrator opens itself with `open_pr`'s
   procedure (the template, the title and public-text rules; Situations checked and Usability `n/a`: no code
   runs in an auto change), its Verified carrying the integrator's Tier line, where and how it judged,

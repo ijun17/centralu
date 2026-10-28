@@ -115,7 +115,7 @@ export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = fa
       } catch (e) {
         // The network, not the change: not a refusal. The push may have gone through, so it is not said to have changed nothing
         if (isNetworkFailure(e)) throw new GitError(`Pushing ${branch} failed on the network, so it may or may not have gone through: ${e.message}`, e.stderr, e.code)
-        refuse(`Pushing ${branch} failed, so nothing changed: ${e.message}${/stale info|rejected/.test(e.message) ? ' It moved on the remote after it was read; call again.' : ''}`)
+        refuse(`Pushing ${branch} failed, so nothing changed: ${e.message}${/stale info|rejected/.test(`${e.message}\n${e.stderr}`) ? ' It moved on the remote after it was read; call again.' : ''}`)
       }
       lines.push(`Pushed ${short(rebased)} to ${branch} on ${remote}, where it was ${short(tested)}.`)
     }

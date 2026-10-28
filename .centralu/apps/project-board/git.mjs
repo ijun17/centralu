@@ -100,6 +100,25 @@ export async function remoteFor(dir, repo) {
 }
 
 /**
+ * Whether `remote` has `ref` (`refs/heads/docs/x`), from the exit code of `git ls-remote --exit-code`: 2 is nothing
+ * matched, and a match is taken only when it is `ref` itself (ls-remote matches a pattern on the name's tail, so
+ * `refs/heads/refs/heads/docs/x` would match too). Anything else (no network, the remote away, a timeout) throws its
+ * GitError. The text of a failed fetch says "couldn't find remote ref" only when that is the first thing git prints: a
+ * line before it (a warning, a trace) made a missing branch read as a failure of the moment (the integrator's `retry`,
+ * main's CI on Windows, 2026-10-27).
+ */
+export async function remoteHas(dir, remote, ref) {
+  let listed
+  try {
+    listed = await git(dir, ['ls-remote', '--exit-code', remote, ref])
+  } catch (e) {
+    if (e instanceof GitError && e.code === 2) return false
+    throw e
+  }
+  return listed.split('\n').some((line) => line.trimEnd().endsWith(`\t${ref}`))
+}
+
+/**
  * Fetches refs of the remote by name and answers their commits, in order. They land under a name of
  * this app's own for a moment and are removed again: no branch or remote-tracking ref of the person's
  * moves. stack.mjs runs one restack at a time, so the names never collide; release.mjs names its own
@@ -122,8 +141,9 @@ export async function isAncestor(dir, a, b) {
     await git(dir, ['merge-base', '--is-ancestor', a, b])
     return true
   } catch (e) {
-    // Exit 1 with nothing said: not an ancestor. Anything else is an error (an unknown commit)
-    if (e.code === 1 && !e.stderr.trim()) return false
+    // Exit 1: not an ancestor. Anything else is an error (an unknown commit, 128). Not by what it printed: a warning
+    // or a trace line comes with an exit 1 too
+    if (e.code === 1) return false
     throw e
   }
 }
@@ -171,14 +191,48 @@ export async function remoteRefs(dir, remote, prefix) {
   return [...refs].map(([name, sha]) => ({ name, sha }))
 }
 
-/** A file of a commit as text; null when the commit has no such file. */
+/**
+ * A file of a commit as text; null when the commit has no such file. A `rev` that is not a commit or tree of the repository
+ * (a name that does not exist, an option, a sha it lacks) is a caller's bug, not a missing file: it throws. One
+ * `git cat-file --batch` answers "<spec> missing" with exit 0, so nothing is read from git's error text, whose first line is
+ * not always the error; but it says "missing" too for an object the tree names and the repository cannot read (a blobless
+ * clone with its remote away, a deleted object, a submodule), so a miss asks `rev-parse --verify` whether the tree names the
+ * path: if it does, that is a failure and throws. `--batch` reads one name per line, so a path holding a newline (a POSIX file
+ * name may) would be two requests and the first one's answer taken for it: those go by `rev-parse --verify` and `git show`,
+ * whose arguments are not lines. Any other failure (the repository, a promisor remote away) is git's exit code and throws.
+ */
 export async function showFile(dir, rev, path) {
-  try {
-    return await git(dir, ['show', `${rev}:${path}`])
-  } catch (e) {
-    if (/does not exist|exists on disk, but not in/.test(e.message)) return null
-    throw e
+  const spec = `${rev}:${path}`
+  if (rev.startsWith('-')) throw new GitError(`git cannot read ${spec}: ${rev} is not a revision`)
+  // `rev-parse --verify --quiet`: exit 0 the object is named, exit 1 and no output it is not; 128 and others are git failing
+  const named = async (name) => {
+    try {
+      await git(dir, ['rev-parse', '--verify', '--quiet', name])
+      return true
+    } catch (e) {
+      if (e instanceof GitError && e.code === 1) return false
+      throw e
+    }
   }
+  const absent = async () => {
+    if (!(await named(`${rev}^{tree}`))) throw new GitError(`git cannot read ${spec}: ${rev} is not a commit of this repository`)
+    return null
+  }
+  if (/[\r\n]/.test(path)) {
+    if (!(await named(spec))) return absent()
+    return git(dir, ['show', spec])
+  }
+  const answer = await git(dir, ['cat-file', '--batch'], { input: `${spec}\n` })
+  const header = answer.slice(0, answer.indexOf('\n'))
+  if (header.endsWith(' missing')) {
+    if (await named(spec)) throw new GitError(`git cannot read ${spec}: the tree names it, but its object cannot be read`)
+    return absent()
+  }
+  const found = /^[0-9a-f]{40,64} (\w+) \d+$/.exec(header)
+  if (!found) throw new GitError(`git cat-file could not read ${spec}: ${header}`)
+  // A folder or anything else that is not a file: as `git show` prints it
+  if (found[1] !== 'blob') return git(dir, ['show', spec])
+  return answer.slice(header.length + 1, -1)
 }
 
 /** Every file of a commit's tree. */
@@ -190,7 +244,7 @@ export async function filesHolding(dir, rev, strings) {
     const text = await git(dir, ['grep', '-l', '-z', '-I', '-F', ...strings.flatMap((s) => ['-e', s]), rev, '--'])
     return text.split('\0').filter(Boolean).map((l) => l.slice(rev.length + 1))
   } catch (e) {
-    if (e.code === 1 && !e.stderr.trim()) return [] // nothing found
+    if (e.code === 1) return [] // nothing found; an error is 128
     throw e
   }
 }

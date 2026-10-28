@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fetchRefs, git, GitError, remoteFor, showFile, topLevel } from './git.mjs'
+import { fetchRefs, git, GitError, remoteFor, remoteHas, showFile, topLevel } from './git.mjs'
 import { GitHubError } from './github.mjs'
 import { short } from './util.mjs'
 
@@ -53,6 +53,13 @@ async function runJudge(root, script, base, head) {
   }
 }
 
+/** How a git command failed, for a reason someone has to read later: its exit code and the last lines of what it printed */
+function gitFailure(e) {
+  const lines = String(e.stderr ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const tail = lines.slice(-6).join(' | ').slice(-500)
+  return `exited ${e.code ?? 'without a code'}${tail ? `, stderr: ${tail}` : e.message ? ` (${e.message})` : ''}`
+}
+
 /**
  * The tier of what `branch` adds over `defaultBranch`, both as GitHub has them now, judged by main's
  * judge and rules in the checkout `dir`. `head`: the commit to judge when it is not the branch's tip
@@ -78,16 +85,32 @@ export async function judgeBranch({ dir, repo, branch, defaultBranch, head: want
     ;[main] = await fetchRefs(root, remote, [`refs/heads/${defaultBranch}`], `${space}/main`)
   } catch (e) {
     if (!(e instanceof GitError)) throw e
-    return unjudged(`${defaultBranch} could not be fetched (${e.message})`, { retry: true })
+    return unjudged(`${defaultBranch} could not be fetched: the fetch of ${defaultBranch} (the first fetch) ${gitFailure(e)}`, { retry: true })
   }
   let tip
   try {
     ;[tip] = await fetchRefs(root, remote, [`refs/heads/${branch}`], `${space}/head`)
   } catch (e) {
     if (!(e instanceof GitError)) throw e
-    // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again
-    if (/couldn't find remote ref|not our ref|no such ref/i.test(e.message)) return unjudged(`the branch ${branch} is not on GitHub (${e.message})`, { missing: true, main })
-    return unjudged(`the branch ${branch} could not be fetched (${e.message})`, { retry: true, main })
+    // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again. Which one is
+    // asked of the remote by exit code (`remoteHas`), never read from what the fetch printed. The fetch's own failure and
+    // the question's answer are both kept in the reason: that is what settles why a missing branch ever read as a failure
+    let asked = ''
+    try {
+      if (!(await remoteHas(root, remote, `refs/heads/${branch}`))) {
+        // A remote that lists nothing at all (a lagging replica, a proxy) says the same for every branch: main, which was
+        // just fetched, must be there too
+        if (await remoteHas(root, remote, `refs/heads/${defaultBranch}`)) {
+          if (!/couldn't find remote ref/i.test(e.stderr)) console.error(`[project-board] integrate: ls-remote says ${branch} is not on the remote, but its fetch did not say so: the fetch of ${branch} (the second fetch) ${gitFailure(e)}`)
+          return unjudged(`the branch ${branch} is not on GitHub`, { missing: true, main })
+        }
+        asked = `; ls-remote exit 2 for ${branch} and for ${defaultBranch}, which was fetched a moment ago: the remote listed nothing`
+      } else asked = `; ls-remote exit 0: ${branch} is on the remote`
+    } catch (a) {
+      if (!(a instanceof GitError)) throw a
+      asked = `; ls-remote ${gitFailure(a)}`
+    }
+    return unjudged(`the branch ${branch} could not be fetched: the fetch of ${branch} (the second fetch, after ${defaultBranch} was fetched) ${gitFailure(e)}${asked}`, { retry: true, main })
   }
   let head = tip
   if (want && want !== tip) {

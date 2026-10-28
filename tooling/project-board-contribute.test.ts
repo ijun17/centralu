@@ -714,6 +714,19 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     )
   })
 
+  it("says a refused push moved on the remote even when git's error is not the first line it printed", async () => {
+    const s = stack()
+    runtime()
+    // The remote prints a line of its own before git's "rejected" line (a hook's note, as a warning or a trace would be)
+    const hook = join(s.origin, 'hooks', 'pre-receive')
+    writeFileSync(hook, '#!/bin/sh\necho "a note from the remote before the refusal" >&2\nexit 1\n', { mode: 0o755 })
+    const r = await call('rebase_stack', { pr: 2, path: s.work, push: true })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('Pushing up failed, so nothing changed')
+    expect(r.text).toContain('It moved on the remote after it was read; call again.')
+    expect(g(s.origin, 'rev-parse', 'refs/heads/up')).toBe(s.u2)
+  })
+
   it('needs lower once GitHub moved the base itself, and then leaves the base alone', async () => {
     const s = stack()
     runtime()
