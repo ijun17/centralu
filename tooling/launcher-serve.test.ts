@@ -798,6 +798,27 @@ async function hello(port: number, token: string): Promise<Record<string, unknow
   }
 }
 
+/** One call to the host after a hello with `token`, its result, or the error it answered */
+async function askHost(port: number, token: string, method: string, params: unknown = {}): Promise<unknown> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  try {
+    return await new Promise((resolve, reject) => {
+      ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
+      ws.onmessage = (ev) => {
+        const f = JSON.parse(String(ev.data)) as Record<string, any>
+        if (f.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'q1', method, params }))
+        else if (f.kind === 'res' && f.id === 'q1') {
+          if (f.ok) resolve(f.result)
+          else reject(new Error(String(f.error?.message)))
+        }
+      }
+      ws.onclose = (ev) => reject(new Error(`closed ${ev.code}`))
+    })
+  } finally {
+    ws.close()
+  }
+}
+
 describe('the port serve starts on (#482)', () => {
   const takenOf = (...ports: number[]) => async (p: number) => ports.includes(p)
 
@@ -911,6 +932,38 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       expect(s.out.stderr).not.toContain(String(paired.token))
       expect(s.out.stderr).not.toContain(String(readServeState(d).key))
       expect((await connection(d)).hostRunning).toBe(false)
+    },
+    90_000 * SLOW,
+  )
+
+  /*
+   * #1405 review: the host's main.ts hands HostServer the hook that records each full hello, and hands
+   * `host.credentials` what it recorded. With either left out, a credential paired, used and withdrawn between two of a
+   * hub's reads left no trace, and every unit test still passed
+   */
+  it(
+    'lists a credential used and withdrawn before any read as gone, and the ids used under hub labels, from a real host',
+    async () => {
+      const d = tempDir()
+      const port = await freePort()
+      const s = serve(d, ['--port', String(port)])
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      try {
+        // Paired, used and withdrawn at once, by something of this user
+        const x = (await cli(d, ['--connection', '--pair', 'x'])).line
+        expect(await hello(port, String(x.token))).toMatchObject({ kind: 'hello_ok' })
+        expect((await cli(d, ['--revoke', String(x.credential)])).code).toBe(0)
+        // A hub's own, which reads host.credentials as a hub does
+        const hub = (await cli(d, ['--connection', '--pair', 'hub:test-0123abcd'])).line
+        const r = (await askHost(port, String(hub.token), 'host.credentials')) as Record<string, any>
+        expect(r.credentials).toEqual(expect.arrayContaining([expect.objectContaining({ id: x.credential, label: 'x', gone: true })]))
+        expect(r.usedUnderHubLabels).toEqual([expect.objectContaining({ id: hub.credential, label: 'hub:test-0123abcd' })])
+        expect(r.unreadable).toBeNull()
+      } finally {
+        if (POSIX) s.child.kill('SIGTERM')
+        else await cli(d, ['--stop'])
+        await s.exited
+      }
     },
     90_000 * SLOW,
   )
