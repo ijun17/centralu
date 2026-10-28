@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mkdirSync, writeSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
@@ -823,7 +823,7 @@ const server = new HostServer({
    * A `centralu serve` host that takes verifiers (#1405): what it was handed is its key, and the full credentials are
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
-  ...(serveState ? { fullCredentials: () => readFullCredentials(serveState) } : {}),
+  ...(serveState ? { fullCredentials: () => readFullCredentials(serveState, (f) => readFileSync(f, 'utf8')) } : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)

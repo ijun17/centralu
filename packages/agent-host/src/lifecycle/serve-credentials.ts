@@ -1,5 +1,4 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { asObj } from '../json-value.js'
 
 /**
@@ -49,9 +48,9 @@ export function verifierOf(credential: string): string {
  * The full credentials `serve.json` at `path` names, read now: each entry of the listed shape (`isListedEntry`), and
  * no other. An unreadable file (a writer replacing it on Windows) is
  * tried again a few times; one that stays unreadable, or is not version 2, names none: a hello is then refused rather
- * than let in on a guess.
+ * than let in on a guess. `read` is the caller's (the file as text): this module does not touch the OS (#1599).
  */
-export function readFullCredentials(path: string, read: (p: string) => string = (p) => readFileSync(p, 'utf8'), pause: (ms: number) => void = sleepSync): FullCredential[] {
+export function readFullCredentials(path: string, read: (p: string) => string, pause: (ms: number) => void = sleepSync): FullCredential[] {
   for (let i = 0; i < 5; i++) {
     if (i > 0) pause(10 * i)
     let parsed: unknown

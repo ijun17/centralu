@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
+import { credentialProof, hostProof, proofNonce, provesCredential } from './host-proof.js'
+import { readFullCredentials, verifierOf } from '../lifecycle/serve-credentials.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
@@ -343,5 +345,82 @@ describe('a limited call that asks the person, over the sockets (#1405 slice 3)'
     // The limited credential saying it shows them counts for nothing: it cannot answer
     await windowHello(port, ['host_requests'], limitedToken(TOKEN))
     expect(srv.showsHostRequests()).toBe(false)
+  })
+})
+
+/*
+ * A `centralu serve` host (#1405 slice 5): its key is the token it derives from, and it takes as full only a credential
+ * whose verifier serve.json names, read at each hello (lifecycle/serve-credentials.ts)
+ */
+const SERVE_KEY = 'k'.repeat(43)
+const SERVE_HUB = 'h'.repeat(43)
+const SERVE_WINDOW = 'w'.repeat(43)
+const serveEntry = (id: string, token: string) => ({ id, label: id, verifier: verifierOf(token), created: 1 })
+
+/** A host as `centralu serve` starts one: its key as the token, its full credentials those the file names */
+async function serveHost(full: object[]) {
+  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does
+  let file = ''
+  const write = (entries: object[]) => (file = JSON.stringify({ v: 2, key: SERVE_KEY, port: null, full: entries }))
+  write(full)
+  server = new HostServer({ port: 0, token: SERVE_KEY, fullCredentials: () => readFullCredentials('serve.json', () => file), onRpc: async () => ({ ok: true }) })
+  const port = await server.listen()
+  return { port, write }
+}
+
+/** The frames a socket gets for what it sends first (a prove, a hello), and the code it closed with, if it did */
+async function serveExchange(port: number, first: object): Promise<{ frames: Record<string, unknown>[]; closed: number | null }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const frames: Record<string, unknown>[] = []
+  let closed: number | null = null
+  ws.on('message', (d) => frames.push(JSON.parse(text(d))))
+  ws.on('close', (code) => (closed = code))
+  await new Promise<void>((r) => ws.on('open', () => r()))
+  ws.send(JSON.stringify(first))
+  for (let i = 0; i < 200 && frames.length === 0 && closed === null; i++) await new Promise((r) => setTimeout(r, 10))
+  ws.close()
+  return { frames, closed }
+}
+
+const serveHello = (port: number, token: string) => serveExchange(port, { kind: 'hello', token, protocolVersion: PROTOCOL_VERSION })
+
+describe('a centralu serve host takes as full only the credentials serve.json names (#1405)', () => {
+  it('lets a paired credential in, not the key it was handed, and the limited credential as a client', async () => {
+    const { port } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    expect((await serveHello(port, SERVE_KEY)).closed).toBe(4001)
+    expect((await serveHello(port, limitedToken(SERVE_KEY))).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+
+  it('keeps out an entry written by hand that nothing would list: no label, or an id --revoke does not take', async () => {
+    const { port, write } = await serveHost([{ id: 'aaaaaaaa', verifier: verifierOf(SERVE_HUB), created: 1 }])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+    write([{ id: 'zz', label: 'hand', verifier: verifierOf(SERVE_HUB), created: 1 }])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+    write([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+
+  it('reads the file at each hello: a pairing lets the next one in, a revocation keeps it out', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_WINDOW)).closed).toBe(4001)
+    write([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+  })
+
+  it("proves under the named credential's verifier, which only its holder can check, and under the key otherwise", async () => {
+    const { port } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    const nonce = proofNonce()
+    const named = (await serveExchange(port, { kind: 'prove', nonce, credential: 'aaaaaaaa' })).frames[0] as { mac: string }
+    expect(named.mac).toBe(credentialProof(verifierOf(SERVE_HUB), nonce))
+    expect(provesCredential(verifierOf(SERVE_HUB), nonce, named.mac)).toBe(true)
+    expect(provesCredential(verifierOf(SERVE_WINDOW), nonce, named.mac)).toBe(false)
+    // No credential named, or one it does not hold: the proof the launcher's own probe checks, under the key
+    const plain = (await serveExchange(port, { kind: 'prove', nonce })).frames[0] as { mac: string }
+    expect(plain.mac).toBe(hostProof(SERVE_KEY, nonce))
+    const unknown = (await serveExchange(port, { kind: 'prove', nonce, credential: 'cccccccc' })).frames[0] as { mac: string }
+    expect(unknown.mac).toBe(hostProof(SERVE_KEY, nonce))
   })
 })

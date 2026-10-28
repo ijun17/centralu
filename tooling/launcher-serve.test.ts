@@ -166,7 +166,7 @@ describe('the data folder and the state file', () => {
     writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key, port: null, full: entries }))
     const listed = (readServeState(d).full as { id: string }[]).map((e) => e.id)
     expect(listed).toEqual(['cccccccc'])
-    expect(readFullCredentials(join(d, SERVE_STATE_FILE)).map((e) => e.id)).toEqual(listed)
+    expect(readFullCredentials(join(d, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')).map((e) => e.id)).toEqual(listed)
     // And the next write leaves the others out of the file
     pairServe(d, 'hub:laptop')
     const kept = (JSON.parse(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')) as { full: { id: string }[] }).full.map((e) => e.id)
@@ -601,7 +601,7 @@ function serve(dataDir: string, args: string[]) {
  * those serve.json names, read at each hello
  */
 function serveHostCredentials(dataDir: string) {
-  return { token: String(readServeState(dataDir).key), fullCredentials: () => readFullCredentials(join(dataDir, SERVE_STATE_FILE)) }
+  return { token: String(readServeState(dataDir).key), fullCredentials: () => readFullCredentials(join(dataDir, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')) }
 }
 
 async function connection(dataDir: string, extra: NodeJS.ProcessEnv = {}): Promise<Record<string, unknown>> {
