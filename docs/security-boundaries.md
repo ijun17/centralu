@@ -1527,7 +1527,12 @@ A host started with `centralu serve` on another machine is reached by the app th
       `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
       the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also
       gives every id used under a hub's label, listed or gone, in order of first use (`usedUnderHubLabels`), and the
-      hub compares those under its own label with the ids it paired itself while it runs. Any other is listed as used
+      hub compares those under its own label with the ids it paired itself while it runs, by id and by secret: the host
+      keeps one record per id and verifier, and answers each entry with a `check`, an HMAC under its verifier of a nonce the
+      hub chose for that read (never the verifier), which the hub compares with the same HMAC of the secret it holds. An
+      entry written into `serve.json` by hand under a reused hub id, with another secret, is not the hub's own then: it
+      is listed as used and gone, or, while still listed, as held, and the hub's own is then taken for gone if it is the
+      one missing. Any other is listed as used
       and gone ("under this computer's own name but not made by it"); its own are never listed. Left: one used under
       the hub's label before this hub's first link in its present run is not judged, since the hub does not remember
       the ids of its earlier runs.

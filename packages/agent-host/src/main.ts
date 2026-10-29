@@ -765,7 +765,7 @@ const router: Router = new Router({
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
     // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
     // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
-    serveCredentials: () => (launch.serveState ? credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials) : null),
+    serveCredentials: (nonce) => (launch.serveState ? credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce) : null),
     themes,
     terminals,
     updates,

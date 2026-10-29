@@ -57,8 +57,9 @@ export const hostResults = {
   'host.credentials': z.object({
     credentials: z
       // Unbounded: every one the folder holds, so the hub's count of those it does not list is exact (#1405 review)
-      // `gone` (#1405 review): used there, and no longer listed. Additive
-      .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), replaced: z.boolean().catch(false).default(false), gone: z.boolean().optional() }))
+      // `gone` (#1405 review): used there, and no longer listed. `check` (additive): an HMAC of the call's `nonce` under the
+      // credential's verifier, for the hub to tell its own from another secret under the same id. Additive
+      .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), replaced: z.boolean().catch(false).default(false), gone: z.boolean().optional(), check: z.string().max(64).optional() }))
       .nullable(),
     /** The error code while serve.json is there but cannot be read (#1405 review; `credentials` is null then). Additive */
     unreadable: z.string().max(40).nullable().optional(),
@@ -66,7 +67,7 @@ export const hostResults = {
      * Every credential used on that host under a hub's label (`hub:`), listed or gone, by first use (#1405 review): the
      * hub of that label tells the ones it paired itself from one something else paired under it. Additive
      */
-    usedUnderHubLabels: z.array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number() })).optional(),
+    usedUnderHubLabels: z.array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), check: z.string().max(64).optional() })).optional(),
   }),
   'host.lastAnswer': HostLastAnswerResult,
   'host.send': z.object({ ok: z.literal(true) }),

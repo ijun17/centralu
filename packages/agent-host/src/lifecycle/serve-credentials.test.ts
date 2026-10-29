@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { credentialsReport, isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { credentialCheck, credentialsReport, isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -187,6 +187,28 @@ describe('the full credentials used here (#1405 review)', () => {
       throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
     }
     expect(credentialsReport('report-denied', denied, used)).toMatchObject({ credentials: null, unreadable: 'EACCES' })
+  })
+
+  // #1405 review: a hub tells its own credential from one that only reuses its id by a check of its nonce, never by a verifier
+  it('gives each entry a check of the hub’s nonce, keeps a reused id with another secret apart, and never gives a verifier', () => {
+    const used = new UsedCredentials()
+    used.saw({ ...c('cccccccc', 'hub:mac-0123abcd'), verifier: verifierOf(HUB) })
+    used.saw({ ...c('cccccccc', 'hub:mac-0123abcd'), verifier: verifierOf('another secret'), created: 2 })
+    const file = JSON.stringify({ v: 2, key: KEY, full: [{ ...entry('cccccccc', HUB), label: 'hub:mac-0123abcd' }] })
+    const r = credentialsReport('report-check', () => file, used, 'nonce-nonce')
+    expect(r.usedUnderHubLabels.map((u) => u.check)).toEqual([credentialCheck(verifierOf(HUB), 'nonce-nonce'), credentialCheck(verifierOf('another secret'), 'nonce-nonce')])
+    // Both used under one id, one listed: the host takes the other for the pairer again (same way, same label), the hub tells
+    expect(r.credentials?.map((e) => [e.id, e.gone === true, e.check])).toEqual([['cccccccc', false, credentialCheck(verifierOf(HUB), 'nonce-nonce')]])
+    // Not listed (a different secret under the id), under another label: it is gone, by its own check
+    const gone = new UsedCredentials()
+    gone.saw({ ...c('cccccccc', 'x'), verifier: verifierOf('another secret') })
+    expect(credentialsReport('report-check', () => file, gone, 'nonce-nonce').credentials?.map((e) => [e.id, e.gone === true, e.check])).toEqual([
+      ['cccccccc', false, credentialCheck(verifierOf(HUB), 'nonce-nonce')],
+      ['cccccccc', true, credentialCheck(verifierOf('another secret'), 'nonce-nonce')],
+    ])
+    expect(JSON.stringify(r)).not.toContain(verifierOf('another secret'))
+    // No nonce asked: no check at all
+    expect(JSON.stringify(credentialsReport('report-check', () => file, used))).not.toContain('check')
   })
 })
 

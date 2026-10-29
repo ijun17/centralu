@@ -72,7 +72,8 @@ export type ConnectionLine = {
 }
 
 /** A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when */
-export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean }
+/** `check`: the host's `credentialCheck` of the call's nonce under the entry's verifier (`host.credentials`); it never reaches a row */
+export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean; check?: string }
 
 /** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
 export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
@@ -205,7 +206,7 @@ export function credentialsOf(raw: unknown): RemoteCredential[] | null {
     const o = asObj(e)
     if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
     const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0
-    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true, ...(o.gone === true ? { gone: true } : {}) }]
+    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true, ...(o.gone === true ? { gone: true } : {}), ...(typeof o.check === 'string' && o.check.length <= 64 ? { check: o.check } : {}) }]
   })
 }
 

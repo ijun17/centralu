@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
+import type { SshTunnel } from './tunnel.js'
 import { hubSelfId, linkDepsFor, storeMirror, storeProjectOrder, storeRegistry, tunnelsFor } from './stored.js'
 
 /** The linked machines and the headers mirror in the hub's store (#82, store v46) */
@@ -216,13 +217,13 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
     const store = new Store()
     try {
       const deps = linkDepsFor(store, rest as never)
-      expect(deps.tunnelFor(record).pairsAs.endsWith(`-${hubSelfId(store).slice('hub-'.length)}`)).toBe(true)
+      expect((deps.tunnelFor(record) as SshTunnel).pairsAs.endsWith(`-${hubSelfId(store).slice('hub-'.length)}`)).toBe(true)
       // The registry is the store's too
       deps.registry.add({ id: 'm1', name: 'box', sshTarget: 'box', remote: { shell: 'posix' as const }, addedAt: 0, acceptedVersions: null })
       expect(storeRegistry(store).list().map((m) => m.id)).toEqual(['m1'])
       // Even handed one past the type, the store's is what is made
       const own = linkDepsFor(store, { ...rest, tunnelFor: () => { throw new Error('not taken') } } as never)
-      expect(own.tunnelFor(record).pairsAs).toBe(deps.tunnelFor(record).pairsAs)
+      expect((own.tunnelFor(record) as SshTunnel).pairsAs).toBe((deps.tunnelFor(record) as SshTunnel).pairsAs)
     } finally {
       store.close()
     }

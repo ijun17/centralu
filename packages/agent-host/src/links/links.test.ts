@@ -16,7 +16,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
-import { verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
+import { credentialCheck, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -86,7 +86,7 @@ async function remoteHost(
     /** A host from before #1618: its hello says nothing of the turns it continued, and it continues none */
     before1618?: boolean
     /** A `centralu serve` host's full credentials, as `host.credentials` answers them (#1405) */
-    credentials?: () => ListedCredential[] | null | Partial<CredentialsReport>
+    credentials?: (nonce?: string) => ListedCredential[] | null | Partial<CredentialsReport>
     /** A `centralu serve` host's full credentials as it takes them at hello, read again every 20 ms while one is in */
     full?: () => FullCredential[] | CredentialsRead
   } = {},
@@ -96,7 +96,7 @@ async function remoteHost(
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, { ...(o.activity ? { activity: o.activity } : {}), ...(o.credentials ? { serveCredentials: reportOf(o.credentials) } : {}) }), o.without ?? [], o.onCall),
+    onRpc: without(createRpcHandler(mgr, adapters, { ...(o.activity ? { activity: o.activity } : {}), ...(o.credentials ? { serveCredentials: (nonce?: string) => reportOf(() => o.credentials!(nonce))() } : {}) }), o.without ?? [], o.onCall),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
@@ -3855,6 +3855,53 @@ describe('machines.revokeCredential (#1405)', () => {
     const row = hub.links.list()[0]!
     expect(row.otherCredentials).toEqual([{ id: 'abab1212', label, created: 3, replaced: false, gone: true, hubsName: true }])
     expect(row.ownCredentialGone).toBe(false)
+  })
+
+  /*
+   * #1405 review: the hub's own credential was decided by id alone. A program of that user writes an entry into
+   * serve.json under the id this hub's credential has, with a secret of its own (the file is that user's to write), uses
+   * it and removes it. The hub holds its own secret, so it compares the host's check of this read's nonce with its own:
+   * the entry that only reuses the id is another's, listed as used and gone
+   */
+  it("lists one that reuses this hub's credential id with another secret, as gone, and the hub's own is still not listed", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const other = verifierOf('another secret of that user')
+    const mine = verifierOf(TOKEN)
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        ({
+          credentials: [{ ...own, check: credentialCheck(mine, nonce!) }],
+          usedUnderHubLabels: [
+            { id: 'cccc3333', label, created: 2, check: credentialCheck(mine, nonce!) },
+            { id: 'cccc3333', label, created: 3, check: credentialCheck(other, nonce!) },
+          ],
+        }) as Partial<CredentialsReport>,
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 3, replaced: false, gone: true, hubsName: true }])
+    expect(JSON.stringify(row)).not.toContain('"check"')
+    expect(row.ownCredentialGone).toBe(false)
+  })
+
+  it("lists a live entry that reuses this hub's credential id with another secret, and says its own is gone when only that is left", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const other = verifierOf('another secret of that user')
+    const mine = verifierOf(TOKEN)
+    let ownStays = true
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        ({
+          credentials: [...(ownStays ? [{ ...own, check: credentialCheck(mine, nonce!) }] : []), { ...cred('cccc3333', label, true), check: credentialCheck(other, nonce!) }],
+        }) as Partial<CredentialsReport>,
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 7, replaced: true, hubsName: true }])
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    ownStays = false
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
   })
 
   // #1405 review: chmod 000 on the machine's serve.json. The hub took its own credential for withdrawn, for its whole run

@@ -271,7 +271,9 @@ export const hostParams = {
    * the machine row. Null on a host `centralu serve` did not start. Asked by the hub directly, never routed; an older
    * host answers "Unknown method", and the hub keeps what the connection line said
    */
-  'host.credentials': z.object({}),
+  // `nonce` (#1405 review, additive): each entry then carries a `check` of it, so the hub can tell its own credential from one
+  // that only reuses its id
+  'host.credentials': z.object({ nonce: z.string().min(8).max(64).optional() }),
   /**
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
    * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an
