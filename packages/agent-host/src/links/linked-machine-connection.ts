@@ -85,6 +85,8 @@ const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAIT
 const CREDENTIALS_MS = 30_000
 /** How many of a machine's other full credentials its row lists; the rest are counted (`otherCredentialsMore`) */
 const OTHER_CREDENTIALS_SHOWN = 32
+/** How many credentials the host told this hub of (`host_credential_used`) it keeps until a read answers for them (#1712) */
+const REPORTED_USED_KEPT = 64
 
 /** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
 const ATTEMPT_WAIT_MS = 60_000
@@ -132,6 +134,15 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   private pairedHere = new Map<string, string | null>()
   private usedUnderHubLabels: RemoteCredential[] = []
+  /**
+   * Full credentials the machine's host told this hub, over this link, were just used there (#1712,
+   * `host_credential_used`), and that no `host.credentials` read has answered for since: shown as used and gone, since
+   * a credential used and withdrawn before the next read (or a host stopped right after) is what they are for. A read
+   * that succeeds replaces them with the host's own answer, which has them (its record is written before the event is
+   * sent). `settled`: the read the event started has ended without an answer, so they may be shown while connected
+   */
+  private reportedUsed: { key: string; seq: number; settled: boolean; credential: RemoteCredential }[] = []
+  private reportSeq = 0
   /** The machine's host says its serve.json cannot be read (#1405 review), or closed this link for that */
   private fileUnreadable = false
   /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
@@ -438,8 +449,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const line = this.endpoint?.line
     const all = this.credentials ?? line?.others ?? null
     const credentialFileUnreadable = this.fileUnreadable
-    if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken, credentialFileUnreadable }
-    const others = [...all, ...this.notPairedHere(line, all)].filter((c) => !this.isCurrent(c, line) && !this.revokedHere.has(c.id))
+    const connected = this.status === 'connected'
+    // Told by the host over this link, not yet answered by a read; shown also while the link is away, as it was seen (#1712)
+    const told = this.reportedUsed.filter((r) => (r.settled || !connected) && !this.revokedHere.has(r.credential.id)).map((r) => r.credential)
+    if (!connected || !line || !all) {
+      const gone = told.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, own: _own, ...c }) => ({ ...c, hubsName: !!line?.pairedAs && c.label === line.pairedAs }))
+      return { otherCredentials: gone.length ? gone : null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken, credentialFileUnreadable }
+    }
+    // Told of and also listed: listed (the list read last may be older than the news). The hub's own entry does not hide another secret's under its id
+    const named = new Set(all.filter((c) => c.own !== true).map((c) => c.id))
+    const others = [...all, ...this.notPairedHere(line, all), ...told.filter((c) => !named.has(c.id))].filter((c) => !this.isCurrent(c, line) && !this.revokedHere.has(c.id))
     const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, own: _own, ...c }) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
     // One listed as `gone` is no longer held: this hub's own among them is gone too, and none of them counts as more access
     const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => this.isCurrent(c, line) && !c.gone)
@@ -501,6 +520,39 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
+   * The machine's host says a full credential said hello there (#1712, `host_credential_used`). Not this hub's own (the
+   * host's `check` of the event's nonce is of the secret this hub holds under that id, as `host.credentials`' is), and
+   * not one this hub withdrew: kept as used and gone until a read of `host.credentials` answers for it, and that read
+   * is started now, not waited for. If the host is stopped before it answers, the use stays on the row. Fire and
+   * forget: nothing here is waited on by the host or by anything of this hub's
+   */
+  private credentialUsed(raw: unknown): void {
+    const o = asObj(raw)
+    const nonce = typeof o.nonce === 'string' && o.nonce.length >= 8 && o.nonce.length <= 64 ? o.nonce : null
+    const check = typeof o.check === 'string' && o.check.length <= 64 ? o.check : null
+    const c = credentialsOf([{ ...o, gone: true }])?.[0]
+    if (!c || !nonce || !check || this.stopped) return
+    const mine = this.pairedHere.get(c.id)
+    // Past this line it is not the secret this hub holds under that id, so not the credential this link is open with (`own: false`)
+    if (mine && check === credentialCheck(mine, nonce)) return
+    if (this.revokedHere.has(c.id)) return
+    const key = `${c.id}:${nonce}`
+    if (this.reportedUsed.some((r) => r.key === key)) return
+    const seq = ++this.reportSeq
+    this.reportedUsed = [...this.reportedUsed, { key, seq, settled: false, credential: { id: c.id, label: c.label, created: c.created, replaced: c.replaced, gone: true, own: false } }].slice(-REPORTED_USED_KEPT)
+    const read = this.readCredentials
+    const settle = () => {
+      const entry = this.reportedUsed.find((r) => r.seq === seq)
+      if (!entry) return
+      entry.settled = true
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    }
+    if (!read) return settle()
+    // The read answers for this credential, which then leaves `reportedUsed` (`watchCredentials`); one that fails leaves it shown
+    void read().then(settle, settle)
+  }
+
+  /**
    * Reads the machine's full credentials through `client` now and every `credentialsMs` while it is this link's and
    * connected (#1405, `host.credentials`): a pairing made there while the link is up shows on the row within that, not
    * only at the next link. A machine that does not know the method is not asked again on this link
@@ -516,6 +568,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     const read = async (): Promise<void> => {
       if (this.client !== client || !client.connected) return stop()
+      // What the host told this hub of before this read was asked is in its answer (#1712)
+      const told = this.reportSeq
       try {
         const nonce = randomBytes(16).toString('base64url')
         const r = asObj(await client.call('host.credentials', { nonce }))
@@ -533,6 +587,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
           return stop()
         }
         const before = JSON.stringify(this.otherCredentials())
+        // Answered: the host's own list now has what it told of (a reply that cannot be read keeps them)
+        if (listed) this.reportedUsed = this.reportedUsed.filter((u) => u.seq > told)
         if (listed) this.credentials = listed
         this.fileUnreadable = unreadable
         this.usedUnderHubLabels = this.ownOf(credentialsOf(r.usedUnderHubLabels), nonce) ?? []
@@ -1210,6 +1266,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       const h = HostHandover.nullable().safeParse(raw.handover)
       this.handover = h.success ? h.data : null
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      return
+    }
+    // A full credential was just used on the machine (#1712): kept on its row, passed on to no one
+    if (raw.type === 'host_credential_used') {
+      this.credentialUsed(raw.credential)
       return
     }
     const sid = typeof raw.sessionId === 'string' ? raw.sessionId : null

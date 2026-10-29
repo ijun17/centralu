@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { asObj } from '../json-value.js'
 
 /**
@@ -170,22 +170,47 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  * What this cannot tell is two askers of the same way under one label (a program's `--pair hub:<name>-<key>` that the
  * hub's own next link takes the place of). So every id used under a hub's label is also given as it is (`underHubLabels`),
  * and the hub of that label compares them with the ids it paired itself: any other is one it did not make (#1405
- * review). At most `max` are kept, the oldest dropped first; a restart of this host forgets them.
+ * review). At most `max` are kept, the oldest dropped first. A restart of this host reads them back from the file it keeps beside `serve.json` (#1712, `UsedCredentialsFile`).
  */
 export class UsedCredentials {
   private seq = 0
   // By id and verifier: an id another secret reused is a second entry, not the first one overwritten (#1405 review)
-  private readonly used = new Map<string, { id: string; verifier: string; label: string; created: number; replaced: boolean; seq: number }>()
+  private readonly used = new Map<string, UsedRecord & { seq: number }>()
 
   constructor(private readonly max = 256) {}
 
-  /** A socket said hello with `c` */
-  saw(c: FullCredential): void {
-    if (c.via === 'handover') return
+  /**
+   * A socket said hello with `c`. The record when this is the first use of this credential (this id under this
+   * verifier) that this host knows of, here or in the file it kept (`load`): the caller writes it down and tells the
+   * hubs (#1712). Null for one already known, and for the launcher's own one-call credential, which is not kept
+   */
+  saw(c: FullCredential): UsedRecord | null {
+    if (c.via === 'handover') return null
     const key = `${c.id}:${c.verifier}`
     const known = this.used.get(key)
     this.used.delete(key)
-    this.used.set(key, { id: c.id, verifier: c.verifier, label: c.label, created: c.created ?? 0, replaced: c.replaced === true, seq: known?.seq ?? ++this.seq })
+    const rec: UsedRecord = { id: c.id, verifier: c.verifier, label: c.label, created: c.created ?? 0, replaced: c.replaced === true }
+    this.used.set(key, { ...rec, seq: known?.seq ?? ++this.seq })
+    this.trim()
+    return known ? null : rec
+  }
+
+  /** Takes in what the file kept (#1712), in the order it was written: those already known are not counted twice */
+  load(records: readonly UsedRecord[]): void {
+    for (const r of records) {
+      const key = `${r.id}:${r.verifier}`
+      if (this.used.has(key)) continue
+      this.used.set(key, { ...r, seq: ++this.seq })
+    }
+    this.trim()
+  }
+
+  /** Every record kept, by first use: what the file is rewritten from when it grows past `max` */
+  records(): UsedRecord[] {
+    return [...this.used.values()].sort((a, b) => a.seq - b.seq).map(({ seq: _seq, ...r }) => r)
+  }
+
+  private trim(): void {
     for (const id of this.used.keys()) {
       if (this.used.size <= this.max) break
       this.used.delete(id)
@@ -222,6 +247,47 @@ export class UsedCredentials {
 
 /** A credential used on this host under a hub's label (`UsedCredentials.underHubLabels`) */
 export type UsedUnderHubLabel = { id: string; label: string; created: number; check?: string }
+
+/** One full credential a socket said hello with on this host (`UsedCredentials`), as the host keeps it in memory and in its file (#1712) */
+export type UsedRecord = { id: string; verifier: string; label: string; created: number; replaced: boolean }
+
+/** One line of the file of used credentials (#1712): a record, as JSON. Lines are only ever added at the end */
+export function encodeUsedRecord(r: UsedRecord): string {
+  return `${JSON.stringify({ v: 1, id: r.id, verifier: r.verifier, label: r.label, created: r.created, replaced: r.replaced })}\n`
+}
+
+/**
+ * The records a file of used credentials holds (#1712): each line of the shape `encodeUsedRecord` writes and that
+ * `isListedEntry` would take, in the order written. A line that is not one (cut short by a stop in the middle of a
+ * write, or written by hand) is skipped, and no other line is lost with it
+ */
+export function parseUsedRecords(text: string): UsedRecord[] {
+  return text.split('\n').flatMap((line) => {
+    if (line.trim() === '') return []
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      return []
+    }
+    const f = asObj(parsed)
+    if (f.v !== 1 || !isListedEntry(f)) return []
+    const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
+    return [{ id: f.id, verifier: f.verifier, label: f.label, created, replaced: f.replaced === true }]
+  })
+}
+
+/**
+ * What a hub linked to this host is told when a full credential said hello (#1712, the `host_credential_used` event):
+ * the record without its verifier, and a `check` of a nonce chosen here for this event, with which a hub that holds the
+ * secret under that id knows it for its own (`credentialCheck`), and no one else learns the verifier from
+ */
+export function usedEvent(r: UsedRecord, nonce: string = randomBytes(16).toString('base64url')) {
+  return {
+    type: 'host_credential_used' as const,
+    credential: { id: r.id, label: r.label, created: r.created, replaced: r.replaced, nonce, check: credentialCheck(r.verifier, nonce) },
+  }
+}
 
 /**
  * What `host.credentials` answers (#1405): the full credentials the file names, and those used here and gone since

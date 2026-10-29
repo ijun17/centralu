@@ -19,6 +19,11 @@ describe('a linked machine\'s events about itself', () => {
     expect(q.event({ type: 'a_later_event', sessionId: 's1' })).toEqual({ type: 'a_later_event', sessionId: 'm1.s1' })
     expect(q.event({ type: 'a_later_event' })).toBeNull()
   })
+
+  // #1712: the hub's link handles it before the qualifier; a hub build before it falls here and drops it, since it names no session
+  it('drops host_credential_used, which a hub from before it does not know and which names no session', () => {
+    expect(q.event({ type: 'host_credential_used', credential: { id: 'abab1212', label: 'x', created: 1, replaced: false, nonce: 'bm9uY2Vub25jZQ', check: 'c' } })).toBeNull()
+  })
 })
 
 // #1604: the sender of the message a turn ran for is named as a message's sender is, or the hub could not match it to its own

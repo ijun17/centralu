@@ -4,7 +4,7 @@ import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { CREDENTIAL_FILE_UNREADABLE, HostServer, type RpcContext } from './server.js'
 import { credentialProof, hostProof, proofNonce, provesCredential } from './host-proof.js'
-import { LAST_READ_KEPT_MS, readCredentialFile, verifierOf } from '../lifecycle/serve-credentials.js'
+import { LAST_READ_KEPT_MS, readCredentialFile, UsedCredentials, usedEvent, verifierOf, type FullCredential } from '../lifecycle/serve-credentials.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
@@ -547,5 +547,132 @@ describe("a session's credential at hello (#1405 slice 6)", () => {
   it("is refused at hello when it names a session this host does not have", async () => {
     const { port } = await startKnowing([])
     expect(await (await hello(port, sessionToken(TOKEN, SID))).closed).toBe(4001)
+  })
+})
+
+const REPORT_KEY = 'k'.repeat(43)
+const REPORT_HUB = 'h'.repeat(43)
+const REPORT_OTHER = 'o'.repeat(43)
+const REPORT_WINDOW = 'w'.repeat(43)
+const reportEntry = (id: string, label: string, token: string) => ({ id, label, verifier: verifierOf(token), created: 1 })
+
+const sockets: WebSocket[] = []
+afterEach(() => {
+  for (const ws of sockets.splice(0)) ws.terminate()
+})
+
+/** A host as main.ts wires one: each first full hello is recorded (`written`), then told to the hubs */
+async function reportHost(o: { record?: (c: FullCredential) => void } = {}) {
+  const file = JSON.stringify({ v: 2, key: REPORT_KEY, port: null, full: [reportEntry('aaaaaaaa', 'hub:test-0123abcd', REPORT_HUB), reportEntry('bbbbbbbb', 'agent-script', REPORT_OTHER), reportEntry('cccccccc', 'window', REPORT_WINDOW)] })
+  const used = new UsedCredentials()
+  const written: string[] = []
+  const hubs = { told: 0 }
+  const host = new HostServer({
+    port: 0,
+    token: REPORT_KEY,
+    fullCredentials: () => readCredentialFile('serve.json', () => file, () => {}),
+    onFullHello: (c) => {
+      o.record?.(c)
+      const first = used.saw(c)
+      if (!first) return
+      written.push(c.id)
+      host.tellHubs(usedEvent(first))
+      hubs.told++
+    },
+    onRpc: async () => ({ ok: true }),
+  })
+  server = host
+  const port = await host.listen()
+  return { port, written, used, hubs }
+}
+
+/** A socket that said hello with `token`, its frames collected; resolves once it is let in (or closed) */
+async function reportConnect(port: number, token: string, extra: Record<string, unknown> = {}) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  sockets.push(ws)
+  const frames: Record<string, any>[] = []
+  let closed: number | null = null
+  ws.on('message', (d) => frames.push(JSON.parse(text(d))))
+  ws.on('close', (code) => (closed = code))
+  await new Promise<void>((r) => ws.on('open', () => r()))
+  ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION, ...extra }))
+  for (let i = 0; i < 500 && !frames.some((f) => f.kind === 'hello_ok') && closed === null; i++) await new Promise((r) => setTimeout(r, 10))
+  return { ws, frames, closed: () => closed, told: () => frames.filter((f) => f.kind === 'event' && f.event.type === 'host_credential_used').map((f) => f.event.credential.id as string) }
+}
+
+const reportSettle = () => new Promise((r) => setTimeout(r, 150))
+
+describe('a full hello, reported as it is let in (#1712)', () => {
+  it('tells a hub linked to the host at once, and no window or limited caller', async () => {
+    const h = await reportHost()
+    const hub = await reportConnect(h.port, REPORT_HUB)
+    const window = await reportConnect(h.port, REPORT_WINDOW)
+    const limited = await reportConnect(h.port, limitedToken(REPORT_KEY))
+    await reportSettle()
+    // Only another's first hello is news to a hub; each hub-labelled socket's own hello is told too, and the hub drops it by the check
+    const before = hub.told().length
+    const script = await reportConnect(h.port, REPORT_OTHER)
+    expect(script.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    await reportSettle()
+    expect(hub.told().slice(before)).toEqual(['bbbbbbbb'])
+    expect(window.told()).toEqual([])
+    expect(limited.told()).toEqual([])
+    // A second hello with the same credential is not news
+    await reportConnect(h.port, REPORT_OTHER)
+    await reportSettle()
+    expect(hub.told().slice(before)).toEqual(['bbbbbbbb'])
+  })
+
+  it('records it before the socket is let in, also when no hub is linked', async () => {
+    let atRecord: string[] | null = null
+    const h = await reportHost({ record: () => (atRecord = [...h.written]) })
+    const script = await reportConnect(h.port, REPORT_OTHER)
+    // The hello was answered, and the record was written down by then and not after
+    expect(script.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    expect(atRecord).toEqual([])
+    expect(h.written).toEqual(['bbbbbbbb'])
+    expect(h.used.gone([])).toHaveLength(1)
+  })
+
+  it('lets a hello in with the hub’s link down as it does with it up: the hub is never waited on', async () => {
+    const h = await reportHost()
+    const hub = await reportConnect(h.port, REPORT_HUB)
+    // The hub's link stops reading altogether
+    hub.ws.pause()
+    const t0 = Date.now()
+    const script = await reportConnect(h.port, REPORT_OTHER)
+    expect(script.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    // Generous: far under the 5 s handshake and what any wait on the hub would take
+    expect(Date.now() - t0).toBeLessThan(3000)
+    hub.ws.terminate()
+    // And with no hub link at all
+    const window = await reportConnect(h.port, REPORT_WINDOW)
+    expect(window.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    expect(h.written).toEqual(['aaaaaaaa', 'bbbbbbbb', 'cccccccc'])
+  })
+
+  it('lets the hello in when recording it throws', async () => {
+    const h = await reportHost({
+      record: () => {
+        throw new Error('disk full')
+      },
+    })
+    const script = await reportConnect(h.port, REPORT_OTHER)
+    expect(script.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+  })
+
+  it('reports no hello that is refused: a wrong credential, or a protocol it cannot serve', async () => {
+    const h = await reportHost()
+    expect((await reportConnect(h.port, 'x'.repeat(43))).closed()).toBe(4001)
+    await reportConnect(h.port, REPORT_OTHER, { protocolVersion: PROTOCOL_VERSION + 1 })
+    expect(h.written).toEqual([])
+  })
+
+  it('gives a hub that links later the events it missed, in the replay of a link that kept its place', async () => {
+    const h = await reportHost()
+    await reportConnect(h.port, REPORT_OTHER)
+    const late = await reportConnect(h.port, REPORT_HUB)
+    await reportSettle()
+    expect(late.told()).toEqual(expect.arrayContaining(['bbbbbbbb']))
   })
 })

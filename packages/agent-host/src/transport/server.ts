@@ -114,7 +114,12 @@ export type HostServerOptions = {
    * hello. 1 s when absent
    */
   credentialSweepMs?: number
-  /** A socket said hello with one of the full credentials `fullCredentials` names (#1405 review, `UsedCredentials`) */
+  /**
+   * A hello with one of the full credentials `fullCredentials` names is about to be let in (#1405 review,
+   * `UsedCredentials`; #1712). Called before the socket has any rights, once the hello is whole (a refused one is not
+   * reported), and never waited on beyond the call itself: it must write down what it keeps and tell the hubs without
+   * waiting for them (`tellHubs`). A throw is said and the hello goes on
+   */
   onFullHello?: (credential: FullCredential) => void
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
@@ -274,6 +279,8 @@ export class HostServer {
    * closed once it is no longer listed (`sweepWithdrawn`)
    */
   private fullBy = new Map<WebSocket, string>()
+  /** Those of them paired by a hub (a `hub:` label), which `tellHubs` reaches (#1712) */
+  private hubLinks = new Set<WebSocket>()
   private sweepTimer: ReturnType<typeof setInterval> | undefined
   /** The sockets in `clients` by their `RpcContext.client`, for a call to one of them (`call`, #550) */
   private byClient = new Map<number, WebSocket>()
@@ -489,6 +496,19 @@ export class HostServer {
   }
 
   /**
+   * Tells the hubs linked to this host (the sockets in with a full credential labelled `hub:`) of an event, and no one
+   * else now (#1712). It is kept with the others, so a hub whose link was away a moment and comes back to this host
+   * finds it in the replay. Never waits: a frame is queued on each socket, and one that has stopped reading is cut
+   * (`sendTo`) as for any event
+   */
+  tellHubs(event: NormalizedEvent): void {
+    const body = JSON.stringify(event)
+    const entry = this.log.append(event, body.length)
+    const frame = `{"kind":"event","seq":${entry.seq},"event":${body}}`
+    for (const ws of this.hubLinks) this.sendTo(ws, frame)
+  }
+
+  /**
    * The connections that receive events: windows and a hub linked to this host (the token), and the limited
    * credential's (#1405). Never a bridge
    */
@@ -561,6 +581,7 @@ export class HostServer {
     for (const [ws, id] of this.fullBy) {
       if (read.open.some((c) => c.id === id)) continue
       this.fullBy.delete(ws)
+      this.hubLinks.delete(ws)
       /*
        * A file that cannot be read withdrew nothing (#1405 review): said as that, so a hub does not take its own credential
        * for taken over, and its row can say why
@@ -705,6 +726,17 @@ export class HostServer {
           this.refuse(ws, 4002, 'version mismatch')
           return
         }
+        /*
+         * A full credential is written down BEFORE the socket gets its rights (#1712): once `authed` is set below nothing
+         * of this hello can be undone by a stop of the host
+         */
+        if (match) {
+          try {
+            this.opts.onFullHello?.(match)
+          } catch (e) {
+            console.error(`[agent-host] a full hello could not be recorded: ${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
         authed = true
         req.socket.off('data', countPreHello)
         clearTimeout(this.handshakeTimers.get(ws))
@@ -722,7 +754,7 @@ export class HostServer {
         this.byClient.set(client, ws)
         if (match) {
           this.fullBy.set(ws, match.id)
-          this.opts.onFullHello?.(match)
+          if (match.label.startsWith('hub:')) this.hubLinks.add(ws)
         }
         label = frame.data.client?.trim().slice(0, 60) || null
         if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
@@ -806,6 +838,7 @@ export class HostServer {
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
       this.fullBy.delete(ws)
+      this.hubLinks.delete(ws)
       if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
       leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)
@@ -917,7 +950,9 @@ export class HostServer {
    */
   private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined): void {
     const window = this.log.since(afterSeq, streamEpoch)
-    const frames = window.events.map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
+    // What was told to the hubs only (`tellHubs`) is replayed to a hub's link alone (#1712)
+    const hub = this.hubLinks.has(ws)
+    const frames = window.events.filter((e) => hub || e.event.type !== 'host_credential_used').map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
     let bytes = ws.bufferedAmount + wireBytes(this.helloOk(window.resyncRequired))
     for (const f of frames) bytes += wireBytes(f)
     if (bytes > this.limits.replayBudgetBytes) {

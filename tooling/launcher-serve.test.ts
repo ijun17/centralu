@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
-import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
+import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, credentialCheck, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
 import {
   connectionLine,
@@ -966,6 +966,64 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       }
     },
     90_000 * SLOW,
+  )
+
+  /*
+   * #1712: a program of the machine's user pairs, uses full rights, withdraws and stops the host before a hub's next read.
+   * The host writes the use down before the socket has rights and tells the hubs linked to it at once; a host that starts
+   * again reports it from the file. Both halves are main.ts wiring and the server's, so this runs a real host
+   */
+  it(
+    'tells a linked hub of a full hello at once, and a restarted host reports it after a stop right behind it',
+    async () => {
+      const d = tempDir()
+      const port = await freePort()
+      const s = serve(d, ['--port', String(port)])
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      let s2: ReturnType<typeof serve> | null = null
+      try {
+        // A hub linked to the host: its open link is what the event goes over
+        const hub = (await cli(d, ['--connection', '--pair', 'hub:test-0123abcd'])).line
+        const events: Record<string, any>[] = []
+        const link = new WebSocket(`ws://127.0.0.1:${port}`)
+        link.onopen = () => link.send(JSON.stringify({ kind: 'hello', token: String(hub.token), protocolVersion: PROTOCOL_VERSION }))
+        link.onmessage = (ev) => {
+          const f = JSON.parse(String(ev.data)) as Record<string, any>
+          if (f.kind === 'event') events.push(f.event)
+        }
+        await vi.waitFor(() => expect(link.readyState).toBe(WebSocket.OPEN))
+        // Something of that user: pairs, says hello, withdraws, and stops the host, with no read between
+        const x = (await cli(d, ['--connection', '--pair', 'x'])).line
+        expect(await hello(port, String(x.token))).toMatchObject({ kind: 'hello_ok' })
+        expect((await cli(d, ['--revoke', String(x.credential)])).code).toBe(0)
+        // The hub's own link was told of too (its first hello), which the hub drops by the check: this one is x's
+        const usedOf = (id: unknown) => events.find((e) => e.type === 'host_credential_used' && e.credential.id === id)?.credential
+        await vi.waitFor(() => expect(usedOf(x.credential)).toBeDefined(), { timeout: 20_000 * SLOW })
+        const told = usedOf(x.credential)
+        expect(told).toMatchObject({ id: x.credential, label: 'x' })
+        // The check is of the secret the hub could hold, and the verifier itself is nowhere in the event
+        expect(told.check).toBe(credentialCheck(verifierOf(String(x.token)), told.nonce))
+        expect(JSON.stringify(events)).not.toContain(verifierOf(String(x.token)))
+        // Written down before the stop
+        expect(readFileSync(join(d, 'serve-used.jsonl'), 'utf8')).toContain(String(x.credential))
+        link.close()
+        if (POSIX) s.child.kill('SIGTERM')
+        else await cli(d, ['--stop'])
+        await s.exited
+
+        // A host that starts again reports it at the next read, listed once
+        const port2 = await freePort()
+        s2 = serve(d, ['--port', String(port2)])
+        await s2.until(/listening on 127\.0\.0\.1:\d+/)
+        const r = (await askHost(port2, String(hub.token), 'host.credentials')) as Record<string, any>
+        expect(r.credentials.filter((c: Record<string, unknown>) => c.id === x.credential)).toEqual([expect.objectContaining({ label: 'x', gone: true })])
+      } finally {
+        if (POSIX) (s2 ?? s).child.kill('SIGTERM')
+        else await cli(d, ['--stop'])
+        await (s2 ?? s).exited
+      }
+    },
+    120_000 * SLOW,
   )
 
   // Windows cannot send a Ctrl+C to one process from Node (the console delivers it to the whole group), and serve

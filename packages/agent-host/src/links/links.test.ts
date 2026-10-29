@@ -16,7 +16,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
-import { credentialCheck, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
+import { credentialCheck, usedEvent, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -3997,5 +3997,107 @@ describe('machines.revokeCredential (#1405)', () => {
     const { u, runs } = await setup()
     await expect(u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'cccc3333' })).rejects.toThrow(/this computer's own credential/)
     expect(runs).toEqual([])
+  })
+
+  /*
+   * #1712: the machine's host tells the hub, over the open link, that a full credential said hello, as it lets it in.
+   * The hub reads `host.credentials` every 30 s (never within a test here), so a use withdrawn before the next read, or a
+   * host stopped right after, was never on the row
+   */
+  describe('a full hello the machine’s host tells the hub of as it is let in (#1712)', () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const told = (id: string, secret: string, o: { label?: string; nonce?: string } = {}) => usedEvent({ id, verifier: verifierOf(secret), label: o.label ?? 'agent-script', created: 9, replaced: false }, o.nonce ?? 'bm9uY2Vub25jZQ')
+
+    /** A serve machine whose `host.credentials` answers `listed` */
+    async function machine(listed: (nonce?: string) => ListedCredential[]) {
+      let reads = 0
+      const remote = await remoteHost(0, new Store(), {
+        credentials: (nonce) => listed(nonce),
+        onCall: (m) => {
+          if (m === 'host.credentials') reads++
+        },
+      })
+      const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 60_000 })
+      await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+      return { remote, hub, reads: () => reads }
+    }
+
+    it('lists one used and then withdrawn, on the row, though the host stops before the hub can read it', async () => {
+      let stopped = false
+      const m = await machine(() => {
+        // The host is gone by the time the read the event starts is asked: it answers nothing
+        if (stopped) throw new Error('the host stopped')
+        return [own]
+      })
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([])
+      stopped = true
+      m.remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await eventually(() => m.hub.links.list()[0]!.otherCredentials?.length === 1)
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'agent-script', created: 9, replaced: false, gone: true, hubsName: false }])
+      expect(JSON.stringify(m.hub.links.list()[0])).not.toMatch(/"check"|"nonce"/)
+      // And the link going down with the host does not take it off the row
+      await m.remote.close()
+      await eventually(() => status(m.hub) !== 'connected')
+      expect(m.hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['abab1212'])
+    })
+
+    it('leaves it to the host’s own answer once a read has answered: the report is only for the time before', async () => {
+      // The host's own answer is its record, which has what it told (it is written before the event is sent); here a host that judged it no news
+      const m = await machine(() => [own])
+      const reads = m.reads()
+      m.remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await eventually(() => m.reads() > reads)
+      // A read that succeeds is the host's own answer (which has what it told, in its record): it replaces the report
+      await eventually(() => m.hub.links.list()[0]!.otherCredentials?.length === 0)
+    })
+
+    it('starts a read at once, and lists nothing as gone that the host’s answer holds', async () => {
+      let held = false
+      const m = await machine(() => (held ? [own, cred('abab1212', 'agent-script')] : [own]))
+      const reads = m.reads()
+      held = true
+      m.remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await eventually(() => m.reads() > reads)
+      await eventually(() => m.hub.links.list()[0]!.otherCredentials?.length === 1)
+      // Still held, so not "used, then withdrawn"
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'agent-script', created: 7, replaced: false, hubsName: false }])
+    })
+
+    it('does not list this hub’s own credential, told as any other is, and lists one that only reuses its id', async () => {
+      let stopped = false
+      const m = await machine((nonce) => {
+        if (stopped) throw new Error('the host stopped')
+        return [{ ...own, check: credentialCheck(verifierOf(TOKEN), nonce!) }]
+      })
+      stopped = true
+      // Its own hello at the link: the check is of the secret it holds under that id
+      m.remote.server.broadcast(told('cccc3333', TOKEN, { label }))
+      // Another secret under the same id is another's
+      m.remote.server.broadcast(told('cccc3333', 'another secret', { label, nonce: 'b3RoZXJub25jZQ' }))
+      await eventually(() => (m.hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, gone: true, hubsName: true }])
+    })
+
+    it('drops an event it cannot read, and lists the one it can', async () => {
+      let stopped = false
+      const m = await machine(() => {
+        if (stopped) throw new Error('the host stopped')
+        return [own]
+      })
+      stopped = true
+      m.remote.server.broadcast({ type: 'host_credential_used', credential: { id: 'zz', label: 'x', created: 1, replaced: false, nonce: 'bm9uY2Vub25jZQ', check: 'x' } } as never)
+      m.remote.server.broadcast({ type: 'host_credential_used', credential: { id: 'abab1212', label: 'x', created: 1, replaced: false, nonce: 'short', check: 'x' } } as never)
+      m.remote.server.broadcast(told('dddd4444', 'x'))
+      await eventually(() => (m.hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+      expect(m.hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['dddd4444'])
+    })
+
+    it('is not passed on to a window of the hub', async () => {
+      const m = await machine(() => [own])
+      const u = await ui(m.hub.port)
+      m.remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await new Promise((r) => setTimeout(r, 150))
+      expect(u.events().some((e) => e.type === 'host_credential_used')).toBe(false)
+    })
   })
 })

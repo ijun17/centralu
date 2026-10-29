@@ -1541,10 +1541,23 @@ A host started with `centralu serve` on another machine is reached by the app th
     also leaves out one used and then withdrawn when the label was paired the same way again; that new pairing is
     listed itself, with Revoke. Before, `--pair x`, a hello and
     `--revoke` within 135 ms left no trace on any row. The machine's user can get around this at will in two ways:
-    - **Kill the host.** The record is in the host's memory (at most 256 entries). Use a credential, kill the machine's
-      host and withdraw the credential before the hub's next read, and the restarted host has no record of it: up to
-      the 30 s between two reads, nothing shows. This stays. Any record the host kept on disk, the same user could
-      delete just as easily; it is a residual of an attacker who is this machine's user, at most 30 s of use.
+    - **Kill the host.** Closed while the hub's link is up (#1712). The first time a full credential says hello on a
+      host, the host appends its record (id, label, date, verifier, never the credential) to `serve-used.jsonl` beside
+      `serve.json`, BEFORE the socket gets its rights, and tells the hubs linked to it at once with a
+      `host_credential_used` event over their open links (the sockets in with a `hub:`-labelled credential; the event
+      carries a `check` of a nonce of its own, so a hub knows its own credential from one that only reuses its id, and
+      never the verifier). A hub puts the credential on its row as used and gone and starts a `host.credentials` read at
+      once, whose answer then replaces it; if the host is stopped first, the use stays on the row, also while the link is
+      down. A host that starts again reads the file back (at most 256 records, the oldest dropped; a credential in
+      both the file and memory is one record), so its next `host.credentials` reports it as before. Agents' per-session
+      credentials are not full credentials and are not reported. The owner's constraint (2026-10-29) is that this never
+      slows or blocks ordinary work: the hello is not held for the hub (the event is queued on the hub's socket, a hub
+      that stopped reading is cut as for any event), with the hub's link down the record stays in the file, and a
+      record that cannot be written (a full disk) is said on stderr while the hello goes on. What is left is the same
+      user's: drop the hub's link first (the event has nowhere to go; the file is read at the next link), or delete or
+      change the file, which that user can do as easily as `serve.json` (the first use after that is written down again;
+      a restart before the hub's next read still shows nothing then). A swap's overlap, two hosts of one folder, may
+      lose a line to the rewrite that shortens a file past four times its bound.
     - **Take the hub's label while its link is down** (end the user's own ssh session, pair under
       `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
       the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also
