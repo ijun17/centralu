@@ -1,10 +1,10 @@
 import { createHmac, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto'
 import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES } from '@cc/protocol'
-import { CREDENTIAL_ID_RE } from '../lifecycle/serve-credentials.js'
+import { CREDENTIAL_ID_RE } from '../lifecycle/credential-id.js'
 
 /**
  * The keys and the signed transcript of a hub's key pairing with a linked machine (#1711, docs/plans/key-pairing.md
- * §4.1 and §4.3). Pure: nothing here reads a file or a socket, and nothing on a live path calls it yet (slice 2).
+ * §4.1 and §4.3). Pure: nothing here reads a file or a socket. The host's side calls it through `link-proof.ts` (slice 3).
  *
  * Both sides sign one transcript `T` before hello, each under its own role label, so a signature seen once opens
  * nothing elsewhere: the host's nonce makes a hub signature good for one socket, the hub's nonce makes a host signature
@@ -67,13 +67,16 @@ function yOf(raw: Uint8Array): bigint {
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 
+/** Every key `LinkPublicKey.parse` returned, and no other object: what `LinkPublicKey.is` asks (#1714 recheck) */
+const PARSED = new WeakSet<object>()
+
 /**
  * A public key that passed `parseLinkPublicKey`: only such a key is verified against (`verifyLink`, which checks it with
- * `LinkPublicKey.is` at run time as well as by type). A class with a private constructor and a private field, so no
- * object literal and no other module can make one.
+ * `LinkPublicKey.is` at run time as well as by type). The constructor is private to TypeScript only, so `is` asks a
+ * module-private set of the keys `parse` returned: an instance made another way (a cast, `Reflect.construct`, a
+ * subclass) is not in it. Frozen, so a parsed key's fields cannot be swapped afterwards.
  */
 export class LinkPublicKey {
-  readonly #checked = true
   private constructor(
     /** As on the wire and in `serve.json`: 43 characters of base64url */
     readonly text: string,
@@ -97,12 +100,14 @@ export class LinkPublicKey {
       return null
     }
     if (key.asymmetricKeyType !== 'ed25519') return null
-    return new LinkPublicKey(text, raw, key)
+    const parsed = Object.freeze(new LinkPublicKey(text, raw, key))
+    PARSED.add(parsed)
+    return parsed
   }
 
-  /** Whether `value` is a key that came through `parse`: a real check at run time, which a cast to the type does not pass */
+  /** Whether `value` is a key that came through `parse`: a real check at run time, which a cast, a copy or another construction does not pass */
   static is(value: unknown): value is LinkPublicKey {
-    return typeof value === 'object' && value !== null && #checked in value
+    return typeof value === 'object' && value !== null && PARSED.has(value)
   }
 }
 
@@ -179,8 +184,9 @@ export function linkAddressOfSocket(localAddress: string | undefined, localPort:
  * `ws://127.0.0.1:<port>`. The host's socket then comes from the door's relay, and its local port is the inner one.
  * Read as written, not through `URL`, which would turn `08080` into `8080`.
  */
-export function linkAddressOfDoor(frontDoor: string | undefined): string | null {
-  return frontDoor?.startsWith(DOOR_PREFIX) ? readLinkAddress(frontDoor.slice(DOOR_PREFIX.length)) : null
+export function linkAddressOfDoor(frontDoor: unknown): string | null {
+  // Anything but a string gives none, as the earlier regex did (#1714 recheck): never a throw on a value of another type
+  return typeof frontDoor === 'string' && frontDoor.startsWith(DOOR_PREFIX) ? readLinkAddress(frontDoor.slice(DOOR_PREFIX.length)) : null
 }
 
 /**

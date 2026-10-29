@@ -1,5 +1,9 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { asObj } from '../json-value.js'
+import { parseLinkPublicKey } from '../transport/link-keys.js'
+import { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE } from './credential-id.js'
+
+export { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE }
 
 /**
  * The full credentials of a host `centralu serve` runs (#1405): their verifiers, read from `serve.json` (the launcher's
@@ -24,8 +28,6 @@ import { asObj } from '../json-value.js'
  * machine row shows. An entry written into the file by hand with no label or another id would otherwise open the
  * host whole while nobody could see or withdraw it; listing is the whole defence against a pairing nobody asked for.
  */
-export const CREDENTIAL_ID_RE = /^[0-9a-f]{8}$/
-export const CREDENTIAL_LABEL_RE = /^[A-Za-z0-9:._-]{1,80}$/
 const VERIFIER_RE = /^[0-9a-f]{64}$/
 
 /** Whether one entry of the file is a full credential this host takes (`CREDENTIAL_ID_RE`) */
@@ -35,6 +37,34 @@ export function isListedEntry(f: Record<string, unknown>): f is Record<string, u
     typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&
     typeof f.verifier === 'string' && VERIFIER_RE.test(f.verifier)
   )
+}
+
+/**
+ * Whether one entry of `keys` is a hub's public key this host takes (#1711, docs/plans/key-pairing.md §4.2): the listed
+ * id and label, and a public key `parseLinkPublicKey` takes. One with a refused key (a small-order or non-canonical one,
+ * written by hand) is absent: it makes no socket full and is not listed (§4.1)
+ */
+export function isKeyEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; publicKey: string } {
+  return (
+    typeof f.id === 'string' && CREDENTIAL_ID_RE.test(f.id) &&
+    typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&
+    parseLinkPublicKey(f.publicKey) !== null
+  )
+}
+
+/**
+ * A hub's key entry (#1711, `centralu serve --connection --pair-key`): the hub's Ed25519 public key, which the hub signs
+ * the link transcript with (`transport/link-proof.ts`). Public: nothing in it opens the host. A socket in under it stays
+ * full while an entry with its id **and** its public key is listed (`HostServer` `sweepWithdrawn`)
+ */
+export type KeyCredential = {
+  id: string
+  label: string
+  /** 43 characters of base64url, checked by `parseLinkPublicKey` */
+  publicKey: string
+  created?: number
+  replaced?: boolean
+  via?: string
 }
 
 /** One full credential the host accepts: its id, for the proof (`prove.credential`), who it was made for, and its verifier */
@@ -74,6 +104,9 @@ export type CredentialsRead = {
   full: FullCredential[]
   open: FullCredential[]
   unreadable: { code: string; since: number } | null
+  /** The hubs' key entries (#1711): `keys`, what a key hello is checked against, and `openKeys`, what a socket in under one may keep. Absent: none */
+  keys?: KeyCredential[]
+  openKeys?: KeyCredential[]
 }
 
 /**
@@ -115,7 +148,7 @@ export function readCredentialFile(
     const o = asObj(parsed)
     if (o.v !== 2 || !Array.isArray(o.full)) {
       lastRead.delete(path)
-      return { full: [], open: [], unreadable: null }
+      return { full: [], open: [], unreadable: null, keys: [], openKeys: [] }
     }
     const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
@@ -123,19 +156,34 @@ export function readCredentialFile(
       const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
       return [{ id: f.id, label: f.label, verifier: f.verifier, created, replaced: f.replaced === true, ...(typeof f.via === 'string' ? { via: f.via } : {}) }]
     })
-    lastRead.set(path, { full, at: now() })
-    return { full, open: full, unreadable: null }
+    const keys = readKeyEntries(o.keys)
+    lastRead.set(path, { full, keys, at: now() })
+    return { full, open: full, unreadable: null, keys, openKeys: keys }
   }
   if (code === 'ENOENT') {
     lastRead.delete(path)
     refusedSince.delete(path)
-    return { full: [], open: [], unreadable: null }
+    return { full: [], open: [], unreadable: null, keys: [], openKeys: [] }
   }
   const since = refusedSince.get(path) ?? now()
   refusedSince.set(path, since)
   const last = lastRead.get(path)
-  const open = last && now() - last.at <= LAST_READ_KEPT_MS ? last.full : []
-  return { full: [], open, unreadable: { code, since } }
+  const kept = last && now() - last.at <= LAST_READ_KEPT_MS ? last : null
+  return { full: [], open: kept?.full ?? [], unreadable: { code, since }, keys: [], openKeys: kept?.keys ?? [] }
+}
+
+/**
+ * The key entries of a version 2 file's `keys` (#1711), each of the shape `isKeyEntry` takes and no other. Additive: a
+ * file without `keys` (every launcher before key pairing writes none) names none
+ */
+function readKeyEntries(raw: unknown): KeyCredential[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((e: unknown) => {
+    const f = asObj(e)
+    if (!isKeyEntry(f)) return []
+    const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
+    return [{ id: f.id, label: f.label, publicKey: f.publicKey, created, replaced: f.replaced === true, ...(typeof f.via === 'string' ? { via: f.via } : {}) }]
+  })
 }
 
 /** The full credentials a new hello is checked against now (`readCredentialFile`'s `full`) */
@@ -152,7 +200,7 @@ export function readFullCredentials(
  * A full credential as a hub's machine row lists it (#1405): never its verifier. `gone`: no longer listed, but a socket
  * said hello with it on this host (`UsedCredentials`)
  */
-export type ListedCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean; check?: string }
+export type ListedCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean; check?: string; publicKey?: string }
 
 /**
  * The full credentials a socket said hello with on this host, kept while it runs (#1405 review), so that one withdrawn
@@ -174,18 +222,22 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  */
 export class UsedCredentials {
   private seq = 0
-  // By id and verifier: an id another secret reused is a second entry, not the first one overwritten (#1405 review)
-  private readonly used = new Map<string, { id: string; verifier: string; label: string; created: number; replaced: boolean; seq: number }>()
+  /*
+   * By id and verifier, or by id and public key for a key entry (#1711): an id another secret or another key reused is a
+   * second entry, not the first one overwritten (#1405 review)
+   */
+  private readonly used = new Map<string, { id: string; verifier?: string; publicKey?: string; label: string; created: number; replaced: boolean; seq: number }>()
 
   constructor(private readonly max = 256) {}
 
-  /** A socket said hello with `c` */
-  saw(c: FullCredential): void {
+  /** A socket said hello with `c`: a full credential, or a hub's key entry (#1711) */
+  saw(c: FullCredential | KeyCredential): void {
     if (c.via === 'handover') return
-    const key = `${c.id}:${c.verifier}`
+    const secret = 'verifier' in c ? { verifier: c.verifier } : { publicKey: c.publicKey }
+    const key = `${c.id}:${secret.verifier ?? `key:${secret.publicKey}`}`
     const known = this.used.get(key)
     this.used.delete(key)
-    this.used.set(key, { id: c.id, verifier: c.verifier, label: c.label, created: c.created ?? 0, replaced: c.replaced === true, seq: known?.seq ?? ++this.seq })
+    this.used.set(key, { id: c.id, ...secret, label: c.label, created: c.created ?? 0, replaced: c.replaced === true, seq: known?.seq ?? ++this.seq })
     for (const id of this.used.keys()) {
       if (this.used.size <= this.max) break
       this.used.delete(id)
@@ -193,18 +245,21 @@ export class UsedCredentials {
   }
 
   /** Those used here that `listed` no longer names and no same-way successor took the place of, as `gone` */
-  gone(listed: readonly { id: string; label?: string; replaced?: boolean; verifier?: string }[], nonce?: string): ListedCredential[] {
+  gone(listed: readonly { id: string; label?: string; replaced?: boolean; verifier?: string; publicKey?: string }[], nonce?: string): ListedCredential[] {
     const all = [...this.used.values()].map((u) => [u.id, u] as const)
     return [...this.used.values()].flatMap((u) => {
       const id = u.id
-      // Still listed: by id, and by verifier too when the listing gives it (one under a reused id is another credential)
-      if (listed.some((c) => c.id === id && (c.verifier === undefined || c.verifier === u.verifier))) return []
+      /*
+       * Still listed: by id, and by verifier or public key too when the listing gives it (one under a reused id is another
+       * credential, and a verifier entry never stands for a key entry of the same id, nor the other way round)
+       */
+      if (listed.some((c) => c.id === id && sameSecretOf(c, u))) return []
       // The next credential of its label used here, by first use
       const next = all.filter(([, s]) => s.label === u.label && s.seq > u.seq).sort(([, a], [, b]) => a.seq - b.seq)[0]
       if (next && !next[1].replaced) return []
       // Or, before any of it said hello here, the one of its label the file names now (#1405 review)
       if (!next && listed.some((c) => c.label === u.label && c.replaced === false)) return []
-      return [{ id, label: u.label, created: u.created, replaced: u.replaced, gone: true, ...(nonce ? { check: credentialCheck(u.verifier, nonce) } : {}) }]
+      return [{ id, label: u.label, created: u.created, replaced: u.replaced, gone: true, ...secretFields(u, nonce) }]
     })
   }
 
@@ -216,12 +271,27 @@ export class UsedCredentials {
     return [...this.used.values()]
       .filter((u) => u.label.startsWith('hub:'))
       .sort((a, b) => a.seq - b.seq)
-      .map((u) => ({ id: u.id, label: u.label, created: u.created, ...(nonce ? { check: credentialCheck(u.verifier, nonce) } : {}) }))
+      .map((u) => ({ id: u.id, label: u.label, created: u.created, ...secretFields(u, nonce) }))
   }
 }
 
+/** Whether a listed entry and a used one are the same secret: the same verifier, or the same public key; a listing that gives neither by id alone */
+function sameSecretOf(c: { verifier?: string; publicKey?: string }, u: { verifier?: string; publicKey?: string }): boolean {
+  if (c.verifier === undefined && c.publicKey === undefined) return true
+  return u.verifier !== undefined ? c.verifier === u.verifier : c.publicKey === u.publicKey
+}
+
+/**
+ * What a listing says of an entry's secret: a `credentialCheck` of its verifier, for the hub to compare (#1405 review),
+ * or the public key of a key entry, which is public and which a hub compares with its own (#1711, §4.4)
+ */
+function secretFields(u: { verifier?: string; publicKey?: string }, nonce: string | undefined): { check?: string; publicKey?: string } {
+  if (u.verifier !== undefined) return nonce ? { check: credentialCheck(u.verifier, nonce) } : {}
+  return u.publicKey !== undefined ? { publicKey: u.publicKey } : {}
+}
+
 /** A credential used on this host under a hub's label (`UsedCredentials.underHubLabels`) */
-export type UsedUnderHubLabel = { id: string; label: string; created: number; check?: string }
+export type UsedUnderHubLabel = { id: string; label: string; created: number; check?: string; publicKey?: string }
 
 /**
  * What `host.credentials` answers (#1405): the full credentials the file names, and those used here and gone since
@@ -237,7 +307,7 @@ export function credentialsReport(path: string, read: (p: string) => string, use
   let listed = readListing(path, read)
   const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
   if (!listed && unreadable === null) listed = readListing(path, read)
-  const shown = listed?.map(({ verifier, ...c }) => (nonce ? { ...c, check: credentialCheck(verifier, nonce) } : c))
+  const shown = listed?.map(({ verifier, publicKey, ...c }) => ({ ...c, ...secretFields({ verifier, publicKey }, nonce) }))
   return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce) }
 }
 
@@ -250,8 +320,11 @@ export function readListedCredentials(path: string, read: (p: string) => string)
   return readListing(path, read)?.map(({ verifier: _verifier, ...c }) => c) ?? null
 }
 
-/** `readListedCredentials` with each entry's verifier, which stays on this host: only a `credentialCheck` of it leaves */
-function readListing(path: string, read: (p: string) => string): (ListedCredential & { verifier: string })[] | null {
+/**
+ * `readListedCredentials` with each full entry's verifier, which stays on this host: only a `credentialCheck` of it
+ * leaves. The hubs' key entries follow with their public keys (#1711, §4.4), which are public
+ */
+function readListing(path: string, read: (p: string) => string): (ListedCredential & { verifier?: string })[] | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(read(path))
@@ -260,12 +333,14 @@ function readListing(path: string, read: (p: string) => string): (ListedCredenti
   }
   const o = asObj(parsed)
   if (o.v !== 2 || !Array.isArray(o.full)) return null
-  return o.full.flatMap((e: unknown) => {
+  const full = o.full.flatMap((e: unknown) => {
     const f = asObj(e)
     if (!isListedEntry(f)) return []
     const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
     return [{ id: f.id, label: f.label, created, replaced: f.replaced === true, verifier: f.verifier }]
   })
+  const keys = readKeyEntries(o.keys).map((k) => ({ id: k.id, label: k.label, created: k.created ?? 0, replaced: k.replaced === true, publicKey: k.publicKey }))
+  return [...full, ...keys]
 }
 
 
@@ -277,7 +352,7 @@ function readListing(path: string, read: (p: string) => string): (ListedCredenti
 export const LAST_READ_KEPT_MS = 5_000
 
 /** The last list read from each file and when, for a read that stays refused (`readCredentialFile`) */
-const lastRead = new Map<string, { full: FullCredential[]; at: number }>()
+const lastRead = new Map<string, { full: FullCredential[]; keys: KeyCredential[]; at: number }>()
 
 /** Since when each file has been refused, for `unreadable` */
 const refusedSince = new Map<string, number>()
@@ -287,8 +362,23 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
-/** Whether `given` is one of `full`, compared in constant time against each */
+/**
+ * Whether `given` is one of `full` that opens the host whole, compared in constant time against each. An entry an older
+ * launcher made for one `host.handover` call (`via: 'handover'`) is not (#1711, docs/plans/key-pairing.md §4.4): that
+ * call takes limited rights now, and such a credential crossed a port to whatever answered the proof under the key
+ */
 export function isFullCredential(full: readonly FullCredential[], given: string): FullCredential | null {
+  const found = matchCredential(full, given)
+  return found && found.via !== 'handover' ? found : null
+}
+
+/** Whether `given` is an older launcher's one-call hand-over credential (`via: 'handover'`): limited rights, never full (§4.4) */
+export function isHandoverCredential(full: readonly FullCredential[], given: string): FullCredential | null {
+  const found = matchCredential(full, given)
+  return found && found.via === 'handover' ? found : null
+}
+
+function matchCredential(full: readonly FullCredential[], given: string): FullCredential | null {
   const mine = Buffer.from(verifierOf(given), 'hex')
   let found: FullCredential | null = null
   for (const c of full) {

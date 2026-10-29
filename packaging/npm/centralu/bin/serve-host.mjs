@@ -6,6 +6,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { dirname, join } from 'node:path'
+import { LINK_NONCE_BYTES, signedHostKey } from './serve-keys.mjs'
 
 /**
  * The protocol a host folder speaks, from the `bundle-info.json` the bundler writes next to
@@ -34,7 +35,7 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped }) {
+export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped, hostKey, keyId }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
    * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
@@ -44,10 +45,16 @@ export function connectionLine({ port, token, credential, limited, others, versi
    * `pair` (#1405): `--connection --pair <label>` hands out a full credential of its own; without it the line carries the
    * limited credential only
    */
-  const takes = ['from', 'window', 'pair']
+  /*
+   * `pairKey` (#1711, docs/plans/key-pairing.md §4.2): `--pair-key` made a key pairing, said only on a line that is one
+   * (`hostKey` and `keyId`, and no `token`). A line from `--pair-key` without it is a verifier pairing
+   */
+  const takes = ['from', 'window', 'pair', ...(hostKey && keyId ? ['pairKey'] : [])]
   return JSON.stringify({
     v: 1,
     port,
+    // The key the running host signs with, and the hub's key entry it signs for (#1711); never with a credential
+    ...(hostKey && keyId ? { hostKey, keyId } : {}),
     // A full credential only to `--pair` (#1405), with its id for the proof; an older serve always printed its token
     ...(token ? { token } : {}),
     ...(credential ? { credential } : {}),
@@ -260,6 +267,85 @@ export function hostProvesOf(entry) {
     // not a bundle; try the source below
   }
   return existsSync(join(dirname(entry), 'transport', 'host-proof.ts'))
+}
+
+/**
+ * Whether the host at `entry` takes a hub's key hello (#1711): a bundle says so in `bundle-info.json` (`keyPairing`), a
+ * host run from source has `transport/link-proof.ts`. `--pair-key` reports a key derived from serve.json only for a host
+ * started next that will sign with it (docs/plans/key-pairing.md §4.2)
+ */
+export function takesKeyHellos(entry) {
+  try {
+    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).keyPairing === 1
+  } catch {
+    // not a bundle; try the source below
+  }
+  return existsSync(join(dirname(entry), 'transport', 'link-proof.ts'))
+}
+
+/**
+ * Asks the host on `port` to sign for the key entry `keyId` (#1711, docs/plans/key-pairing.md §4.2 step 3), as a hub
+ * would: a `prove` naming it, with a nonce of this launcher's, and the answer's signature checked against the key it
+ * carries, the hub's key `hubKey` and the address `127.0.0.1:<port>`. No hello follows. One of:
+ *
+ * - `{ outcome: 'signed', hostKey }`: the running host signs, with `hostKey` (after `--rotate-token`, still its old one);
+ * - `{ outcome: 'unsigned' }`: a proof with no signature at all, from a host from before key pairing still running;
+ * - `{ outcome: 'none' }`: the connection was refused, so nothing listens there;
+ * - `{ outcome: 'unknown' }`: anything else (no answer within `timeoutMs`, a socket closed before a proof, a proof that is
+ *   malformed or does not verify, no WebSocket in this Node), which pairs as a host that does not sign does.
+ */
+export async function probeKeyProof({ port, keyId, hubKey, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket, connectTo = connect }) {
+  // Refused at once: nothing listens. Told apart from a socket that opens and says nothing, which is not known to be nothing
+  const reach = await new Promise((resolve) => {
+    const s = connectTo({ host: '127.0.0.1', port })
+    const done = (r) => {
+      s.destroy()
+      resolve(r)
+    }
+    s.setTimeout(timeoutMs, () => done('unknown'))
+    s.once('connect', () => done('open'))
+    s.once('error', (e) => done(e?.code === 'ECONNREFUSED' ? 'none' : 'unknown'))
+  })
+  if (reach !== 'open') return { outcome: reach }
+  if (typeof WebSocketImpl !== 'function') return { outcome: 'unknown' }
+  const nonce = randomBytes(LINK_NONCE_BYTES).toString('base64url')
+  return new Promise((resolve) => {
+    let ws = null
+    let settled = false
+    const done = (r) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        ws?.close()
+      } catch {
+        // already closed
+      }
+      resolve(r)
+    }
+    const timer = setTimeout(() => done({ outcome: 'unknown' }), timeoutMs)
+    try {
+      ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
+    } catch {
+      return done({ outcome: 'unknown' })
+    }
+    ws.onopen = () => ws.send(JSON.stringify({ kind: 'prove', nonce, key: keyId }))
+    ws.onmessage = (ev) => {
+      let m = null
+      try {
+        m = JSON.parse(String(ev.data))
+      } catch {
+        // not a frame
+      }
+      const hostKey = signedHostKey(m, { hubNonce: nonce, hubKey, keyId, port })
+      if (hostKey) return done({ outcome: 'signed', hostKey })
+      // A proof without any of the three fields: a host that does not sign. One with some of them and no valid signature is not known
+      const unsigned = m?.kind === 'proof' && m.nonce === nonce && m.hostNonce === undefined && m.hostKey === undefined && m.sig === undefined
+      done({ outcome: unsigned ? 'unsigned' : 'unknown' })
+    }
+    ws.onerror = () => done({ outcome: 'unknown' })
+    ws.onclose = () => done({ outcome: 'unknown' })
+  })
 }
 
 /** The answer a host holding `token` gives to a `prove` of `nonce` (the host's `hostProof`) */

@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { credentialsReport, readCredentialFile, UsedCredentials, type FullCredential } from './lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -827,8 +827,10 @@ const server = new HostServer({
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
   ...(serveState
-    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential) => usedCredentials.saw(c) }
+    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential | KeyCredential) => usedCredentials.saw(c) }
     : {}),
+  // What a hub's key pairing signs as this host's address under a keeper: the front door's, not the inner port (#1711)
+  ...(launch.frontDoor !== undefined ? { frontDoor: launch.frontDoor } : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)
