@@ -3894,7 +3894,7 @@ describe('machines.revokeCredential (#1405)', () => {
     expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
   })
 
-  it('lists one used there and withdrawn since, as gone, with nothing to revoke', async () => {
+  it('lists one used, then withdrawn, as gone, with nothing to revoke', async () => {
     const { hub, set } = await serveMachine([own])
     set([own, { ...cred('abab1212', 'x'), gone: true }])
     await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
