@@ -1,10 +1,42 @@
 /** The file of full credentials used on a `centralu serve` host (#1712), on the in-memory OS of each family */
 import { describe, expect, it } from 'vitest'
-import { credentialCheck, credentialsReport, encodeUsedRecord, parseUsedRecords, UsedCredentials, usedEvent, verifierOf, type FullCredential } from './serve-credentials.js'
+import { credentialCheck, credentialsReport, encodeUsedRecord, parseUsedRecords, UsedCredentials, usedEvent, verifierOf, WITHDRAWN_KEPT_MS, type FullCredential, type UsedRecord } from './serve-credentials.js'
 import { UsedCredentialsFile, usedCredentialsPath } from './used-credentials-file.js'
+import type { Os } from '../os/port.js'
 import { memoryOs } from '../os/memory.js'
 
 const c = (id: string, label: string, o: Partial<FullCredential> = {}): FullCredential => ({ id, label, verifier: verifierOf(id), created: 1, replaced: false, ...o })
+/** The n-th id, in order */
+const idOf = (n: number): string => n.toString(16).padStart(8, '0')
+const recordOf = (n: number, o: Partial<UsedRecord> = {}): UsedRecord => ({ id: idOf(n), verifier: verifierOf(idOf(n)), label: 'x', created: n, replaced: false, ...o })
+
+/** An `Os` whose file reads are counted: the bytes `readSync` and `readFileSync` took */
+function counted(os: Os) {
+  const read = { bytes: 0 }
+  const files = new Proxy(os.files, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target) as unknown
+      if (typeof value !== 'function') return value
+      const fn = value as (...a: unknown[]) => unknown
+      if (key === 'readSync') {
+        return (...a: unknown[]) => {
+          const n = fn.apply(target, a) as number
+          read.bytes += n
+          return n
+        }
+      }
+      if (key === 'readFileSync') {
+        return (...a: unknown[]) => {
+          const out = fn.apply(target, a) as { length: number }
+          read.bytes += out.length
+          return out
+        }
+      }
+      return fn.bind(target)
+    },
+  })
+  return { os: new Proxy(os, { get: (target, key) => (key === 'files' ? files : Reflect.get(target, key, target)) }), read }
+}
 
 describe.each(['posix', 'windows'] as const)('the record of used full credentials, kept in a file (#1712), on %s', (family) => {
   /** A data folder, and hosts that start in it one after the other, as a restart does */
@@ -16,12 +48,13 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     const file = usedCredentialsPath(serveState, os)
     const said: string[] = []
     /** What a host does at a full hello (main.ts `onFullHello`) */
-    const host = (max?: number) => {
+    const host = (max?: number, osOf: Os = os) => {
       const used = new UsedCredentials(max)
-      const store = new UsedCredentialsFile(file, used, os, max, (l) => said.push(l))
+      const store = new UsedCredentialsFile(file, used, osOf, max, (l) => said.push(l))
       store.load()
       return {
         used,
+        store,
         hello: (cred: FullCredential) => {
           const first = used.saw(cred)
           if (first) store.add(first)
@@ -121,6 +154,207 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     f.host().hello(c('aaaaaaaa', 'x'))
     f.os.files.appendFileSync(f.file, `${JSON.stringify({ v: 1, id: 'bbbbbbbb', label: 'y', verifier: verifierOf('b'), created: 2, replaced: true, later: 'field' })}\n`)
     expect(f.host().used.records().map((r) => r.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+  })
+
+  it('holds the file’s newest records however often it is read, and a use made with no hub linked shows at every read and after a restart (more in the file than are kept)', () => {
+    const f = folder()
+    // A host before this one left 30 records; this one keeps 8 and rewrites the file past 32 lines
+    f.os.files.writeFileSync(f.file, Array.from({ length: 30 }, (_, i) => encodeUsedRecord(recordOf(i + 1))).join(''))
+    const h = f.host(8)
+    const ids = () => h.used.records().map((r) => Number.parseInt(r.id, 16))
+    expect(ids()).toEqual([23, 24, 25, 26, 27, 28, 29, 30])
+    // Read again and again: the same newest 8, not the older half put back as newest and the newest dropped
+    for (let i = 0; i < 4; i++) {
+      h.store.refresh()
+      expect(ids()).toEqual([23, 24, 25, 26, 27, 28, 29, 30])
+    }
+    // A use of something paired, used and withdrawn with no hub linked
+    expect(h.hello(c(idOf(31), 'x'))).not.toBeNull()
+    for (let i = 0; i < 4; i++) {
+      h.store.refresh()
+      expect(ids()).toEqual([24, 25, 26, 27, 28, 29, 30, 31])
+      expect(h.used.gone([]).map((g) => g.id)).toContain(idOf(31))
+    }
+    // The hub's own link, and a window, say hello: the file passes 32 lines and is rewritten from the memory
+    h.hello(c(idOf(32), 'hub:test-0123abcd'))
+    h.hello(c(idOf(33), 'window'))
+    expect(f.os.files.readFileSync(f.file, 'utf8').trim().split('\n')).toHaveLength(8)
+    for (let i = 0; i < 4; i++) {
+      h.store.refresh()
+      expect(ids()).toEqual([26, 27, 28, 29, 30, 31, 32, 33])
+      expect(h.used.gone([]).map((g) => g.id)).toContain(idOf(31))
+    }
+    // And after a restart, with the file as it was left
+    const again = f.host(8)
+    expect(again.used.records().map((r) => r.id)).toContain(idOf(31))
+    expect(again.used.ids()).toContain(idOf(31))
+    expect(again.used.gone([]).map((g) => g.id)).toContain(idOf(31))
+  })
+
+  it('keeps a credential whose newest line is among the kept ones when an older line of it is far back', () => {
+    const f = folder()
+    // Used long ago, then 12 others, then written again (a record evicted from memory is new at its next hello)
+    const lines = [recordOf(1), ...Array.from({ length: 12 }, (_, i) => recordOf(i + 2)), recordOf(1)]
+    f.os.files.writeFileSync(f.file, lines.map(encodeUsedRecord).join(''))
+    const h = f.host(8)
+    expect(h.used.ids()).toContain(idOf(1))
+    expect(h.used.ids()).toHaveLength(8)
+    expect(h.hello(c(idOf(1), 'x'))).toBeNull()
+  })
+
+  it('writes a newline first when the file ends in a line that was cut short, so the next record is not lost with it', () => {
+    const f = folder()
+    f.os.files.writeFileSync(f.file, `${encodeUsedRecord(recordOf(1))}{"v":1,"id":"bbbbbbbb","verif`)
+    const h = f.host()
+    expect(h.used.ids()).toEqual([idOf(1)])
+    expect(h.hello(c(idOf(2), 'x'))).not.toBeNull()
+    // Still read by this host (its memory), and by one that starts after it
+    expect(h.used.ids()).toEqual([idOf(1), idOf(2)])
+    expect(f.host().used.ids()).toEqual([idOf(1), idOf(2)])
+    // A file that ends in a newline gets no empty line before the record
+    const g = folder()
+    g.host().hello(c(idOf(1), 'x'))
+    g.host().hello(c(idOf(2), 'x'))
+    expect(g.os.files.readFileSync(g.file, 'utf8')).not.toMatch(/\n\n/)
+    expect(g.os.files.readFileSync(g.file, 'utf8').split('\n')).toHaveLength(3)
+  })
+
+  it('reads a line cut short once it is finished, and not before', () => {
+    const f = folder()
+    const h = f.host()
+    const line = encodeUsedRecord(recordOf(1))
+    f.os.files.appendFileSync(f.file, line.slice(0, 30))
+    h.store.refresh()
+    expect(h.used.ids()).toEqual([])
+    f.os.files.appendFileSync(f.file, line.slice(30))
+    h.store.refresh()
+    expect(h.used.ids()).toEqual([idOf(1)])
+  })
+
+  it('reads the lines another program appended once, and not again at every report', () => {
+    const f = folder()
+    const { os, read } = counted(f.os)
+    const h = f.host(256, os)
+    const foreign = Array.from({ length: 3000 }, (_, i) => encodeUsedRecord(recordOf(i + 1))).join('')
+    f.os.files.appendFileSync(f.file, foreign)
+    read.bytes = 0
+    h.store.refresh()
+    expect(read.bytes).toBeGreaterThanOrEqual(foreign.length)
+    expect(read.bytes).toBeLessThan(foreign.length + 1024)
+    // Nothing new: nothing read, however many reports
+    read.bytes = 0
+    for (let i = 0; i < 5; i++) h.store.refresh()
+    expect(read.bytes).toBe(0)
+    // One line more: that line, not the file
+    f.os.files.appendFileSync(f.file, encodeUsedRecord(recordOf(3001)))
+    read.bytes = 0
+    h.store.refresh()
+    expect(read.bytes).toBeLessThan(400)
+    expect(h.used.records().at(-1)?.id).toBe(idOf(3001))
+  })
+
+  it('takes at most a set size of new lines at a read, the newest, and says so', () => {
+    const f = folder()
+    const used = new UsedCredentials()
+    const h = new UsedCredentialsFile(f.file, used, f.os, 256, (l) => f.said.push(l), 2048)
+    f.os.files.writeFileSync(f.file, Array.from({ length: 200 }, (_, i) => encodeUsedRecord(recordOf(i + 1))).join(''))
+    h.load()
+    const ids = used.records().map((r) => Number.parseInt(r.id, 16))
+    // The newest lines that fit, whole ones: it ends at the last line and starts inside the file
+    expect(ids.at(-1)).toBe(200)
+    expect(ids.length).toBeGreaterThan(5)
+    expect(ids.length).toBeLessThan(15)
+    expect(ids[0]).toBeGreaterThan(180)
+    expect(f.said.join()).toContain('are taken in, the rest is skipped')
+    // And the next read starts where this one ended
+    f.os.files.appendFileSync(f.file, encodeUsedRecord(recordOf(201)))
+    h.refresh()
+    expect(used.records().at(-1)?.id).toBe(idOf(201))
+    expect(f.said).toHaveLength(1)
+  })
+
+  it('reads a file that was replaced or made shorter from its start', () => {
+    const f = folder()
+    const h = f.host(8)
+    for (let i = 1; i <= 5; i++) f.os.files.appendFileSync(f.file, encodeUsedRecord(recordOf(i)))
+    h.store.refresh()
+    expect(h.used.ids()).toHaveLength(5)
+    // Another host shortened it (a rewrite): one record, none of the above
+    f.os.files.writeFileSync(f.file, encodeUsedRecord(recordOf(9)))
+    h.store.refresh()
+    expect(h.used.ids()).toContain(idOf(9))
+    // And removed, then made again with a record
+    f.os.files.rmSync(f.file)
+    h.store.refresh()
+    f.os.files.writeFileSync(f.file, encodeUsedRecord(recordOf(10)))
+    h.store.refresh()
+    expect(h.used.ids()).toContain(idOf(10))
+  })
+
+  it('notes a withdrawn credential when it first finds it so, keeps that across a restart, and drops the record 7 days after, from memory and the file', () => {
+    const f = folder()
+    const h = f.host()
+    h.hello(c(idOf(1), 'x'))
+    h.hello(c(idOf(2), 'y'))
+    const held = [{ id: idOf(2), verifier: verifierOf(idOf(2)) }]
+    const t0 = Date.UTC(2026, 5, 1)
+    // Found withdrawn at t0 (the second is still named, so it is not touched)
+    h.store.settle(held, t0)
+    expect(f.os.files.readFileSync(f.file, 'utf8')).toContain(`"goneAt":${t0}`)
+    expect(h.used.ids()).toEqual([idOf(1), idOf(2)])
+    // A host that starts again later keeps the clock where it was, not where it started: a restart a day does not renew it
+    const day = 24 * 60 * 60 * 1000
+    let restarted = f.host()
+    restarted.store.settle(held, t0 + 3 * day)
+    expect(restarted.used.ids()).toEqual([idOf(1), idOf(2)])
+    restarted = f.host()
+    restarted.store.settle(held, t0 + WITHDRAWN_KEPT_MS - 1)
+    expect(restarted.used.ids()).toEqual([idOf(1), idOf(2)])
+    restarted.store.settle(held, t0 + WITHDRAWN_KEPT_MS)
+    expect(restarted.used.ids()).toEqual([idOf(2)])
+    expect(restarted.used.gone(held)).toEqual([])
+    // And from the file: a host that starts after has only the one still named
+    expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain(idOf(1))
+    expect(f.host().used.ids()).toEqual([idOf(2)])
+  })
+
+  it('notes nothing withdrawn while serve.json cannot be read, and never drops a credential still named', () => {
+    const f = folder()
+    const h = f.host()
+    h.hello(c(idOf(1), 'x'))
+    // credentialsReport tells `settle` only what it read: nothing when it cannot read the file
+    const settled: unknown[] = []
+    credentialsReport(f.serveState, () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }) }, h.used, undefined, (l) => settled.push(l))
+    expect(settled).toEqual([])
+    const named = JSON.stringify({ v: 2, key: 'k', full: [{ id: idOf(1), label: 'x', verifier: verifierOf(idOf(1)), created: 1 }] })
+    const report = credentialsReport(f.serveState, () => named, h.used, undefined, (l) => h.store.settle(l, Date.now() + 365 * 24 * 60 * 60 * 1000))
+    expect(report.usedIds).toEqual([idOf(1)])
+    expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain('goneAt')
+  })
+})
+
+describe('the record in memory', () => {
+  it('counts a credential once however many lines name it: it keeps the place of its first use, whichever way it is read again', () => {
+    const used = new UsedCredentials()
+    const a = recordOf(1, { label: 'x' })
+    const b = recordOf(2, { label: 'x' })
+    used.load([a, b])
+    // Read again, the file replaced by one that holds only the first (a swap's rewrite, a re-read from its start)
+    used.load([a])
+    expect(used.records().map((r) => r.id)).toEqual([idOf(2), idOf(1)])
+    expect(used.ids().sort()).toEqual([idOf(1), idOf(2)])
+    // The first is still the earlier use: the second is its pairer again, so only the second is news
+    expect(used.gone([]).map((g) => g.id)).toEqual([idOf(2)])
+  })
+
+  it('drops the one whose newest line is the oldest, not the one used longest ago', () => {
+    const used = new UsedCredentials(2)
+    used.load([recordOf(1), recordOf(2), recordOf(3)])
+    expect(used.ids().sort()).toEqual([idOf(2), idOf(3)])
+    // Used again: known, so no new line and no new place
+    expect(used.saw({ ...c(idOf(2), 'x'), verifier: verifierOf(idOf(2)) })).toBeNull()
+    used.load([recordOf(4)])
+    expect(used.ids().sort()).toEqual([idOf(3), idOf(4)])
   })
 })
 

@@ -85,6 +85,11 @@ const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAIT
 const CREDENTIALS_MS = 30_000
 /** How many of a machine's other full credentials its row lists; the rest are counted (`otherCredentialsMore`) */
 const OTHER_CREDENTIALS_SHOWN = 32
+/** How long a withdrawal from the row is remembered (#1712): longer than the week the machine's host keeps its record of the credential (`WITHDRAWN_KEPT_MS`) */
+const REVOKED_KEPT_MS = 14 * 24 * 60 * 60 * 1000
+
+/** A credential as the row shows one that is held: without the mark of one withdrawn */
+const withoutGone = ({ gone: _gone, ...c }: RemoteCredential): RemoteCredential => c
 /** How many credentials the host told this hub of (`host_credential_used`) it keeps until a read answers for them (#1712) */
 const REPORTED_USED_KEPT = 64
 
@@ -120,8 +125,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * it. Kept for as long as this hub runs, since the link pairs again at once and the poll would not see it
    */
   private ownCredentialTaken = false
-  /** The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said */
+  /**
+   * The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said.
+   * Kept in the registry (#1712) for `REVOKED_KEPT_MS`, so a hub that starts again does not list them as used and withdrawn
+   * again: the machine's host keeps its record of a withdrawn credential for a week
+   */
   protected revokedHere = new Set<string>()
+  private revokedAt = new Map<string, number>()
   /**
    * The machine's full credentials as this link last read them through `host.credentials` (#1405), the hub's own among
    * them; null until read, and on a machine that does not answer it (the connection line's `others` stand then)
@@ -139,9 +149,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * `host_credential_used`), and that no `host.credentials` read has answered for since: shown as used and gone, since
    * a credential used and withdrawn before the next read (or a host stopped right after) is what they are for. A read
    * that succeeds replaces them with the host's own answer, which has them (its record is written before the event is
-   * sent). `settled`: the read the event started has ended without an answer, so they may be shown while connected
+   * sent). `settled`: the read the event started has ended without an answer, so they may be shown while connected.
+   * `answered`: a read that began after the event answered and does not list it, so it is withdrawn (shown "used, then
+   * withdrawn"); until one has, nothing says it is not still held, and it is shown as held, as a listed one is
    */
-  private reportedUsed: { key: string; seq: number; settled: boolean; credential: RemoteCredential }[] = []
+  private reportedUsed: { key: string; seq: number; settled: boolean; answered: boolean; credential: RemoteCredential }[] = []
   private reportSeq = 0
   /** The read under way for what the host told (`readForReported`), and whether another was asked for while it ran */
   private reportRead: Promise<void> | null = null
@@ -263,6 +275,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
     // When it was last up, kept across restarts (#1398)
     this.lastConnectedAt = record.lastConnectedAt ?? null
+    // What the person withdrew from the row before this run (#1712), while the host there could still hold a record of it
+    for (const [credential, at] of Object.entries(record.revoked ?? {})) {
+      if (Date.now() - at >= REVOKED_KEPT_MS) continue
+      this.revokedAt.set(credential, at)
+      this.revokedHere.add(credential)
+    }
     tunnel.onDown((reason) => this.transportDown(reason))
   }
 
@@ -453,8 +471,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const all = this.credentials ?? line?.others ?? null
     const credentialFileUnreadable = this.fileUnreadable
     const connected = this.status === 'connected'
-    // Told by the host over this link, not yet answered by a read; shown also while the link is away, as it was seen (#1712)
-    const told = this.reportedUsed.filter((r) => (r.settled || !connected) && !this.revokedHere.has(r.credential.id)).map((r) => r.credential)
+    // Told by the host over this link; shown also while the link is away. Withdrawn once a read has answered and does not list it, held until then (#1712)
+    const told = this.reportedUsed.filter((r) => (r.settled || !connected) && !this.revokedHere.has(r.credential.id)).map((r) => (r.answered ? r.credential : withoutGone(r.credential)))
     if (!connected || !line || !all) {
       const gone = told.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, own: _own, ...c }) => ({ ...c, hubsName: !!line?.pairedAs && c.label === line.pairedAs }))
       return { otherCredentials: gone.length ? gone : null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken, credentialFileUnreadable }
@@ -467,6 +485,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => this.isCurrent(c, line) && !c.gone)
     const more = others.slice(OTHER_CREDENTIALS_SHOWN).filter((c) => !c.gone).length
     return { otherCredentials: shown, otherCredentialsMore: more, ownCredentialGone: ownGone || this.ownCredentialTaken, credentialFileUnreadable }
+  }
+
+  /** The person withdrew `id` from the row: kept in the registry, so it is not listed again after this hub restarts (#1712) */
+  protected rememberRevoked(id: string): void {
+    this.revokedAt.set(id, Date.now())
+    for (const [credential, at] of this.revokedAt) if (Date.now() - at >= REVOKED_KEPT_MS) this.revokedAt.delete(credential)
+    this.deps.registry.setRevoked?.(this.id, Object.fromEntries(this.revokedAt))
   }
 
   /** An entry's id with its check, for telling two secrets under one id apart (`credentialCheck`) */
@@ -542,7 +567,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const key = `${c.id}:${nonce}`
     if (this.reportedUsed.some((r) => r.key === key)) return
     const seq = ++this.reportSeq
-    this.reportedUsed = [...this.reportedUsed, { key, seq, settled: false, credential: { id: c.id, label: c.label, created: c.created, replaced: c.replaced, gone: true, own: false } }].slice(-REPORTED_USED_KEPT)
+    this.reportedUsed = [...this.reportedUsed, { key, seq, settled: false, answered: false, credential: { id: c.id, label: c.label, created: c.created, replaced: c.replaced, gone: true, own: false } }].slice(-REPORTED_USED_KEPT)
     const read = this.readCredentials
     const settle = () => {
       const entry = this.reportedUsed.find((r) => r.seq === seq)
@@ -622,6 +647,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         if (listed) {
           const known = Array.isArray(r.usedIds) ? new Set(r.usedIds) : null
           this.reportedUsed = this.reportedUsed.filter((u) => u.seq > told || (known !== null && !known.has(u.credential.id)))
+          // What stays from before this read was answered for by it, and is not listed: withdrawn
+          for (const u of this.reportedUsed) if (u.seq <= told) u.answered = true
         }
         if (listed) this.credentials = listed
         this.fileUnreadable = unreadable

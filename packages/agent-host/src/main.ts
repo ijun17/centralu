@@ -776,7 +776,9 @@ const router: Router = new Router({
       if (!launch.serveState) return null
       // What another host of this folder wrote since this one started (a swap's overlap, #1712)
       usedCredentialsFile?.refresh()
-      return credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce)
+      // A record of a credential that serve.json no longer names is noted withdrawn, and dropped a week after (#1712)
+      const settle = (listed: readonly { id: string; verifier: string }[]) => (usedCredentialsFile ? usedCredentialsFile.settle(listed) : usedCredentials.settle(listed, Date.now()))
+      return credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce, settle)
     },
     themes,
     terminals,

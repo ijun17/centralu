@@ -174,8 +174,9 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  */
 export class UsedCredentials {
   private seq = 0
+  private rank = 0
   // By id and verifier: an id another secret reused is a second entry, not the first one overwritten (#1405 review)
-  private readonly used = new Map<string, UsedRecord & { seq: number }>()
+  private readonly used = new Map<string, Kept>()
 
   constructor(private readonly max = 256) {}
 
@@ -186,21 +187,30 @@ export class UsedCredentials {
    */
   saw(c: FullCredential): UsedRecord | null {
     if (c.via === 'handover') return null
-    const key = `${c.id}:${c.verifier}`
-    const known = this.used.get(key)
-    this.used.delete(key)
+    const key = keyOf(c)
+    if (this.used.has(key)) return null
     const rec: UsedRecord = { id: c.id, verifier: c.verifier, label: c.label, created: c.created ?? 0, replaced: c.replaced === true }
-    this.used.set(key, { ...rec, seq: known?.seq ?? ++this.seq })
+    this.used.set(key, { ...rec, seq: ++this.seq, rank: ++this.rank })
     this.trim()
-    return known ? null : rec
+    return rec
   }
 
-  /** Takes in what the file kept (#1712), in the order it was written: those already known are not counted twice */
+  /**
+   * Takes in lines of the file (#1712), in the order they were written. A credential is one record however many lines
+   * name it: it keeps the place of its first use (`seq`, which decides whose pairer again a later credential is) and
+   * takes the place of its newest line in what is kept (`rank`), so that what stays is the file's newest 256 and the
+   * order of the file is the order of the records, whichever way and however often it is read. A line that only says
+   * when the credential was found withdrawn (`goneAt`) adds that and moves nothing
+   */
   load(records: readonly UsedRecord[]): void {
     for (const r of records) {
-      const key = `${r.id}:${r.verifier}`
-      if (this.used.has(key)) continue
-      this.used.set(key, { ...r, seq: ++this.seq })
+      const key = keyOf(r)
+      const known = this.used.get(key)
+      if (!known) this.used.set(key, { ...r, seq: ++this.seq, rank: ++this.rank })
+      else {
+        if (r.goneAt !== undefined) known.goneAt = Math.min(known.goneAt ?? r.goneAt, r.goneAt)
+        else known.rank = ++this.rank
+      }
     }
     this.trim()
   }
@@ -210,16 +220,37 @@ export class UsedCredentials {
     return [...new Set([...this.used.values()].map((u) => u.id))]
   }
 
-  /** Every record kept, by first use: what the file is rewritten from when it grows past `max` */
+  /** Every record kept, in the order of the file they are written to: what the file is rewritten from when it grows past `max` */
   records(): UsedRecord[] {
-    return [...this.used.values()].sort((a, b) => a.seq - b.seq).map(({ seq: _seq, ...r }) => r)
+    return [...this.used.values()].sort((a, b) => a.rank - b.rank).map(({ seq: _seq, rank: _rank, ...r }) => r)
+  }
+
+  /**
+   * Notes which records `listed` (what `serve.json` names now) no longer holds and had not been seen without it, with
+   * `now` as when they were withdrawn, and drops those withdrawn `WITHDRAWN_KEPT_MS` ago or more (#1712). Returns the
+   * records newly noted, for the file to be told, and how many were dropped. A credential still named is not touched
+   */
+  settle(listed: readonly { id: string; verifier?: string }[], now: number): { noted: UsedRecord[]; dropped: number } {
+    const noted: UsedRecord[] = []
+    let dropped = 0
+    for (const [key, u] of this.used) {
+      if (listed.some((c) => c.id === u.id && (c.verifier === undefined || c.verifier === u.verifier))) continue
+      if (u.goneAt === undefined) {
+        u.goneAt = now
+        noted.push({ id: u.id, verifier: u.verifier, label: u.label, created: u.created, replaced: u.replaced, goneAt: now })
+      } else if (now - u.goneAt >= WITHDRAWN_KEPT_MS) {
+        this.used.delete(key)
+        dropped++
+      }
+    }
+    return { noted, dropped }
   }
 
   private trim(): void {
-    for (const id of this.used.keys()) {
-      if (this.used.size <= this.max) break
-      this.used.delete(id)
-    }
+    if (this.used.size <= this.max) return
+    // The one whose newest line is the oldest first
+    const byRank = [...this.used].sort(([, a], [, b]) => a.rank - b.rank)
+    for (const [key] of byRank.slice(0, this.used.size - this.max)) this.used.delete(key)
   }
 
   /** Those used here that `listed` no longer names and no same-way successor took the place of, as `gone` */
@@ -253,12 +284,24 @@ export class UsedCredentials {
 /** A credential used on this host under a hub's label (`UsedCredentials.underHubLabels`) */
 export type UsedUnderHubLabel = { id: string; label: string; created: number; check?: string }
 
-/** One full credential a socket said hello with on this host (`UsedCredentials`), as the host keeps it in memory and in its file (#1712) */
-export type UsedRecord = { id: string; verifier: string; label: string; created: number; replaced: boolean }
+/**
+ * One full credential a socket said hello with on this host (`UsedCredentials`), as the host keeps it in memory and in its file (#1712).
+ * `goneAt`: when the host found `serve.json` no longer naming it (ms), absent while it does
+ */
+export type UsedRecord = { id: string; verifier: string; label: string; created: number; replaced: boolean; goneAt?: number }
 
-/** One line of the file of used credentials (#1712): a record, as JSON. Lines are only ever added at the end */
+/** How long the record of a credential that `serve.json` no longer names is kept, from when the host found it withdrawn (#1712): 7 days */
+export const WITHDRAWN_KEPT_MS = 7 * 24 * 60 * 60 * 1000
+
+/** What a record is kept under: the id and the verifier, so an id another secret reused is another credential */
+const keyOf = (c: { id: string; verifier: string }): string => `${c.id}:${c.verifier}`
+
+/** A record in memory: `seq` is the order of first use, `rank` the order of its newest line in the file */
+type Kept = UsedRecord & { seq: number; rank: number }
+
+/** One line of the file of used credentials (#1712): a record, as JSON. Lines are only ever added at the end, each ending in a newline */
 export function encodeUsedRecord(r: UsedRecord): string {
-  return `${JSON.stringify({ v: 1, id: r.id, verifier: r.verifier, label: r.label, created: r.created, replaced: r.replaced })}\n`
+  return `${JSON.stringify({ v: 1, id: r.id, verifier: r.verifier, label: r.label, created: r.created, replaced: r.replaced, ...(r.goneAt !== undefined ? { goneAt: r.goneAt } : {}) })}\n`
 }
 
 /**
@@ -278,7 +321,8 @@ export function parseUsedRecords(text: string): UsedRecord[] {
     const f = asObj(parsed)
     if (f.v !== 1 || !isListedEntry(f)) return []
     const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
-    return [{ id: f.id, verifier: f.verifier, label: f.label, created, replaced: f.replaced === true }]
+    const goneAt = typeof f.goneAt === 'number' && Number.isFinite(f.goneAt) && f.goneAt > 0 ? f.goneAt : undefined
+    return [{ id: f.id, verifier: f.verifier, label: f.label, created, replaced: f.replaced === true, ...(goneAt !== undefined ? { goneAt } : {}) }]
   })
 }
 
@@ -303,11 +347,19 @@ export function usedEvent(r: UsedRecord, nonce: string = randomBytes(16).toStrin
 export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[]; usedIds?: string[] }
 
 /** `host.credentials` for the serve.json at `path` and the credentials used on this host (main.ts) */
-export function credentialsReport(path: string, read: (p: string) => string, used: UsedCredentials, nonce?: string): CredentialsReport {
+export function credentialsReport(
+  path: string,
+  read: (p: string) => string,
+  used: UsedCredentials,
+  nonce?: string,
+  /** Told what the file names, before the answer is made from it: where the records of withdrawn credentials are noted and expire (#1712) */
+  onListed?: (listed: readonly { id: string; verifier: string }[]) => void,
+): CredentialsReport {
   // Read again when the second read finds the file readable after all (a busy moment), so the answer is not null for nothing
   let listed = readListing(path, read)
   const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
   if (!listed && unreadable === null) listed = readListing(path, read)
+  if (listed) onListed?.(listed)
   const shown = listed?.map(({ verifier, ...c }) => (nonce ? { ...c, check: credentialCheck(verifier, nonce) } : c))
   return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce), usedIds: used.ids() }
 }

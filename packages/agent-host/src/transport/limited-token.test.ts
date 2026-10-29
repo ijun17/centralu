@@ -583,7 +583,7 @@ async function reportHost(o: { record?: (c: FullCredential) => void } = {}) {
   })
   server = host
   const port = await host.listen()
-  return { port, written, used, hubs }
+  return { port, written, used, hubs, host }
 }
 
 /** A socket that said hello with `token`, its frames collected; resolves once it is let in (or closed) */
@@ -624,14 +624,28 @@ describe('a full hello, reported as it is let in (#1712)', () => {
   })
 
   it('records it before the socket is let in, also when no hub is linked', async () => {
-    let atRecord: string[] | null = null
-    const h = await reportHost({ record: () => (atRecord = [...h.written]) })
-    const script = await reportConnect(h.port, REPORT_OTHER)
-    // The hello was answered, and the record was written down by then and not after
-    expect(script.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
-    expect(atRecord).toEqual([])
-    expect(h.written).toEqual(['bbbbbbbb'])
-    expect(h.used.gone([])).toHaveLength(1)
+    // What the host can see of the socket whose hello is being recorded, from inside the recording: a hub's socket that was
+    // let in already would be told what is told to the hubs now, and one that was not yet would not
+    let probed = false
+    const h = await reportHost({
+      record: (c) => {
+        if (c.id !== 'aaaaaaaa') return
+        probed = true
+        h.host.tellHubs({ type: 'host_credential_used', credential: { id: 'dddddddd', label: 'probe', created: 1, replaced: false, nonce: 'cHJvYmVub25jZQ', check: 'x' } } as never)
+      },
+    })
+    // Asking for nothing of the log: what is told now reaches this socket only if it is let in by then, not as a replay
+    const hub = await reportConnect(h.port, REPORT_HUB, { afterSeq: 1_000_000 })
+    await reportSettle()
+    expect(probed).toBe(true)
+    // The hello was answered; and nothing told while it was recorded reached its socket, which had no rights yet
+    expect(hub.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    expect(hub.told()).not.toContain('dddddddd')
+    // No hub linked (the person's window): the record is written all the same
+    const window = await reportConnect(h.port, REPORT_WINDOW)
+    expect(window.frames.some((f) => f.kind === 'hello_ok')).toBe(true)
+    expect(h.written).toEqual(['aaaaaaaa', 'cccccccc'])
+    expect(h.used.gone([])).toHaveLength(2)
   })
 
   it('lets a hello in with the hub’s link down as it does with it up: the hub is never waited on', async () => {

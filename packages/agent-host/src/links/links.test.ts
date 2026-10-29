@@ -3773,6 +3773,45 @@ describe('machines.revokeCredential (#1405)', () => {
   const cred = (id: string, label: string, replaced = false): ListedCredential => ({ id, label, created: 7, replaced })
   const own = cred('cccc3333', 'hub:hub-mac-0123abcd', true)
 
+  it('remembers what the person withdrew from the row across a restart of the hub, so a record the host keeps does not bring it back (#1712)', async () => {
+    // The host still keeps its record of the credential (listed as used and gone), for a week after it was withdrawn
+    const remote = await remoteHost(0, new Store(), { credentials: () => [own, { ...cred('aaaa1111', 'agent-script'), gone: true }] })
+    const store = new Store()
+    const exec = async () => ({ code: 0, stderr: '', stdout: `${JSON.stringify({ v: 1, revoked: true, id: 'aaaa1111' })}
+` })
+    const line = () => lineFor(remote.port, { credential: 'cccc3333', pairedAs: 'hub:hub-mac-0123abcd', others: [] })
+    const tunnelFor = () => Object.assign(new DirectTunnel(line), { exec })
+    const first = await hubHost(line, store, true, { tunnelFor, credentialsMs: 60_000 })
+    await eventually(() => first.links.list()[0]!.otherCredentials?.some((c) => c.id === 'aaaa1111') === true)
+    await (await ui(first.port)).call('machines.revokeCredential', { machineId: 'm1', credentialId: 'aaaa1111' })
+    expect(first.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
+    // The hub starts again on the same store: the row reads the host's list, which still has it, and does not list it
+    await first.links.stop()
+    const second = await hubHost(line, store, false, { tunnelFor, credentialsMs: 60_000 })
+    await eventually(() => second.links.list()[0]!.otherCredentials !== null)
+    expect(second.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
+  })
+
+  it('keeps the withdrawals per machine in the registry, forgets them with the machine, and ignores what is not a withdrawal', () => {
+    const store = new Store()
+    const registry = storeRegistry(store)
+    registry.add({ id: 'm1', name: 'Box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    expect(registry.list()[0]!.revoked).toBeUndefined()
+    registry.setRevoked?.('m1', { aaaa1111: 5, bbbb2222: 6 })
+    expect(registry.list()[0]!.revoked).toEqual({ aaaa1111: 5, bbbb2222: 6 })
+    // Only the newest 256
+    registry.setRevoked?.('m1', Object.fromEntries(Array.from({ length: 300 }, (_, i) => [i.toString(16).padStart(8, '0'), i + 1])))
+    expect(Object.keys(registry.list()[0]!.revoked ?? {})).toHaveLength(256)
+    expect(registry.list()[0]!.revoked?.['0000012b']).toBe(300)
+    store.settings.setAppSetting('links.revoked.m1', '{"aaaa1111":"yesterday","bbbb2222":9}')
+    expect(registry.list()[0]!.revoked).toEqual({ bbbb2222: 9 })
+    store.settings.setAppSetting('links.revoked.m1', 'not json')
+    expect(registry.list()[0]!.revoked).toBeUndefined()
+    registry.setRevoked?.('m1', { cccc3333: 1 })
+    registry.remove('m1')
+    expect(store.settings.appSetting('links.revoked.m1')).toBeNull()
+  })
+
   it('shows a pairing made there while the link is up, without waiting for the next link', async () => {
     const { hub, set } = await serveMachine([own])
     await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
@@ -4022,7 +4061,7 @@ describe('machines.revokeCredential (#1405)', () => {
       return { remote, hub, reads: () => reads }
     }
 
-    it('lists one used and then withdrawn, on the row, though the host stops before the hub can read it', async () => {
+    it('lists a use told of, on the row, though the host stops before the hub can read it: as held, since no read has said it was withdrawn', async () => {
       let stopped = false
       const m = await machine(() => {
         // The host is gone by the time the read the event starts is asked: it answers nothing
@@ -4033,12 +4072,33 @@ describe('machines.revokeCredential (#1405)', () => {
       stopped = true
       m.remote.server.broadcast(told('abab1212', 'a secret of that user'))
       await eventually(() => m.hub.links.list()[0]!.otherCredentials?.length === 1)
-      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'agent-script', created: 9, replaced: false, gone: true, hubsName: false }])
+      // Nothing says it is not still held: the row shows it as a held credential does, not "used, then withdrawn"
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'agent-script', created: 9, replaced: false, hubsName: false }])
       expect(JSON.stringify(m.hub.links.list()[0])).not.toMatch(/"check"|"nonce"/)
       // And the link going down with the host does not take it off the row
       await m.remote.close()
       await eventually(() => status(m.hub) !== 'connected')
-      expect(m.hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['abab1212'])
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'agent-script', created: 9, replaced: false, hubsName: false }])
+    })
+
+    it('shows a use told of as held while the read fails, and as used and withdrawn once a read answered without it', async () => {
+      let answers = false
+      const remote = await remoteHost(0, new Store(), {
+        credentials: () => {
+          if (!answers) throw new Error('the read fails')
+          // Answered: it is not listed, and the host's record does not hold it either (it started again without it)
+          return { credentials: [own], usedIds: [] }
+        },
+      })
+      const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 60_000 })
+      await eventually(() => status(hub) === 'connected')
+      remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+      expect(hub.links.list()[0]!.otherCredentials?.[0]).not.toHaveProperty('gone')
+      // A later read answers, and the list does not name it: withdrawn
+      answers = true
+      remote.server.broadcast(told('abab1212', 'a secret of that user', { nonce: 'c2Vjb25kbm9uY2U' }))
+      await eventually(() => hub.links.list()[0]!.otherCredentials?.[0]?.gone === true)
     })
 
     it('leaves it to the host’s own answer once a read has answered: the report is only for the time before', async () => {
@@ -4075,7 +4135,7 @@ describe('machines.revokeCredential (#1405)', () => {
       // Another secret under the same id is another's
       m.remote.server.broadcast(told('cccc3333', 'another secret', { label, nonce: 'b3RoZXJub25jZQ' }))
       await eventually(() => (m.hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
-      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, gone: true, hubsName: true }])
+      expect(m.hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, hubsName: true }])
     })
 
     it('drops an event it cannot read, and lists the one it can', async () => {
