@@ -687,7 +687,7 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
         </p>
       )}
       {count > 0 && <p className="text-ink">{count === 1 ? 'Something else also has full access to this machine' : `${count} others also have full access to this machine`}</p>}
-      {count === 0 && others?.some((c) => c.gone) && <p className="text-ink">Something else had full access to this machine, used it, and lost it since</p>}
+      {count === 0 && others?.some((c) => c.gone) && <p className="text-ink">Full access was used here, then withdrawn</p>}
       <ul className="mt-0.5">
         {(others ?? []).map((c) => (
           <li key={c.id} className="flex items-center gap-2 text-ink-muted" data-testid={`machine-credential-${c.id}`}>
@@ -697,7 +697,7 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
               {/* A pairing under a label already there is a change, not a silent swap (#1405) */}
               {c.hubsName ? ', under this computer’s own name but not made by it' : c.replaced ? ', which replaced an earlier one of that name' : ''}
               {/* Used there, then withdrawn before a read listed it (#1405 review): nothing left to revoke */}
-              {c.gone ? ', used there and withdrawn since' : ''}
+              {c.gone ? ', used, then withdrawn' : ''}
             </span>
             {!c.gone && (
               <button

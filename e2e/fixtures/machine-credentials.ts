@@ -90,4 +90,27 @@ export function machineCredentialsTests(): void {
     await expect(page.getByTestId('machine-credential-file-unreadable-box')).toContainText("This machine's credential file cannot be read there")
     await expect(page.getByTestId('machine-own-credential-gone-box')).toHaveCount(0)
   })
+
+  // Owner's wording (#1405): used, then withdrawn before any read listed it; nothing left to revoke
+  test('one used and then withdrawn is said so, and it is the only line when no other credential is left', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-machines').click()
+    const open = page.getByTestId('machines-add-open')
+    if (await open.isVisible()) await open.click()
+    await page.getByTestId('machines-add-name').fill('Box')
+    await page.getByTestId('machines-add-target').fill('me@box')
+    await page.getByTestId('machines-add-confirm').click()
+    await expect(page.getByTestId('machine-row-box')).toBeVisible()
+    await page.evaluate(() => {
+      const mock = (window as any).__mock
+      const row = mock.machinesList.find((m: { id: string }) => m.id === 'box')
+      row.otherCredentials = [{ id: 'cccc3333', label: 'agent-script', created: Date.UTC(2026, 9, 21), gone: true }]
+      mock.emit({ type: 'machine_status', machine: { ...row } })
+    })
+    await expect(page.getByTestId('machine-credentials-box')).toContainText('Full access was used here, then withdrawn')
+    await expect(page.getByTestId('machine-credential-cccc3333')).toContainText('"agent-script"')
+    await expect(page.getByTestId('machine-credential-cccc3333')).toContainText(', used, then withdrawn')
+    await expect(page.getByTestId('machine-credential-revoke-cccc3333')).toHaveCount(0)
+  })
 }

@@ -1512,7 +1512,7 @@ A host started with `centralu serve` on another machine is reached by the app th
     (the host there closes the link then, 4001 "credential withdrawn"); that mark stays for as long as the hub runs,
     since the link pairs again at once. A credential used and then withdrawn before the next 30 s read is listed too
     (#1405 review): the host keeps, while it runs, every full credential a socket said hello with, and `host.credentials`
-    adds those no longer in `serve.json` as `gone` ("used there and withdrawn since", no Revoke), unless the next
+    adds those no longer in `serve.json` as `gone` (", used, then withdrawn" after its entry, no Revoke; "Full access was used here, then withdrawn" when none other is left, the owner's wording), unless the next
     credential of the same label, the next used there or the one the file names now, was paired the same way (its
     pairer again, as at each window start or hub link; the file's own counts since a review found a hub that had paired
     again but not yet said hello listed as gone on another hub's row for one read). Under any label but a hub's this
