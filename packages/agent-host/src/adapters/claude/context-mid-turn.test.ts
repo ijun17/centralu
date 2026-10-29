@@ -61,14 +61,18 @@ describe('the context reading during a Claude turn', () => {
     await handle.dispose()
   })
 
-  it("does not read for a subagent's request", async () => {
+  it("does not read for a subagent's request, not even in a trailing read", async () => {
     cli.asked = 0
     cli.size = 50_000
     const { handle, readings } = await start()
+    cli.feed?.(assistant(50_000, null))
+    await until(() => readings().length === 1)
+    // A subagent's prompt is its own: its request is not asked for, at once or when the gap has passed
+    cli.size = 30_000
     cli.feed?.(assistant(30_000, 'toolu_sub'))
-    await new Promise((r) => setTimeout(r, 100))
-    expect(cli.asked).toBe(0)
-    expect(readings()).toEqual([])
+    await new Promise((r) => setTimeout(r, 2_300))
+    expect(cli.asked).toBe(1)
+    expect(readings().map((r) => r.used)).toEqual([50_000])
     await handle.dispose()
   })
 
