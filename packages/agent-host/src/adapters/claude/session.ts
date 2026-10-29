@@ -641,8 +641,12 @@ export class ClaudeSession implements SessionHandle {
    * the conversation.
    */
   private async reportContext(q: QueryHandle): Promise<void> {
+    // A reading asked for earlier that is answered after a later one is older than it: dropped (#1526)
+    const asked = ++this.contextAsked
     try {
       const usage = await q.getContextUsage()
+      if (asked < this.contextApplied) return
+      this.contextApplied = asked
       const used = Number(usage?.totalTokens ?? 0)
       const window = Number(usage?.maxTokens ?? 0)
       this.contextWindow = window > 0 ? window : null
@@ -673,6 +677,8 @@ export class ClaudeSession implements SessionHandle {
     console.error(`[claude] ${this.sessionId.slice(0, 8)} compacts at ${reported} tokens, not the ${expected} Centralu asked for`)
   }
   private compactPointSaid = false
+  private contextAsked = 0
+  private contextApplied = 0
   private contextWindow: number | null = null
 
   /**
