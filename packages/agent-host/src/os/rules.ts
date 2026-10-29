@@ -336,18 +336,13 @@ export type TimePrecision = 'microsecond' | 'nanosecond'
 
 /**
  * What decides how finely a time set with `utimes` is kept is libuv (Node's file layer), not the OS alone: Windows
- * is cut to microseconds on every Node measured (22, 24, 26); on POSIX libuv cut to microseconds on Linux until 1.52.0
- * (Node 24.22.1 ships 1.52.1, Node 22.23 ships 1.51.0); 1.52.0 keeps nanoseconds ("unix: support nanosecond
- * resolution in uv__fs_to_timespec"); macOS kept nanoseconds on every libuv measured (Node 26). `uv` defaults to the running Node's; the
- * in-memory OS models Linux, so `macOs` is for a test on a Mac.
+ * is cut to microseconds on every Node measured (22, 24, 26); POSIX (Linux and macOS alike) is cut to microseconds
+ * until libuv 1.52.0 (Node 22.23 ships 1.51.0, Node 24.22 ships 1.52.1), which keeps nanoseconds ("unix: support
+ * nanosecond resolution in uv__fs_to_timespec"; measured on macOS with Node 22.23.4, 24.22.2 and 26.12.1). `uv`
+ * defaults to the running Node's.
  */
-export function timePrecision(
-  family: OsFamily,
-  uv: string = process.versions.uv,
-  macOs = false,
-): TimePrecision {
+export function timePrecision(family: OsFamily, uv: string = process.versions.uv): TimePrecision {
   if (family === 'windows') return 'microsecond'
-  if (macOs) return 'nanosecond'
   const [major = 0, minor = 0] = uv.split('.').map(Number)
   return major > 1 || (major === 1 && minor >= 52) ? 'nanosecond' : 'microsecond'
 }
