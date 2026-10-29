@@ -1,7 +1,8 @@
 # Pairing a hub and a linked machine with keys (#1711)
 
-> **Status: proposed (2026-10-30), design only; revised after the adversarial review on #1714.** Nothing here is
-> built. The first pull request is this document; each later one updates it with what it built and measured. It closes
+> **Status: slice 2 built (2026-10-30); revised after the adversarial review and its recheck on #1714.** Slice 2 (the
+> keys, the transcript and the protocol fields, §9) is built and no live path calls it yet; nothing else is built. The
+> first pull request carries this document with slice 2; each later one updates it with what it built and measured. It closes
 > the residual in [security-boundaries.md](../security-boundaries.md), "The remote host", **Residual: the proof under a
 > stored verifier** (#1405 review, held for the owner; owner decision 2026-10-29: do it after the #1405 stack).
 >
@@ -65,7 +66,7 @@ closed here. The aim is the one #1405 set: no file and no documented interface g
 | **Stolen `serve.json`** | the key, and the verifiers: the proof of step 2 for any paired hub | the key (as today: the limited credential, and now also the host's signing key), the hubs' **public** keys. No full credential follows from any of it |
 | **Impersonating the machine's port** (stop the host, listen on its port) | receives the hub's full credential in the hello | receives a signature over a nonce it chose and its own transcript; it opens nothing elsewhere (§4.3). It can still stand in for the machine's host toward the hub, which the same user can do anyway by replacing the host's code; what a machine may ask a hub is bounded by the hub's reverse allowlist (#550), unchanged |
 | **Impersonating the port during a hand-over** (Windows, `moveIntoSignIn`) | receives a full `via: 'handover'` credential, unlisted | receives the limited credential, which the file already holds (§4.4) |
-| **Downgrade** (point `<data>/remote/current` at an older installed release: the launcher then refuses `--pair-key`, or the running host is old) | nothing to downgrade from | the hub refuses a verifier pairing with a machine it has paired by key, whatever the remote prints (§5.1); it sends no credential |
+| **Downgrade** (point `<data>/remote/current` at an older installed release: the launcher then refuses `--pair-key`, or the running host is old) | nothing to downgrade from | closed **from the machine's first key link**: from then on the hub refuses a verifier pairing with that machine, whatever the remote prints (§5.1), and sends no credential. Before it (a machine never linked by key, or a hub with no record of it: a new hub, a restored store, a machine removed and linked again) the first link is today's residual, no worse |
 | **Replay** of anything seen on the link | the credential is a bearer: reusable until the next pairing | each signature covers a host nonce minted for one socket and dropped at its hello or its 10 s hello timeout |
 | **Relay** (sit between the hub and a real host, passing each frame on) | not needed: the bearer is enough | the transcript names the address the hub forwards to and the host's own key; a real host elsewhere refuses it, and no second listener can share the held port (§4.3, measured) |
 | **A forged public key** (a small-order or malformed Ed25519 key in `keys`, by `--pair-key` or by hand) | no keys | refused by the launcher and ignored by the host (§4.1); unchecked, a small-order key verifies a forged signature over every message |
@@ -222,10 +223,17 @@ launcher then:
    - **A host answers without a signature** (an older host still running, the machine updated but not restarted): a
      verifier pairing under the label, as `--pair <label>` does today. The line carries `token` and `credential` and no
      `pairKey`. The key entry stays: it is public and is used once a new host runs.
-   - **No host answers:** `hostKey` is derived from the file's key (the host started next gets that key on stdin), and
-     `pairKey` is in `takes` when the installed host takes key hellos (`bundle-info.json`, as `takesVerifiers` reads
-     `verifiers`); otherwise as the previous case. With `--key-paired` and `pairKey`, the label's verifier entry is
-     removed now.
+   - **No host answers** (the connection to the host's port is refused: nothing listens there) **and no keeper runs
+     there:** `hostKey` is derived from the file's key (the host started next gets that key on stdin), and `pairKey` is
+     in `takes` when the installed host takes key hellos (`bundle-info.json`, as `takesVerifiers` reads `verifiers`);
+     otherwise as the previous case. With `--key-paired` and `pairKey`, the label's verifier entry is removed now.
+   - **Unknown:** the probe times out (`probeHost`'s 2 s), the socket closes before a proof, the proof is malformed, or
+     nothing listens but a keeper runs there (the keeper hands every host it starts its own copy of the key, which after
+     `--rotate-token` is not the file's, §7, so a key derived from the file could be wrong). Treated as a host that
+     answers without a signature: a verifier pairing, no `pairKey`, no `hostKey`, and the label's verifier entry is not
+     removed, even with `--key-paired`. A hub with a record refuses that line for this attempt (§5.1) and asks again at
+     its usual backoff, by when the host has answered or started. So a slow old host never gets `pairKey`, and no line
+     reports a key derived from a file the running host does not sign with.
 
 So the hub's verifier entry under its label is removed only once the hub has paired by key with a running new host:
 the hub records that at its first accepted key hello and then runs the same command once more with `--key-paired`
@@ -259,9 +267,15 @@ Before hello, on every socket, reusing the `prove` frame additively:
    builds itself. Anything else: the socket is dropped and nothing more is sent. One case reads the line again first:
    a signature that verifies under a `Pm` other than the line's (a host restarted with its new key after
    `--rotate-token`, which a redial without ssh meets). The hub then runs its connection line once more and drops the
-   socket with the reason only if the new line's `hostKey` still differs.
+   socket with the reason only if the new line's `hostKey` still differs. "Once more" is once per dial cycle (the run
+   of up to `LINK_REDIALS` redials between two ssh runs of the line), not once per socket: a squatter answering every
+   redial with another key costs the hub one extra ssh run per cycle, not one per socket.
 4. **Hub → host:** `hello { …, auth: { key: <keyId>, sig: Sign(Kh, field("centralu link hub v1") ‖ T) } }`. The `token`
-   field carries a fixed, non-secret marker (the field is required by the schema; slice 2 settles the marker).
+   field carries a fixed, non-secret marker (the field is required by the schema), settled in slice 2 as
+   `LINK_AUTH_MARKER`, the string `centralu link auth v1`. It has spaces, so it is never a key or credential the
+   launcher draws (43 base64url characters) and never a derived one (`ccl1:`, `ccs1:`, `ccb1:`); a test pins that
+   `sameSecret` against a drawn key and the limited, session and bridge paths refuse it. A host refuses a hello carrying
+   the marker without a valid `auth`; an older host reads only `token` and answers "bad token".
 5. **Host:** refuses an `auth.key` other than the `keyId` its `prove` carried; reads `serve.json` (as at every hello
    today), finds that entry in `keys`, rebuilds `T` from what it holds for this socket and verifies. Then `Ns` is gone.
    The socket is full, under that entry's `(id, publicKey)`: the per-second sweep closes it (4001 "credential
@@ -342,8 +356,12 @@ host. §3 has the comparison.
 ### 4.4 Who checks what
 
 - **The hand-over call becomes limited.** `host.handover` moves from `link` to `everyday` in `method-rights.ts`. Its
-  parameters are a state (`waiting` or `gave_up`) and a time (`HostHandover`), no text; all a limited caller gains is
-  that note on the machine's row, which a same-user program gets anyway by running the launcher. `sayHandover` then
+  parameters are a state (`waiting` or `gave_up`) and a time (`HostHandover`), no text. A limited caller gains more
+  than running the launcher gives: any agent (it holds `CC_HOST_CREDENTIAL`, a session's credential) can post or clear
+  the hand-over note, which the host broadcasts as `host_handover` to every client, without moving or stopping
+  anything. That is accepted because it is cosmetic and bounded: a note of a fixed shape on the machine's row, with no
+  text of the caller's, that opens and stops nothing. `host.stop` set the precedent: a limited caller may already call
+  it, and it does far more (it ends the host). `sayHandover` then
   says it with the credentials the launcher already holds for its own host (`ownCredentials`: the limited credential,
   proved under the key) and makes no credential: no `pairServe(…, 'handover')`, no revoke after. A squatter answering
   that proof receives the limited credential, which the file already holds. By build:
@@ -363,8 +381,8 @@ host. §3 has the comparison.
   (public), and `UsedCredentials` keys them by id and public key. Once the hub's record says it has paired by key with
   the machine, a **verifier** entry under its own label is never its own (it holds no credential to `check` it, and it
   removed its own with `--key-paired`): the hub shows it among the other credentials, with Revoke, as it shows any other
-  credential today. So someone else's `serve --pair hub:<label>` between two links is judged like any other. Whether it
-  needs a sentence of its own is open decision D6.
+  credential today. So someone else's `serve --pair hub:<label>` between two links is judged like any other. It gets no
+  sentence of its own (D6, decided).
 - **The sweep compares `(id, publicKey)`** for key sockets (`sweepWithdrawn`, `fullBy`): a socket stays full only while
   an entry with its id and its public key is listed. With a new id for a changed key under a label (§4.2), an entry that
   reuses an id under another key does not keep a socket full.
@@ -396,14 +414,16 @@ it selects is a genuine release. So the remote's answer can never be what turns 
 - **With a record**, the hub never runs `--pair` there and never uses a `token` or `credential` from a line. An
   "unknown option for serve: --pair-key", or a line without `pairKey`, fails this link attempt; when the line made a
   verifier credential the hub withdraws it there at once (`serve --revoke <id>`, which every launcher since #1405
-  takes). The machine's row says why: the sentence is open decision D2 (§11). The next attempt, at the usual backoff,
-  asks again.
+  takes). The machine's row says why, in D2's sentence (§11, decided). The next attempt, at the usual backoff, asks
+  again.
 - **Without a record**, as today: the fallback to `--pair <label>` on "unknown option for serve: --pair-key", then to
   no pairing on "unknown option for serve: --pair". The window before the first key link is today's residual, no worse.
 - Considered: "a version the hub itself installed there takes keys" as the trigger, which would also close the window
   before the first key link. Not taken: a machine the hub updated may still run an older host until it restarts (§4.2)
   and would be refused where it links today, and an accepted key hello is the only thing that shows a key-capable host
-  really ran there.
+  really ran there. A narrower trigger escapes that objection: a machine the hub installed **fresh in this same link**
+  runs no older host. Slice 4 takes it if the install step can tell a fresh install from an update, and its pull request
+  says which it did; until then the first-link window stays today's residual (§2).
 
 **The hub's store.** Besides the record, nothing: the private key is not in `store.db` (§6), so copies of the store (a
 dev build's copy, a backup) do not carry it.
@@ -442,8 +462,8 @@ against the user this is about (who can ssh to the machine with the person's key
   installs it again.
 - **The hub.** A new key pair replaces the file and is installed at each machine's next link (the entry under its label
   is replaced, with a new id); sockets open under the old key are closed by the sweep, which compares `(id, publicKey)`.
-  What starts a rotation (a command, the person, a schedule) is open decision D5; nothing rotates by itself except a key
-  the hub could not read.
+  What starts a rotation is D5 (decided): no button and no new text; the key rotates on its own, on revoke and when the
+  key file cannot be read. Slice 4 settles which revoke starts it and writes it here.
 - **Unlinking a machine.** The hub withdraws its own entry there (`serve --revoke`) when the machine is reachable, and
   drops its record with the machine; slice 4 checks what unlinking does today and keeps it consistent.
 
@@ -459,8 +479,8 @@ situation is listed as an open decision with the text it would need.
 | `--rotate-token` there with a host running | the link pairs again at once against the running host (§7) | nothing new |
 | A machine updated but not restarted | verifier pairing, as today, until a restart; no record yet | nothing new |
 | The hub cannot read its key file | a key in memory for this run, installed at the next link | nothing; a line in the host's log |
-| A machine the hub paired by key with now offers only verifier pairing, and the hub did not roll it back | refused; a verifier credential the line made is withdrawn there | a sentence on the machine's row: open decision D2 |
-| A verifier entry under the hub's label after it paired by key | listed among the other credentials | today's listing of other credentials, with Revoke; D6 if it needs its own sentence |
+| A machine the hub paired by key with now offers only verifier pairing, and the hub did not roll it back | refused; a verifier credential the line made is withdrawn there | D2's sentence on the machine's row (§11) |
+| A verifier entry under the hub's label after it paired by key | listed among the other credentials | today's listing of other credentials, with Revoke; no sentence of its own (D6) |
 | `host.handover` refused by a host from before slice 3 | the launcher goes on moving the host | no hand-over note on the row during that wait |
 | The machine's host key changed between two links | taken, recorded | nothing (D3, decided) |
 | Two machines' clocks differ | nothing reads time | nothing |
@@ -480,10 +500,11 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    from `CC_FRONT_DOOR`, and takes a key hello; the sweep compares `(id, publicKey)`; `host.credentials` covers key
    entries. The hand-over call: `host.handover` limited, the launcher makes no hand-over credential, a host takes a
    `via: 'handover'` entry as limited (§4.4). An old hub sees no change. The acceptance run measures macOS port sharing.
-4. **The hub side, waiting for D2's sentence.** The key file; `--pair-key` at every link and `--key-paired` from the
+4. **The hub side, with D2's sentence.** The key file; `--pair-key` at every link and `--key-paired` from the
    record; the record (§5.1) and the refusal, with the made credential withdrawn; the key handshake in `RemoteClient`;
    its own entry recognised by public key, and a verifier entry under its label shown as another's; the additive store
-   fields. `security-boundaries.md`: the residual rewritten as closed, with what stays (§2).
+   fields. `security-boundaries.md`: the residual rewritten as closed **from the machine's first key link**, with what
+   stays (§2), the first-link window among it.
 5. **Dropped.** It was a key-confirmed channel in case two listeners could share the host's port on Windows. The
    measurement in §4.3 shows they cannot, on Windows or WSL.
 6. **Optional (D1):** the hub's key behind the keeper and the OS store.
@@ -522,6 +543,11 @@ Each fails without its fix.
   fails with its socket's inner port; a host without one uses the socket's local address.
 - **Replay:** a valid key hello recorded and sent again on a new socket, and on the same socket after a second `prove`,
   is refused; a host proof recorded and answered to a later `prove` is refused by the hub.
+- **Order:** a hello with `auth` on a socket that sent no `prove`, and one after a `prove` without `key` (so no `Nh` and
+  no `keyId` are stored), is refused, and never checked against values taken from the hello itself.
+- **The marker:** `LINK_AUTH_MARKER` is refused by `sameSecret` against a drawn key and by the limited, session and
+  bridge paths (slice 2), and as a full credential of a file paired by `--pair` (slice 3); a hello with the marker and
+  no `auth`, or a wrong one, is neither full nor limited (slice 3).
 - **Relay:** a relay passing `Nh`, `Ns` and both signatures between a hub forwarding to one port and a real host on
   another is refused by the host. A transcript with the host's key swapped, with the hub's key of another entry, or with
   a host signature presented as the hub's, is refused.
@@ -551,14 +577,13 @@ Decided by the orchestrator (2026-10-29, on #1714):
 - **D4. When verifier pairing stops for a hub's label:** not before every machine the hub links has paired by key at
   least once and two releases have shipped with key pairing; the floor is decided then, in its own issue.
 
-Open, for the owner (each is visible text):
+Decided by the owner (2026-10-30, on #1714). No decision is open.
 
 - **D2. The sentence on the row when a machine the hub paired by key with offers only verifier pairing.** The
-  behaviour is decided: refuse (§5.1). Only the sentence is open. Proposed: "This machine now offers only the older way
-  of pairing, which this computer no longer accepts from it. Update Centralu there, or remove the machine and link it
-  again." Slice 4 waits for it.
-- **D5. What rotates the hub's key.** Proposed: nothing yet besides a key that cannot be read. A Rotate button would
-  need its text and a place in Settings → Machines.
-- **D6. A verifier entry under the hub's own label after it paired by key.** Proposed: no new text; it is listed with
-  the other credentials, with Revoke, as any other credential is today (§4.4). A sentence of its own (for example,
-  "Paired under this computer's name, but not by this computer") would be the owner's.
+  behaviour is refuse (§5.1), and the sentence is the one proposed: "This machine now offers only the older way of
+  pairing, which this computer no longer accepts from it. Update Centralu there, or remove the machine and link it
+  again." The reason given: a beta, and a rare case, so the wording is not tuned further now. Slice 4 may use it.
+- **D5. What rotates the hub's key.** No button. The key rotates on its own, on revoke and when the key file cannot be
+  read, with no new text (§7).
+- **D6. A verifier entry under the hub's own label after it paired by key.** No sentence of its own: it is listed with
+  the other credentials, with Revoke, in today's text (§4.4).
