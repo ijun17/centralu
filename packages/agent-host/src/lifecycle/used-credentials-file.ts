@@ -48,17 +48,29 @@ export class UsedCredentialsFile {
 
   /** Reads what a host before this one wrote into `used`, and shortens the file when it holds far more lines than are kept (a rewrite can drop a line that another host, in a swap, writes at that moment: so it is rare) */
   load(): void {
-    let text: string
-    try {
-      text = this.os.files.readFileSync(this.path, 'utf8')
-    } catch (e) {
-      if (codeOf(e) !== 'ENOENT') this.log(`[agent-host] the file of used credentials cannot be read (${codeOf(e)}); it starts empty`)
-      return
-    }
-    const records = parseUsedRecords(text)
+    const records = this.read()
+    if (!records) return
     this.used.load(records)
     this.lines = records.length
     if (this.lines > this.max * REWRITE_AT) this.rewrite()
+  }
+
+  /**
+   * Takes in what another host of this folder wrote since (in a swap, the host being replaced goes on serving until the
+   * new one holds the folder's lock), before a report is made; what is known is not counted twice. Shortens nothing
+   */
+  refresh(): void {
+    const records = this.read()
+    if (records) this.used.load(records)
+  }
+
+  private read(): UsedRecord[] | null {
+    try {
+      return parseUsedRecords(this.os.files.readFileSync(this.path, 'utf8'))
+    } catch (e) {
+      if (codeOf(e) !== 'ENOENT') this.log(`[agent-host] the file of used credentials cannot be read (${codeOf(e)}); it starts empty`)
+      return null
+    }
   }
 
   /** Writes `record` down, at the end of the file. Synchronous, so it is on disk before the caller goes on; never throws */
@@ -79,7 +91,12 @@ export class UsedCredentialsFile {
     try {
       const tmp = `${this.path}.${process.pid}.tmp`
       this.os.files.writeFileSync(tmp, records.map(encodeUsedRecord).join(''), { mode: 0o600 })
-      this.os.files.renameSync(tmp, this.path)
+      try {
+        this.os.files.renameSync(tmp, this.path)
+      } catch (e) {
+        this.os.files.rmSync(tmp, { force: true })
+        throw e
+      }
       this.lines = records.length
     } catch (e) {
       this.log(`[agent-host] the file of used credentials could not be shortened (${codeOf(e)})`)

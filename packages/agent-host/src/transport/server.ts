@@ -497,8 +497,8 @@ export class HostServer {
 
   /**
    * Tells the hubs linked to this host (the sockets in with a full credential labelled `hub:`) of an event, and no one
-   * else now (#1712). It is kept with the others, so a hub whose link was away a moment and comes back to this host
-   * finds it in the replay. Never waits: a frame is queued on each socket, and one that has stopped reading is cut
+   * else now (#1712). It is kept with the others, so a hub that comes back to this host lifetime asking for what it missed
+   * finds it in the replay (to a hub's link alone, `greet`). Never waits: a frame is queued on each socket, and one that has stopped reading is cut
    * (`sendTo`) as for any event
    */
   tellHubs(event: NormalizedEvent): void {

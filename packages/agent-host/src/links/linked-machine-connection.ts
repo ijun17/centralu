@@ -143,6 +143,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   private reportedUsed: { key: string; seq: number; settled: boolean; credential: RemoteCredential }[] = []
   private reportSeq = 0
+  /** The read under way for what the host told (`readForReported`), and whether another was asked for while it ran */
+  private reportRead: Promise<void> | null = null
+  private reportReadAgain = false
   /** The machine's host says its serve.json cannot be read (#1405 review), or closed this link for that */
   private fileUnreadable = false
   /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
@@ -549,7 +552,30 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     if (!read) return settle()
     // The read answers for this credential, which then leaves `reportedUsed` (`watchCredentials`); one that fails leaves it shown
-    void read().then(settle, settle)
+    void this.readForReported(read).then(settle, settle)
+  }
+
+  /**
+   * A read that began after the event that asks for it (`credentialUsed`). Events that come while one is under way ask
+   * for one more after it, not one each: a burst of first uses costs the machine's host one read in flight and one
+   * waiting, and no more
+   */
+  private readForReported(read: () => Promise<void>): Promise<void> {
+    if (this.reportRead) {
+      this.reportReadAgain = true
+      return this.reportRead
+    }
+    const run = async () => {
+      do {
+        this.reportReadAgain = false
+        await read()
+      } while (this.reportReadAgain)
+    }
+    const p = run().finally(() => {
+      this.reportRead = null
+    })
+    this.reportRead = p
+    return p
   }
 
   /**
@@ -587,8 +613,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
           return stop()
         }
         const before = JSON.stringify(this.otherCredentials())
-        // Answered: the host's own list now has what it told of (a reply that cannot be read keeps them)
-        if (listed) this.reportedUsed = this.reportedUsed.filter((u) => u.seq > told)
+        /*
+         * Answered: the host's own list has what it told of, if its record holds it. A host that started again with no
+         * record of a credential (the file was removed or could not be written) says its ids (`usedIds`) without it, and
+         * what the hub was told stays. A host that says no ids (from before this) is taken at its word, as before. A
+         * reply that cannot be read keeps them all
+         */
+        if (listed) {
+          const known = Array.isArray(r.usedIds) ? new Set(r.usedIds) : null
+          this.reportedUsed = this.reportedUsed.filter((u) => u.seq > told || (known !== null && !known.has(u.credential.id)))
+        }
         if (listed) this.credentials = listed
         this.fileUnreadable = unreadable
         this.usedUnderHubLabels = this.ownOf(credentialsOf(r.usedUnderHubLabels), nonce) ?? []

@@ -1547,17 +1547,23 @@ A host started with `centralu serve` on another machine is reached by the app th
       `host_credential_used` event over their open links (the sockets in with a `hub:`-labelled credential; the event
       carries a `check` of a nonce of its own, so a hub knows its own credential from one that only reuses its id, and
       never the verifier). A hub puts the credential on its row as used and gone and starts a `host.credentials` read at
-      once, whose answer then replaces it; if the host is stopped first, the use stays on the row, also while the link is
-      down. A host that starts again reads the file back (at most 256 records, the oldest dropped; a credential in
+      once (a burst of events costs one read in flight and one waiting), whose answer then replaces it, provided that host's
+      record holds the credential (`usedIds`; one that started again without it, because the file was removed or could not
+      be written, leaves what the hub was told on the row); if the host is stopped first, or the read cannot answer
+      (the file unreadable), the use stays on the row, also while the link is down, and a credential still held then
+      reads as "used, then withdrawn" until the next answer: failing toward showing the use. A restarted host
+      reads the file back, and every report takes in what another host of the folder wrote since (a swap's overlap). A host that starts again reads the file back (at most 256 records, the oldest dropped; a credential in
       both the file and memory is one record), so its next `host.credentials` reports it as before. Agents' per-session
       credentials are not full credentials and are not reported. The owner's constraint (2026-10-29) is that this never
       slows or blocks ordinary work: the hello is not held for the hub (the event is queued on the hub's socket, a hub
       that stopped reading is cut as for any event), with the hub's link down the record stays in the file, and a
       record that cannot be written (a full disk) is said on stderr while the hello goes on. What is left is the same
-      user's: drop the hub's link first (the event has nowhere to go; the file is read at the next link), or delete or
-      change the file, which that user can do as easily as `serve.json` (the first use after that is written down again;
-      a restart before the hub's next read still shows nothing then). A swap's overlap, two hosts of one folder, may
-      lose a line to the rewrite that shortens a file past four times its bound.
+      user's: drop the hub's link first (the event has nowhere to go; the file is read at the next link), or delete the
+      file or make it unwritable, which that user can do as easily as `serve.json` (the hub's event still arrives while
+      its link is up, and it keeps it across the restart; with the link down too, nothing is left to show). A swap's overlap, two hosts of one folder, may
+      lose a line to the rewrite that shortens a file past four times its bound. A consequence: the record now outlives
+      a host restart, so a credential the person withdrew from the row (or a test pairing) stays listed as "used, then
+      withdrawn" until 256 newer first uses push it out.
     - **Take the hub's label while its link is down** (end the user's own ssh session, pair under
       `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
       the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also

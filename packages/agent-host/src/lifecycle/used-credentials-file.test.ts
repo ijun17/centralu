@@ -102,6 +102,20 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host(2).used.records().map((r) => r.id)).toEqual(['22222222', '33333333'])
   })
 
+  it('takes in a line another host of the folder wrote since it started, at its next report', () => {
+    const f = folder()
+    const mine = f.host()
+    const other = f.host()
+    other.hello(c('aaaaaaaa', 'x'))
+    expect(mine.used.gone([])).toEqual([])
+    // The host being replaced in a swap went on serving after this one read the file
+    const store = new UsedCredentialsFile(f.file, mine.used, f.os, 256, () => {})
+    store.refresh()
+    expect(mine.used.gone([]).map((g) => g.id)).toEqual(['aaaaaaaa'])
+    store.refresh()
+    expect(mine.used.ids()).toEqual(['aaaaaaaa'])
+  })
+
   it('reads the lines a later build adds after these, whatever else they hold', () => {
     const f = folder()
     f.host().hello(c('aaaaaaaa', 'x'))

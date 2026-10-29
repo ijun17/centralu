@@ -170,7 +170,7 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  * What this cannot tell is two askers of the same way under one label (a program's `--pair hub:<name>-<key>` that the
  * hub's own next link takes the place of). So every id used under a hub's label is also given as it is (`underHubLabels`),
  * and the hub of that label compares them with the ids it paired itself: any other is one it did not make (#1405
- * review). At most `max` are kept, the oldest dropped first. A restart of this host reads them back from the file it keeps beside `serve.json` (#1712, `UsedCredentialsFile`).
+ * review). At most `max` are kept, the one used longest ago dropped first. A restart of this host reads them back from the file it keeps beside `serve.json` (#1712, `UsedCredentialsFile`).
  */
 export class UsedCredentials {
   private seq = 0
@@ -203,6 +203,11 @@ export class UsedCredentials {
       this.used.set(key, { ...r, seq: ++this.seq })
     }
     this.trim()
+  }
+
+  /** The id of every record kept (#1712, `host.credentials` `usedIds`) */
+  ids(): string[] {
+    return [...new Set([...this.used.values()].map((u) => u.id))]
   }
 
   /** Every record kept, by first use: what the file is rewritten from when it grows past `max` */
@@ -295,7 +300,7 @@ export function usedEvent(r: UsedRecord, nonce: string = randomBytes(16).toStrin
  * it cannot be read (`unreadable`, #1405 review), so the hub's row can say the machine's credential file cannot be
  * read; and the ids used under hub labels, for the hub of each to check against its own (`underHubLabels`)
  */
-export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[] }
+export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[]; usedIds?: string[] }
 
 /** `host.credentials` for the serve.json at `path` and the credentials used on this host (main.ts) */
 export function credentialsReport(path: string, read: (p: string) => string, used: UsedCredentials, nonce?: string): CredentialsReport {
@@ -304,7 +309,7 @@ export function credentialsReport(path: string, read: (p: string) => string, use
   const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
   if (!listed && unreadable === null) listed = readListing(path, read)
   const shown = listed?.map(({ verifier, ...c }) => (nonce ? { ...c, check: credentialCheck(verifier, nonce) } : c))
-  return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce) }
+  return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce), usedIds: used.ids() }
 }
 
 /**

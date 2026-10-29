@@ -4092,6 +4092,36 @@ describe('machines.revokeCredential (#1405)', () => {
       expect(m.hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['dddd4444'])
     })
 
+    it('keeps what it was told when a host that started again has no record of it, and drops it when the host has', async () => {
+      let ids: string[] | undefined = []
+      let listed: ListedCredential[] = [own]
+      const remote = await remoteHost(0, new Store(), { credentials: () => ({ credentials: listed, usedIds: ids }) })
+      const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 60_000 })
+      await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+      // The host answers without a record of it: the file was removed or could not be written there
+      remote.server.broadcast(told('abab1212', 'a secret of that user'))
+      await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+      expect(hub.links.list()[0]!.otherCredentials?.[0]).toMatchObject({ id: 'abab1212', gone: true })
+      // Its record holds it (and the list judged it no news): the host's own answer stands
+      ids = ['abab1212']
+      remote.server.broadcast(told('abab1212', 'a secret of that user', { nonce: 'c2Vjb25kbm9uY2U' }))
+      await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 0)
+      // A host from before the ids is taken at its word
+      ids = undefined
+      listed = [own]
+      remote.server.broadcast(told('dddd4444', 'x'))
+      await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 0)
+    })
+
+    it('asks the host for one read in flight and one waiting, whatever the number of events it is told of', async () => {
+      const m = await machine(() => [own])
+      const before = m.reads()
+      for (let i = 0; i < 20; i++) m.remote.server.broadcast(told('abab1212', `secret ${i}`, { nonce: `bm9uY2Vub25jZQ${i}` }))
+      await eventually(() => m.hub.links.list()[0]!.otherCredentials?.length === 0)
+      await new Promise((r) => setTimeout(r, 100))
+      expect(m.reads() - before).toBeLessThanOrEqual(3)
+    })
+
     it('is not passed on to a window of the hub', async () => {
       const m = await machine(() => [own])
       const u = await ui(m.hub.port)

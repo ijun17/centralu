@@ -668,7 +668,7 @@ describe('a full hello, reported as it is let in (#1712)', () => {
     expect(h.written).toEqual([])
   })
 
-  it('gives a hub that links later the events it missed, in the replay of a link that kept its place', async () => {
+  it('replays it to a hub’s link asking for what it missed, and to no window', async () => {
     const h = await reportHost()
     await reportConnect(h.port, REPORT_OTHER)
     const late = await reportConnect(h.port, REPORT_HUB)
