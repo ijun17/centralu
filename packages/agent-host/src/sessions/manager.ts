@@ -378,7 +378,7 @@ export class SessionManager {
      * adapters that cannot attach to the tool in-process (Codex) comes back through this address.
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
-    private endpoint?: (sessionId: string) => { url: string; token: string } | null,
+    private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
     /**
      * Root under which worktrees are created. **Placed next to the data folder** — that way dev and
      * the packaged app naturally separate (`~/.centralu-dev` vs `~/.centralu`), and tests supply a
@@ -1501,6 +1501,16 @@ export class SessionManager {
   /** `SessionSettings.updateSettings` (session-settings.ts), kept on the manager for its callers */
   updateSettings(...a: Parameters<SessionSettings['updateSettings']>): ReturnType<SessionSettings['updateSettings']> {
     return this.sessionSettings.updateSettings(...a)
+  }
+
+  /** Whether a session is one of this host's, without copying the list (#1405: asked at every hello with a session credential) */
+  hasSession(sessionId: string): boolean {
+    return this.meta.has(sessionId)
+  }
+
+  /** A session's name, or null when it has none or is not this host's (#1405: named on a host request) */
+  sessionName(sessionId: string): string | null {
+    return this.meta.get(sessionId)?.name ?? null
   }
 
   /** Whether a session's process is alive (what the UI uses to know if it can be continued) */

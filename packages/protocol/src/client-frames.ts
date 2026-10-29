@@ -37,6 +37,12 @@ export const ProveClient = z.object({
   kind: z.literal('prove'),
   /** Fresh random, base64url: the HMAC's input after a fixed label, so no other value derived from the token can be asked for */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,128}$/),
+  /**
+   * Which full credential the asker holds (#1405, `centralu serve --pair`'s id): a serve host proves with that
+   * credential's verifier (`credentialProof`, label `centralu host proof v2`). Absent: the proof under the host's own
+   * key, as before. Additive: an older host ignores it
+   */
+  credential: z.string().regex(/^[0-9a-f]{8}$/).optional().catch(undefined),
 })
 export type ProveClient = z.infer<typeof ProveClient>
 /**

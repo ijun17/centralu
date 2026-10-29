@@ -9,8 +9,8 @@ import { setup } from './fixtures/control.js'
 
 const QUESTION = 'Delete the trashed session "Fix the parser" on the linked machine "Laptop" for good? Its 4 messages (2.0 KB) leave this computer. This cannot be undone.'
 
-async function raise(page: Page, question: string, client: string | null = null): Promise<string> {
-  return page.evaluate(({ q, c }) => (window as any).__mock.raiseHostRequest(q, { client: c }), { q: question, c: client })
+async function raise(page: Page, question: string, client: string | null = null, session: string | null = null): Promise<string> {
+  return page.evaluate(({ q, c, s }) => (window as any).__mock.raiseHostRequest(q, { client: c, session: s }), { q: question, c: client, s: session })
 }
 
 const answers = (page: Page) => page.evaluate(() => (window as any).__mock.hostRequestAnswers as { requestId: string; decision: string }[])
@@ -25,6 +25,17 @@ test('a host request names what goes and who asked, and Allow answers it', async
   await page.getByTestId('host-request-allow').click()
   await expect(card).toBeHidden()
   expect(await answers(page)).toEqual([{ requestId: id, decision: 'allow' }])
+})
+
+test('a host request from a session credential names the session it says it runs under', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await raise(page, QUESTION, '"host-rpc"', '"Orchestrator"')
+  await expect(page.getByTestId('host-request-from')).toHaveText(
+    'A program on this computer (it calls itself "host-rpc"), which says it runs under the session "Orchestrator", asks, and waits',
+  )
+  await page.getByTestId('host-request-deny').click()
+  await raise(page, QUESTION)
+  await expect(page.getByTestId('host-request-from')).toHaveText('A program on this computer asks, and waits')
 })
 
 test('a host request is never answered by a key: y in the window allows nothing', async ({ page }) => {

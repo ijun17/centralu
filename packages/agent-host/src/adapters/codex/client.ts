@@ -77,6 +77,8 @@ export class CodexClient {
       source?: ProcessSource
       /** The session this app-server serves: its frames are recorded under it when `CC_RECORD_FRAMES` is set (`core/tool-process.ts`) */
       sessionId?: string
+      /** Variables added to the app-server's environment (#1405: the host's address and the session's credential) */
+      env?: Record<string, string>
     } = {},
   ) {
     if (opts.process) {
@@ -94,7 +96,7 @@ export class CodexClient {
        * keeper's. Tapped (`sessionId`) before the reader below is attached
        */
       this.proc = startToolProcess(
-        { command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), env: launch.env(process.env) },
+        { command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), env: { ...launch.env(process.env), ...opts.env } },
         { ...(opts.sessionId ? { sessionId: opts.sessionId } : {}), ...(opts.source ? { source: opts.source } : {}) },
       )
     }

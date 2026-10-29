@@ -131,6 +131,15 @@ export class Links {
     return m.info()
   }
 
+  /**
+   * One of the machine's other full credentials withdrawn there (#1405). Over its own ssh, without opening the link: a
+   * reopen would pair at the same time and could bring back the line that still lists it, and a Disconnect is the
+   * person's to undo
+   */
+  revokeCredential(id: string, credentialId: string): Promise<MachineInfo> {
+    return this.need(id).revokeCredential(credentialId)
+  }
+
   /** Auto reconnect on or off for the machine's link (#1341), kept with the machine */
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo {
     const m = this.need(id)

@@ -7,7 +7,7 @@ import { LinkedMachineConnection } from './linked-machine-connection.js'
 import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './node-floor.js'
 import { installVersion, type InstallVersion } from './registry.js'
 import { RemoteClient } from './remote-client.js'
-import { npmInstall, type RemoteCommand, type RemoteRun } from './tunnel.js'
+import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, type RemoteRun } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -410,6 +410,29 @@ export class LinkedMachine extends LinkedMachineConnection {
       this.deps.log?.(`[links] ${this.name}: removed the Centralu this computer installed; its data stays`)
       return { machine: this.info(), stopped: r.stopped }
     })
+  }
+
+  /**
+   * `machines.revokeCredential` (#1405): withdraws one of the machine's other full credentials, by running
+   * `centralu serve --revoke <id>` there over the link's ssh. Its next hello there is refused, and the host there closes a
+   * connection already open with it within a second. Not this hub's own credential, which the next link would only make
+   * again
+   */
+  async revokeCredential(credentialId: string): Promise<MachineInfo> {
+    const exec = this.tunnel.exec?.bind(this.tunnel)
+    if (!exec) throw linkError(`This computer has no shell on ${this.name} to withdraw a credential`)
+    if (this.endpoint?.line.credential === credentialId) throw linkError(`That is this computer's own credential on ${this.name}, made again at each link`)
+    const r = await exec(revokeCommand(this.record.remote, credentialId))
+    if (r.code === 255) throw linkError(`ssh could not reach ${this.record.sshTarget}: ${lastLine(r.stderr) || 'no answer'}`)
+    const said = parseRevoke(r.stdout)
+    if (said === null) throw linkError(`${this.name} did not say whether it withdrew the credential${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ''}`)
+    // Gone there (now, or before): gone from the row too, also from a line a reconnect read before the revoke landed
+    this.revokedHere.add(credentialId)
+    this.deps.log?.(`[links] ${this.name}: ${said ? 'withdrew' : 'found no'} full credential ${credentialId}`)
+    // And the list read again, through the link when it is up: what else changed there shows with it
+    await this.readCredentials?.()
+    this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    return this.info()
   }
 
   /**

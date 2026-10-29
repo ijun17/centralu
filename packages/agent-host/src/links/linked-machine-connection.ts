@@ -1,4 +1,5 @@
-import { isObj } from '../json-value.js'
+import { randomBytes } from 'node:crypto'
+import { asObj, isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
   HostHandover,
@@ -17,7 +18,8 @@ import { nodeFloor } from './install.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import { shimNames, StartedNotServing, type ConnectionLine, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
+import { credentialsOf, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
 import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
@@ -79,6 +81,11 @@ const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
 const KEEPS_TRYING = 'reconnecting'
 const WAITS_FOR_PERSON = 'press Connect to try again'
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
+/** How often a connected link reads the machine's full credentials (`host.credentials`, #1405) */
+const CREDENTIALS_MS = 30_000
+/** How many of a machine's other full credentials its row lists; the rest are counted (`otherCredentialsMore`) */
+const OTHER_CREDENTIALS_SHOWN = 32
+
 /** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
 const ATTEMPT_WAIT_MS = 60_000
 /**
@@ -105,6 +112,31 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The host this link started there, if it did (owner decision 7, plan §10.9) */
   protected hostStarted: (HostStart & { at: number }) | null = null
   protected endpoint: Endpoint | null = null
+  /**
+   * The machine's host closed this hub's link because the credential it was paired with is gone there (#1405 review:
+   * 4001 "credential withdrawn"), while it was still this hub's latest: something paired under its label or withdrew
+   * it. Kept for as long as this hub runs, since the link pairs again at once and the poll would not see it
+   */
+  private ownCredentialTaken = false
+  /** The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said */
+  protected revokedHere = new Set<string>()
+  /**
+   * The machine's full credentials as this link last read them through `host.credentials` (#1405), the hub's own among
+   * them; null until read, and on a machine that does not answer it (the connection line's `others` stand then)
+   */
+  private credentials: RemoteCredential[] | null = null
+  /**
+   * The ids of every credential this hub paired on the machine while it runs (#1405 review), and the ids the machine's
+   * host says were used there under a hub's label (`host.credentials` `usedUnderHubLabels`): one under this hub's label
+   * that this hub did not pair is something else's, shown as used and gone though its pairer re-paired after it
+   */
+  private pairedHere = new Map<string, string | null>()
+  private usedUnderHubLabels: RemoteCredential[] = []
+  /** The machine's host says its serve.json cannot be read (#1405 review), or closed this link for that */
+  private fileUnreadable = false
+  /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
+  protected readCredentials: (() => Promise<void>) | null = null
+  private credentialsTimer: ReturnType<typeof setInterval> | undefined
   protected client: RemoteClient | null = null
   /** The client when it stopped redialling (`gaveUp`, #1143) and is waiting, idle, for the next opening */
   private gaveUp: RemoteClient | null = null
@@ -392,7 +424,128 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       autoReconnect: this.autoReconnect,
       updateWaits: true,
       connect: this.autoReconnect ? 'at_start' : 'when_needed',
+      ...this.otherCredentials(),
     }
+  }
+
+  /**
+   * The machine's other full credentials for its row (#1405): as `host.credentials` last said, else as the connection
+   * line of this link named them, less this hub's own and any it withdrew since. None while not connected, so a list
+   * from an earlier link is not taken for the present one. Each is marked when it carries this hub's own label, and the
+   * row says when this hub's own is gone from the list (something paired under its label, or withdrew it)
+   */
+  private otherCredentials(): Pick<MachineInfo, 'otherCredentials' | 'otherCredentialsMore' | 'ownCredentialGone' | 'credentialFileUnreadable'> {
+    const line = this.endpoint?.line
+    const all = this.credentials ?? line?.others ?? null
+    const credentialFileUnreadable = this.fileUnreadable
+    if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken, credentialFileUnreadable }
+    const others = [...all, ...this.notPairedHere(line, all)].filter((c) => !this.isCurrent(c, line) && !this.revokedHere.has(c.id))
+    const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, own: _own, ...c }) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
+    // One listed as `gone` is no longer held: this hub's own among them is gone too, and none of them counts as more access
+    const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => this.isCurrent(c, line) && !c.gone)
+    const more = others.slice(OTHER_CREDENTIALS_SHOWN).filter((c) => !c.gone).length
+    return { otherCredentials: shown, otherCredentialsMore: more, ownCredentialGone: ownGone || this.ownCredentialTaken, credentialFileUnreadable }
+  }
+
+  /** An entry's id with its check, for telling two secrets under one id apart (`credentialCheck`) */
+  private keyOf(c: RemoteCredential): string {
+    return `${c.id}:${c.check ?? ''}`
+  }
+
+  /**
+   * Whether `c` is a credential this hub paired on the machine in its present run (#1405 review): its id is one this hub
+   * made and, when the host sent a `check` of this read's nonce, the check is of the secret this hub holds under that
+   * id. An entry written into serve.json by hand under a reused id, with another secret, is not. A host that sent no
+   * check (one from before it) is compared by id alone
+   */
+  private isPairedHere(c: RemoteCredential): boolean {
+    if (!this.pairedHere.has(c.id)) return false
+    return c.own ?? true
+  }
+
+  /** Whether `c` is the credential this link is open with, by its id and, as far as the host says, its secret */
+  private isCurrent(c: RemoteCredential, line: ConnectionLine): boolean {
+    return !!line.credential && c.id === line.credential && this.isPairedHere(c)
+  }
+
+  /**
+   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
+   * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
+   * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
+   * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
+   * not remember, are not taken for another's
+   */
+  /**
+   * Marks, in a list the host answered with `nonce`, the entries whose `check` is of the secret this hub holds under
+   * their id (`own`). An entry without a check (a host from before it) or a credential this hub holds no secret of is not
+   * marked, and is compared by id alone
+   */
+  private ownOf(list: RemoteCredential[] | null, nonce: string): RemoteCredential[] | null {
+    return (
+      list?.map((c) => {
+        const verifier = this.pairedHere.get(c.id)
+        return c.check === undefined || !verifier ? c : { ...c, own: c.check === credentialCheck(verifier, nonce) }
+      }) ?? null
+    )
+  }
+
+  private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
+    if (!line.pairedAs) return []
+    const first = this.usedUnderHubLabels.findIndex((u) => this.isPairedHere(u))
+    if (first < 0) return []
+    const named = new Set(listed.map((c) => this.keyOf(c)))
+    return this.usedUnderHubLabels
+      .slice(first)
+      .filter((u) => u.label === line.pairedAs && !this.isPairedHere(u) && !named.has(this.keyOf(u)))
+      .map((u) => ({ id: u.id, label: u.label, created: u.created, replaced: false, gone: true, ...(u.check ? { check: u.check } : {}), ...(u.own !== undefined ? { own: u.own } : {}) }))
+  }
+
+  /**
+   * Reads the machine's full credentials through `client` now and every `credentialsMs` while it is this link's and
+   * connected (#1405, `host.credentials`): a pairing made there while the link is up shows on the row within that, not
+   * only at the next link. A machine that does not know the method is not asked again on this link
+   */
+  private watchCredentials(client: RemoteClient): void {
+    clearInterval(this.credentialsTimer)
+    this.credentials = null
+    // A link that came up paired, so the file was read there: what a closed link said of it is past
+    this.fileUnreadable = false
+    const stop = () => {
+      clearInterval(this.credentialsTimer)
+      if (this.readCredentials === read) this.readCredentials = null
+    }
+    const read = async (): Promise<void> => {
+      if (this.client !== client || !client.connected) return stop()
+      try {
+        const nonce = randomBytes(16).toString('base64url')
+        const r = asObj(await client.call('host.credentials', { nonce }))
+        if (this.client !== client) return
+        // Each entry's check read now, with this read's nonce: which are the secrets this hub holds (`own`), kept with the entry
+        const listed = this.ownOf(credentialsOf(r.credentials), nonce)
+        // Unreadable there (#1405 review): the last list stands, and the row says the file cannot be read
+        const unreadable = typeof r.unreadable === 'string'
+        if (listed === null && !unreadable) {
+          // Not a file it cannot read (none there, or a host not run by serve): nothing to say about one
+          if (this.fileUnreadable) {
+            this.fileUnreadable = false
+            this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+          }
+          return stop()
+        }
+        const before = JSON.stringify(this.otherCredentials())
+        if (listed) this.credentials = listed
+        this.fileUnreadable = unreadable
+        this.usedUnderHubLabels = this.ownOf(credentialsOf(r.usedUnderHubLabels), nonce) ?? []
+        if (JSON.stringify(this.otherCredentials()) !== before) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Unknown method: host.credentials')) return stop()
+        this.deps.log?.(`[links] ${this.name}: could not read its full credentials: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    this.readCredentials = read
+    void read()
+    this.credentialsTimer = setInterval(() => void read(), this.deps.credentialsMs ?? CREDENTIALS_MS)
+    this.credentialsTimer.unref?.()
   }
 
   // ── The reverse direction (#550) ──────────────────────────────────────────────────────────
@@ -740,6 +893,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     if (this.held) return
     this.endpoint = endpoint
+    if (endpoint.line.credential) this.pairedHere.set(endpoint.line.credential, endpoint.token ? verifierOf(endpoint.token) : null)
     if (!endpoint.line.hostRunning) {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`${shimNames(this.record.remote).centralu} serve\` is running there`)
       return this.retryLater()
@@ -883,14 +1037,22 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const idle = this.client !== null && this.client === this.gaveUp ? this.client : null
     this.gaveUp = null
     if (idle && idle.provesHost === (endpoint.line.proof === true)) {
-      idle.updateEndpoint(endpoint.url, endpoint.token)
+      idle.updateEndpoint(endpoint.url, endpoint.token, endpoint.line.credential)
       return
     }
     this.client?.close()
     this.client = null
     const client = new RemoteClient(
       // A host that can prove it holds the token is asked to, before the token goes out (#838)
-      { redials: LINK_REDIALS, ...this.deps.client, url: endpoint.url, token: endpoint.token, proveHost: endpoint.line.proof === true },
+      {
+        redials: LINK_REDIALS,
+        ...this.deps.client,
+        url: endpoint.url,
+        token: endpoint.token,
+        proveHost: endpoint.line.proof === true,
+        // The credential paired for this hub at this link (#1405): the host proves under its verifier
+        ...(endpoint.line.credential ? { credential: endpoint.line.credential } : {}),
+      },
       {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),
@@ -941,9 +1103,28 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
            * from before it (updated without a restart, or rolled back). Said as that, not as a token problem.
            */
           const serve = `${shimNames(this.record.remote).centralu} serve`
+          /*
+           * Its credential withdrawn there while the link held it (#1405 review): pairing again is the way on, and the row
+           * keeps saying it happened. Not when this hub had already paired anew (its own earlier link, closed late)
+           */
+          const withdrawn = r.code === 4001 && r.reason === 'credential withdrawn'
+          if (withdrawn && client.credential !== undefined && client.credential === this.endpoint?.line.credential) {
+            this.ownCredentialTaken = true
+            this.deps.log?.(`[links] ${this.name}: its host closed the link, this computer's credential there was withdrawn; pairing again`)
+          }
+          /*
+           * Its serve.json cannot be read there (#1405 review, transport/server.ts `CREDENTIAL_FILE_UNREADABLE`): nothing
+           * withdrew this hub's credential, so its own is not marked gone, and the row says the file cannot be read
+           */
+          const unreadable = r.code === 4001 && r.reason === 'credential file unreadable'
+          if (unreadable) this.fileUnreadable = true
           const why = r.proving
             ? `${this.name} runs an older Centralu host than the one installed there, which cannot prove it holds the link's token`
-            : r.code === 4002 ? (r.error?.message ?? 'The remote host speaks another protocol') : `${this.name} refused the link's token`
+            : r.code === 4002
+              ? (r.error?.message ?? 'The remote host speaks another protocol')
+              : withdrawn
+                ? `${this.name} withdrew this computer's credential there`
+                : unreadable ? `${this.name} cannot read its credential file` : `${this.name} refused the link's token`
           if (!this.refusedOnce) {
             this.refusedOnce = true
             this.setStatus('connecting', why)
@@ -1010,6 +1191,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     void this.offerAsks(client)
     // And when agents compact (#1376)
     void this.offerAutoCompact(client)
+    // Who else holds full access there, kept current while the link is up (#1405)
+    this.watchCredentials(client)
     /*
      * The UI re-reads this machine's sessions and projects, and wakes the ones that were live
      * before and are not now (a remote host that restarted without a keeper). Sent on every

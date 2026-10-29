@@ -44,10 +44,16 @@ const BUSY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
  * `rename`, tried again for up to `budgetMs` while the system refuses it because someone has the target open (#1041;
  * `retry`: Windows only, `renameWaitsForReaders`). With `retry` off, and for any other error, it is one try. Backs off 10, 20, 40 ... 200 ms between tries; the last
  * error is thrown when the budget is spent.
+ *
+ * `mayTry`, when given, is asked before every try, the first too, and a false answer ends it with its error (#1405
+ * review): a writer under a lock checks there that the lock is still its own, so a retry seconds later cannot land a
+ * write after another writer took the lock over.
  */
-export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, now = Date.now } = {}) {
+export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, now = Date.now, mayTry = null } = {}) {
   const t0 = now()
   for (let delay = 10; ; delay = Math.min(delay * 2, 200)) {
+    const refusal = mayTry?.()
+    if (refusal) throw refusal
     try {
       return rename(from, to)
     } catch (e) {

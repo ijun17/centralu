@@ -7,6 +7,9 @@ process ("App servers"); an app's screen is sandboxed ("App views"). The app mod
 
 ## Inter-agent content
 
+A script an agent runs calls the host with its session's credential (#1405, "Who holds full power"): attribution, not
+proof, and never more than the limited credential's rights.
+
 Worker reports retain their provenance in stored history and the UI. Reports from
 workers to directing sessions become host-authored notifications: the receiver's model reads only what Centralu wrote
 (how the work ended, the session's id, the kind of its tool's error, how to go on, and the `read_session` call that
@@ -1349,6 +1352,25 @@ host after a swap accepts it with nothing handed over, and holding it gives noth
 is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the orchestrator's tooling no
 longer needs it), but none of its `res` frames answers the host's own calls, which are a hub's.
 
+**A session's credential** (`ccs1:<sessionId>:<mac>`, `transport/session-token.ts`, slice 6) has the limited
+credential's rights and names a session. Every agent the host starts finds it in its environment, with the host's
+address (`CC_HOST_URL`, `CC_HOST_CREDENTIAL`; `hostAccessEnv`, in the Claude CLI's and the Codex app-server's
+environment, and so in what they run), so a script an agent writes calls the host the sanctioned way instead of reading
+a token from somewhere. One naming a session this host does not have is refused at hello. It is **attribution, not
+proof**: an agent's environment is readable by every process of the same user for as long as it runs ("The front door"
+below), so a process can present another session's credential. Its rights are the same either way; all it can fake is
+the session a card names, which says "which says it runs under the session". The name is weak in two more ways: a
+session's name can be changed by any limited caller (`sessions.rename` is everyday), and on a serve host whoever reads
+`serve.json`'s key can derive a session credential for any session ("The remote host" below). Beside it, a Codex
+session's bridge process holds `CC_BRIDGE_TOKEN` (`ccb1`) in its environment, readable the same way, and that one gives
+more than the session credential: the session's own tool channel as that session, under its preset ("The Codex bridge
+gets a credential of its own" below; the rare commands still raise a card in every preset). Derived like the bridge's, so the next
+host after a swap, and a keeper's adopted agent, keep it working. An agent started by a build from before slice 6 and
+adopted after an update has none (a process's environment is fixed when it starts) until its next start. A host started
+inside an agent takes both variables out of its own environment at start (`LAUNCH_VARIABLES`), so its agents get only
+its own. The orchestrator's instructions do not mention it:
+their resident budget had no room, and `keeper.sock` hands out only the limited credential anyway.
+
 **Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
 linked machine's session is refused on the hub and never relayed; the machine does not judge again, since it cannot tell
 a relayed call's origin.
@@ -1429,9 +1451,9 @@ that it shows them (`hello.shows`), one at a time, oldest first.
 
 **Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
 the keeper handing the token to windows only (slice 4, "The keeper's control socket" below): a script that asks
-`keeper.sock` gets the limited credential. Not yet: the serve host's `serve.json` (below) still holds its token until
-slice 5, which a process of the user on a linked machine, or on Windows where the window attaches to the folder's serve
-host, can read; and the direct host on Windows gives its token only to the window that started it.
+`keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, "The remote host" below) holds no
+full credential: a script that reads it, or runs `--connection`, gets the limited one. Every agent's process has its
+session's credential (slice 6). The direct host on Windows gives its token only to the window that started it.
 
 ## The remote host (`centralu serve`, #82)
 
@@ -1441,15 +1463,109 @@ A host started with `centralu serve` on another machine is reached by the app th
 - **Nothing listens on a public interface.** The host binds 127.0.0.1 on the remote; the forward binds 127.0.0.1 on
   the person's computer. Reaching the host takes an SSH login to that machine as that user, so SSH is what
   authenticates the person and encrypts the link. Centralu adds no listener, no TLS and no login of its own.
-- **The token** is 32 random bytes in `<data folder>/serve.json`, created with mode 0600 (never written wider and
-  narrowed later) and set back to 0600 whenever `serve` finds it wider. It is printed only by
-  `centralu serve --connection`, which the client runs over SSH; the host's ready line, which also carries it, is read
-  by the launcher and passed on to nothing. It reaches the host as the first line on the host's stdin, a pipe to the
-  launcher (`CC_HOST_TOKEN_ON_STDIN=1`, #538): not on the command line, which every user on the machine can read with
-  `ps`, and not in the environment, which every process of the user can read for as long as the host runs (measured
-  below, "The front door"). A host bundle from before #538 (`CENTRALU_HOST_ENTRY` pointing at one), whose
-  `bundle-info.json` does not say `tokenOnStdin`, still gets it in `CC_HOST_TOKEN` (`takesTokenOnStdin`). It does not
-  change across restarts until `--rotate-token`.
+- **No full credential is written down** (#1405, `serve-files.mjs`, `lifecycle/serve-credentials.ts`).
+  `<data folder>/serve.json` (version 2, mode 0600 from the first byte and narrowed back if it drifts) holds the host's
+  `key` and one entry per full credential, `{ id, label, verifier, created }`, the verifier being the SHA-256 of the
+  credential. The host gets the key as the first line on its stdin (`{"key"}`, a pipe to the launcher: not on the command
+  line, which `ps` shows every user, and not in the environment, which every process of the user can read for as long
+  as the host runs, measured below in "The front door"), and the file's path in `CC_SERVE_STATE`. It derives what it
+  hands out from the key (the limited credential, a bridge's, the proof of a probe) and takes as full only a hello whose
+  credential's verifier is in the file, read again at each hello, so a pairing or a revocation applies at once. A hello
+  with the key itself is refused. The host takes exactly the entries the launcher lists and `--revoke` takes (an 8-hex
+  id and a label `--pair` takes, `isListedEntry` on both sides, one test holding the two rules equal): an entry written
+  into the file by hand with no label or another id opens nothing, since one that nobody could see or withdraw would
+  undo the listing below, and the launcher's next write leaves it out.
+  - **Who gets a full credential.** Whoever runs `serve --connection --pair <label>`: one is made, printed once and
+    kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>-<key>` at each link, the
+    key being the 8 hex characters of the hub's own random id (`hubSelfId`, kept in its store), so two hubs of one
+    computer name do not replace each other's credential; its own
+    credential lives in its memory only, as the token did, and it needs no store change. `serve --window` gets one
+    per start (label `window`): the desktop app runs it on Windows, and it runs the same on Linux and macOS, so any
+    program of this user there can run it too. The launcher's own hand-over call (`host.handover`, a
+    hub's) uses one made for that call and withdrawn after it.
+  - **What anyone else gets.** `--connection` without `--pair` prints the limited credential (`limited`) and the
+    other full credentials by id, label and date (`others`), never their values; `--stop` and the launcher's probes
+    use the limited credential. `--revoke <id>` withdraws one full credential; `--rotate-token` draws a new key and
+    withdraws them all. Both act at once on the next hello, and on the sockets already open (#1405 review): the host
+    reads `serve.json` at each hello and, while any socket holds a full credential, every second, and closes each
+    socket whose credential the file no longer names (4001 "credential withdrawn"; a hub's link then pairs again).
+    Before, a socket opened and then revoked within 135 ms kept full rights for as long as it stayed open, while no
+    listing named it. A file that is not there (moved aside, as the launcher advises for a bad one) names no full
+    credential at all, at once. One that is there but cannot be read (permission denied, as after `chmod 000`, or a
+    scanner holding it on Windows) names none for a new hello, at once (#1405 review: a credential paired just before
+    kept full rights for 30 s while nothing listed it); a socket already in keeps what the file said at its last read
+    for at most 5 s, so one busy moment does not close every link, and is then closed as "credential file unreadable",
+    not "credential withdrawn". `host.credentials` then answers the error's code (`unreadable`), and the hub's row
+    says the machine's credential file cannot be read; a hub whose link was closed that way says the same, and does not
+    take its own credential for withdrawn. The launcher says a file it may not read is a permission problem and how to
+    give access back, never to move it aside, which would end every credential it names. Changes to the file take
+    `serve.json.lock`: one whose time is more than 10 s from now, ahead or behind (a crashed writer, a clock set back),
+    is taken over. A writer reads its lock back before each try of its rename, and tries only within 8 s of taking the
+    lock by its own process clock, so neither a stall nor Windows' 5 s of rename retries lets a writer whose lock was
+    taken over write. Taking a stale lock over, and removing one's own, move the lock aside first and put back one that
+    turns out to be another writer's. Left open: a writer suspended over 2 s between its last read-back and the rename,
+    and a system clock set forward by over 10 s while a lock is held.
+  - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
+    it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
+    (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before
+    verifiers (a rollback; `verifiers` absent from its `bundle-info.json`) knows a single token: the launcher keeps one
+    for it (`legacyHostToken`), gives it to that host and to a hub that pairs, and drops it once a host of today runs.
+    A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
+    `CC_HOST_TOKEN`.
+  - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
+    can. It gets a full credential of its own, which the file names by its label. That is made loud rather than
+    prevented (owner, 2026-10-21): the hub's machine row in Settings → Machines lists every full credential the machine
+    holds besides the hub's own, by the label its asker gave (shown quoted, never checked) and its date, with Revoke,
+    which runs `serve --revoke` there over the machine's ssh without opening its link (`machines.revokeCredential`; the
+    hub's own is refused, since its next link would only make it again). The list is the one the machine named when the
+    link opened, then what the machine's host says through the link (`host.credentials`, read from `serve.json`) at each
+    connect and every 30 seconds: a pairing there while the link is up shows within that. It is shown while connected,
+    its labels cleaned to one line. A pairing under a label already there replaces that credential, as the hub's own
+    re-pairing at each link does. Each entry keeps how it was asked for (`via`: `pair` for `--connection --pair`,
+    `window` for `--window`, `handover` for the launcher's own one-call credential), and a pairing is marked `replaced`
+    in the file and on the row ("which replaced an earlier one of that name") only when the entry it took the place of
+    was asked for another way, or does not say (#1405 review): the window pairing at each start and a hub at each link
+    are their own pairer again, and marking them made the flag mean nothing. So `--pair window` in the window's place,
+    and the window's next start after it, are a change the person sees. The window's credential, from `serve --window`
+    on any OS, is listed on a hub's row as "window" with its date, and its re-pairing at each start is not marked. Two askers of the same way under one label (a
+    program's `--pair hub:<name>-<key>` against that hub's own link) cannot be told apart by the launcher: the hub tells
+    it itself. One under this hub's own label that this hub did not make says so ("under this computer's own name but
+    not made by it"), and the row says when this hub's own was gone from the list or withdrawn while its link held it
+    (the host there closes the link then, 4001 "credential withdrawn"); that mark stays for as long as the hub runs,
+    since the link pairs again at once. A credential used and then withdrawn before the next 30 s read is listed too
+    (#1405 review): the host keeps, while it runs, every full credential a socket said hello with, and `host.credentials`
+    adds those no longer in `serve.json` as `gone` (", used, then withdrawn" after its entry, no Revoke; "Full access was used here, then withdrawn" when none other is left, the owner's wording), unless the next
+    credential of the same label, the next used there or the one the file names now, was paired the same way (its
+    pairer again, as at each window start or hub link; the file's own counts since a review found a hub that had paired
+    again but not yet said hello listed as gone on another hub's row for one read). Under any label but a hub's this
+    also leaves out one used and then withdrawn when the label was paired the same way again; that new pairing is
+    listed itself, with Revoke. Before, `--pair x`, a hello and
+    `--revoke` within 135 ms left no trace on any row. The machine's user can get around this at will in two ways:
+    - **Kill the host.** The record is in the host's memory (at most 256 entries). Use a credential, kill the machine's
+      host and withdraw the credential before the hub's next read, and the restarted host has no record of it: up to
+      the 30 s between two reads, nothing shows. This stays. Any record the host kept on disk, the same user could
+      delete just as easily; it is a residual of an attacker who is this machine's user, at most 30 s of use.
+    - **Take the hub's label while its link is down** (end the user's own ssh session, pair under
+      `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
+      the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also
+      gives every id used under a hub's label, listed or gone, in order of first use (`usedUnderHubLabels`), and the
+      hub compares those under its own label with the ids it paired itself while it runs, by id and by secret: the host
+      keeps one record per id and verifier, and answers each entry with a `check`, an HMAC under its verifier of a nonce the
+      hub chose for that read (never the verifier), which the hub compares with the same HMAC of the secret it holds. An
+      entry written into `serve.json` by hand under a reused hub id, with another secret, is not the hub's own then: it
+      is listed as used and gone, or, while still listed, as held, and the hub's own is then taken for gone if it is the
+      one missing. Any other is listed as used
+      and gone ("under this computer's own name but not made by it"); its own are never listed. Left: one used under
+      the hub's label before this hub's first link in its present run is not judged, since the hub does not remember
+      the ids of its earlier runs. An entry that reuses the hub's own id has no working Revoke: the hub refuses to withdraw its own id, and `serve --revoke <id>` there would take both. The record keeps at most 256 (id, secret) pairs, so whoever can write `serve.json` can still push older ones out, as it could with 256 ids before.
+
+    The row lists 32 and counts the rest ("And N more"), so a flood of entries cannot hide the one after them. A
+    process of this user there can also read the key. That gives it the limited credential, a session's credential
+    (`ccs1`) for any session it can name, which fakes only the name on a card, and also a bridge credential (`ccb1`)
+    for any session it can name, which reaches
+    that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
+    did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
+    the launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
@@ -1497,6 +1613,15 @@ A host started with `centralu serve` on another machine is reached by the app th
   on the port, which could otherwise make the line say no); a remote from before #838 has no `proof` and gets the
   hello as before, so on such a remote this hole stays open until it is updated. A host that refuses the `prove`
   (a machine rolled back to such a build) is a refusal: the hub reads the line again rather than retrying.
+- **Residual: the proof under a stored verifier** (#1405 review, held for the owner). A hub that paired proves the
+  host with `credentialProof`, keyed by its credential's verifier, which `serve.json` holds. A process of the same user
+  on the linked machine that reads the file can therefore stop the host (`host.stop` is everyday, or `kill`), listen on
+  its port, answer the hub's `prove { credential }` from the file, and receive the hub's full credential in the hello
+  that follows. That credential is never listed as an "other" one. This is no worse than before #1405, when the file
+  held the token itself, but a reader of `serve.json` gets more than the limited credential through it. Closing it needs
+  an asymmetric pairing (the verifier a public key, the hub signing the host's nonce instead of sending a bearer
+  credential); until the owner decides, it stays a stated residual. Another account cannot take this path: it cannot
+  read the 0600 file.
 - **The same on the linked machine.** `serve --connection`, `serve` and `serve --stop` ask the host on the recorded
   port with the token, and another account there can hold that port while the host is down. When the installed
   build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).

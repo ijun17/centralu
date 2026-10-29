@@ -59,3 +59,13 @@ describe('Claude cross-session controls', () => {
     expect(result.env.CLAUDE_CODE_HARBOR_KITE).toBe('0')
   })
 })
+
+describe("the host's address and the session's credential in a Claude agent's environment (#1405)", () => {
+  it('reaches the CLI when the session has them, and nothing of the kind when it does not', async () => {
+    const { hostAccessEnv } = await import('../contract.js')
+    const access = { url: 'ws://127.0.0.1:4100', credential: 'ccs1:s:mac' }
+    const result = withoutCrossSessionMessaging({ env: hostAccessEnv(access) })
+    expect(result.env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:4100', CC_HOST_CREDENTIAL: 'ccs1:s:mac' })
+    expect(hostAccessEnv(undefined)).toEqual({})
+  })
+})

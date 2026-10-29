@@ -94,6 +94,7 @@ With the limited credential: runs.
 - `machines.need`
 - `machines.probe`
 - `machines.reconnect`
+- `machines.revokeCredential`
 - `machines.setAutoReconnect`
 - `machines.setConnect`
 - `machines.sshHosts`
@@ -234,6 +235,7 @@ With the limited credential: refused, never a card: the person's own answers and
 
 With the limited credential: refused: a hub linked to this host calls it, with the token.
 
+- `host.credentials`
 - `host.handover`
 - `host.hubAuto`
 - `host.hubOffer`

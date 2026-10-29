@@ -2,10 +2,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
-import { HostServer, type RpcContext } from './server.js'
+import { CREDENTIAL_FILE_UNREADABLE, HostServer, type RpcContext } from './server.js'
+import { credentialProof, hostProof, proofNonce, provesCredential } from './host-proof.js'
+import { LAST_READ_KEPT_MS, readCredentialFile, verifierOf } from '../lifecycle/serve-credentials.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
+import { sessionToken } from './session-token.js'
 
 describe('the limited credential is derived from the token', () => {
   it('matches the vector the keeper is checked against (#1405 slice 4)', () => {
@@ -55,7 +58,8 @@ async function hello(port: number, token: string, extra: Record<string, unknown>
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const frames: Record<string, unknown>[] = []
   ws.on('message', (d) => frames.push(JSON.parse(text(d))))
-  const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)))
+  let reason = ''
+  const closed = new Promise<number>((r) => ws.on('close', (code, why) => ((reason = String(why)), r(code))))
   await new Promise<void>((r) => ws.on('open', () => r()))
   ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION, ...extra }))
   const wait = async (pred: () => boolean, ms = 3000) => {
@@ -72,7 +76,7 @@ async function hello(port: number, token: string, extra: Record<string, unknown>
     await wait(() => frames.some((f) => f.kind === 'res' && f.id === id))
     return frames.find((f) => f.kind === 'res' && f.id === id) as { ok: boolean; error?: { code: string; message: string; data?: unknown } }
   }
-  return { ws, frames, closed, wait, call }
+  return { ws, frames, closed, wait, call, reason: () => reason }
 }
 
 const ev = (sessionId: string): NormalizedEvent => ({ type: 'turn_started', sessionId, turnId: 't1' }) as unknown as NormalizedEvent
@@ -343,5 +347,205 @@ describe('a limited call that asks the person, over the sockets (#1405 slice 3)'
     // The limited credential saying it shows them counts for nothing: it cannot answer
     await windowHello(port, ['host_requests'], limitedToken(TOKEN))
     expect(srv.showsHostRequests()).toBe(false)
+  })
+})
+
+/*
+ * A `centralu serve` host (#1405 slice 5): its key is the token it derives from, and it takes as full only a credential
+ * whose verifier serve.json names, read at each hello (lifecycle/serve-credentials.ts)
+ */
+const SERVE_KEY = 'k'.repeat(43)
+const SERVE_HUB = 'h'.repeat(43)
+const SERVE_WINDOW = 'w'.repeat(43)
+const serveEntry = (id: string, token: string) => ({ id, label: id, verifier: verifierOf(token), created: 1 })
+
+/** A host as `centralu serve` starts one: its key as the token, its full credentials those the file names */
+async function serveHost(full: object[], opts: { credentialSweepMs?: number; path?: string; now?: () => number } = {}) {
+  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does, `remove` moves it aside, `deny` takes this user's read away
+  let file: string | null = ''
+  let denied = false
+  const write = (entries: object[]) => (file = JSON.stringify({ v: 2, key: SERVE_KEY, port: null, full: entries }))
+  const remove = () => (file = null)
+  const deny = (on = true) => (denied = on)
+  const read = () => {
+    if (denied) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    if (file === null) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
+    return file
+  }
+  write(full)
+  const path = opts.path ?? 'serve.json'
+  server = new HostServer({
+    port: 0,
+    token: SERVE_KEY,
+    fullCredentials: () => readCredentialFile(path, read, () => {}, opts.now),
+    ...(opts.credentialSweepMs ? { credentialSweepMs: opts.credentialSweepMs } : {}),
+    onRpc: async () => ({ ok: true }),
+  })
+  const port = await server.listen()
+  return { port, write, remove, deny }
+}
+
+/** The frames a socket gets for what it sends first (a prove, a hello), and the code it closed with, if it did */
+async function serveExchange(port: number, first: object): Promise<{ frames: Record<string, unknown>[]; closed: number | null }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const frames: Record<string, unknown>[] = []
+  let closed: number | null = null
+  ws.on('message', (d) => frames.push(JSON.parse(text(d))))
+  ws.on('close', (code) => (closed = code))
+  await new Promise<void>((r) => ws.on('open', () => r()))
+  ws.send(JSON.stringify(first))
+  for (let i = 0; i < 200 && frames.length === 0 && closed === null; i++) await new Promise((r) => setTimeout(r, 10))
+  ws.close()
+  return { frames, closed }
+}
+
+const serveHello = (port: number, token: string) => serveExchange(port, { kind: 'hello', token, protocolVersion: PROTOCOL_VERSION })
+
+describe('a centralu serve host takes as full only the credentials serve.json names (#1405)', () => {
+  it('lets a paired credential in, not the key it was handed, and the limited credential as a client', async () => {
+    const { port } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    expect((await serveHello(port, SERVE_KEY)).closed).toBe(4001)
+    expect((await serveHello(port, limitedToken(SERVE_KEY))).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+
+  it('keeps out an entry written by hand that nothing would list: no label, or an id --revoke does not take', async () => {
+    const { port, write } = await serveHost([{ id: 'aaaaaaaa', verifier: verifierOf(SERVE_HUB), created: 1 }])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+    write([{ id: 'zz', label: 'hand', verifier: verifierOf(SERVE_HUB), created: 1 }])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+    write([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+
+  it('reads the file at each hello: a pairing lets the next one in, a revocation keeps it out', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    expect((await serveHello(port, SERVE_WINDOW)).closed).toBe(4001)
+    write([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+  })
+
+  it("proves under the named credential's verifier, which only its holder can check, and under the key otherwise", async () => {
+    const { port } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)])
+    const nonce = proofNonce()
+    const named = (await serveExchange(port, { kind: 'prove', nonce, credential: 'aaaaaaaa' })).frames[0] as { mac: string }
+    expect(named.mac).toBe(credentialProof(verifierOf(SERVE_HUB), nonce))
+    expect(provesCredential(verifierOf(SERVE_HUB), nonce, named.mac)).toBe(true)
+    expect(provesCredential(verifierOf(SERVE_WINDOW), nonce, named.mac)).toBe(false)
+    // No credential named, or one it does not hold: the proof the launcher's own probe checks, under the key
+    const plain = (await serveExchange(port, { kind: 'prove', nonce })).frames[0] as { mac: string }
+    expect(plain.mac).toBe(hostProof(SERVE_KEY, nonce))
+    const unknown = (await serveExchange(port, { kind: 'prove', nonce, credential: 'cccccccc' })).frames[0] as { mac: string }
+    expect(unknown.mac).toBe(hostProof(SERVE_KEY, nonce))
+  })
+
+  /*
+   * #1405 review, the blocker: `--pair x`, a socket opened with it, `--revoke` within 135 ms. The socket kept full
+   * rights for as long as it stayed open (75 s+ measured), while serve.json, and so every listing, no longer named it
+   */
+  it('closes a socket already in with a credential once it is revoked, and leaves the others', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)], { credentialSweepMs: 20, path: 'revoked.json' })
+    const hub = await hello(port, SERVE_HUB)
+    const win = await hello(port, SERVE_WINDOW)
+    const limited = await hello(port, limitedToken(SERVE_KEY))
+    await hub.wait(() => [hub, win, limited].every((c) => c.frames.some((f) => f.kind === 'hello_ok')))
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect(await hub.closed).toBe(4001)
+    // The window's credential is still listed, and the limited one was never full: both stay in
+    await new Promise((r) => setTimeout(r, 100))
+    expect((await win.call('x')).ok).toBe(true)
+    expect(limited.ws.readyState).toBe(WebSocket.OPEN)
+  })
+
+  it('closes it at the next hello too, before any sweep', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)], { credentialSweepMs: 3_600_000, path: 'hello.json' })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    expect(await hub.closed).toBe(4001)
+  })
+
+  it('closes every full socket when serve.json is moved aside (#1405 review)', async () => {
+    const { port, remove } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)], { credentialSweepMs: 20, path: 'moved.json' })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    remove()
+    expect(await hub.closed).toBe(4001)
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+  })
+
+  /*
+   * #1405 review: serve.json made unreadable (chmod 000). A credential paired just before kept full rights 30 s while
+   * no row listed it, and then every full socket, the hub's too, closed as "credential withdrawn", which the hub took
+   * for its own credential taken over
+   */
+  it('refuses a new full hello at once while serve.json cannot be read, and closes the open ones after a few seconds as unreadable, not withdrawn', async () => {
+    let t = 1_000_000
+    const { port, write, deny } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)], { credentialSweepMs: 20, path: 'denied.json', now: () => t })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    write([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    // The host reads the new pairing (its sweep, every 20 ms here) before the file goes unreadable
+    await new Promise((r) => setTimeout(r, 100))
+    deny()
+    // The one paired just before the file went unreadable: refused at its first hello, and said why
+    const fresh = await hello(port, SERVE_WINDOW)
+    expect(await fresh.closed).toBe(4001)
+    expect(fresh.reason()).toBe(CREDENTIAL_FILE_UNREADABLE)
+    // The socket already in stays for a few seconds of a busy file, and the limited credential was never full
+    await new Promise((r) => setTimeout(r, 100))
+    expect(hub.ws.readyState).toBe(WebSocket.OPEN)
+    expect((await serveHello(port, limitedToken(SERVE_KEY))).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    t += LAST_READ_KEPT_MS + 1
+    expect(await hub.closed).toBe(4001)
+    expect(hub.reason()).toBe(CREDENTIAL_FILE_UNREADABLE)
+    // Readable again: the credentials it names work as before
+    deny(false)
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+})
+
+describe("a session's credential at hello (#1405 slice 6)", () => {
+  const SID = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+  async function startKnowing(known: string[]) {
+    const calls: Call[] = []
+    let asked: { client: string | null; session?: string } | null = null
+    server = new HostServer({
+      port: 0,
+      token: TOKEN,
+      knowsSession: (id) => known.includes(id),
+      onRpc: async (method, params, ctx) => {
+        calls.push({ method, params, ctx })
+        return { ok: true }
+      },
+      onAsk: async (_m, _p, from) => {
+        asked = from
+        return { ok: true }
+      },
+    })
+    const port = await server.listen()
+    return { port, calls, asked: () => asked }
+  }
+
+  it("has the limited credential's rights, and says its session to the handler and to a card", async () => {
+    const { port, calls, asked } = await startKnowing([SID])
+    const c = await hello(port, sessionToken(TOKEN, SID))
+    expect(await c.call('sessions.list')).toMatchObject({ ok: true })
+    expect(calls[0]!.ctx).toMatchObject({ rights: 'limited', session: SID })
+    // Refused what the limited credential is refused
+    expect((await c.call('agents.respondApproval', {})).error?.data).toEqual({ refused: 'rights', rights: 'window' })
+    // And what asks goes to the card with its session named
+    await c.call('trash.purge', { sessionId: SID })
+    expect(asked()).toMatchObject({ session: SID })
+    c.ws.close()
+  })
+
+  it("is refused at hello when it names a session this host does not have", async () => {
+    const { port } = await startKnowing([])
+    expect(await (await hello(port, sessionToken(TOKEN, SID))).closed).toBe(4001)
   })
 })

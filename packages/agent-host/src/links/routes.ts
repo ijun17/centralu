@@ -340,6 +340,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.probe': HUB,
   'machines.remove': HUB,
   'machines.reconnect': HUB,
+  'machines.revokeCredential': HUB,
   'machines.disconnect': HUB,
   'machines.setAutoReconnect': HUB,
   'machines.setConnect': HUB,
@@ -373,6 +374,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.send': HUB,
   'host.hubAuto': HUB,
   'host.setHubAuto': HUB,
+  'host.credentials': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,

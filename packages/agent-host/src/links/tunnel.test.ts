@@ -5,6 +5,11 @@ import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
+  pairLabel,
+  credentialsOf,
+  hubKeyOf,
+  parseRevoke,
+  revokeCommand,
   autostartCommand,
   connectionCommand,
   detachCommand,
@@ -93,6 +98,13 @@ fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) 
 const has = (process.env.FAKE_SSH_HAS || '').split('|')
 const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
 const answer = () => {
+  // A serve from before #1405 refuses --pair, as it refuses any option it does not know
+  // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && !/ --pair /.test(cmd) && !fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) return process.stdout.write(line({ token: undefined, takes: ['from', 'window', 'pair'] }) + String.fromCharCode(10))
+  // A serve.json this user may not read there (#1405 review), as the launcher says it
+  if (process.env.FAKE_SSH_DENIED) { process.stderr.write('centralu serve: /d/serve.json cannot be read by this user (EACCES). Give this user read and write access to it again (on Linux and macOS: chmod 600 /d/serve.json) and run again; do not move it aside.' + String.fromCharCode(10)); process.exit(1) }
+  if (process.env.FAKE_SSH_NO_PAIR && / --pair /.test(cmd)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
     const how = process.env.FAKE_SSH_DETACH
@@ -199,6 +211,11 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await removeTree(dir)
   })
 
+  it('says under which label this hub paired, so the row can tell its own from one made under its name', async () => {
+    const ep = await tunnel({ FAKE_SSH_LINE: line({ credential: 'abcd1234' }) }).open()
+    expect(ep.line.pairedAs).toMatch(/^hub:[A-Za-z0-9._-]+$/)
+  })
+
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
     const t = tunnel({})
     const ep = await t.open()
@@ -206,7 +223,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(ep.line).toMatchObject({ port: remotePort, version: '0.1.0-beta.11', hostRunning: true })
     const [ask, forward] = (logged() as unknown[]).filter((x): x is string[] => Array.isArray(x))
     expect(ask!.slice(0, -1)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', 'box'])
-    expect(ask!.at(-1)).toMatch(/^sh -c 'd=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
+    expect(ask!.at(-1)).toMatch(/^sh -c 'd=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection --pair hub:[A-Za-z0-9._-]+; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
     expect(forward).toContain('-N')
     for (const opt of ['BatchMode=yes', 'ExitOnForwardFailure=yes', 'ServerAliveInterval=15', 'GatewayPorts=no']) expect(forward).toContain(opt)
     const spec = forward![forward!.indexOf('-L') + 1]!
@@ -270,6 +287,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'powershell' }).open()).rejects.toThrow(/not installed on box/)
     await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()).rejects.toThrow('not installed in WSL (Ubuntu-24.04) on box')
     await expect(tunnel({ FAKE_SSH_UNREACHABLE: '1' }).open()).rejects.toThrow(/ssh could not reach box: .*timed out/)
+  })
+
+  // #1405 review: the row said the Centralu there "may predate centralu serve", then the launcher's permission advice
+  it("says the machine's serve.json cannot be read there as that alone, not as a Centralu too old to print the line", async () => {
+    const said = await tunnel({ FAKE_SSH_DENIED: '1' }).open().then(() => '', (e: unknown) => (e instanceof Error ? e.message : ''))
+    expect(said).toMatch(/serve\.json cannot be read by this user \(EACCES\)\. Give this user read and write access/)
+    expect(said).not.toMatch(/may predate/)
   })
 
   it('opens no forward while the remote host is not running', async () => {
@@ -447,7 +471,8 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()
     const runs = (logged() as { shell?: string; run?: string }[]).filter((x) => x.shell)
     expect(runs[0]!.shell).toBe('powershell')
-    expect(runs[0]!.run).toContain("elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd serve --connection } else { $l = Join-Path $d 'bin\\centralu.cmd'")
+    // A full credential of its own is asked for at each link (#1405): `--pair hub:<this computer>`
+    expect(runs[0]!.run).toMatch(/elseif \(Get-Command centralu\.cmd -ErrorAction SilentlyContinue\) \{ & centralu\.cmd serve --connection --pair hub:[A-Za-z0-9._-]+ \} else \{ \$l = Join-Path \$d 'bin\\centralu\.cmd'/)
     expect(runs[1]!.shell).toBe('wsl:Ubuntu-24.04')
     // Windows' drives are off PATH inside the distro: its npm shim must not answer for the distro
     expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); d=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
@@ -458,11 +483,45 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(forwards[1]).not.toContain('-N')
   })
 
+  it('pairs for a credential of its own, and asks a serve from before pairing as before, once (#1405)', async () => {
+    const t = tunnel({ FAKE_SSH_NO_PAIR: '1' })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
+    expect(runs.map((r) => / --pair hub:/.test(r))).toEqual([true, false])
+    // The refusal is remembered for this link: the next open asks without --pair at once
+    await t.close()
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const after = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
+    expect(after.slice(2).map((r) => / --pair hub:/.test(r))).toEqual([false])
+  })
+
+  it('asks with --pair again once a remote that refused it was updated, rather than linking with no credential (#1405 review)', async () => {
+    const flag = join(dir, `no-pair-${Date.now()}`)
+    writeFileSync(flag, '')
+    const t = tunnel({ FAKE_SSH_NO_PAIR_FILE: flag })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    await t.close()
+    // Updated there: it takes --pair now, and prints no token without it
+    rmSync(flag, { force: true })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => / --pair hub:/.test(x.run!))
+    expect(runs).toEqual([true, false, false, true])
+  })
+
+  it('pairs under a label of its own: its name, and a key that tells it from a hub of the same name', () => {
+    expect(pairLabel('Mac-mini', hubKeyOf('hub-0123abcd'))).toBe('hub:Mac-mini-0123abcd')
+    // Two hubs of one computer name are two labels by their own random ids, whatever their data folders' paths
+    expect(pairLabel('Mac-mini', hubKeyOf('hub-0123abcd'))).not.toBe(pairLabel('Mac-mini', hubKeyOf('hub-89abcdef')))
+    expect(hubKeyOf('not an id')).toMatch(/^[0-9a-f]{8}$/)
+    // Never past what --pair takes (80 characters)
+    expect(pairLabel('x'.repeat(64), hubKeyOf('/d')).length).toBeLessThanOrEqual(80)
+  })
+
   it('runs the person’s own command in place of centralu, with no fallback', async () => {
     const cmd = 'CC_DATA_DIR=/tmp/x node /src/packaging/npm/centralu/bin/centralu.mjs'
     await expect(tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open()).rejects.toThrow(/No such file or directory/)
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run)
-    expect(runs).toEqual([`${cmd} serve --connection`])
+    expect(runs).toEqual([expect.stringMatching(/^CC_DATA_DIR=\/tmp\/x node \/src\/packaging\/npm\/centralu\/bin\/centralu\.mjs serve --connection --pair hub:[A-Za-z0-9._-]+$/)])
     await expect(tunnel({ FAKE_SSH_HAS: cmd }, { shell: 'posix', command: cmd }).open()).resolves.toMatchObject({ token: 'tok' })
   })
 
@@ -837,5 +896,45 @@ describe('the proof field of the connection line', () => {
     const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
     expect(parseConnectionLine(JSON.stringify({ ...base, proof: true })).proof).toBe(true)
     for (const proof of [undefined, false, 'true', 1]) expect(parseConnectionLine(JSON.stringify({ ...base, proof })).proof).toBeUndefined()
+  })
+})
+
+describe('serve --revoke over ssh (#1405)', () => {
+  it('names one credential by its id, and reads whether there was one', () => {
+    expect(revokeCommand({ shell: 'posix', command: 'x' }, 'abcd1234')).toBe('x serve --revoke abcd1234')
+    expect(() => revokeCommand({ shell: 'posix' }, 'abcd; rm -rf ~')).toThrow(/8 hex characters/)
+    expect(parseRevoke(['motd', '{"v":1,"revoked":true,"id":"abcd1234"}', ''].join('\n'))).toBe(true)
+    expect(parseRevoke('{"v":1,"revoked":false,"id":"abcd1234"}')).toBe(false)
+    // An older serve refuses the option and prints no line
+    expect(parseRevoke('')).toBeNull()
+  })
+
+  it("cleans what a remote names before it reaches a row: an id --revoke takes, one line of label, a real date", () => {
+    const base = { v: 1, port: 1, protocolVersion: 1, takes: ['pair'] }
+    // A bidi override and a line break in the label: written as escapes here, as they come over the wire
+    const tricky = 'evil' + String.fromCharCode(0x202e) + '"label"' + String.fromCharCode(10) + 'next'
+    const line = parseConnectionLine(JSON.stringify({ ...base, others: [
+      { id: 'abcd1234', label: tricky, created: 5 },
+      { id: 'not-hex!', label: 'x', created: 1 },
+      { id: 'ffff0000', label: 'y', created: 1e300 },
+    ] }))
+    expect(line.others?.map((c) => c.id)).toEqual(['abcd1234', 'ffff0000'])
+    const label = line.others![0]!.label
+    expect(label.includes(String.fromCharCode(0x202e)) || label.includes(String.fromCharCode(10))).toBe(false)
+    expect(line.others![1]!.created).toBe(0)
+  })
+
+  it('reads whether a pairing replaced an earlier one of its label, keeps a label whole up to what --pair takes, and reads a long list whole', () => {
+    const listed = credentialsOf([
+      { id: 'abcd1234', label: 'window', created: 5, replaced: true },
+      { id: 'abcd1235', label: 'window', created: 5, replaced: 'yes' },
+      { id: 'abcd1236', label: 'hub:' + 'x'.repeat(76), created: 5 },
+    ])
+    expect(listed?.map((c) => c.replaced)).toEqual([true, false, false])
+    expect(listed?.[2]?.label).toHaveLength(80)
+    // The row shows 32 and counts the rest, so none is dropped here
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: i.toString(16).padStart(8, '0'), label: 'x', created: 1 }))
+    expect(credentialsOf(many)).toHaveLength(40)
+    expect(credentialsOf({ not: 'a list' })).toBeNull()
   })
 })

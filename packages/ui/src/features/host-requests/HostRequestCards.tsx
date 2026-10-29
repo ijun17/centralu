@@ -51,7 +51,8 @@ export function HostRequestCards() {
             Awaiting approval
           </Pill>
           <span className="text-xs text-ink-faint" data-testid="host-request-from">
-            A program on this computer{first.client ? ` (it calls itself ${first.client})` : ''} asks, and waits
+            A program on this computer{first.client ? ` (it calls itself ${first.client})` : ''}
+            {first.session ? `, which says it runs under the session ${first.session},` : ''} asks, and waits
           </span>
         </div>
         {/* All of it shows, wrapped anywhere: what runs is what the card says, and a long line of JSON has no spaces */}

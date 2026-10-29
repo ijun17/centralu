@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
+import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
 import {
   connectionLine,
@@ -39,6 +40,10 @@ import {
   readyPort,
   recordServePort,
   rotateServeToken,
+  pairServe,
+  revokeServe,
+  verifierOf,
+  limitedOf,
   SERVE_STATE_FILE,
   serveDataDir,
   chooseServePort,
@@ -61,12 +66,16 @@ import {
   markStopped,
   readStopped,
   rotateServeLog,
+  PAIR_LABEL_RE,
+  CREDENTIAL_ID_RE,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } from '../packaging/npm/centralu/bin/serve-files.mjs'
 import { SLOW } from './test-timing.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 
@@ -143,6 +152,30 @@ describe('serve arguments', () => {
 })
 
 describe('the data folder and the state file', () => {
+  it('lists exactly the full credentials the host takes: an entry nothing would list opens nothing (#1405)', () => {
+    // The two rules are one: what --pair and --revoke take is what the host's reader takes
+    expect(HOST_ID_RE.source).toBe(CREDENTIAL_ID_RE.source)
+    expect(HOST_LABEL_RE.source).toBe(PAIR_LABEL_RE.source)
+    const d = tempDir()
+    const key = 'k'.repeat(43)
+    const v = verifierOf('h'.repeat(43))
+    const entries = [
+      { id: 'aaaaaaaa', verifier: v, created: 1 },
+      { id: 'zz', label: 'hand', verifier: v, created: 1 },
+      { id: 'bbbbbbbb', label: 'with space', verifier: v, created: 1 },
+      { id: 'cccccccc', label: 'window', verifier: v, created: 1 },
+    ]
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key, port: null, full: entries }))
+    const listed = (readServeState(d).full as { id: string }[]).map((e) => e.id)
+    expect(listed).toEqual(['cccccccc'])
+    expect(readFullCredentials(join(d, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')).map((e) => e.id)).toEqual(listed)
+    // And the next write leaves the others out of the file
+    pairServe(d, 'hub:laptop')
+    const kept = (JSON.parse(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')) as { full: { id: string }[] }).full.map((e) => e.id)
+    expect(kept).not.toContain('aaaaaaaa')
+    expect(kept).not.toContain('zz')
+  })
+
   it('is ~/.centralu unless CC_DATA_DIR says otherwise', () => {
     expect(serveDataDir({}, '/home/me')).toBe(join('/home/me', '.centralu'))
     expect(serveDataDir({ CC_DATA_DIR: '/srv/cc' }, '/home/me')).toBe('/srv/cc')
@@ -164,21 +197,221 @@ describe('the data folder and the state file', () => {
     expect(statSync(join(d, SERVE_STATE_FILE)).mode & 0o777).toBe(0o600)
   })
 
-  it('generates the token once and keeps it across starts and port changes', () => {
+  it('generates the key once and keeps it across starts and port changes, with no full credential yet (#1405)', () => {
     const d = tempDir()
     const first = ensureServeState(d)
-    expect(first.token.length).toBeGreaterThanOrEqual(32)
+    expect(first.key.length).toBeGreaterThanOrEqual(32)
     expect(first.port).toBeNull()
+    expect(first.full).toEqual([])
+    // What the launcher's own probes say hello with: the limited credential, derived from the key as the host derives it
+    expect(first.token).toBe(limitedOf(first.key))
     recordServePort(d, 9100)
-    expect(ensureServeState(d)).toEqual({ token: first.token, port: 9100 })
+    expect(ensureServeState(d)).toEqual({ ...first, port: 9100 })
   })
 
-  it('replaces the token only when asked, keeping the port', () => {
+  it('keeps a full credential only as its hash, one per label, and withdraws it when asked (#1405)', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    const again = pairServe(d, 'hub:mac')
+    const win = pairServe(d, 'window')
+    const file = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
+    for (const t of [hub.token, again.token, win.token]) expect(file).not.toContain(t)
+    const state = readServeState(d)!
+    // Pairing again replaces the label's earlier credential
+    expect(state.full.map((e: { label: string; id: string; verifier: string }) => [e.label, e.id, e.verifier])).toEqual([
+      ['hub:mac', again.id, verifierOf(again.token)],
+      ['window', win.id, verifierOf(win.token)],
+    ])
+    // The same pairer pairing again (a hub at each link) is not marked: it is routine (#1405 review)
+    expect(state.full.map((e: { label: string; replaced?: boolean }) => [e.label, e.replaced === true])).toEqual([
+      ['hub:mac', false],
+      ['window', false],
+    ])
+    expect(revokeServe(d, again.id)).toBe(true)
+    expect(revokeServe(d, again.id)).toBe(false)
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+  })
+
+  it('marks a pairing replaced only when the one it took the place of was asked for another way (#1405 review)', () => {
+    const d = tempDir()
+    const marked = () => readServeState(d).full.map((e: { label: string; replaced?: boolean }) => [e.label, e.replaced === true])
+    // The window at each start: the same pairer, never marked
+    pairServe(d, 'window', process.platform, 1, 'window')
+    pairServe(d, 'window', process.platform, 2, 'window')
+    expect(marked()).toEqual([['window', false]])
+    // Something else pairing under the window's label is marked, and so is the window's next start after it
+    pairServe(d, 'window', process.platform, 3, 'pair')
+    expect(marked()).toEqual([['window', true]])
+    pairServe(d, 'window', process.platform, 4, 'window')
+    expect(marked()).toEqual([['window', true]])
+    pairServe(d, 'window', process.platform, 5, 'window')
+    expect(marked()).toEqual([['window', false]])
+    // An entry that does not say how it was asked for counts as another way
+    const file = join(d, SERVE_STATE_FILE)
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { full: { via?: string }[] }
+    delete raw.full[0]!.via
+    writeFileSync(file, JSON.stringify(raw))
+    pairServe(d, 'window', process.platform, 6, 'window')
+    expect(marked()).toEqual([['window', true]])
+  })
+
+  it('takes over a lock dated ahead of now, as one dated long ago (#1405 review: a crashed writer, then the clock set back)', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    writeFileSync(lock, 'crashed')
+    const ahead = new Date(Date.now() + 5 * 60_000)
+    utimesSync(lock, ahead, ahead)
+    let waits = 0
+    const paired = changeServeState(d, (s: { full: unknown[] }) => ({ ...s, port: 9400 }), process.platform, { sleep: () => waits++ })
+    expect(paired.port).toBe(9400)
+    // Taken over at the first look, not after the five minutes (nor the 12 s the waiter gives up after)
+    expect(waits).toBeLessThanOrEqual(1)
+    expect(existsSync(lock)).toBe(false)
+  })
+
+  it('writes nothing once its lock was taken over while it was stalled (#1405 review), and leaves the new holder its lock', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    // Stalled past the 10 s: another writer took the lock over and revoked meanwhile
+    expect(() =>
+      changeServeState(d, (s: { full: unknown[] }) => {
+        writeFileSync(lock, 'another writer')
+        return { ...s, full: [...s.full, { id: 'dddddddd', label: 'late', verifier: verifierOf('z'.repeat(43)), created: 1 }] }
+      }),
+    ).toThrow(/taken over/)
+    expect(readServeState(d).full.map((e: { id: string }) => e.id)).toEqual([hub.id])
+    expect(readFileSync(lock, 'utf8')).toBe('another writer')
+  })
+
+  /*
+   * #1405 review: the writer read its lock back, then removed it by name. A writer that took the lock over in between
+   * lost it, and a third could then write beside it
+   */
+  it('does not remove a lock another writer took over between its look and its removal', () => {
+    const d = tempDir()
+    pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    let looked = false
+    // The moment this writer looks at its lock, another takes it over
+    const read = (p: string, enc: BufferEncoding) => {
+      const text = readFileSync(p, enc)
+      if (!looked) {
+        looked = true
+        writeFileSync(lock, 'successor')
+      }
+      return text
+    }
+    changeServeState(d, (s: unknown) => s, process.platform, { read })
+    expect(readFileSync(lock, 'utf8')).toBe('successor')
+  })
+
+  /*
+   * #1405 review: on Windows the rename after the read-back is tried again for up to 5 s while a reader holds the
+   * file, long enough for the lock to go stale, be taken over and written under. A writer past its time writes nothing
+   */
+  // Self-check: a lock that could not be read after it was moved aside may be another writer's, and is put back
+  it('puts back a lock it could not read once moved aside, rather than removing what may be another writer', () => {
+    const d = tempDir()
+    pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    const read = (p: string, enc: BufferEncoding) => {
+      if (p.endsWith('.release')) throw Object.assign(new Error('EBUSY: busy'), { code: 'EBUSY' })
+      return readFileSync(p, enc)
+    }
+    changeServeState(d, (s: unknown) => s, process.platform, { read })
+    expect(existsSync(lock)).toBe(true)
+  })
+
+  it('writes nothing once it held its lock too long to finish before a waiter may take it over', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    let t = 0
+    expect(() =>
+      changeServeState(d, (s: { full: unknown[] }) => {
+        t += STATE_LOCK_STALE_MS - STATE_LOCK_MARGIN_MS
+        return { ...s, port: 9500 }
+      }, process.platform, { clock: () => t }),
+    ).toThrow(/held too long/)
+    expect(readServeState(d)).toMatchObject({ port: null, full: [expect.objectContaining({ id: hub.id })] })
+    expect(existsSync(join(d, `${SERVE_STATE_FILE}.lock`))).toBe(false)
+  })
+
+  it('puts back a lock that looked stale and was not by the time it was taken over (two waiters at once)', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    // Another waiter's fresh lock, which this one's first look took for the stale one before it
+    writeFileSync(lock, 'fresh, another waiter')
+    let looks = 0
+    const nowMs = () => (++looks === 1 ? Date.now() + 60_000 : Date.now())
+    expect(() => changeServeState(d, (s: { full: unknown[] }) => ({ ...s, port: 9600 }), process.platform, { sleep: () => {}, nowMs })).toThrow(/held by another serve/)
+    expect(readFileSync(lock, 'utf8')).toBe('fresh, another waiter')
+    expect(readServeState(d).port).toBeNull()
+  })
+
+  // #1405 review: chmod 000 on serve.json was answered "Move it aside", which would lock out every holder of a credential
+  it('says a serve.json this user cannot read is a permission problem, not a file to move aside', () => {
+    const denied = (code: string) => () => {
+      throw Object.assign(new Error(`${code}: permission denied`), { code })
+    }
+    for (const code of ['EACCES', 'EPERM']) {
+      const said = noState('/d/serve.json', denied(code)).message
+      expect(said).toContain(`cannot be read by this user (${code})`)
+      expect(said).toContain('chmod 600 /d/serve.json')
+      expect(said).not.toMatch(/Move it aside/)
+    }
+    expect(noState('/d/serve.json', () => 'not json').message).toMatch(/not a serve state file\. Move it aside/)
+  })
+
+  // As it reads for real, where mode bits can refuse this user (not as root, who reads anything)
+  it.skipIf(!POSIX || process.getuid?.() === 0)('refuses to pair over a serve.json chmod 000, saying how to give it back', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const file = join(d, SERVE_STATE_FILE)
+    chmodSync(file, 0o000)
+    try {
+      expect(() => pairServe(d, 'hub:mac')).toThrow(/cannot be read by this user \(EACCES\)/)
+    } finally {
+      chmodSync(file, 0o600)
+    }
+  })
+
+  it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {
+    const d = tempDir()
+    const legacy = 'x'.repeat(43)
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: legacy, port: 9300 }))
+    const moved = ensureServeState(d)
+    expect(moved).toMatchObject({ v: 2, port: 9300 })
+    expect(moved.full).toEqual([expect.objectContaining({ label: 'legacy', verifier: verifierOf(legacy) })])
+    expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(legacy)
+    // The key is new: a hello with the old token is not what derives the limited credential
+    expect(moved.key).not.toBe(legacy)
+    // A program's own pairing leaves it: a hub that held it and has not paired yet keeps its link
+    pairServe(d, 'script')
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['legacy', 'script'])
+    pairServe(d, 'hub:mac')
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['script', 'hub:mac'])
+  })
+
+  it('drops a version 1 token at the window pairing, so a machine no hub links to does not keep it (#1405 review)', () => {
+    const d = tempDir()
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: 'y'.repeat(43), port: 9300 }))
+    ensureServeState(d)
+    pairServe(d, 'window')
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+  })
+
+  it('replaces the key and withdraws every full credential only when asked, keeping the port', () => {
     const d = tempDir()
     const first = ensureServeState(d)
     recordServePort(d, 9200)
+    pairServe(d, 'hub:mac')
     const after = rotateServeToken(d)
+    expect(after.key).not.toBe(first.key)
     expect(after.token).not.toBe(first.token)
+    expect(after.full).toEqual([])
     expect(after.port).toBe(9200)
     expect(readServeState(d)).toEqual(after)
   })
@@ -255,6 +488,19 @@ describe('replacing a file that a reader holds open (#1041)', () => {
     expect(calls).toBe(1)
   })
 
+  // #1405 review: a writer under serve.json.lock asks before every try whether the lock is still its own
+  it('asks before every try whether it may still try, and stops with that answer', () => {
+    let calls = 0
+    let may = true
+    const rename = () => {
+      calls++
+      may = false
+      throw busy('EBUSY')
+    }
+    expect(() => renameRetrying('a', 'b', { ...quick, rename, mayTry: () => (may ? null : new Error('lock taken over')) })).toThrow(/lock taken over/)
+    expect(calls).toBe(1)
+  })
+
   it('leaves the old file whole and no temporary file when the rename never goes through', () => {
     const d = tempDir()
     const file = join(d, 'f.json')
@@ -321,7 +567,8 @@ describe('the connection line', () => {
   it('has exactly the fields the client reads, in one JSON object', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
     // `takes`: the options an older serve refuses, so a hub (`from`) or the window (`window`) uses them only on one that says so (#1223)
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window'] })
+    // `pair` (#1405): `--connection --pair` hands out a full credential of its own
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window', 'pair'] })
     expect(line).not.toContain('\n')
   })
 
@@ -515,6 +762,14 @@ function serve(dataDir: string, args: string[]) {
   return { child, out, exited, until }
 }
 
+/**
+ * The options a host `centralu serve` runs is started with since #1405: its key as the token, and the full credentials
+ * those serve.json names, read at each hello
+ */
+function serveHostCredentials(dataDir: string) {
+  return { token: String(readServeState(dataDir).key), fullCredentials: () => readFullCredentials(join(dataDir, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')) }
+}
+
 async function connection(dataDir: string, extra: NodeJS.ProcessEnv = {}): Promise<Record<string, unknown>> {
   const stdout = await new Promise<string>((resolve, reject) =>
     execFile(process.execPath, [CLI, 'serve', '--connection'], { cwd: ROOT, env: { ...cliEnv(dataDir), ...extra } }, (err, out) =>
@@ -536,6 +791,27 @@ async function hello(port: number, token: string): Promise<Record<string, unknow
     return await new Promise((resolve, reject) => {
       ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
       ws.onmessage = (ev) => resolve(JSON.parse(String(ev.data)) as Record<string, unknown>)
+      ws.onclose = (ev) => reject(new Error(`closed ${ev.code}`))
+    })
+  } finally {
+    ws.close()
+  }
+}
+
+/** One call to the host after a hello with `token`, its result, or the error it answered */
+async function askHost(port: number, token: string, method: string, params: unknown = {}): Promise<unknown> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  try {
+    return await new Promise((resolve, reject) => {
+      ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
+      ws.onmessage = (ev) => {
+        const f = JSON.parse(String(ev.data)) as Record<string, any>
+        if (f.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'q1', method, params }))
+        else if (f.kind === 'res' && f.id === 'q1') {
+          if (f.ok) resolve(f.result)
+          else reject(new Error(String(f.error?.message)))
+        }
+      }
       ws.onclose = (ev) => reject(new Error(`closed ${ev.code}`))
     })
   } finally {
@@ -616,14 +892,30 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 
       const info = await connection(d)
       // proof (#838): the running host answered a prove, so the hub will ask it to before sending the token
-      expect(info).toMatchObject({ v: 1, port, token: before.token, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true, proof: true })
+      expect(info).toMatchObject({ v: 1, port, limited: before.limited, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true, proof: true })
       // From the installed build (#838), whether a host runs or not
       expect(before.proof).toBe(true)
+      // --connection alone hands out no full credential (#1405): the limited one only
+      expect(info.token).toBeUndefined()
+      expect(String(info.limited)).toMatch(/^ccl1:/)
 
-      const ok = await hello(port, String(info.token))
+      // A hub pairs (#1405): a full credential of its own, printed once, which the running host takes at once
+      const paired = (await cli(d, ['--connection', '--pair', 'hub:test'])).line
+      expect(paired).toMatchObject({ token: expect.any(String), credential: expect.stringMatching(/^[0-9a-f]{8}$/), others: [] })
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(String(paired.token))
+      const ok = await hello(port, String(paired.token))
       // Whether it runs with administrator rights is known before it listens (#702): a hub's first hello already says it
       expect(ok).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, elevated: expect.any(Boolean) })
+      // The limited credential is a client too, and the key it comes from is no credential at all
+      expect(await hello(port, String(info.limited))).toMatchObject({ kind: 'hello_ok' })
+      await expect(hello(port, String(readServeState(d).key))).rejects.toThrow(/closed 4001/)
       await expect(hello(port, 'not-the-token')).rejects.toThrow(/closed 4001/)
+      // Withdrawn, the credential's next hello is refused
+      const revoked = await cli(d, ['--revoke', String(paired.credential)])
+      expect(revoked.code).toBe(0)
+      // And says what the host does with a connection open with it (#1405 review: it said such a one stays)
+      expect(revoked.stderr).toContain('closes a connection already open with it within a second')
+      await expect(hello(port, String(paired.token))).rejects.toThrow(/closed 4001/)
 
       const second = serve(d, [])
       expect(await second.exited).toBe(1)
@@ -635,10 +927,43 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       else expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: true })
       expect(await s.exited).toBe(0)
       expect(s.out.stderr).toContain('[agent-host] shutting down')
-      // The ready line carries the token; serve passes it to no one
+      // The ready line carries the host's key; serve passes it to no one, nor any credential
       expect(s.out.stdout).toBe('')
-      expect(s.out.stderr).not.toContain(String(info.token))
+      expect(s.out.stderr).not.toContain(String(paired.token))
+      expect(s.out.stderr).not.toContain(String(readServeState(d).key))
       expect((await connection(d)).hostRunning).toBe(false)
+    },
+    90_000 * SLOW,
+  )
+
+  /*
+   * #1405 review: the host's main.ts hands HostServer the hook that records each full hello, and hands
+   * `host.credentials` what it recorded. With either left out, a credential paired, used and withdrawn between two of a
+   * hub's reads left no trace, and every unit test still passed
+   */
+  it(
+    'lists a credential used and withdrawn before any read as gone, and the ids used under hub labels, from a real host',
+    async () => {
+      const d = tempDir()
+      const port = await freePort()
+      const s = serve(d, ['--port', String(port)])
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      try {
+        // Paired, used and withdrawn at once, by something of this user
+        const x = (await cli(d, ['--connection', '--pair', 'x'])).line
+        expect(await hello(port, String(x.token))).toMatchObject({ kind: 'hello_ok' })
+        expect((await cli(d, ['--revoke', String(x.credential)])).code).toBe(0)
+        // A hub's own, which reads host.credentials as a hub does
+        const hub = (await cli(d, ['--connection', '--pair', 'hub:test-0123abcd'])).line
+        const r = (await askHost(port, String(hub.token), 'host.credentials')) as Record<string, any>
+        expect(r.credentials).toEqual(expect.arrayContaining([expect.objectContaining({ id: x.credential, label: 'x', gone: true })]))
+        expect(r.usedUnderHubLabels).toEqual([expect.objectContaining({ id: hub.credential, label: 'hub:test-0123abcd' })])
+        expect(r.unreadable).toBeNull()
+      } finally {
+        if (POSIX) s.child.kill('SIGTERM')
+        else await cli(d, ['--stop'])
+        await s.exited
+      }
     },
     90_000 * SLOW,
   )
@@ -725,7 +1050,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         expect(s.out.stderr).toContain(`127.0.0.1:${held} is in use by another program; starting on ${held + 1} instead`)
         const info = await connection(d)
         expect(info).toMatchObject({ port: held + 1, hostRunning: true })
-        expect(await hello(held + 1, String(info.token))).toMatchObject({ kind: 'hello_ok' })
+        expect(await hello(held + 1, String(info.limited))).toMatchObject({ kind: 'hello_ok' })
         if (POSIX) s.child.kill('SIGTERM')
         else await cli(d, ['--stop'])
         expect(await s.exited).toBe(0)
@@ -850,7 +1175,7 @@ describe('starting through WMI', () => {
           // What the task's serve does: a host on this folder's port, with its token
           const { dataDir } = a[0] as { dataDir: string }
           const state = readServeState(dataDir)!
-          const server = new HostServer({ port: state.port!, token: state.token, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+          const server = new HostServer({ port: state.port!, ...serveHostCredentials(dataDir), onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
           servers.push(server)
           await server.listen()
           return { started: true, name: 'Centralu host 1a2b3c4d' }
@@ -989,7 +1314,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     const told: unknown[] = []
     const server: HostServer = new HostServer({
       port: state.port!,
-      token: state.token,
+      ...serveHostCredentials(d),
       ...(logon ? { logon: () => logon } : {}),
       build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
       onRpc: async (method, params) => {
@@ -1154,8 +1479,8 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     recordServePort(d, await freePort())
     return { d, state: readServeState(d)! }
   }
-  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive') => {
-    const server = new HostServer({ port: state.port!, token: state.token, logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive', d = '') => {
+    const server = new HostServer({ port: state.port!, ...serveHostCredentials(d), logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
     await server.listen()
     return server
   }
@@ -1189,11 +1514,16 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
 
   it('hands the window the running host’s port and token as a ready line, and leaves the host running when the window goes', async () => {
     const { d, state } = await folder()
-    const server = await hostOn(state)
+    const server = await hostOn(state, 'interactive', d)
     try {
       const w = window(d)
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))
-      expect(JSON.parse(w.lines[0]!)).toEqual({ ready: true, port: state.port, token: state.token, db: join(d, 'store.db') })
+      // A full credential made for the window at this start (#1405): serve.json keeps only its verifier
+      const ready = JSON.parse(w.lines[0]!)
+      expect(ready).toEqual({ ready: true, port: state.port, token: expect.any(String), db: join(d, 'store.db') })
+      expect(readServeState(d).full).toEqual([expect.objectContaining({ label: 'window', verifier: verifierOf(ready.token) })])
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(ready.token)
+      expect(await hello(Number(state.port), ready.token)).toMatchObject({ kind: 'hello_ok' })
       expect(w.calls).toEqual({ detach: 0, signIn: 0 })
       w.stdin.end()
       expect(await w.done).toBe(0)
@@ -1209,13 +1539,13 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     try {
       const w = window(d, {
         detach: async (o: { write: (l: string) => void }) => {
-          server = await hostOn(state)
-          o.write(`${JSON.stringify({ v: 1, port: state.port, token: state.token, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
+          server = await hostOn(state, 'interactive', d)
+          o.write(`${JSON.stringify({ v: 1, port: state.port, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
           return 0
         },
       })
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))
-      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: state.token })
+      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: expect.any(String) })
       await server!.close()
       expect(await w.done).toBe(1)
     } finally {
@@ -1237,7 +1567,7 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
 
   it('uses a host in a network logon now, and starts the sign-in task that moves it into this sign-in once idle (#1224)', async () => {
     const { d, state } = await folder()
-    const server = await hostOn(state, 'network')
+    const server = await hostOn(state, 'network', d)
     try {
       const w = window(d)
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))

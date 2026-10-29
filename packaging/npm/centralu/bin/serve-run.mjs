@@ -4,10 +4,10 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid, pairServe, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, ownCredentials } from './serve-host.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 import { moveIntoSignIn } from './serve-handover.mjs'
 
@@ -22,22 +22,34 @@ export function serveFolder({ env, home, cliPath, platform = process.platform })
   return { dataDir, state }
 }
 
-/** What `--connection` answers, as fields: the running host's versions when one answers, else the installed ones */
-export async function describe({ env, dataDir, state, entry, version }) {
+/**
+ * What `--connection` answers, as fields: the running host's versions when one answers, else the installed ones.
+ *
+ * The credentials (#1405): `paired` (`--pair`, `{ token, id }`) is a full credential just made for whoever asked, and
+ * the only one this ever prints; without it the line carries the limited credential, which reads and does the everyday
+ * things. An installed host from before verifiers knows one token: `--pair` hands out that one (`legacyHostTokenOf`).
+ * `others` names the full credentials the folder holds besides the one just paired, never their values, each marked
+ * `replaced` when its pairing took the place of an earlier one of its label.
+ */
+export async function describe({ env, dataDir, state, entry, version, paired = null }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry)
   // Whether the installed host proves it holds the token (#838): asked of the running one before its hello, and said in the line
   const proof = hostProvesOf(entry)
-  const probe = await probeHost({ port, token: state.token, protocolVersion: installed, prove: proof })
+  const own = ownCredentials(state, entry)
+  const probe = await probeHost({ port, ...own, protocolVersion: installed, prove: proof })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
   const hostRunning = heldHere(probe, dataDir)
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
+  const verifiers = takesVerifiers(entry)
   return {
     proof,
     port,
-    token: state.token,
+    ...(paired ? { token: paired.token, ...(paired.id ? { credential: paired.id } : {}) } : {}),
+    ...(verifiers ? { limited: state.token } : {}),
+    others: state.full.filter((e) => e.id !== paired?.id).map(({ id, label, created, replaced }) => ({ id, label, created, ...(replaced ? { replaced: true } : {}) })),
     version: (probe.running ? probe.version : undefined) ?? version,
     protocolVersion,
     dataDir,
@@ -52,9 +64,23 @@ export async function describe({ env, dataDir, state, entry, version }) {
  * `centralu serve --connection`. stdout carries exactly one line, the JSON; everything else goes to
  * stderr. Exit 1 when there is no host to describe.
  */
-export async function printConnection({ env, home, entry, version, cliPath }) {
-  const { dataDir, state } = serveFolder({ env, home, cliPath })
-  const d = await describe({ env, dataDir, state, entry, version })
+export async function printConnection({ env, home, entry, version, cliPath, pair = null }) {
+  const folder = serveFolder({ env, home, cliPath })
+  const { dataDir } = folder
+  let { state } = folder
+  // `--pair <label>` (#1405): a full credential for whoever asked, printed once and written down as its verifier only
+  let paired = null
+  if (pair !== null) {
+    if (takesVerifiers(entry)) {
+      const made = pairServe(dataDir, pair)
+      state = made.state
+      paired = { token: made.token, id: made.id }
+      say(`made a full credential for ${JSON.stringify(pair)} (${made.id}); serve --revoke ${made.id} withdraws it`)
+    } else {
+      paired = { token: legacyHostTokenOf(dataDir), id: null }
+    }
+  }
+  const d = await describe({ env, dataDir, state, entry, version, paired })
   if (!d) {
     say(`cannot read the protocol version of the host at ${entry}`)
     return 1
@@ -82,7 +108,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT
-  const existing = await probeHost({ port: recorded, token: state.token, protocolVersion, prove: hostProvesOf(entry) })
+  const existing = await probeHost({ port: recorded, ...ownCredentials(state, entry), protocolVersion, prove: hostProvesOf(entry) })
   // A host the hub's ssh started before anyone signed in moves into this sign-in, once idle (#1224, serve-handover.mjs)
   if (heldHere(existing, dataDir) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
     const pid = lockHolderPid(dataDir)
@@ -104,14 +130,28 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
 
   const plan = hostCommand(execPath, entry, { port, dataDir, platform })
   const onStdin = takesTokenOnStdin(entry)
+  /*
+   * A host that takes verifiers (#1405) gets the key on stdin and the path of serve.json, whose full credentials it
+   * checks at each hello; nothing it gets opens it whole. An older host gets the one token it knows, kept for it
+   */
+  const verifiers = takesVerifiers(entry)
+  if (verifiers) dropLegacyHostToken(dataDir, platform)
+  const legacy = verifiers ? null : legacyHostTokenOf(dataDir, platform)
   const child = spawn(plan.command, plan.args, {
     stdio: ['pipe', 'pipe', logFd === null ? 'inherit' : 'pipe'],
-    env: hostEnv(env, { dataDir, version, hostDir: dirname(entry), from: serveFrom(env, from), ...(onStdin ? {} : { legacyToken: state.token }) }),
+    env: hostEnv(env, {
+      dataDir,
+      version,
+      hostDir: dirname(entry),
+      from: serveFrom(env, from),
+      ...(verifiers ? { serveState: join(dataDir, SERVE_STATE_FILE) } : {}),
+      ...(onStdin ? {} : { legacyToken: legacy ?? state.token }),
+    }),
     detached: plan.detached,
     windowsHide: true,
   })
-  // The token, before anything else on the pipe the host watches (#538); stdin stays open for --watch-parent
-  if (onStdin) child.stdin.write(tokenLine(state.token))
+  // What the host holds, before anything else on the pipe it watches (#538); stdin stays open for --watch-parent
+  if (onStdin) child.stdin.write(verifiers ? keyLine(state.key) : tokenLine(legacy))
 
   let ready = false
   if (logFd !== null) {
@@ -187,11 +227,26 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   })
 }
 
-/** `centralu serve --rotate-token` */
+/** `centralu serve --rotate-token`: a new key, and every full credential withdrawn (#1405) */
 export function rotateToken({ env, home }) {
   const dataDir = serveDataDir(env, home)
   rotateServeToken(dataDir)
-  say(`replaced the token in ${join(dataDir, SERVE_STATE_FILE)}.`)
-  say('A serve that is running keeps the old one until it restarts; clients read the new one with --connection.')
+  say(`replaced the key and withdrew every full credential in ${join(dataDir, SERVE_STATE_FILE)}.`)
+  say('A linked computer pairs again at its next connection, and a window at its next start. A serve that is running keeps its old key until it restarts: the limited credential --connection prints works once it has.')
+  return 0
+}
+
+/** `centralu serve --revoke <id>`: one full credential withdrawn (#1405); its next hello is refused, and the host closes a socket already in with it */
+export function revokeCredential({ env, home, id, write = (line) => process.stdout.write(line) }) {
+  const dataDir = serveDataDir(env, home)
+  const revoked = revokeServe(dataDir, id)
+  // One JSON line on stdout, as every serve command a hub runs prints one: whether there was one to withdraw
+  write(`${JSON.stringify({ v: 1, revoked, id })}
+`)
+  if (!revoked) {
+    say(`no full credential ${JSON.stringify(id)} in ${join(dataDir, SERVE_STATE_FILE)}; --connection lists them under others.`)
+    return 1
+  }
+  say(`withdrew the full credential ${id}. A running host refuses its next hello and closes a connection already open with it within a second.`)
   return 0
 }

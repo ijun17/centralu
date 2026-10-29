@@ -8,10 +8,17 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
   centralu serve --detach         Start it in the background, outside this session; return once it answers
   centralu serve --stop           Ask the running host to stop, and wait until it has
   centralu serve --window         What the Centralu window on Windows runs here: start the host if
-                                  none runs, print its port and token as a ready line, stay until
-                                  stdin ends, and leave the host running
-  centralu serve --connection     Print how to reach it as one JSON line, then exit
-  centralu serve --rotate-token   Replace the token (a running serve keeps the old one until restarted)
+                                  none runs, print its port and a full credential for the window as
+                                  a ready line, stay until stdin ends, and leave the host running
+  centralu serve --connection     Print how to reach it as one JSON line, then exit. It carries the
+                                  limited credential (everyday calls) and lists the full ones
+  centralu serve --connection --pair <label>
+                                  ... and a new full credential for <label>, printed once and kept
+                                  here only as its hash; it replaces <label>'s earlier one. What the
+                                  app on another computer runs at each link
+  centralu serve --revoke <id>    Withdraw one full credential (--connection lists their ids)
+  centralu serve --rotate-token   A new key, and every full credential withdrawn (a running serve
+                                  keeps its old key until restarted)
   centralu serve --from <hub>     With serve or --detach: the name of the computer whose link asks,
                                   said by a second Centralu on this data folder when it is refused
   centralu serve --autostart on|off|remove|status
@@ -32,7 +39,16 @@ from an install the app made over SSH, which has a launcher of its own.`
 
 /** The flags that each make serve a different command */
 const MODE_FLAGS = { '--connection': 'connection', '--rotate-token': 'rotate', '--detach': 'detach', '--stop': 'stop', '--window': 'window' }
-const FLAG_OF = { ...Object.fromEntries(Object.entries(MODE_FLAGS).map(([f, m]) => [m, f])), autostart: '--autostart' }
+const FLAG_OF = { ...Object.fromEntries(Object.entries(MODE_FLAGS).map(([f, m]) => [m, f])), autostart: '--autostart', revoke: '--revoke' }
+
+/**
+ * What `--pair` takes (#1405): who the full credential is for, said back in `--connection`'s `others` and on the hub's
+ * machine row. A hub sends `hub:<its machine id>`
+ */
+export const PAIR_LABEL_RE = /^[A-Za-z0-9:._-]{1,80}$/
+
+/** What `--revoke` takes: a full credential's id, as `--connection` lists it (8 hex characters) */
+export const CREDENTIAL_ID_RE = /^[0-9a-f]{8}$/
 
 /** What `--autostart` takes */
 export const AUTOSTART_ACTIONS = ['on', 'off', 'remove', 'status']
@@ -66,9 +82,21 @@ export function parseServeArgs(argv) {
   let child = null
   let autostart = null
   let from = null
+  let pair = null
+  let revoke = null
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === '--autostart' || a.startsWith('--autostart=')) {
+    if (a === '--pair' || a.startsWith('--pair=')) {
+      const raw = a === '--pair' ? argv[++i] : a.slice('--pair='.length)
+      if (typeof raw !== 'string' || !PAIR_LABEL_RE.test(raw)) return { error: `--pair needs a label: letters, digits, ':', '.', '_' and '-' (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
+      pair = raw
+    } else if (a === '--revoke' || a.startsWith('--revoke=')) {
+      const raw = a === '--revoke' ? argv[++i] : a.slice('--revoke='.length)
+      if (typeof raw !== 'string' || !CREDENTIAL_ID_RE.test(raw)) return { error: `--revoke needs a credential's id, as --connection lists it (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
+      if (mode !== 'serve' && mode !== 'revoke') return { error: `${FLAG_OF[mode]} and --revoke are separate commands; pass one` }
+      mode = 'revoke'
+      revoke = raw
+    } else if (a === '--autostart' || a.startsWith('--autostart=')) {
       const raw = a === '--autostart' ? argv[++i] : a.slice('--autostart='.length)
       if (!AUTOSTART_ACTIONS.includes(raw)) return { error: `--autostart needs on, off, remove or status (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
       if (mode !== 'serve' && mode !== 'autostart') return { error: `${FLAG_OF[mode]} and --autostart are separate commands; pass one` }
@@ -76,7 +104,7 @@ export function parseServeArgs(argv) {
       autostart = raw
     } else if (Object.hasOwn(MODE_FLAGS, a)) {
       const m = MODE_FLAGS[a]
-      if (mode !== 'serve' && mode !== m) return { error: `${FLAG_OF[mode]} and ${a} are separate commands; pass one` }
+      if (mode !== 'serve' && mode !== m) return { error: `${FLAG_OF[mode] ?? mode} and ${a} are separate commands; pass one` }
       mode = m
     } else if (a === '--help' || a === '-h') help = true
     else if (a.startsWith(CHILD_FLAG)) child = a.slice(CHILD_FLAG.length)
@@ -92,6 +120,8 @@ export function parseServeArgs(argv) {
     } else return { error: `unknown option for serve: ${a}\n\n${SERVE_HELP}` }
   }
   if (help) return { mode: 'help', port }
+  if (pair !== null && mode !== 'connection') return { error: '--pair goes with --connection' }
+  if (mode === 'revoke') return port !== null ? { error: '--revoke takes no --port' } : { mode, port, revoke }
   if (from !== null && mode !== 'serve' && mode !== 'detach') return { error: `--from goes with \`centralu serve\` and --detach, which start a host; not with ${FLAG_OF[mode]}` }
   if (child !== null) {
     if (mode !== 'serve') return { error: `${CHILD_FLAG.slice(0, -1)} is how --detach starts serve, not an option of ${FLAG_OF[mode]}` }
@@ -106,7 +136,7 @@ export function parseServeArgs(argv) {
     if (port !== null) return { error: '--autostart takes no --port: the entry it writes starts serve on the port serve recorded' }
     return { mode, port, autostart }
   }
-  return { mode, port, ...(from !== null ? { from } : {}) }
+  return { mode, port, ...(from !== null ? { from } : {}), ...(pair !== null ? { pair } : {}) }
 }
 
 function parsePort(raw) {

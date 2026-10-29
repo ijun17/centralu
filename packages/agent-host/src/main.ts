@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mkdirSync, writeSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
@@ -59,6 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, type FullCredential } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -71,8 +72,7 @@ import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
-import { SshTunnel } from './links/tunnel.js'
-import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
+import { hubSelfId, linkDepsFor, storeProjectOrder } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
 import { projectsHome } from './dev-services/project-folder.js'
@@ -679,7 +679,7 @@ const stopFromRequest = (o: { forUpdate: boolean }) => {
  */
 /** This computer's name as a linked machine shows who sent its session an instruction (`MacBook-Pro`, not `.local`) */
 const hubName = (): string => hostname().replace(/\.local$/i, '') || 'a linked computer'
-const links = new Links({
+const links = new Links(linkDepsFor(store, {
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
   // The orchestrator also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
   broadcast: (e) => {
@@ -687,9 +687,6 @@ const links = new Links({
     mgr.observeLinked(e)
   },
   terminal: screens.push,
-  mirror: storeMirror(store),
-  registry: storeRegistry(store),
-  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
   // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)
@@ -709,7 +706,7 @@ const links = new Links({
     ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
     selfName: hubName,
   }),
-})
+}))
 /*
  * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back
  * on the connection it offered on (`HostServer.call`)
@@ -756,7 +753,11 @@ const requests: HostRequests = new HostRequests({
   emit: (e) => events.push(e),
   rpc: (method, params, ctx) => hostDrain.track(`request ${method}`, () => router.handle(method, params, ctx)),
   canShow: (): boolean => server.showsHostRequests(),
+  // Which session a session credential's card says asked (#1405)
+  sessionName: (sessionId) => mgr.sessionName(sessionId),
 })
+/** The full credentials a socket said hello with on this host, for `host.credentials` once they are gone (#1405 review) */
+const usedCredentials = new UsedCredentials()
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
@@ -764,6 +765,9 @@ const router: Router = new Router({
     settleDeletedProjects: () => userAppAdoption.settle(),
     // And what a delete may do to the folder, for the dialog that asks (#1301)
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
+    // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
+    // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
+    serveCredentials: (nonce) => (launch.serveState ? credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce) : null),
     themes,
     terminals,
     updates,
@@ -812,10 +816,19 @@ const elevation = detectToken().then((t) => {
     )
   }
 })
+/** Where a `centralu serve` host's full credentials are (#1405), when it is one */
+const serveState = launch.serveState
 const server = new HostServer({
   port: Number(values.port),
   ...(launch.startedByServe ? { servedBy: 'serve' as const } : {}),
   token,
+  /*
+   * A `centralu serve` host that takes verifiers (#1405): what it was handed is its key, and the full credentials are
+   * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
+   */
+  ...(serveState
+    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential) => usedCredentials.saw(c) }
+    : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)
@@ -824,6 +837,8 @@ const server = new HostServer({
   rightsHost: { followsHub: (machineId) => links.followsHub(machineId), updateAtRest: () => updateAtRest() },
   // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
   onShowing: (count) => requests.showingChanged(count),
+  // A session credential names one of this host's sessions, or it is refused at hello (#1405)
+  knowsSession: (sessionId) => mgr.hasSession(sessionId),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)

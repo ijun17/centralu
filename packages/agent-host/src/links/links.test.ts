@@ -16,6 +16,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
+import { credentialCheck, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -53,6 +54,14 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
+/** What `host.credentials` answers for a test's list, or a test's whole answer (#1405 review) */
+function reportOf(f: () => ListedCredential[] | null | Partial<CredentialsReport>): () => CredentialsReport {
+  return () => {
+    const r = f()
+    return r === null || Array.isArray(r) ? { credentials: r, unreadable: null, usedUnderHubLabels: [] } : { credentials: null, unreadable: null, usedUnderHubLabels: [], ...r }
+  }
+}
+
 async function remoteHost(
   port = 0,
   store = new Store(),
@@ -76,6 +85,10 @@ async function remoteHost(
     updateResume?: UpdateResumeFolder
     /** A host from before #1618: its hello says nothing of the turns it continued, and it continues none */
     before1618?: boolean
+    /** A `centralu serve` host's full credentials, as `host.credentials` answers them (#1405) */
+    credentials?: (nonce?: string) => ListedCredential[] | null | Partial<CredentialsReport>
+    /** A `centralu serve` host's full credentials as it takes them at hello, read again every 20 ms while one is in */
+    full?: () => FullCredential[] | CredentialsRead
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
@@ -83,12 +96,13 @@ async function remoteHost(
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? [], o.onCall),
+    onRpc: without(createRpcHandler(mgr, adapters, { ...(o.activity ? { activity: o.activity } : {}), ...(o.credentials ? { serveCredentials: (nonce?: string) => reportOf(() => o.credentials!(nonce))() } : {}) }), o.without ?? [], o.onCall),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
     ...(o.before1618 ? {} : { updateContinued: () => mgr.updateContinued() }),
+    ...(o.full ? { fullCredentials: o.full, credentialSweepMs: 20 } : {}),
   })
   await o.beforeListen?.(mgr)
   const p = await server.listen()
@@ -3682,5 +3696,306 @@ describe('the machine commands on a real hub (#1219)', () => {
     const r = await run(hub, orc.id, 'install_machine', { machine: 'Remote box', action: 'update' })
     expect(r).toEqual({ text: 'Nothing changed: This computer cannot install on Remote box', isError: true })
     expect(machineCard(hub, orc.id)).toBeUndefined()
+  })
+})
+
+describe('machines.revokeCredential (#1405)', () => {
+  /** A machine whose connection line names two other full credentials and this hub's own, and whose `serve --revoke` answers as serve-run.mjs does */
+  async function setup() {
+    const remote = await remoteHost()
+    const runs: string[] = []
+    let held = ['aaaa1111', 'bbbb2222']
+    const exec = async (cmd: string) => {
+      const id = /serve --revoke ([0-9a-f]{8})/.exec(cmd)?.[1]
+      runs.push(id ? `revoke ${id}` : cmd)
+      const revoked = id !== undefined && held.includes(id)
+      held = held.filter((h) => h !== id)
+      return { code: revoked ? 0 : 1, stderr: '', stdout: `${JSON.stringify({ v: 1, revoked, id })}\n` }
+    }
+    // Every line names both, as a line read before a revoke lands would: the row must not take it back
+    const others = () => ['aaaa1111', 'bbbb2222'].map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5, replaced: false }))
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { credential: 'cccc3333', others: others() })), { exec })
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
+    await eventually(() => status(hub) === 'connected')
+    return { hub, u: await ui(hub.port), runs }
+  }
+
+  it("lists the machine's other full credentials on its row, from its connection line", async () => {
+    const { hub } = await setup()
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([
+      { id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false, hubsName: false },
+      { id: 'bbbb2222', label: 'agent-script', created: 5, replaced: false, hubsName: false },
+    ])
+  })
+
+  it('withdraws one there over ssh, and the row and the event follow', async () => {
+    const { hub, u, runs } = await setup()
+    const row = await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    expect(row.otherCredentials).toEqual([{ id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false, hubsName: false }])
+    expect(runs).toEqual(['revoke bbbb2222'])
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.otherCredentials?.length === 1))
+    // The link was never dropped for it
+    expect(status(hub)).toBe('connected')
+  })
+
+  it('keeps a withdrawn credential off the row even when a line read before the revoke still names it', async () => {
+    const { hub, u } = await setup()
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'aaaa1111' })
+    // The machine's link drops and comes back: its new line may have been read before the revoke landed
+    await u.call('machines.disconnect', { machineId: 'm1' })
+    // Not while disconnected: an earlier link's list is not the present one
+    expect(hub.links.list()[0]!.otherCredentials).toBeNull()
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['bbbb2222'])
+  })
+
+  it("withdraws over the machine's own ssh without opening its link, and says when there was none to withdraw", async () => {
+    const { hub, u, runs } = await setup()
+    await u.call('machines.disconnect', { machineId: 'm1' })
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    // The person's Disconnect stands
+    expect(status(hub)).toBe('disconnected')
+    // Asked again, there is none: answered, not an error
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    expect(runs).toEqual(['revoke bbbb2222', 'revoke bbbb2222'])
+  })
+
+  /** A serve machine whose credentials change while the link is up, read every few milliseconds here (every 30 s in use) */
+  async function serveMachine(start: ListedCredential[], o: { without?: string[] } = {}) {
+    let listed = start
+    const remote = await remoteHost(0, new Store(), { credentials: () => listed, ...(o.without ? { without: o.without } : {}) })
+    const line = () => lineFor(remote.port, { credential: 'cccc3333', pairedAs: 'hub:hub-mac-0123abcd', others: [] })
+    const hub = await hubHost(line, new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected')
+    return { hub, set: (next: ListedCredential[]) => (listed = next) }
+  }
+  const cred = (id: string, label: string, replaced = false): ListedCredential => ({ id, label, created: 7, replaced })
+  const own = cred('cccc3333', 'hub:hub-mac-0123abcd', true)
+
+  it('shows a pairing made there while the link is up, without waiting for the next link', async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([])
+    // Something of that user ran `serve --connection --pair window` there, on a machine whose window never paired
+    set([own, cred('dddd4444', 'window')])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'dddd4444', label: 'window', created: 7, replaced: false, hubsName: false }])
+    // Paired again under the same label: the row says it replaced the earlier one
+    set([own, cred('eeee5555', 'window', true)])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.[0]?.id === 'eeee5555')
+    expect(hub.links.list()[0]!.otherCredentials?.[0]).toMatchObject({ label: 'window', replaced: true })
+    expect(status(hub)).toBe('connected')
+  })
+
+  it("marks a credential under this hub's own name that it did not make, and says when its own is gone", async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    // `--pair <this hub's label>` there replaced this hub's own: a credential that would otherwise read as the hub's
+    set([cred('ffff6666', 'hub:hub-mac-0123abcd', true)])
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'ffff6666', label: 'hub:hub-mac-0123abcd', created: 7, replaced: true, hubsName: true }])
+  })
+
+  it("says this hub's own credential was taken while its link held it, and keeps saying it once the link pairs again (#1405 review)", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const paired = [
+      { id: 'cccc3333', token: 'c'.repeat(43) },
+      { id: 'dddd4444', token: 'd'.repeat(43) },
+    ]
+    let full: FullCredential[] = [{ id: 'cccc3333', label, verifier: verifierOf(paired[0]!.token) }]
+    const remote = await remoteHost(0, new Store(), { full: () => full, credentials: () => full.map((c) => ({ id: c.id, label: c.label, created: 7, replaced: false })) })
+    let links = 0
+    // Each link pairs: the first gets cccc3333, the next dddd4444
+    const line = () => {
+      const p = paired[Math.min(links++, 1)]!
+      return lineFor(remote.port, { token: p.token, credential: p.id, pairedAs: label, others: [] })
+    }
+    const hub = await hubHost(line, new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    // Something of that user ran `--pair <this hub's label>` there, then the hub's next link took its place
+    full = [{ id: 'dddd4444', label, verifier: verifierOf(paired[1]!.token) }]
+    await eventually(() => links >= 2 && status(hub) === 'connected')
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    // Connected on its new credential, the mark stands: the poll alone would have seen nothing amiss
+    await new Promise((r) => setTimeout(r, 100))
+    expect(status(hub)).toBe('connected')
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(true)
+  })
+
+  it("reads this hub's own credential listed as gone as gone, and counts no gone one among the more (self-check)", async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    const many = Array.from({ length: 34 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    set([{ ...own, gone: true }, ...many, { ...cred('abab1212', 'x'), gone: true }])
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    expect(hub.links.list()[0]!.otherCredentialsMore).toBe(2)
+  })
+
+  /*
+   * #1405 review, gap (b): the person on the machine drops the hub's link, pairs under the hub's own label, uses it and
+   * withdraws it; the hub's next link pairs again. The host takes the hub's new credential for the old one's pairer
+   * again and lists nothing; only the hub knows which ids it paired itself
+   */
+  it("lists one used under this hub's own label that this hub did not pair, as gone, and none of its own", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const used = [
+      // Under this label before this hub's run: not this run's to judge
+      { id: '0000aaaa', label, created: 1 },
+      { id: 'cccc3333', label, created: 2 },
+      { id: 'abab1212', label, created: 3 },
+      // Another hub's: that hub's to judge
+      { id: 'efef3434', label: 'hub:studio-89abcdef', created: 4 },
+    ]
+    const remote = await remoteHost(0, new Store(), { credentials: () => ({ credentials: [own], usedUnderHubLabels: used }) })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toEqual([{ id: 'abab1212', label, created: 3, replaced: false, gone: true, hubsName: true }])
+    expect(row.ownCredentialGone).toBe(false)
+  })
+
+  /*
+   * #1405 review: the hub's own credential was decided by id alone. A program of that user writes an entry into
+   * serve.json under the id this hub's credential has, with a secret of its own (the file is that user's to write), uses
+   * it and removes it. The hub holds its own secret, so it compares the host's check of this read's nonce with its own:
+   * the entry that only reuses the id is another's, listed as used and gone
+   */
+  it("lists one that reuses this hub's credential id with another secret, as gone, and the hub's own is still not listed", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const other = verifierOf('another secret of that user')
+    const mine = verifierOf(TOKEN)
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        ({
+          credentials: [{ ...own, check: credentialCheck(mine, nonce!) }],
+          usedUnderHubLabels: [
+            { id: 'cccc3333', label, created: 2, check: credentialCheck(mine, nonce!) },
+            { id: 'cccc3333', label, created: 3, check: credentialCheck(other, nonce!) },
+          ],
+        }),
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 3, replaced: false, gone: true, hubsName: true }])
+    expect(JSON.stringify(row)).not.toContain('"check"')
+    expect(row.ownCredentialGone).toBe(false)
+  })
+
+  it("lists a live entry that reuses this hub's credential id with another secret, and says its own is gone when only that is left", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const other = verifierOf('another secret of that user')
+    const mine = verifierOf(TOKEN)
+    let ownStays = true
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        ({
+          credentials: [...(ownStays ? [{ ...own, check: credentialCheck(mine, nonce!) }] : []), { ...cred('cccc3333', label, true), check: credentialCheck(other, nonce!) }],
+        }),
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'cccc3333', label, created: 7, replaced: true, hubsName: true }])
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    ownStays = false
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+  })
+
+  // Self-check: the read after a list with checks answers "unreadable", so no new list; the last one stands, and its checks were of the last nonce
+  it("keeps taking its own credential for its own across a read that cannot be read there, though the list was checked under an earlier nonce", async () => {
+    const mine = verifierOf(TOKEN)
+    let unreadable = false
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        unreadable
+          ? { credentials: null, unreadable: 'EACCES' }
+          : { credentials: [{ ...own, check: credentialCheck(mine, nonce!) }, cred('dddd4444', 'window')] },
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: own.label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    unreadable = true
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    expect(hub.links.list()[0]).toMatchObject({ ownCredentialGone: false, otherCredentials: [expect.objectContaining({ id: 'dddd4444' })] })
+    expect(hub.links.list()[0]!.otherCredentials).toHaveLength(1)
+  })
+
+  // #1405 review: chmod 000 on the machine's serve.json. The hub took its own credential for withdrawn, for its whole run
+  it("says the machine's credential file cannot be read, keeps the last list, and does not take its own for gone", async () => {
+    let report: Partial<CredentialsReport> = { credentials: [own, cred('dddd4444', 'window')] }
+    const remote = await remoteHost(0, new Store(), { credentials: () => report })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: own.label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    expect(hub.links.list()[0]!.credentialFileUnreadable).toBe(false)
+    report = { credentials: null, unreadable: 'EACCES' }
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    expect(hub.links.list()[0]).toMatchObject({ ownCredentialGone: false, otherCredentials: [expect.objectContaining({ id: 'dddd4444' })] })
+    // Readable again: no longer said
+    report = { credentials: [own] }
+    await eventually(() => !hub.links.list()[0]!.credentialFileUnreadable)
+    // Moved aside after that: no file to read is not one that cannot be read (self-check)
+    report = { credentials: null, unreadable: 'EACCES' }
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    report = { credentials: null, unreadable: null }
+    await eventually(() => !hub.links.list()[0]!.credentialFileUnreadable)
+  })
+
+  it('reads a link closed because the machine cannot read its credential file as that, not as its credential withdrawn', async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const token = 'c'.repeat(43)
+    const listed: FullCredential[] = [{ id: 'cccc3333', label, verifier: verifierOf(token) }]
+    let unreadable = false
+    const remote = await remoteHost(0, new Store(), {
+      full: () => (unreadable ? { full: [], open: [], unreadable: { code: 'EACCES', since: 1 } } : listed),
+      credentials: () => (unreadable ? { credentials: null, unreadable: 'EACCES' } : listed.map((c) => ({ id: c.id, label: c.label, created: 7, replaced: false }))),
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { token, credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 3_600_000 })
+    await eventually(() => status(hub) === 'connected')
+    unreadable = true
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    await eventually(() => /cannot read its credential file/.test(hub.links.list()[0]!.error ?? ''))
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+  })
+
+  it('lists one used, then withdrawn, as gone, with nothing to revoke', async () => {
+    const { hub, set } = await serveMachine([own])
+    set([own, { ...cred('abab1212', 'x'), gone: true }])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'x', created: 7, replaced: false, gone: true, hubsName: false }])
+  })
+
+  it('lists the first 32 and counts the rest, so a flood of entries cannot hide the one after them', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    const { hub } = await serveMachine([own, ...many])
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toHaveLength(32)
+    expect(row.otherCredentialsMore).toBe(8)
+  })
+
+  it('counts every entry past the first 32, however many, so the count is exact (#1405 review)', async () => {
+    const many = Array.from({ length: 1205 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    const { hub } = await serveMachine([own, ...many])
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toHaveLength(32)
+    expect(row.otherCredentialsMore).toBe(1205 - 32)
+  })
+
+  it("keeps the connection line's list from a machine that does not answer host.credentials", async () => {
+    const remote = await remoteHost(0, new Store(), { without: ['host.credentials'] })
+    const others = [{ id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false }]
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', others }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected')
+    await new Promise((r) => setTimeout(r, 80))
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['aaaa1111'])
+  })
+
+  it("refuses to withdraw this computer's own credential, which the next link would make again, and asks nothing", async () => {
+    const { u, runs } = await setup()
+    await expect(u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'cccc3333' })).rejects.toThrow(/this computer's own credential/)
+    expect(runs).toEqual([])
   })
 })

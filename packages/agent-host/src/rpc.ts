@@ -32,6 +32,7 @@ import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { InlineViews } from './inline-views.js'
+import type { CredentialsReport } from './lifecycle/serve-credentials.js'
 import type {
   GridPanel,
   HostActivity,
@@ -109,6 +110,8 @@ export type RpcServices = {
   mail?: MailPerson
   /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
   requests?: Pick<HostRequests, 'list' | 'answer'>
+  /** A `centralu serve` host's full credentials as the launcher lists them (#1405, `host.credentials`); absent or null: none */
+  serveCredentials?: (nonce?: string) => CredentialsReport | null
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -119,6 +122,8 @@ export type MachinesPort = {
   reconnect(id: string, opts?: { start?: boolean }): MachineInfo
   /** Closes the link until the person connects it again (#1134) */
   disconnect(id: string): Promise<MachineInfo>
+  /** One of the machine's other full credentials withdrawn there (#1405) */
+  revokeCredential(id: string, credentialId: string): Promise<MachineInfo>
   /** Auto reconnect on or off (#1341) */
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   /** `machines.need` of an older window (#1134): answers the row, does nothing else (#1341) */
@@ -155,7 +160,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -977,6 +982,10 @@ export function createRpcHandler(
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
     'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.revokeCredential': async (p) => {
+      const { machineId, credentialId } = RpcMethods['machines.revokeCredential'].params.parse(p)
+      return requireMachines().revokeCredential(machineId, credentialId)
+    },
     'machines.setAutoReconnect': async (p) => {
       const { machineId, autoReconnect } = RpcMethods['machines.setAutoReconnect'].params.parse(p)
       return requireMachines().setAutoReconnect(machineId, autoReconnect)
@@ -1059,6 +1068,8 @@ export function createRpcHandler(
     },
     // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
     'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
+    // Who else holds full access here (#1405): the hub's machine row reads it between links
+    'host.credentials': async (p) => serveCredentials?.(RpcMethods['host.credentials'].params.parse(p ?? {}).nonce) ?? { credentials: null },
     // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
     'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: RpcMethods['host.setHubAuto'].params.parse(p).allowed })) }),
     'host.send': async (p) => {

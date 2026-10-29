@@ -23,6 +23,13 @@ describe('the token handed over on stdin (#538)', () => {
     expect(await after).toBe('{"op":"drain"}\n{"op":"stop"}\n')
   })
 
+  it("takes a centralu serve host's key in the token's place (#1405)", async () => {
+    const input = new PassThrough()
+    const key = readHandedToken(input, 1000)
+    input.write('{"key":"k-123"}' + String.fromCharCode(10))
+    await expect(key).resolves.toBe('k-123')
+  })
+
   it('waits for a line written in pieces', async () => {
     const input = new PassThrough()
     const token = readHandedToken(input, 1000)

@@ -2,10 +2,12 @@ import type { Store } from '../dev-services/store.js'
 import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
+import type { LinkDeps } from './link-deps.js'
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
 import { HUB_SELF_KEY } from '../dev-services/store/store-keys.js'
+import { hubKeyOf, SshTunnel } from './tunnel.js'
 
 /**
  * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
@@ -43,6 +45,25 @@ export function hubSelfId(store: Store): string {
    */
   store.settings.updateAppSetting(HUB_SELF_KEY, (current) => (current !== null && HUB_SELF_ID.test(current) ? current : made))
   return store.settings.appSetting(HUB_SELF_KEY) ?? made
+}
+
+/**
+ * The tunnel each linked machine's link opens (main.ts's `tunnelFor`): ssh, pairing there under this hub's own key,
+ * drawn from its id in the store (`hubSelfId`, #1405 review). Here rather than inline in main.ts so a test holds the
+ * key to the id: a key from the data folder's path gave two hubs of one computer name and one path a single label
+ */
+export function tunnelsFor(store: Store, log: (line: string) => void): (record: MachineRecord) => SshTunnel {
+  return (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(hubSelfId(store)), log })
+}
+
+/**
+ * What `new Links(...)` is given (main.ts), with everything the hub's own store decides made here: the registry, the
+ * headers mirror and the tunnel (`tunnelsFor`). main.ts cannot hand any of the three in (the type leaves them out), so
+ * the key a tunnel pairs under cannot be drawn from anything but the store's id again, and a test drives this very
+ * function (#1405 review)
+ */
+export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor'>): LinkDeps {
+  return { ...rest, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, (line) => rest.log?.(line)) }
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')

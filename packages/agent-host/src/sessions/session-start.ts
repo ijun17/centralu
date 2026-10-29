@@ -629,7 +629,9 @@ export class SessionStarts {
             (m.roleAppend ?? undefined),
       // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
       // (M4 A-5)
-      orchestratorBridge: profile || o.apps ? (this.host.endpoint?.(m.id) ?? undefined) : undefined,
+      orchestratorBridge: profile || o.apps ? bridgeOf(this.host.endpoint?.(m.id)) : undefined,
+      // Every session's agent finds the host and its own credential in its environment (#1405, session-token.ts)
+      hostAccess: hostAccessOf(this.host.endpoint?.(m.id)),
       // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
       // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
       // A-7)
@@ -1002,4 +1004,14 @@ function startFit(adapter: AgentAdapter, opts: CreateSessionOpts, sink: EventSin
     roleText: !!opts.systemPromptAppend,
   })
   return reason ? Promise.reject(unfitError(reason)) : adapter.createSession(opts, sink)
+}
+
+/** The bridge's address and credential, as the adapter takes them */
+function bridgeOf(e: { url: string; token: string } | null | undefined): { url: string; token: string } | undefined {
+  return e ? { url: e.url, token: e.token } : undefined
+}
+
+/** The host's address and the session's credential (#1405), when the host knows its port */
+function hostAccessOf(e: { url: string; credential?: string } | null | undefined): { url: string; credential: string } | undefined {
+  return e?.credential ? { url: e.url, credential: e.credential } : undefined
 }

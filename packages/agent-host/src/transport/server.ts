@@ -19,7 +19,9 @@ import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
 import { conditionalRight, limitedRefusal, type RightsHost } from './method-rights.js'
-import { hostProof } from './host-proof.js'
+import { sessionOfToken } from './session-token.js'
+import { credentialProof, hostProof } from './host-proof.js'
+import { isFullCredential, type CredentialsRead, type FullCredential } from '../lifecycle/serve-credentials.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -48,6 +50,11 @@ export type RpcContext = {
    * judged once, in the transport. Never set on a call the person allowed on a card (host-requests.ts), nor on a full one
    */
   covered?: boolean
+  /**
+   * The session whose credential the socket said hello with (#1405, session-token.ts): attribution for a card, never
+   * a right. Absent for the token and the plain limited credential
+   */
+  session?: string
 }
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
@@ -89,7 +96,26 @@ export type HostServerOptions = {
   port: number
   /** Started by `centralu serve`: a taken port gets serve's advice, not a developer's (#482) */
   servedBy?: 'serve'
+  /**
+   * The host's token: what a full hello says, and the key everything handed out is derived from (the limited
+   * credential, a bridge's, the proof). With `fullCredentials` (a `centralu serve` host, #1405) it is only the key: a
+   * hello with it is not full, and the full ones are those the callback names
+   */
   token: string
+  /**
+   * The full credentials of a `centralu serve` host (#1405, lifecycle/serve-credentials.ts): their verifiers, asked at
+   * each hello and each `prove` naming one, so a pairing or a revocation applies at once. A whole read
+   * (`readCredentialFile`) also says what a socket already in may keep while the file cannot be read, and that it cannot
+   */
+  fullCredentials?: () => readonly FullCredential[] | CredentialsRead
+  /**
+   * How often the full credentials are read again while a socket holds one (#1405 review): a socket whose credential
+   * is no longer listed is closed then, so a revocation ends a connection already open with it, not only the next
+   * hello. 1 s when absent
+   */
+  credentialSweepMs?: number
+  /** A socket said hello with one of the full credentials `fullCredentials` names (#1405 review, `UsedCredentials`) */
+  onFullHello?: (credential: FullCredential) => void
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
@@ -140,9 +166,14 @@ export type HostServerOptions = {
    * after the person did (host-requests.ts). `from.client` is what the program called itself in its hello; `signal`
    * fires when its socket goes. Without it, such a call is refused as before
    */
-  onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  onAsk?: (method: string, params: unknown, from: { client: string | null; session?: string }, signal: AbortSignal) => Promise<unknown>
   /** The host's state a conditional right reads (method-rights.ts `RightsHost`); without it every such call asks */
   rightsHost?: RightsHost
+  /**
+   * Whether a session id is one of this host's (#1405): a session credential naming one it does not know is refused at
+   * hello. Without it, any well-formed one is taken
+   */
+  knowsSession?: (sessionId: string) => boolean
   /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
   onShowing?: (count: number) => void
   /**
@@ -198,6 +229,11 @@ export const REVERSE_CALL_TIMEOUT_MS = 30 * 60_000
 /** WebSocket close codes this server uses (4001 is the token rule's own) */
 const CLOSE_GOING_AWAY = 1001
 const CLOSE_AUTH = 4001
+/**
+ * Why a full hello is refused, or a socket in with a full credential closed, while `serve.json` cannot be read (#1405
+ * review): not "withdrawn", which a hub takes for its credential gone, and not "bad token". The hub's row says it
+ */
+export const CREDENTIAL_FILE_UNREADABLE = 'credential file unreadable'
 
 /** `hello_ok`'s `elevated`, only when it is known (#702) */
 function elevatedField(elevated: boolean | null | undefined): { elevated?: boolean } {
@@ -233,6 +269,12 @@ export class HostServer {
   private lastClient = 0
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
+  /**
+   * The sockets in with one of a `centralu serve` host's full credentials, by that credential's id (#1405 review):
+   * closed once it is no longer listed (`sweepWithdrawn`)
+   */
+  private fullBy = new Map<WebSocket, string>()
+  private sweepTimer: ReturnType<typeof setInterval> | undefined
   /** The sockets in `clients` by their `RpcContext.client`, for a call to one of them (`call`, #550) */
   private byClient = new Map<number, WebSocket>()
   /** This host's calls to a client still waiting for its answer, per socket (#550) */
@@ -286,6 +328,14 @@ export class HostServer {
       maxBufferedBytes,
       replayBudgetBytes: Math.min(opts.replayBudgetBytes ?? TRANSPORT_LIMITS.replayBudgetBytes, maxBufferedBytes),
       closeGraceMs: opts.closeGraceMs ?? TRANSPORT_LIMITS.closeGraceMs,
+    }
+    if (opts.fullCredentials) {
+      // Read only while a socket holds a full credential: an idle host does not touch serve.json
+      this.sweepTimer = setInterval(() => {
+        const read = this.credentialRead()
+        if (this.fullBy.size > 0 && read) this.sweepWithdrawn(read)
+      }, opts.credentialSweepMs ?? 1000)
+      this.sweepTimer.unref?.()
     }
     this.log = new EventLog(2000, this.limits.replayBudgetBytes)
     this.http = createServer(createHttpHandler(opts.http))
@@ -409,6 +459,7 @@ export class HostServer {
   }
 
   private async shutdown(): Promise<void> {
+    clearInterval(this.sweepTimer)
     for (const timer of this.handshakeTimers.values()) clearTimeout(timer)
     this.handshakeTimers.clear()
     const sockets = [...this.wss.clients]
@@ -500,6 +551,32 @@ export class HostServer {
    * answer it is cut after the grace. `ws.close()` alone waits up to 30 s for the answer, with the socket
    * still open and still read, and the slot it holds would stay taken that long.
    */
+  /**
+   * Closes every socket in with a full credential `full` no longer names (#1405 review): a revocation (`serve --revoke`,
+   * a pairing that replaced it, `--rotate-token`, the file moved aside) ends the connections already open with it too.
+   * Before, such a socket kept full rights for as long as it stayed open, while no listing showed the credential. The
+   * peer sees 4001 "credential withdrawn": a hub reads its connection line again and pairs anew
+   */
+  private sweepWithdrawn(read: CredentialsRead): void {
+    for (const [ws, id] of this.fullBy) {
+      if (read.open.some((c) => c.id === id)) continue
+      this.fullBy.delete(ws)
+      /*
+       * A file that cannot be read withdrew nothing (#1405 review): said as that, so a hub does not take its own credential
+       * for taken over, and its row can say why
+       */
+      this.refuse(ws, CLOSE_AUTH, read.unreadable ? CREDENTIAL_FILE_UNREADABLE : 'credential withdrawn')
+    }
+  }
+
+  /** The full credentials as `fullCredentials` reads them now, whole; null on a host without them */
+  private credentialRead(): CredentialsRead | null {
+    const r = this.opts.fullCredentials?.()
+    if (!r) return null
+    if ('unreadable' in r) return r
+    return { full: [...r], open: [...r], unreadable: null }
+  }
+
   private refuse(ws: WebSocket, code: number, reason: string): void {
     ws.close(code, reason)
     setTimeout(() => ws.terminate(), this.limits.closeGraceMs).unref()
@@ -511,6 +588,8 @@ export class HostServer {
     let bridgeOf: string | null = null
     /** Whether this socket said hello with the limited credential, not the token (#1405) */
     let limited = false
+    /** The session whose credential it said hello with (#1405, session-token.ts): limited rights, named on its cards */
+    let session: string | undefined
     /** What the program called itself in its hello (#1405), for a card its call raises; cut, never checked */
     let label: string | null = null
     /** Fires when this socket goes: a host request its call raised is withdrawn (#1405) */
@@ -571,7 +650,12 @@ export class HostServer {
         if (authed) return
         if (proved) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         proved = true
-        this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: frame.data.nonce, mac: hostProof(this.opts.token, frame.data.nonce) }))
+        // A hub that paired names its credential (#1405): the proof is under that credential's verifier
+        const ask = frame.data
+        // From what a socket in may keep: a proof lets nothing in, and the hello after it says why it is refused
+        const named = ask.credential ? this.credentialRead()?.open.find((c) => c.id === ask.credential) : undefined
+        const mac = named ? credentialProof(named.verifier, ask.nonce) : hostProof(this.opts.token, ask.nonce)
+        this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac }))
         return
       }
 
@@ -582,13 +666,28 @@ export class HostServer {
          * delivered seq 2 twice — and the client has no way to tell a repeat from new work.
          */
         if (authed) return
-        if (!sameSecret(frame.data.token, this.opts.token)) {
+        // Full: the token, or for a `centralu serve` host one of the full credentials serve.json names (#1405)
+        const listed = this.credentialRead()
+        const match = listed ? isFullCredential(listed.full, frame.data.token) : null
+        const full = listed ? match !== null : sameSecret(frame.data.token, this.opts.token)
+        // Read now anyway: a socket already in with a credential this read no longer names goes (`sweepWithdrawn`)
+        if (listed) this.sweepWithdrawn(listed)
+        if (!full) {
           // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
           limited = isLimitedToken(this.opts.token, frame.data.token)
+          // A session's processes hold a credential with the same rights, naming the session (session-token.ts)
+          if (!limited) {
+            const of = sessionOfToken(this.opts.token, frame.data.token)
+            if (of !== null && (this.opts.knowsSession?.(of) ?? true)) {
+              limited = true
+              session = of
+            }
+          }
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
           if (!limited) bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
           if (!limited && bridgeOf === null) {
-            this.refuse(ws, CLOSE_AUTH, 'bad token')
+            // While serve.json cannot be read no full credential can be checked: refused, and said why (#1405 review)
+            this.refuse(ws, CLOSE_AUTH, listed?.unreadable ? CREDENTIAL_FILE_UNREADABLE : 'bad token')
             return
           }
         }
@@ -621,6 +720,10 @@ export class HostServer {
         }
         this.clients.add(ws)
         this.byClient.set(client, ws)
+        if (match) {
+          this.fullBy.set(ws, match.id)
+          this.opts.onFullHello?.(match)
+        }
         label = frame.data.client?.trim().slice(0, 60) || null
         if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
           this.showing.add(ws)
@@ -656,7 +759,7 @@ export class HostServer {
         // What cannot be undone waits for the person instead (host-requests.ts), and the call answers when they did
         if (refusal?.rights === 'asks' && this.opts.onAsk) {
           try {
-            const result = await this.opts.onAsk(method, params, { client: label }, leaving.signal)
+            const result = await this.opts.onAsk(method, params, { client: label, ...(session ? { session } : {}) }, leaving.signal)
             this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
           } catch (err) {
             // A refusal says why in `data` (host-requests.ts): kept for a program to read
@@ -678,7 +781,7 @@ export class HostServer {
       try {
         // A limited call a conditional right let through with no card says so (#1508): the handler holds it to that, rather than judging again
         const covered = limited && conditionalRight(method)
-        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label, ...(covered ? { covered: true } : {}) })
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label, ...(covered ? { covered: true } : {}), ...(session ? { session } : {}) })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {
@@ -702,6 +805,7 @@ export class HostServer {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
+      this.fullBy.delete(ws)
       if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
       leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)
