@@ -61,22 +61,52 @@ const SMALL_ORDER_Y: readonly bigint[] = [
 /** The 32 bytes as a little-endian number with the top bit (the sign of x) cleared: the point's y as encoded */
 function yOf(raw: Uint8Array): bigint {
   let y = 0n
-  for (let i = raw.length - 1; i >= 0; i--) y = (y << 8n) | BigInt(i === raw.length - 1 ? raw[i]! & 0x7f : raw[i]!)
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const b = raw[i] ?? 0
+    y = (y << 8n) | BigInt(i === raw.length - 1 ? b & 0x7f : b)
+  }
   return y
 }
 
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 
-declare const checked: unique symbol
-/** A public key that passed `parseLinkPublicKey`: only such a key is verified against (`verifyLink`) */
-export type LinkPublicKey = {
-  /** As on the wire and in `serve.json`: 43 characters of base64url */
-  readonly text: string
-  /** The 32 bytes, as they enter the transcript */
-  readonly raw: Buffer
-  readonly key: KeyObject
-  readonly [checked]: true
+/**
+ * A public key that passed `parseLinkPublicKey`: only such a key is verified against (`verifyLink`). A class with a
+ * private constructor and a private field, so no object literal and no other module can make one.
+ */
+export class LinkPublicKey {
+  readonly #checked = true
+  private constructor(
+    /** As on the wire and in `serve.json`: 43 characters of base64url */
+    readonly text: string,
+    /** The 32 bytes, as they enter the transcript */
+    readonly raw: Buffer,
+    readonly key: KeyObject,
+  ) {}
+
+  /** `parseLinkPublicKey`'s checks; see there */
+  static parse(text: unknown): LinkPublicKey | null {
+    if (typeof text !== 'string') return null
+    const raw = decodeBase64url(text, LINK_PUBLIC_KEY_BYTES)
+    if (!raw) return null
+    const y = yOf(raw)
+    if (y >= P) return null
+    if (SMALL_ORDER_Y.includes(y)) return null
+    let key: KeyObject
+    try {
+      key = createPublicKey({ key: Buffer.concat([SPKI_PREFIX, raw]), format: 'der', type: 'spki' })
+    } catch {
+      return null
+    }
+    if (key.asymmetricKeyType !== 'ed25519') return null
+    return new LinkPublicKey(text, raw, key)
+  }
+
+  /** Always true: a mark that this key came through `parse` */
+  get checked(): boolean {
+    return this.#checked
+  }
 }
 
 /**
@@ -86,19 +116,7 @@ export type LinkPublicKey = {
  * decoded point, not a test signature: under a key of order 8 a forged signature verifies for only some messages.
  */
 export function parseLinkPublicKey(text: unknown): LinkPublicKey | null {
-  const raw = decodeBase64url(text, LINK_PUBLIC_KEY_BYTES)
-  if (!raw) return null
-  const y = yOf(raw)
-  if (y >= P) return null
-  if (SMALL_ORDER_Y.includes(y)) return null
-  let key: KeyObject
-  try {
-    key = createPublicKey({ key: Buffer.concat([SPKI_PREFIX, raw]), format: 'der', type: 'spki' })
-  } catch {
-    return null
-  }
-  if (key.asymmetricKeyType !== 'ed25519') return null
-  return { text: text as string, raw, key } as LinkPublicKey
+  return LinkPublicKey.parse(text)
 }
 
 /** The raw public key of an Ed25519 key (private or public), checked as any other (`parseLinkPublicKey`) */
