@@ -468,8 +468,9 @@ export interface AgentAdapter {
   /** Absent: Anthropic's, the ratios the cache figures were first drawn with */
   readonly cacheBilling?: CacheBilling
   /**
-   * The tool says the context size itself with every request's token count (Codex's `thread/tokenUsage/updated`), so the figure
-   * needs no estimate from the request during a turn (`ContextMeter`). Absent: it reads it once at a turn's end (Claude).
+   * The tool says the context size itself with its requests (Codex's `thread/tokenUsage/updated`; Claude's session asks for it after
+   * a top-level request, throttled, #1526), so the figure needs no estimate from the request during a turn (`ContextMeter`).
+   * Absent: the tool reads it once at a turn's end.
    */
   readonly contextAtRequest?: boolean
   /** Whether a live session takes a `quiet` input (see `SessionHandle.send`): the mailbox sends mail that must not wake only to such a tool */

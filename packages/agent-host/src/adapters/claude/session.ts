@@ -56,6 +56,9 @@ export type ClaudeLaunch = {
   stopConfirmMs: number
 }
 
+/** At most one context reading per session in this time while a turn runs (#1526) */
+const MID_TURN_READ_GAP_MS = 2_000
+
 export class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: ClaudeInput[] = []
@@ -390,8 +393,42 @@ export class ClaudeSession implements SessionHandle {
     if (m.type === 'result') this.confirmStop()
     this.schedules.arm()
     // Once a turn ends, asks what is currently in the context window (FR-14).
-    if (m.type === 'result' && !retrying) void this.reportContext(q)
+    if (m.type === 'result' && !retrying) {
+      this.stopMidTurnRead()
+      void this.reportContext(q)
+    }
+    // A request of the session's own conversation (a subagent's has a prompt of its own) says the window is fuller now (#1526)
+    else if (m.type === 'assistant' && (m as { parent_tool_use_id?: unknown }).parent_tool_use_id == null) this.readContextMidTurn(q)
   }
+
+  /**
+   * Reads the window while a turn runs (#1526), so the first turn has a figure before its end, and every turn keeps it exact rather than
+   * estimated. Measured on CLI 2.1.296 (SDK 0.3.263): `getContextUsage()` answers at once during a turn (10 to 550 ms) and returns
+   * the latest top-level assistant message's `input + cache read + cache creation` to the token, the same number the turn's end reads.
+   * A turn makes a request every second or less, so at most one reading per `MID_TURN_READ_GAP_MS`: the first at once, then one
+   * trailing the last request seen. A compaction needs no rule: the request after it is smaller, and so is the reading.
+   */
+  private readContextMidTurn(q: QueryHandle): void {
+    if (this.midTurnTimer) return
+    const wait = this.midTurnReadAt + MID_TURN_READ_GAP_MS - Date.now()
+    if (wait > 0) {
+      this.midTurnTimer = setTimeout(() => {
+        this.midTurnTimer = null
+        this.readContextMidTurn(q)
+      }, wait)
+      this.midTurnTimer.unref?.()
+      return
+    }
+    this.midTurnReadAt = Date.now()
+    if (!this.closed) void this.reportContext(q)
+  }
+  /** The turn's end reads the window itself: no reading of the turn comes after it */
+  private stopMidTurnRead(): void {
+    if (this.midTurnTimer) clearTimeout(this.midTurnTimer)
+    this.midTurnTimer = null
+  }
+  private midTurnTimer: ReturnType<typeof setTimeout> | null = null
+  private midTurnReadAt = 0
 
   /** The CLI's init message: its conversation id, what it can track, its version and its commands */
   private onInit(m: StreamMsg): void {
@@ -604,8 +641,12 @@ export class ClaudeSession implements SessionHandle {
    * the conversation.
    */
   private async reportContext(q: QueryHandle): Promise<void> {
+    // A reading asked for earlier that is answered after a later one is older than it: dropped (#1526)
+    const asked = ++this.contextAsked
     try {
       const usage = await q.getContextUsage()
+      if (asked < this.contextApplied) return
+      this.contextApplied = asked
       const used = Number(usage?.totalTokens ?? 0)
       const window = Number(usage?.maxTokens ?? 0)
       this.contextWindow = window > 0 ? window : null
@@ -636,6 +677,8 @@ export class ClaudeSession implements SessionHandle {
     console.error(`[claude] ${this.sessionId.slice(0, 8)} compacts at ${reported} tokens, not the ${expected} Centralu asked for`)
   }
   private compactPointSaid = false
+  private contextAsked = 0
+  private contextApplied = 0
   private contextWindow: number | null = null
 
   /**
@@ -798,6 +841,7 @@ export class ClaudeSession implements SessionHandle {
   async dispose(): Promise<void> {
     this.inputReceipts.failAll(new Error('The session closed before the parent note finished'))
     this.closed = true
+    this.stopMidTurnRead()
     this.notify?.()
     // A message held behind an unanswered /goal is reported as undelivered, like the queue below
     this.settleGoalKnown()
