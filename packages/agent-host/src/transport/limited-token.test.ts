@@ -666,6 +666,12 @@ describe('a full hello, reported as it is let in (#1712)', () => {
     expect((await reportConnect(h.port, 'x'.repeat(43))).closed()).toBe(4001)
     await reportConnect(h.port, REPORT_OTHER, { protocolVersion: PROTOCOL_VERSION + 1 })
     expect(h.written).toEqual([])
+    // The same credential, let in after: the first use that counts
+    const hub = await reportConnect(h.port, REPORT_HUB)
+    await reportConnect(h.port, REPORT_OTHER)
+    await reportSettle()
+    expect(h.written).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+    expect(hub.told()).toContain('bbbbbbbb')
   })
 
   it('replays it to a hub’s link asking for what it missed, and to no window', async () => {
