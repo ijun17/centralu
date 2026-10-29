@@ -169,6 +169,8 @@ const STOP_CONFIRM_MS = 10_000
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+  /** The session reads the window with its requests during a turn (`ClaudeSession.readContextMidTurn`, #1526) */
+  readonly contextAtRequest = true
   /** `shouldQuery: false` (sdk.d.ts, measured on the Mac 2026-10-20: no turn, merged into the next message) */
   readonly quietInput = true
   readonly cacheBilling = 'anthropic' as const
