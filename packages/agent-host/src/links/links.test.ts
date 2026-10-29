@@ -3875,7 +3875,7 @@ describe('machines.revokeCredential (#1405)', () => {
             { id: 'cccc3333', label, created: 2, check: credentialCheck(mine, nonce!) },
             { id: 'cccc3333', label, created: 3, check: credentialCheck(other, nonce!) },
           ],
-        }) as Partial<CredentialsReport>,
+        }),
     })
     const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
     await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
@@ -3894,7 +3894,7 @@ describe('machines.revokeCredential (#1405)', () => {
       credentials: (nonce) =>
         ({
           credentials: [...(ownStays ? [{ ...own, check: credentialCheck(mine, nonce!) }] : []), { ...cred('cccc3333', label, true), check: credentialCheck(other, nonce!) }],
-        }) as Partial<CredentialsReport>,
+        }),
     })
     const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
     await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)

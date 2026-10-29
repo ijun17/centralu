@@ -216,7 +216,7 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
     const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }) }
     const store = new Store()
     try {
-      const deps = linkDepsFor(store, rest as never)
+      const deps = linkDepsFor(store, rest)
       expect((deps.tunnelFor(record) as SshTunnel).pairsAs.endsWith(`-${hubSelfId(store).slice('hub-'.length)}`)).toBe(true)
       // The registry is the store's too
       deps.registry.add({ id: 'm1', name: 'box', sshTarget: 'box', remote: { shell: 'posix' as const }, addedAt: 0, acceptedVersions: null })
