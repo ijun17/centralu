@@ -29,8 +29,8 @@ export type Contract = {
    */
   darwin?: unknown
   /**
-   * The answer where the file system keeps nanoseconds, not `want`'s microseconds: `timePrecision` (the family, the
-   * OS and the running Node's libuv) says which applies, to the real OS and the in-memory one alike
+   * The answer where the file system keeps nanoseconds, not `want`'s microseconds: `timePrecision` (the family and the
+   * running Node's libuv) says which applies, to the real OS and the in-memory one alike
    */
   nanoseconds?: unknown
   /**
@@ -52,10 +52,7 @@ export type Contract = {
 export function expectedFor(c: Contract, family: OsFamily): unknown {
   if (family === 'windows' && c.nativeRmSync !== undefined && rmSyncImplementation() === 'native')
     return c.nativeRmSync
-  return c.nanoseconds !== undefined &&
-    timePrecision(family, undefined, process.platform === 'darwin') === 'nanosecond'
-    ? c.nanoseconds
-    : c.want[family]
+  return c.nanoseconds !== undefined && timePrecision(family) === 'nanosecond' ? c.nanoseconds : c.want[family]
 }
 
 export type ContractContext = {
@@ -810,8 +807,8 @@ export const CONTRACT: Contract[] = [
       windows: { seconds: '1700000000123456000', date: '1700000000123000000' },
       posix: { seconds: '1700000000123456000', date: '1700000000122999000' },
     },
-    // libuv decides (`timePrecision`): Linux cut to microseconds before libuv 1.52.0, which Node 24.22.1 ships; macOS kept
-    // the nanoseconds of the double it is given (measured on macOS 27, Node 26)
+    // libuv decides (`timePrecision`): POSIX, macOS included, cut to microseconds before libuv 1.52.0, which Node 24.22
+    // ships; from it, the nanoseconds of the double it is given are kept
     nanoseconds: { seconds: '1700000000123456716', date: '1700000000122999906' },
     run(os, root) {
       const { join } = os.paths.path

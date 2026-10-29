@@ -308,7 +308,7 @@ describe('how rmSync is made: Node 23 moved it to C++, which changes the code of
 })
 
 describe('how finely a file time is kept: libuv decides, with the OS family', () => {
-  it('windows cuts to microseconds on every libuv; Linux from libuv 1.52.0; macOS never cuts', () => {
+  it('windows cuts to microseconds on every libuv; POSIX (macOS too) until libuv 1.52.0', () => {
     expect(['1.51.0', '1.52.1', '1.53.0'].map((uv) => timePrecision('windows', uv))).toEqual([
       'microsecond',
       'microsecond',
@@ -317,7 +317,6 @@ describe('how finely a file time is kept: libuv decides, with the OS family', ()
     expect(
       ['1.50.0', '1.51.0', '1.52.0', '1.52.1', '1.53.0', '2.0.0'].map((uv) => timePrecision('posix', uv)),
     ).toEqual(['microsecond', 'microsecond', 'nanosecond', 'nanosecond', 'nanosecond', 'nanosecond'])
-    expect(timePrecision('posix', '1.51.0', true)).toBe('nanosecond')
   })
 
   it('a time is stored cut or whole as that precision says', () => {
