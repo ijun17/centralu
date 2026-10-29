@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ProtocolError } from './entities.js'
 import { RpcRequest } from './envelope.js'
+import { LINK_SIGNATURE_BYTES, base64urlShape } from './link-wire.js'
 
 /** The frames a client sends, which only the host parses: the UI's bundle leaves them out (#1648). */
 
@@ -34,7 +35,7 @@ export const HelloClient = z.object({
   auth: z
     .object({
       key: z.string().regex(/^[0-9a-f]{8}$/),
-      sig: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+      sig: z.string().regex(base64urlShape(LINK_SIGNATURE_BYTES)),
     })
     .optional()
     .catch(undefined),

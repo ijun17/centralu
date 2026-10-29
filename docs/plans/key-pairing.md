@@ -69,7 +69,7 @@ closed here. The aim is the one #1405 set: no file and no documented interface g
 | **Downgrade** (point `<data>/remote/current` at an older installed release: the launcher then refuses `--pair-key`, or the running host is old) | nothing to downgrade from | closed **from the machine's first key link**: from then on the hub refuses a verifier pairing with that machine, whatever the remote prints (§5.1), and sends no credential. Before it (a machine never linked by key, or a hub with no record of it: a new hub, a restored store, a machine removed and linked again) the first link is today's residual, no worse |
 | **Replay** of anything seen on the link | the credential is a bearer: reusable until the next pairing | each signature covers a host nonce minted for one socket and dropped at its hello or its 10 s hello timeout |
 | **Relay** (sit between the hub and a real host, passing each frame on) | not needed: the bearer is enough | the transcript names the address the hub forwards to and the host's own key; a real host elsewhere refuses it, and no second listener can share the held port (§4.3, measured) |
-| **A forged public key** (a small-order or malformed Ed25519 key in `keys`, by `--pair-key` or by hand) | no keys | refused by the launcher and ignored by the host (§4.1); unchecked, a small-order key verifies a forged signature over every message |
+| **A forged public key** (a small-order or malformed Ed25519 key in `keys`, by `--pair-key` or by hand) | no keys | refused by the launcher and ignored by the host (§4.1); unchecked, on Node 22 a small-order key verifies a forged signature over every message (Node 24 refuses it itself, §4.1) |
 | **Another account on the hub's computer** taking the forward's local port first (#838) | gets a nonce, never the credential | the same: it cannot sign as the machine (it cannot read the 0600 file there), so the hub never sends its signature |
 | **Another account on the machine** | stopped by the 0600 file | the same |
 
@@ -178,9 +178,13 @@ What carries over:
   Considered: a key in the host's memory only, drawn per start. It forces a memory read instead of a file read, but
   the hub redials the same forward after a swap without asking ssh again (`LINK_REDIALS`), so every swap would need a
   new connection line, and it closes nothing the derived key leaves open (§4.3).
-- **Which public keys are taken.** `node:crypto` verifies against a small-order public key without complaint: measured
-  on Node 22.23.4 (OpenSSL 3.5), the identity point (`01` then 31 zero bytes) as the public key with the signature
-  R = identity, S = 0 (`01` then 63 zero bytes) passes `crypto.verify(null, m, key, sig)` for every message `m` tried.
+- **Which public keys are taken.** `node:crypto` on Node 22 verifies against a small-order public key without
+  complaint: measured on Node 22.23.4 (OpenSSL 3.5), the identity point (`01` then 31 zero bytes) as the public key with
+  the signature R = identity, S = 0 (`01` then 63 zero bytes) passes `crypto.verify(null, m, key, sig)` for every
+  message `m` tried. **Node 24.22.1 (the remote runtime, `packaging/remote-runtime.json`) refuses these itself**: over
+  256 messages per key, every small-order key and y = p and p + 1 verify 0 times, on Windows and on Linux. The repository
+  allows Node 22.14 and up, and dev and CI run 22, so the hazard is real where it runs and the check below stays; the
+  tests assert the plain hazard only on a Node that has it (§9), and the module's own refusal on every Node.
   So every public key, wherever it is read (the launcher's `--pair-key`, the host reading `keys`, the hub reading
   `hostKey` from a line), goes through one check, `parseLinkPublicKey` (slice 2), and is refused unless all of these
   hold:
@@ -503,13 +507,42 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    - Strict decoding is one rule: the bytes are the given length and encode back to the same string. The exact length
      and the alphabet follow from it, so a separate test for either refuses nothing more (measured by removing each).
    - A public key is used only as a `LinkPublicKey`, which only `parseLinkPublicKey` makes, so nothing verifies against
-     an unchecked key. Rule 4 of §4.1 (`createPublicKey` takes it) refused none of 2,000 random 32-byte values that pass
+     an unchecked key: by type, and at run time too, since `verifyLink` refuses any object that does not pass
+     `LinkPublicKey.is` (a private field's presence, which a cast or a copy does not carry). Rule 4 of §4.1 (`createPublicKey` takes it) refused none of 2,000 random 32-byte values that pass
      rules 1 to 3: off-curve bytes import and verify nothing. It stays as a guard; no test isolates it.
    - The small-order y values are derived in the test from the curve equation, not copied, and match the two encodings
-     libsodium lists. Under raw `node:crypto`, the forged signature R = identity, S = 0 verified for some of 256 messages
-     under each of the ten small-order encodings and under y = p and y = p + 1; the test pins that.
+     libsodium lists. Under raw `node:crypto` on Node 22.23.4, the forged signature R = identity, S = 0 verified for some
+     of 256 messages under each of the ten small-order encodings and under y = p and y = p + 1; the tests pin that on a
+     Node that has it. **Node 24.22.1 verifies 0 of 256 under each of them** (it refuses a small-order key itself), so those
+     assertions are skipped there with the reason in the test's name, probed once at test time; every refusal by
+     `parseLinkPublicKey`, all ten encodings and all 38 of y from p to 2^255 − 1 (19 values, two sign bits), is asserted
+     on both. The check stays because the repository allows Node 22.14 and up. The slice's tests run on Node 22 and on
+     Node 24.22.1.
    - The token marker is `LINK_AUTH_MARKER`, `centralu link auth v1` (§4.3 step 4).
-   - The pinned vector was produced by a separate script written apart from `link-keys.ts`, and the module matches it.
+   - The pinned vector was produced by `tooling/key-pairing-vector.mjs`, written apart from `link-keys.ts`: its own RFC 8032
+     Ed25519 on BigInt, using `node:crypto` only for SHA-256, SHA-512 and HMAC. `tooling/key-pairing-vector.test.ts` runs it
+     against the module on every test run. Another implementation (pure Python, own Ed25519) matched it byte for byte in
+     the review.
+   - The wire lengths (24, 32 and 64 bytes) are defined once, in `@cc/protocol` (`link-wire.ts`), which the frame schemas
+     and `link-keys.ts` both use; the address form is written once, in `linkAddress`, and read by building it again
+     (`readLinkAddress`), so the transcript and the door URL accept the one form. `encodeFields` takes a string as ASCII
+     and throws on any other character. `hostLinkKey` refuses an empty key; slice 3 calls it only with a key it has
+     already checked.
+   - **What slices 3 and 4 must check**, because a malformed field reads as absent:
+     1. *Hub.* Once it has sent `prove.key`, the hub requires `hostNonce`, `hostKey` and `sig` all present and valid. A
+        proof with a mac only is dropped, with or without a record; the hub never falls back to a `token` other than the
+        marker for that line.
+     2. *Host, at `prove`.* When `key` is present, `nonce` must pass `decodeBase64url(nonce, 24)` (the schema still
+        allows 22 to 128 characters); otherwise close as malformed, and never answer with the mac path.
+     3. *Host, at hello.* A `token === LINK_AUTH_MARKER` with `auth` absent (a malformed one included) is refused. An
+        `auth` beside any other token is ignored or refused, and the choice is written down here. `auth` never upgrades a
+        limited or verifier hello.
+     4. *Host, after any hello attempt.* `Ns` and the stored `Nh` and `keyId` are dropped after any hello attempt, failed
+        ones included.
+     5. *Hub.* A line whose `hostKey` fails `parseLinkPublicKey` is dropped. `Pm` is compared as the parsed text, which
+        strict decoding makes equal to a comparison of the bytes.
+     6. *CI.* The slice 3 and slice 4 tests run on Node 24.22.1 as well as on 22, since the two differ in `node:crypto`
+        (§4.1).
    - The repository has no property-testing library; the property checks use a small seeded generator in the test, so
      each run sees the same cases.
 3. **The machine side.** The launcher's `--pair-key` and `--key-paired` (§4.2, with the probe of the running host),
@@ -551,8 +584,9 @@ Each fails without its fix.
   and has no `pairKey` in `takes`; `--key-paired` removes the label's verifier entry only on a key line.
 - **Public keys:** `parseLinkPublicKey` refuses each small-order encoding (both sign bits), the encodings of y ≥ p, a
   42- or 44-character string, one with a character outside base64url, and one whose last character has a spare bit set;
-  the identity key with the forged signature above passes raw `crypto.verify` (the hazard, pinned) and is refused by
-  the check; a `serve.json` entry holding it plus that forged hello is not full; the launcher refuses it at
+  the identity key with the forged signature above passes raw `crypto.verify` on Node 22 (the hazard, pinned there and
+  skipped on Node 24.22.1, which refuses it itself, §4.1) and is refused by the check on both; a `serve.json` entry holding it plus
+  that forged hello is not full; the launcher refuses it at
   `--pair-key` and writes nothing.
 - **Transcript:** the test vector's bytes of `T` and both signatures; each field changed by one byte, and two adjacent
   fields with a byte moved between them, fail to verify; non-canonical base64url for a nonce, key or signature is

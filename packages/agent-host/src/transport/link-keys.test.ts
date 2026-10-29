@@ -1,6 +1,7 @@
 /** The keys and the signed transcript of key pairing (#1711, docs/plans/key-pairing.md §4.1 and §4.3, slice 2) */
 import { createHmac, createPublicKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES } from '@cc/protocol'
 import {
   LINK_AUTH_MARKER,
   decodeBase64url,
@@ -13,9 +14,10 @@ import {
   linkPublicKeyOf,
   linkTranscript,
   parseLinkPublicKey,
+  readLinkAddress,
   signLink,
   verifyLink,
-  type LinkPublicKey,
+  LinkPublicKey,
   type LinkTranscriptInput,
 } from './link-keys.js'
 import { sameSecret } from './http.js'
@@ -104,6 +106,17 @@ function smallOrderEncodings(): { name: string; raw: Buffer }[] {
 const SPKI = (raw: Buffer) => createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), raw]), format: 'der', type: 'spki' })
 /** R = the identity, S = 0: a signature that verifies under a small-order key for some or every message */
 const FORGED = Buffer.concat([encodePoint(1n, false), Buffer.alloc(32)])
+
+/**
+ * Whether this Node's own `crypto.verify` takes the forged signature under the identity key. It does on Node 22.23.4 (every
+ * message) and does not on Node 24.22.1, whose OpenSSL refuses a small-order key itself (measured, #1714). The repository
+ * allows Node 22.14 and up and the remote host runs the pinned Node 24, so the module's own check stays and is tested on
+ * every Node; only the assertions about the plain hazard need a Node that has it.
+ */
+const RAW_VERIFY_TAKES_SMALL_ORDER = Array.from({ length: 16 }, (_, i) => verify(null, Buffer.from(`probe ${i}`), SPKI(encodePoint(1n, false)), FORGED)).some(Boolean)
+const HAZARD_NOTE = RAW_VERIFY_TAKES_SMALL_ORDER
+  ? 'this Node has it'
+  : `skipped: Node ${process.version} refuses a small-order key in crypto.verify itself, as Node 24.22.1 does; Node 22 has the hazard (doc §4.1)`
 
 /** The pinned vector's inputs (slice 2): any other implementation of §4.3 is checked against the same */
 const VECTOR = {
@@ -194,7 +207,7 @@ describe('public keys (§4.1)', () => {
     for (const { name, raw } of encodings) expect(parseLinkPublicKey(raw.toString('base64url')), name).toBeNull()
   })
 
-  it('pins the hazard: raw node:crypto verifies a forged signature under every small-order key', () => {
+  it.skipIf(!RAW_VERIFY_TAKES_SMALL_ORDER)(`pins the hazard where it exists: raw node:crypto verifies a forged signature under every small-order key (${HAZARD_NOTE})`, () => {
     // So a check of the point is needed, and a test signature would not do: under order 8 only some messages pass
     for (const { name, raw } of smallOrderEncodings()) {
       const k = SPKI(raw)
@@ -206,22 +219,26 @@ describe('public keys (§4.1)', () => {
     for (let i = 0; i < 32; i++) expect(verify(null, randomBytes(40), identity, FORGED)).toBe(true)
   })
 
-  it('refuses y = p and y = p + 1 (non-canonical, and the forged signature passes raw under both)', () => {
+  it('refuses y = p and y = p + 1, whatever this Node makes of them (non-canonical)', () => {
     for (const y of [P, P + 1n]) {
       for (const s of [false, true]) {
         const raw = encodePoint(y, s)
         expect(parseLinkPublicKey(raw.toString('base64url')), `${y === P ? 'p' : 'p + 1'}, sign ${s ? 1 : 0}`).toBeNull()
       }
     }
+  })
+
+  it.skipIf(!RAW_VERIFY_TAKES_SMALL_ORDER)(`pins the hazard of y = p + 1 where it exists (${HAZARD_NOTE})`, () => {
     expect(Array.from({ length: 64 }, (_, i) => verify(null, Buffer.from(`m${i}`), SPKI(encodePoint(P + 1n, false)), FORGED)).every(Boolean)).toBe(true)
   })
 
-  it('refuses every y from p to 2^255 − 1', () => {
-    const r = seeded(7)
-    for (let i = 0; i < 200; i++) {
-      const y = P + BigInt(r.int(19))
-      expect(parseLinkPublicKey(encodePoint(y, r.int(2) === 1).toString('base64url'))).toBeNull()
-    }
+  it('refuses every y from p to 2^255 - 1, each with both sign bits (all 38)', () => {
+    // 2^255 - p = 19 values of y, so 19 x 2 encodings: every one
+    expect(P + 18n).toBe(2n ** 255n - 1n)
+    const cases = Array.from({ length: 19 }, (_, i) => P + BigInt(i)).flatMap((y) => [false, true].map((sign) => encodePoint(y, sign)))
+    expect(cases).toHaveLength(38)
+    expect(new Set(cases.map((c) => c.toString('hex'))).size).toBe(38)
+    for (const c of cases) expect(parseLinkPublicKey(c.toString('base64url')), c.toString('hex')).toBeNull()
   })
 
   it('takes every real Ed25519 public key, with either sign bit (property: 200 keys)', () => {
@@ -253,6 +270,13 @@ describe('public keys (§4.1)', () => {
     expect(parseLinkPublicKey(spare)).toBeNull()
     expect(parseLinkPublicKey(undefined)).toBeNull()
     expect(parseLinkPublicKey(42)).toBeNull()
+  })
+})
+
+describe('the wire lengths (§4.3, "The bytes"), defined once in @cc/protocol', () => {
+  it('are 24, 32 and 64 bytes, as 32, 43 and 86 characters', () => {
+    expect([LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES]).toEqual([24, 32, 64])
+    expect([LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES].map((n) => Buffer.alloc(n).toString('base64url').length)).toEqual([32, 43, 86])
   })
 })
 
@@ -398,11 +422,39 @@ describe('the transcript binds every field (§4.3)', () => {
   })
 
   it('never verifies under a small-order key, since none can be named', () => {
-    // The type admits only a parsed key; a forged one is refused before any verify
-    const forgedKey = { text: '', raw: encodePoint(1n, false), key: SPKI(encodePoint(1n, false)) } as unknown as LinkPublicKey
-    // Shown for the record: were such a key let through, the forged signature would pass
-    expect(verifyLink('hub', forgedKey, t(), FORGED.toString('base64url'))).toBe(true)
     expect(parseLinkPublicKey(encodePoint(1n, false).toString('base64url'))).toBeNull()
+    // A key object made by a cast is refused at run time. The identity one, with the forged signature, on any Node; and a
+    // lookalike of the hub's real key with its real signature, which would verify were the key let through
+    const identity = { text: '', raw: encodePoint(1n, false), key: SPKI(encodePoint(1n, false)) } as unknown as LinkPublicKey
+    expect(verifyLink('hub', identity, t(), FORGED.toString('base64url'))).toBe(false)
+    const real = key(VECTOR.hubKey)
+    const lookalike = { text: real.text, raw: real.raw, key: real.key } as unknown as LinkPublicKey
+    expect(verifyLink('hub', real, t(), VECTOR.hubSig)).toBe(true)
+    expect(verifyLink('hub', lookalike, t(), VECTOR.hubSig)).toBe(false)
+    for (const notAKey of [undefined, null, 'x', {}, { key: real.key }]) expect(verifyLink('hub', notAKey as unknown as LinkPublicKey, t(), VECTOR.hubSig)).toBe(false)
+  })
+
+  it('knows a key only by its own mark: LinkPublicKey.is', () => {
+    expect(LinkPublicKey.is(key(VECTOR.hubKey))).toBe(true)
+    expect(LinkPublicKey.is({ ...key(VECTOR.hubKey) })).toBe(false)
+    expect(LinkPublicKey.is(Object.create(LinkPublicKey.prototype))).toBe(false)
+    expect(LinkPublicKey.is(null)).toBe(false)
+    expect(LinkPublicKey.is(VECTOR.hubKey)).toBe(false)
+  })
+
+  it('encodes a string field as ASCII and refuses another character, which one byte per character would fold onto a character below 0x80', () => {
+    // U+0100 has the low byte 0, so as one byte per character it would equal the string NUL
+    expect(() => encodeFields(['\u0100'])).toThrow()
+    expect(() => encodeFields(['\u00e9'])).toThrow()
+    expect(() => encodeFields(['a', '\u{1F600}'])).toThrow()
+    expect(encodeFields(['\0']).toString('hex')).toBe('0000000100')
+    expect(encodeFields(['\x7f', 'az']).toString('hex')).toBe('000000017f000000026' + '17a')
+  })
+
+  it('refuses an empty host key, which would give one stable, guessable key', () => {
+    expect(() => hostLinkKey('')).toThrow()
+    expect(() => hostLinkKey(undefined as unknown as string)).toThrow()
+    expect(hostLinkKey('k').publicKey.text).toHaveLength(43)
   })
 })
 
@@ -412,6 +464,13 @@ describe('the address each side signs (§4.3)', () => {
     expect(linkAddress(1)).toBe('127.0.0.1:1')
     expect(linkAddress(65535)).toBe('127.0.0.1:65535')
     for (const port of [0, -1, 65536, 4100.5, Number.NaN, '4100', undefined]) expect(linkAddress(port), String(port)).toBeNull()
+  })
+
+  it('reads an address only in the one form linkAddress writes', () => {
+    expect(readLinkAddress('127.0.0.1:4100')).toBe('127.0.0.1:4100')
+    for (const port of [1, 80, 4100, 65535]) expect(readLinkAddress(linkAddress(port))).toBe(linkAddress(port))
+    const refused = ['127.0.0.1:04100', '127.0.0.1:0', '127.0.0.1:65536', '127.0.0.1:1e3', '127.0.0.1:0x10', '127.0.0.1:+4100', '127.0.0.1: 4100', '127.0.0.1:4100\n', '127.0.0.1:', '127.0.0.1', '127.0.0.1:4100.0', '127.0.0.1:99999999999999999999', '127.0.0.2:4100', '127.0.0.1:\uff14\uff11\uff10\uff10']
+    for (const text of [...refused, undefined, 4100]) expect(readLinkAddress(text), String(text)).toBeNull()
   })
 
   it("without a keeper: the socket's own local address, an IPv4-mapped loopback read as 127.0.0.1, any other none", () => {

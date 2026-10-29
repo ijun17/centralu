@@ -1,4 +1,5 @@
 import { createHmac, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto'
+import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES } from '@cc/protocol'
 import { CREDENTIAL_ID_RE } from '../lifecycle/serve-credentials.js'
 
 /**
@@ -23,11 +24,6 @@ const HOST_KEY_LABEL = 'centralu host key v1'
 
 /** Who signs: the two signatures over one transcript carry different labels, so one is never taken for the other */
 export type LinkRole = keyof typeof ROLE_LABEL
-
-/** Byte lengths on the link (§4.3, "The bytes") */
-export const LINK_NONCE_BYTES = 24
-export const LINK_PUBLIC_KEY_BYTES = 32
-export const LINK_SIGNATURE_BYTES = 64
 
 /**
  * The bytes of `text`, read as base64url without padding, when it is exactly the encoding of `bytes` bytes: the exact
@@ -72,8 +68,9 @@ const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 
 /**
- * A public key that passed `parseLinkPublicKey`: only such a key is verified against (`verifyLink`). A class with a
- * private constructor and a private field, so no object literal and no other module can make one.
+ * A public key that passed `parseLinkPublicKey`: only such a key is verified against (`verifyLink`, which checks it with
+ * `LinkPublicKey.is` at run time as well as by type). A class with a private constructor and a private field, so no
+ * object literal and no other module can make one.
  */
 export class LinkPublicKey {
   readonly #checked = true
@@ -103,9 +100,9 @@ export class LinkPublicKey {
     return new LinkPublicKey(text, raw, key)
   }
 
-  /** Always true: a mark that this key came through `parse` */
-  get checked(): boolean {
-    return this.#checked
+  /** Whether `value` is a key that came through `parse`: a real check at run time, which a cast to the type does not pass */
+  static is(value: unknown): value is LinkPublicKey {
+    return typeof value === 'object' && value !== null && #checked in value
   }
 }
 
@@ -139,6 +136,8 @@ export function linkPrivateKeyOfSeed(seed: Uint8Array): KeyObject {
  * values derived from it are (`limitedToken`, `hostProof`).
  */
 export function hostLinkKey(hostKey: string): { privateKey: KeyObject; publicKey: LinkPublicKey } {
+  // An empty key is no key: deriving from it would give a stable, guessable one. The caller passes a key it has already checked
+  if (typeof hostKey !== 'string' || hostKey.length === 0) throw new Error('The host key is empty')
   const privateKey = linkPrivateKeyOfSeed(createHmac('sha256', hostKey).update(HOST_KEY_LABEL).digest())
   const publicKey = linkPublicKeyOf(privateKey)
   // A seed whose public key is refused would need SHA-512 to land on one of five values: not met, but never signed with
@@ -147,13 +146,23 @@ export function hostLinkKey(hostKey: string): { privateKey: KeyObject; publicKey
 }
 
 const MAX_PORT = 65535
-const ADDRESS_RE = /^127\.0\.0\.1:([1-9][0-9]{0,4})$/
-const DOOR_RE = /^ws:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/
+const ADDRESS_PREFIX = '127.0.0.1:'
+const DOOR_PREFIX = 'ws://'
 
-/** The transcript's address for a loopback port: `127.0.0.1:<port>`, decimal with no leading zero, 1 to 65535; null for any other port */
+/** The transcript's address for a loopback port: `127.0.0.1:<port>`, decimal with no leading zero, 1 to 65535; null for any other port. The one place the form is written */
 export function linkAddress(port: unknown): string | null {
   if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > MAX_PORT) return null
-  return `127.0.0.1:${port}`
+  return `${ADDRESS_PREFIX}${port}`
+}
+
+/**
+ * `text` when it is exactly an address `linkAddress` makes, else null: the port is read and the address built again, and
+ * only the same string passes, so the form is `linkAddress`'s alone (a leading zero, a sign, a space, an exponent, a
+ * port out of range or a trailing character each build another string)
+ */
+export function readLinkAddress(text: unknown): string | null {
+  if (typeof text !== 'string' || !text.startsWith(ADDRESS_PREFIX)) return null
+  return linkAddress(Number(text.slice(ADDRESS_PREFIX.length))) === text ? text : null
 }
 
 /**
@@ -171,14 +180,18 @@ export function linkAddressOfSocket(localAddress: string | undefined, localPort:
  * Read as written, not through `URL`, which would turn `08080` into `8080`.
  */
 export function linkAddressOfDoor(frontDoor: string | undefined): string | null {
-  const m = frontDoor === undefined ? null : DOOR_RE.exec(frontDoor)
-  return m ? linkAddress(Number(m[1])) : null
+  return frontDoor?.startsWith(DOOR_PREFIX) ? readLinkAddress(frontDoor.slice(DOOR_PREFIX.length)) : null
 }
 
-/** `field(b) = u32be(len(b)) ‖ b` for each part, concatenated: no two different lists of parts give the same bytes */
+/**
+ * `field(b) = u32be(len(b)) ‖ b` for each part, concatenated: no two different lists of parts give the same bytes. A
+ * string is taken as ASCII and throws on a character above 0x7f, which a one-byte-per-character encoding would fold
+ * onto another (U+0100 onto NUL); every string the transcript holds is checked before it gets here
+ */
 export function encodeFields(parts: readonly (Uint8Array | string)[]): Buffer {
   const out: Buffer[] = []
   for (const part of parts) {
+    if (typeof part === 'string' && Array.from(part).some((c) => (c.codePointAt(0) ?? 0) > 0x7f)) throw new Error('A field string is ASCII')
     const b = typeof part === 'string' ? Buffer.from(part, 'ascii') : Buffer.from(part)
     const len = Buffer.alloc(4)
     len.writeUInt32BE(b.length)
@@ -215,9 +228,9 @@ export function linkTranscript(input: LinkTranscriptInput): Buffer | null {
   const hubKey = parseLinkPublicKey(input.hubKey)
   if (!hubNonce || !hostNonce || !hostKey || !hubKey) return null
   if (typeof input.keyId !== 'string' || !CREDENTIAL_ID_RE.test(input.keyId)) return null
-  const port = typeof input.address === 'string' ? ADDRESS_RE.exec(input.address) : null
-  if (!port || Number(port[1]) > MAX_PORT) return null
-  return encodeFields([CONTEXT_LABEL, hubNonce, hostNonce, hostKey.raw, hubKey.raw, input.keyId, input.address])
+  const address = readLinkAddress(input.address)
+  if (!address) return null
+  return encodeFields([CONTEXT_LABEL, hubNonce, hostNonce, hostKey.raw, hubKey.raw, input.keyId, address])
 }
 
 /** What `role` signs: `field(role label) ‖ T` */
@@ -230,8 +243,9 @@ export function signLink(role: LinkRole, privateKey: KeyObject, transcript: Uint
   return sign(null, signedBytes(role, transcript), privateKey).toString('base64url')
 }
 
-/** Whether `sig` is `role`'s signature over `transcript` under `publicKey`; a signature not decoded strictly is refused */
+/** Whether `sig` is `role`'s signature over `transcript` under `publicKey`; a signature not decoded strictly, or a key that did not come through `parseLinkPublicKey`, is refused */
 export function verifyLink(role: LinkRole, publicKey: LinkPublicKey, transcript: Uint8Array, sig: unknown): boolean {
+  if (!LinkPublicKey.is(publicKey)) return false
   const raw = decodeBase64url(sig, LINK_SIGNATURE_BYTES)
   if (!raw) return false
   try {
