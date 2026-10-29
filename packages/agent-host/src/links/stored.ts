@@ -2,6 +2,7 @@ import type { Store } from '../dev-services/store.js'
 import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
+import type { LinkDeps } from './link-deps.js'
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
@@ -55,7 +56,17 @@ export function tunnelsFor(store: Store, log: (line: string) => void): (record: 
   return (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(hubSelfId(store)), log })
 }
 
-const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')
+/**
+ * What `new Links(...)` is given (main.ts), with everything the hub's own store decides made here: the registry, the
+ * headers mirror and the tunnel (`tunnelsFor`). main.ts cannot hand any of the three in (the type leaves them out), so
+ * the key a tunnel pairs under cannot be drawn from anything but the store's id again, and a test drives this very
+ * function (#1405 review)
+ */
+export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor'>): LinkDeps {
+  return { ...rest, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, (line) => rest.log?.(line)) }
+}
+
+const kindOf = (k:'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')
 
 /** Rows without an id are not headers the hub can answer for; they are left out */
 const withIds = (list: unknown[]) =>

@@ -72,7 +72,7 @@ import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
-import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry, tunnelsFor } from './links/stored.js'
+import { hubSelfId, linkDepsFor, storeProjectOrder } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
 import { projectsHome } from './dev-services/project-folder.js'
@@ -679,7 +679,7 @@ const stopFromRequest = (o: { forUpdate: boolean }) => {
  */
 /** This computer's name as a linked machine shows who sent its session an instruction (`MacBook-Pro`, not `.local`) */
 const hubName = (): string => hostname().replace(/\.local$/i, '') || 'a linked computer'
-const links = new Links({
+const links = new Links(linkDepsFor(store, {
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
   // The orchestrator also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
   broadcast: (e) => {
@@ -687,9 +687,6 @@ const links = new Links({
     mgr.observeLinked(e)
   },
   terminal: screens.push,
-  mirror: storeMirror(store),
-  registry: storeRegistry(store),
-  tunnelFor: tunnelsFor(store, (line) => console.error(line)),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
   // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)
@@ -709,7 +706,7 @@ const links = new Links({
     ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
     selfName: hubName,
   }),
-})
+}))
 /*
  * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back
  * on the connection it offered on (`HostServer.call`)
