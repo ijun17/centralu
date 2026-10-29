@@ -689,8 +689,8 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
       {count > 0 && <p className="text-ink">{count === 1 ? 'Something else also has full access to this machine' : `${count} others also have full access to this machine`}</p>}
       {count === 0 && others?.some((c) => c.gone) && <p className="text-ink">Full access was used here, then withdrawn</p>}
       <ul className="mt-0.5">
-        {(others ?? []).map((c) => (
-          <li key={c.id} className="flex items-center gap-2 text-ink-muted" data-testid={`machine-credential-${c.id}`}>
+        {(others ?? []).map((c, i) => (
+          <li key={`${c.id}-${i}`} className="flex items-center gap-2 text-ink-muted" data-testid={`machine-credential-${c.id}`}>
             <span>
               {JSON.stringify(c.label)}
               {c.created ? `, since ${new Date(c.created).toLocaleDateString()}` : ''}

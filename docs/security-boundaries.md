@@ -1535,7 +1535,7 @@ A host started with `centralu serve` on another machine is reached by the app th
       one missing. Any other is listed as used
       and gone ("under this computer's own name but not made by it"); its own are never listed. Left: one used under
       the hub's label before this hub's first link in its present run is not judged, since the hub does not remember
-      the ids of its earlier runs.
+      the ids of its earlier runs. An entry that reuses the hub's own id has no working Revoke: the hub refuses to withdraw its own id, and `serve --revoke <id>` there would take both. The record keeps at most 256 (id, secret) pairs, so whoever can write `serve.json` can still push older ones out, as it could with 256 ids before.
 
     The row lists 32 and counts the rest ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches

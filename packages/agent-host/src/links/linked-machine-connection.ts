@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { asObj, isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
@@ -18,7 +19,6 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { randomBytes } from 'node:crypto'
 import { credentialsOf, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
@@ -132,8 +132,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   private pairedHere = new Map<string, string | null>()
   private usedUnderHubLabels: RemoteCredential[] = []
-  /** What this read of `host.credentials` asked with (`credentialCheck`): an entry is this hub's own only when its `check` is of the secret this hub holds */
-  private readNonce: string | null = null
   /** The machine's host says its serve.json cannot be read (#1405 review), or closed this link for that */
   private fileUnreadable = false
   /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
@@ -442,20 +440,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const credentialFileUnreadable = this.fileUnreadable
     if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken, credentialFileUnreadable }
     const others = [...all, ...this.notPairedHere(line, all)].filter((c) => !this.isCurrent(c, line) && !this.revokedHere.has(c.id))
-    const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, ...c }) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
+    const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map(({ check: _check, own: _own, ...c }) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
     // One listed as `gone` is no longer held: this hub's own among them is gone too, and none of them counts as more access
     const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => this.isCurrent(c, line) && !c.gone)
     const more = others.slice(OTHER_CREDENTIALS_SHOWN).filter((c) => !c.gone).length
     return { otherCredentials: shown, otherCredentialsMore: more, ownCredentialGone: ownGone || this.ownCredentialTaken, credentialFileUnreadable }
   }
 
-  /**
-   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
-   * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
-   * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
-   * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
-   * not remember, are not taken for another's
-   */
   /** An entry's id with its check, for telling two secrets under one id apart (`credentialCheck`) */
   private keyOf(c: RemoteCredential): string {
     return `${c.id}:${c.check ?? ''}`
@@ -468,14 +459,34 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * check (one from before it) is compared by id alone
    */
   private isPairedHere(c: RemoteCredential): boolean {
-    const verifier = this.pairedHere.get(c.id)
-    if (verifier === undefined) return false
-    return verifier === null || c.check === undefined || this.readNonce === null || c.check === credentialCheck(verifier, this.readNonce)
+    if (!this.pairedHere.has(c.id)) return false
+    return c.own ?? true
   }
 
   /** Whether `c` is the credential this link is open with, by its id and, as far as the host says, its secret */
   private isCurrent(c: RemoteCredential, line: ConnectionLine): boolean {
     return !!line.credential && c.id === line.credential && this.isPairedHere(c)
+  }
+
+  /**
+   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
+   * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
+   * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
+   * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
+   * not remember, are not taken for another's
+   */
+  /**
+   * Marks, in a list the host answered with `nonce`, the entries whose `check` is of the secret this hub holds under
+   * their id (`own`). An entry without a check (a host from before it) or a credential this hub holds no secret of is not
+   * marked, and is compared by id alone
+   */
+  private ownOf(list: RemoteCredential[] | null, nonce: string): RemoteCredential[] | null {
+    return (
+      list?.map((c) => {
+        const verifier = this.pairedHere.get(c.id)
+        return c.check === undefined || !verifier ? c : { ...c, own: c.check === credentialCheck(verifier, nonce) }
+      }) ?? null
+    )
   }
 
   private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
@@ -486,7 +497,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.usedUnderHubLabels
       .slice(first)
       .filter((u) => u.label === line.pairedAs && !this.isPairedHere(u) && !named.has(this.keyOf(u)))
-      .map((u) => ({ id: u.id, label: u.label, created: u.created, replaced: false, gone: true, ...(u.check ? { check: u.check } : {}) }))
+      .map((u) => ({ id: u.id, label: u.label, created: u.created, replaced: false, gone: true, ...(u.check ? { check: u.check } : {}), ...(u.own !== undefined ? { own: u.own } : {}) }))
   }
 
   /**
@@ -509,7 +520,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         const nonce = randomBytes(16).toString('base64url')
         const r = asObj(await client.call('host.credentials', { nonce }))
         if (this.client !== client) return
-        const listed = credentialsOf(r.credentials)
+        // Each entry's check read now, with this read's nonce: which are the secrets this hub holds (`own`), kept with the entry
+        const listed = this.ownOf(credentialsOf(r.credentials), nonce)
         // Unreadable there (#1405 review): the last list stands, and the row says the file cannot be read
         const unreadable = typeof r.unreadable === 'string'
         if (listed === null && !unreadable) {
@@ -521,10 +533,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
           return stop()
         }
         const before = JSON.stringify(this.otherCredentials())
-        this.readNonce = nonce
         if (listed) this.credentials = listed
         this.fileUnreadable = unreadable
-        this.usedUnderHubLabels = credentialsOf(r.usedUnderHubLabels) ?? []
+        this.usedUnderHubLabels = this.ownOf(credentialsOf(r.usedUnderHubLabels), nonce) ?? []
         if (JSON.stringify(this.otherCredentials()) !== before) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
       } catch (err) {
         if (err instanceof Error && err.message.startsWith('Unknown method: host.credentials')) return stop()

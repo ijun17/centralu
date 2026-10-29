@@ -66,7 +66,7 @@ export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'regis
   return { ...rest, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, (line) => rest.log?.(line)) }
 }
 
-const kindOf = (k:'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')
+const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')
 
 /** Rows without an id are not headers the hub can answer for; they are left out */
 const withIds = (list: unknown[]) =>

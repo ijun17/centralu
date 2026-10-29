@@ -71,9 +71,12 @@ export type ConnectionLine = {
   stopped?: RemoteStop
 }
 
-/** A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when */
-/** `check`: the host's `credentialCheck` of the call's nonce under the entry's verifier (`host.credentials`); it never reaches a row */
-export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean; check?: string }
+/**
+ * A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when.
+ * `check`: the host's `credentialCheck` of the call's nonce under the entry's verifier (`host.credentials`), and `own`: the
+ * hub's reading of it at that read (set by the link, never by the wire); neither reaches a row
+ */
+export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean; check?: string; own?: boolean }
 
 /** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
 export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }

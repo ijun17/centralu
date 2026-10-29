@@ -3904,6 +3904,24 @@ describe('machines.revokeCredential (#1405)', () => {
     await eventually(() => hub.links.list()[0]!.ownCredentialGone)
   })
 
+  // Self-check: the read after a list with checks answers "unreadable", so no new list; the last one stands, and its checks were of the last nonce
+  it("keeps taking its own credential for its own across a read that cannot be read there, though the list was checked under an earlier nonce", async () => {
+    const mine = verifierOf(TOKEN)
+    let unreadable = false
+    const remote = await remoteHost(0, new Store(), {
+      credentials: (nonce) =>
+        unreadable
+          ? { credentials: null, unreadable: 'EACCES' }
+          : { credentials: [{ ...own, check: credentialCheck(mine, nonce!) }, cred('dddd4444', 'window')] },
+    })
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: own.label, others: [] }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    unreadable = true
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    expect(hub.links.list()[0]).toMatchObject({ ownCredentialGone: false, otherCredentials: [expect.objectContaining({ id: 'dddd4444' })] })
+    expect(hub.links.list()[0]!.otherCredentials).toHaveLength(1)
+  })
+
   // #1405 review: chmod 000 on the machine's serve.json. The hub took its own credential for withdrawn, for its whole run
   it("says the machine's credential file cannot be read, keeps the last list, and does not take its own for gone", async () => {
     let report: Partial<CredentialsReport> = { credentials: [own, cred('dddd4444', 'window')] }
