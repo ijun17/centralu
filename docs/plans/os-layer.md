@@ -397,7 +397,7 @@ file refused", which is not what Node does: it opens files with share-delete):
 | `file/` (a trailing separator) | the file | `ENOTDIR` (`EISDIR` to make one; macOS `ENOENT`) |
 | start a path with no extension | tried as `.com` and `.exe` only: `ENOENT` for a file `node` | the path |
 | a child's stdin given as a file | it reads the file | the same |
-| `utimes` | whole microseconds of the value | whole microseconds of the fraction (a `Date`'s `.123` is `.122999`); macOS keeps the nanoseconds of the double (`.122999906`) |
+| `utimes` | whole microseconds of the value | whole microseconds of the fraction (a `Date`'s `.123` is `.122999`) before libuv 1.52.0 (Node 22); from it the nanoseconds of the double (`.122999906`), Linux and macOS alike |
 | case | NTFS's upcase table: `é`/`É` one name; the Kelvin sign and `k`, `ı` and `I`, `ß` and `SS` two; listed in upcased order (`_` after `Z`) | case counts |
 | `runSync` past `maxBuffer` / `timeout` | `ENOBUFS` with the output kept / `ETIMEDOUT`, both ended by SIGTERM | the same |
 
@@ -484,8 +484,9 @@ too) checks the real OS and the in-memory one as its family against the column o
 in-memory OS gets wrong fails there. `os/rules.test.ts` checks the path, case and PATH rules by property, over
 generated paths and names, for both families on Linux; `real.test.ts` holds `rules.ts`'s `file:` URLs to Node's own.
 The POSIX column is Linux's. Where macOS answers otherwise a case says so (`darwin` in the contract): `real.test.ts`
-holds a Mac's real OS to it and the in-memory OS to Linux's, which is all it models. Measured on macOS 27 (APFS, Node
-26): `utimes` keeps nanoseconds, writing `name/` is `ENOENT`; from Darwin's documentation, not yet run there: a plain
+holds a Mac's real OS to it and the in-memory OS to Linux's, which is all it models. Measured on macOS 27 (APFS): writing
+`name/` is `ENOENT` (Node 26); `utimes` follows libuv as on Linux (Node 22.23.4 cuts to microseconds, 24.22.2 and
+26.12.1 keep nanoseconds); from Darwin's documentation, not yet run there: a plain
 copy keeps a file's change time (`copyfile` with `COPYFILE_ALL`). macOS also ignores case and refuses `unlink` of a
 folder with `EPERM`, so the two cases that
 show it are not run against a Mac (`linux: true`).
