@@ -494,6 +494,24 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    base64url decoding, the host key derived from the key, the transcript's bytes (§4.3) with its test vector, sign and
    verify with role labels; the additive protocol fields (`prove.key`; `proof.hostNonce`, `hostKey`, `sig`;
    `hello.auth`), parsed but not yet used. Unit tests for every binding (§10).
+
+   **Built.** `link-keys.ts` and its tests in `packages/agent-host/src/transport`; the fields in `@cc/protocol`
+   (`client-frames.ts`, `envelope.ts`). What it settled:
+   - The schema checks only each field's shape (8 hex characters, or base64url of the exact length) and reads a
+     malformed one as absent (`.catch(undefined)`), as `prove.credential` does, so no frame is refused for them. The
+     strict decoding, the key checks and the signatures are `link-keys.ts`'s, which slice 3 calls.
+   - Strict decoding is one rule: the bytes are the given length and encode back to the same string. The exact length
+     and the alphabet follow from it, so a separate test for either refuses nothing more (measured by removing each).
+   - A public key is used only as a `LinkPublicKey`, which only `parseLinkPublicKey` makes, so nothing verifies against
+     an unchecked key. Rule 4 of §4.1 (`createPublicKey` takes it) refused none of 2,000 random 32-byte values that pass
+     rules 1 to 3: off-curve bytes import and verify nothing. It stays as a guard; no test isolates it.
+   - The small-order y values are derived in the test from the curve equation, not copied, and match the two encodings
+     libsodium lists. Under raw `node:crypto`, the forged signature R = identity, S = 0 verified for some of 256 messages
+     under each of the ten small-order encodings and under y = p and y = p + 1; the test pins that.
+   - The token marker is `LINK_AUTH_MARKER`, `centralu link auth v1` (§4.3 step 4).
+   - The pinned vector was produced by a separate script written apart from `link-keys.ts`, and the module matches it.
+   - The repository has no property-testing library; the property checks use a small seeded generator in the test, so
+     each run sees the same cases.
 3. **The machine side.** The launcher's `--pair-key` and `--key-paired` (§4.2, with the probe of the running host),
    `keys` in `serve.json`, at most one key and one verifier entry per label, a new id for a changed key, `hostKey`,
    `keyId` and `pairKey` in the line; the host signs its proof when asked by key, takes the address from its socket or

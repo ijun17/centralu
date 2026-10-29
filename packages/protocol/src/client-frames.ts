@@ -25,6 +25,19 @@ export const HelloClient = z.object({
    * characters by the host. Additive
    */
   client: z.string().max(200).optional().catch(undefined),
+  /**
+   * A hub's key pairing (#1711, docs/plans/key-pairing.md §4.3): the id of the hub's key entry in the machine's
+   * `serve.json` and the hub's Ed25519 signature over the link transcript, base64url (86 characters). `token` then
+   * carries the fixed marker `LINK_AUTH_MARKER` (agent-host `link-keys.ts`). Only the shape is checked here; the
+   * strict decoding and the signature are agent-host's. Malformed reads as absent. Additive: an older host ignores it
+   */
+  auth: z
+    .object({
+      key: z.string().regex(/^[0-9a-f]{8}$/),
+      sig: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+    })
+    .optional()
+    .catch(undefined),
 })
 export type HelloClient = z.infer<typeof HelloClient>
 /**
@@ -43,6 +56,12 @@ export const ProveClient = z.object({
    * key, as before. Additive: an older host ignores it
    */
   credential: z.string().regex(/^[0-9a-f]{8}$/).optional().catch(undefined),
+  /**
+   * Which key entry the asker paired (#1711, docs/plans/key-pairing.md §4.3, the id `--pair-key` reported): a host
+   * that takes key hellos answers with its own nonce, its public key and its signature over the link transcript
+   * (`ProofServer`). Malformed reads as absent. Additive: an older host ignores it and answers with a mac only
+   */
+  key: z.string().regex(/^[0-9a-f]{8}$/).optional().catch(undefined),
 })
 export type ProveClient = z.infer<typeof ProveClient>
 /**
