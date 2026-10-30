@@ -9,6 +9,7 @@ import { parseJson } from './json.js'
 import { SESSION_SETTING_OF } from './settings.js'
 import { agentInstructionsKey } from './projects.js'
 import { HUB_SELF_KEY } from './store-keys.js'
+import { STAMP_AHEAD_WINDOW_MS, stampAfter } from './archive-stamp.js'
 
 /**
  * What a session in the session archive remembers (`sessions.trash`, #204). The archive was called the trash until
@@ -79,16 +80,22 @@ export class TrashRecords {
   // the larger half of the store (71MB of 137MB, measured for #96). Restoring rebuilds the index from the messages.
 
   /**
-   * The time a session is archived at: now, but always later than every archived session's, even within one
-   * millisecond. `deleted_at` is also the archive's order (most recently archived first, `listTrash`), and two
-   * archivings in one millisecond (a loop, a fast machine, a coarse clock) would otherwise tie and leave the order to
-   * SQLite. The sessions table's rowid is no help: it is the order they were created in, not archived in. Call it inside
-   * the transaction that writes the stamp.
+   * The time a session is archived at: now, but later than the latest archived session's when that is not earlier, even
+   * within one millisecond (`stampAfter`). `deleted_at` is also the archive's order (most recently archived first,
+   * `listTrash`), and two archivings in one millisecond (a loop, a fast machine, a coarse clock) would otherwise tie and
+   * leave the order to SQLite. The sessions table's rowid is no help: it is the order they were created in, not archived
+   * in. A scan of the sessions table (no index leads with `deleted_at`), so a loop reads it once and steps the stamp
+   * itself. Call it inside the transaction that writes the stamp.
    */
   private nextDeletedAt(): number {
-    const { last } = oneRow(this.db.prepare<unknown[], { last: number | null }>(`SELECT MAX(deleted_at) as last FROM sessions`).get())
     const now = Date.now()
-    return last !== null && last >= now ? last + 1 : now
+    // Only stamps within the window of now count: one from a clock that was far ahead must not hide the ones after it
+    const { last } = oneRow(
+      this.db
+        .prepare<unknown[], { last: number | null }>(`SELECT MAX(deleted_at) as last FROM sessions WHERE deleted_at < ?`)
+        .get(now + STAMP_AHEAD_WINDOW_MS),
+    )
+    return stampAfter(last, now)
   }
 
   /**
@@ -365,11 +372,17 @@ export class TrashRecords {
       const left = this.db.prepare<unknown[], {
         id: string
       }>(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY sidebar_order, created_at, rowid`).all(projectId)
-      for (const { id } of left) {
+      /*
+       * The archive lists the newest stamp first, and the person should see these in the sidebar's order, top first: so
+       * the top session gets the highest stamp and the last one the lowest. The stamp is read once and stepped here,
+       * not read per session (a scan of the sessions table each)
+       */
+      const first = this.nextDeletedAt()
+      for (const [i, { id }] of left.entries()) {
         this.db.prepare(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id = ?)`).run(id)
         this.db
           .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
-          .run(this.nextDeletedAt(), JSON.stringify(record), id)
+          .run(first + left.length - 1 - i, JSON.stringify(record), id)
         this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(id)
         this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(id)
       }

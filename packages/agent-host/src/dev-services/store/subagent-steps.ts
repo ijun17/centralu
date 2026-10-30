@@ -1,5 +1,6 @@
 import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
+import { stampAfter } from './archive-stamp.js'
 
 /** What one session's subagent steps take (#418), in or out of the trash: `listHeld` and `listTrashed` */
 export type SubagentStepsRow = {
@@ -95,9 +96,10 @@ export class SubagentStepRecords {
     /*
      * Also later than the last move of any session: the list is ordered by this stamp, most recently moved first, and
      * two sessions moved in one millisecond would tie. Held in memory, not read from the table: no index leads with the
-     * stamp, and a restart takes longer than the millisecond that matters
+     * stamp, and a restart takes longer than the millisecond that matters. Not pinned to a stamp from a clock that was
+     * wrong once (`stampAfter`)
      */
-    const at = Math.max(now, (prev ?? 0) + 1, this.lastMovedAt + 1)
+    const at = Math.max(stampAfter(this.lastMovedAt, now), (prev ?? 0) + 1)
     this.lastMovedAt = at
     const pick = this.db.prepare<unknown[], { rowid: number; bytes: number }>(
       `SELECT rowid, LENGTH(CAST(payload AS BLOB)) as bytes FROM subagent_messages

@@ -119,6 +119,19 @@ describe("a session's subagent steps in the session archive without it (#418)", 
     s.close()
   })
 
+  it('is not pinned to the time of a clock that was far ahead', async () => {
+    const s = seeded()
+    session(s, 's3', null)
+    for (const id of ['s1', 's2', 's3']) steps(s, id, A, 1)
+    await s.subagentSteps.trash('s1', 10_000_000)
+    await s.subagentSteps.trash('s2', 100)
+    await s.subagentSteps.trash('s3', 100)
+    const at = new Map(s.subagentSteps.listTrashed().map((t) => [t.sessionId, t.deletedAt]))
+    expect(at.get('s2')).toBe(100)
+    expect(at.get('s3')).toBe(101)
+    s.close()
+  })
+
   it('deleting them for good takes only the archived steps, in chunks, and leaves the session and its other steps', async () => {
     const s = seeded()
     steps(s, 's1', A, 5)
