@@ -11,7 +11,7 @@ import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
 import { hostProof, proofNonce } from './host-proof.js'
 import { hostLinkKey, LINK_AUTH_MARKER, linkAddress, linkPublicKeyOf, linkTranscript, signLink, verifyLink, parseLinkPublicKey } from './link-keys.js'
-import { readCredentialFile, verifierOf } from '../lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, verifierOf } from '../lifecycle/serve-credentials.js'
 import { answerKeyProve, HostSigningKey } from './link-proof.js'
 import { limitedToken } from './limited-token.js'
 import { sessionToken } from './session-token.js'
@@ -288,6 +288,47 @@ describe('what a key hello is refused for (§4.3, §9)', () => {
     expect(await b.p.next('hello_ok')).not.toBeNull()
     expect((await b.p.call('host.sessions'))?.ok).toBe(false)
   })
+})
+
+// §4.1: an entry written by hand with a refused public key is absent, both where hellos are checked and where it is listed
+it('reads and lists no key entry whose public key is refused', () => {
+  const hub = hubKeys()
+  const identity = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString('base64url')
+  const text = JSON.stringify({ v: 2, key: KEY, port: null, full: [], keys: [keyEntry(HUB_ID, hub.text), keyEntry('bbbbbbbb', identity, 'hub:x')] })
+  const read = readCredentialFile('refused-key.json', () => text, () => {})
+  expect('keys' in read ? read.keys?.map((k) => k.id) : null).toEqual([HUB_ID])
+  const report = credentialsReport('refused-key.json', () => text, new UsedCredentials())
+  expect(report.credentials?.map((c) => c.id)).toEqual([HUB_ID])
+})
+
+/*
+ * As for a full credential (#1405 review): while the file stays refused, a new key hello names no entry at once, and a
+ * socket already in keeps the key entries the file named last, for at most LAST_READ_KEPT_MS
+ */
+it('keeps the last key entries for sockets in while the file is refused, and none for a new hello', () => {
+  const hub = hubKeys()
+  let t = 1_000
+  let text: string | null = JSON.stringify({ v: 2, key: KEY, port: null, full: [], keys: [keyEntry(HUB_ID, hub.text)] })
+  const read = () => {
+    if (text === null) throw Object.assign(new Error('denied'), { code: 'EACCES' })
+    return text
+  }
+  readCredentialFile('kept-keys.json', read, () => {}, () => t)
+  text = null
+  t += 1_000
+  const refused = readCredentialFile('kept-keys.json', read, () => {}, () => t)
+  expect(refused).toMatchObject({ keys: [], openKeys: [expect.objectContaining({ id: HUB_ID, publicKey: hub.text })] })
+  t += 10_000
+  expect(readCredentialFile('kept-keys.json', read, () => {}, () => t)).toMatchObject({ keys: [], openKeys: [] })
+})
+
+// §4.4: a key entry used here is still listed only under its id and its public key; another key under that id is another entry
+it('lists a used key entry as gone once its id is listed under another public key', () => {
+  const [first, second] = [hubKeys().text, hubKeys().text]
+  const used = new UsedCredentials()
+  used.saw(keyEntry(HUB_ID, first))
+  expect(used.gone([{ ...keyEntry(HUB_ID, first), replaced: false }])).toEqual([])
+  expect(used.gone([{ ...keyEntry(HUB_ID, second), replaced: true }])).toEqual([expect.objectContaining({ id: HUB_ID, gone: true, publicKey: first })])
 })
 
 describe('a socket in by key (§4.4)', () => {
