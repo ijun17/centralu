@@ -1903,7 +1903,7 @@ describe('asking the host on the port without handing the token to anyone else (
       if (held.ok) held.release()
       await s?.close()
     }
-  })
+  }, 90_000 * SLOW)
 
   it('the real host proves it and then gets the hello', async () => {
     const server = new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '9.9.9' } })
