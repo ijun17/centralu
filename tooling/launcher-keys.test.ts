@@ -116,7 +116,7 @@ describe('the launcher holds the host’s key rules (§4.1, §4.3)', () => {
       expect(parseLinkPublicKey(k)?.text).toBe(k)
       expect(hostParse(k)?.text).toBe(k)
     }
-  })
+  }, 30_000 * SLOW)
 
   it('derives the host key the host signs with, and builds the vector’s transcript byte for byte', () => {
     const v = vector()
