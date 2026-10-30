@@ -456,7 +456,7 @@ describe('the transcript binds every field (§4.3)', () => {
     const real = key(VECTOR.hubKey)
     const Ctor = LinkPublicKey as unknown as new (text: string, raw: Buffer, key: KeyObject) => LinkPublicKey
     const made = new Ctor(real.text, real.raw, real.key)
-    const reflected = Reflect.construct(Ctor, [real.text, real.raw, real.key]) as LinkPublicKey
+    const reflected = Reflect.construct(Ctor, [real.text, real.raw, real.key])
     class Sub extends Ctor {}
     const sub = new Sub(real.text, real.raw, real.key)
     for (const k of [made, reflected, sub]) {
@@ -509,7 +509,7 @@ describe('the address each side signs (§4.3)', () => {
   it('under a keeper: the front door, exactly ws://127.0.0.1:<port>', () => {
     expect(linkAddressOfDoor('ws://127.0.0.1:4100')).toBe('127.0.0.1:4100')
     for (const door of ['ws://127.0.0.1:04100', 'ws://127.0.0.1:4100/', 'wss://127.0.0.1:4100', 'ws://localhost:4100', 'ws://127.0.0.1', 'ws://127.0.0.1:0', 'ws://127.0.0.1:65536', 'http://127.0.0.1:4100', ' ws://127.0.0.1:4100', undefined, 4100, null, {}]) {
-      expect(linkAddressOfDoor(door), String(door)).toBeNull()
+      expect(linkAddressOfDoor(door), JSON.stringify(door)).toBeNull()
     }
   })
 

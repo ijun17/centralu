@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { vector } from './key-pairing-vector.mjs'
+import { SLOW } from './test-timing.js'
 import { HostServer } from '../packages/agent-host/src/transport/server.js'
 import { readCredentialFile } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { hostProof } from '../packages/agent-host/src/transport/host-proof.js'
@@ -394,7 +395,7 @@ describe('what --pair-key reports for the host on the port', () => {
     const { line } = await cli(d, ['--connection', '--pair-key', 'hub:a', hub])
     expect(line).toMatchObject({ token: expect.any(String), credential: expect.any(String) })
     expect(line!.takes).not.toContain('pairKey')
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('nothing listening and nothing holding the folder: the key derived from the file, which the host started next signs with', async () => {
     const { d, hub } = await folder()

@@ -5,8 +5,6 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { generateKeyPairSync, type KeyObject } from 'node:crypto'
-import { createServer } from 'node:net'
-import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
 import { hostProof, proofNonce } from './host-proof.js'
@@ -31,11 +29,9 @@ function hubKeys(): { privateKey: KeyObject; text: string } {
 const keyEntry = (id: string, publicKey: string, label = LABEL) => ({ id, label, publicKey, created: 1, via: 'pair-key' })
 
 let server: HostServer | null = null
-const others: { close(): unknown }[] = []
 afterEach(async () => {
   await server?.close()
   server = null
-  for (const o of others.splice(0)) await o.close()
 })
 
 type Call = { method: string; ctx: RpcContext | undefined }
@@ -61,18 +57,16 @@ async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { por
   return { port, write, calls }
 }
 
-const textOf = (d: RawData) => (Buffer.isBuffer(d) ? d : Array.isArray(d) ? Buffer.concat(d) : Buffer.from(d)).toString('utf8')
-
-/** One socket to the host: what it sends, and what comes back */
+/** One socket to the host (Node's own WebSocket, as a hub's would be a client): what it sends, and what comes back */
 async function peer(port: number) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const frames: Record<string, unknown>[] = []
-  ws.on('message', (d) => frames.push(JSON.parse(textOf(d)) as Record<string, unknown>))
+  ws.addEventListener('message', (ev) => frames.push(JSON.parse(String(ev.data)) as Record<string, unknown>))
   let reason = ''
   let code: number | null = null
-  const closed = new Promise<number>((r) => ws.on('close', (c, why) => ((code = c), (reason = String(why)), r(c))))
-  ws.on('error', () => {})
-  await new Promise<void>((r) => ws.on('open', () => r()))
+  const closed = new Promise<number>((r) => ws.addEventListener('close', (ev) => ((code = ev.code), (reason = ev.reason), r(ev.code))))
+  ws.addEventListener('error', () => {})
+  await new Promise<void>((r) => ws.addEventListener('open', () => r()))
   const wait = async (pred: () => boolean, ms = 3000) => {
     const t0 = Date.now()
     while (!pred()) {
@@ -245,7 +239,7 @@ describe('what a key hello is refused for (§4.3, §9)', () => {
     expect(await d.p.closed).toBe(4001)
     // And the signature over the prove's own transcript, under another auth.key: the key the hello names is the prove's
     const e = await hubDial(port, hub, { send: false })
-    e.p.send({ ...e.helloFrame!, auth: { ...(e.helloFrame!.auth as { key: string; sig: string }), key: 'bbbbbbbb' } })
+    e.p.send({ ...e.helloFrame!, auth: { ...e.helloFrame!.auth, key: 'bbbbbbbb' } })
     expect(await e.p.closed).toBe(4001)
   })
 
@@ -393,45 +387,23 @@ describe('the address a host behind a front door signs (§4.3)', () => {
  * host once that runs again. On the verifier path the same squatter received the hub's full credential (§1)
  */
 describe('a squatter on the port gets nothing it can use at the real host', () => {
-  async function freePort(): Promise<number> {
-    return await new Promise((resolve) => {
-      const s = createServer()
-      s.listen(0, '127.0.0.1', () => {
-        const { port } = s.address() as { port: number }
-        s.close(() => resolve(port))
-      })
-    })
-  }
-
   it('answers the hub with the derived key, receives its signature, and is refused with every value it holds', async () => {
     const hub = hubKeys()
     const file = { v: 2, key: KEY, port: null, full: [], keys: [keyEntry(HUB_ID, hub.text)] }
-    const port = await freePort()
-    // The squatter: what the file gives it, and a host of its own on the port, signing as the real host would
+    // The squatter: a host of its own on the port, holding what the file gives it, so it signs as the real host would
     const derived = hostLinkKey(file.key)
-    const wss = new WebSocketServer({ port, host: '127.0.0.1' })
-    others.push({ close: () => new Promise<void>((r) => wss.close(() => r())) })
-    await new Promise<void>((r) => wss.once('listening', () => r()))
-    const received: Record<string, unknown>[] = []
-    let ownNonce = ''
-    wss.on('connection', (ws) =>
-      ws.on('message', (d) => {
-        const f = JSON.parse(textOf(d)) as Record<string, any>
-        received.push(f)
-        if (f.kind !== 'prove') return
-        ownNonce = proofNonce()
-        const t = linkTranscript({ hubNonce: f.nonce, hostNonce: ownNonce, hostKey: derived.publicKey.text, hubKey: hub.text, keyId: f.key, address: linkAddress(port)! })!
-        ws.send(JSON.stringify({ kind: 'proof', nonce: f.nonce, mac: hostProof(file.key, f.nonce), hostNonce: ownNonce, hostKey: derived.publicKey.text, sig: signLink('host', derived.privateKey, t) }))
-      }),
-    )
-    // The hub takes it for the host (the line's hostKey is the derived one) and sends its hello
+    const { port } = await serveHost({ keys: file.keys })
+    // The hub takes it for the host (the line's hostKey is the derived one) and sends its hello, which the squatter keeps
     const dial = await hubDial(port, hub)
     expect(dial.hostSigned).toBe(true)
-    await dial.p.wait(() => received.some((f) => f.kind === 'hello'))
-    const stolen = received.find((f) => f.kind === 'hello') as { token: string; auth: { key: string; sig: string } }
+    expect(dial.proof?.hostKey).toBe(derived.publicKey.text)
+    expect(await accepted(dial.p)).toBe(true)
+    const stolen = dial.helloFrame as { token: string; auth: { key: string; sig: string } }
+    const ownNonce = dial.proof!.hostNonce!
     expect(stolen.token).toBe(LINK_AUTH_MARKER)
     dial.p.ws.close()
-    await new Promise<void>((r) => wss.close(() => r()))
+    await server?.close()
+    server = null
 
     // The real host again, on the same port with the same file
     const { port: real } = await serveHost({ keys: file.keys }, { port })
