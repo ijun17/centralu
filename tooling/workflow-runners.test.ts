@@ -26,12 +26,12 @@ describe('workflow runner images change only when explicitly upgraded', () => {
 describe('macOS runners and the oldest macOS the app runs on', () => {
   it('no workflow uses a macOS image GitHub has retired', () => {
     // macos-14 and earlier (and their -large and -xlarge twins) stop running on 2026-11-02 (actions/runner-images#13518),
-    // and fail every job during the brownouts before it. Comments may name them.
-    const retired = workflows.flatMap((name) => readFileSync(new URL(name, directory), 'utf8').split('
-')
+    // and fail every job during the brownouts before it. Comments may name them. One test over every workflow, not one
+    // per file: a per-file test for a workflow that never named macOS would pass without the change.
+    const retired = workflows.flatMap((name) => readFileSync(new URL(name, directory), 'utf8').split('\n')
       .flatMap((line, index) => {
         const config = line.replace(/(^|\s)#.*$/, '')
-        return /macos-(?:\d|1[0-4])/.test(config) ? [`${name}:${index + 1}: ${config.trim()}`] : []
+        return /\bmacos-(?:\d|1[0-4])\b/.test(config) ? [`${name}:${index + 1}: ${config.trim()}`] : []
       }))
     expect(retired, 'Move the job to macos-15 or later, and its check name in tooling/project-board-ci.test.ts').toEqual([])
   })
