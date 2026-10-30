@@ -1517,12 +1517,13 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     // It holds the file: it answers the proof under the key, then takes whatever hello comes
     wss.on('connection', (ws: any) =>
       ws.on('message', (raw: unknown) => {
-        const f = JSON.parse(String(raw)) as { kind: string; nonce?: string; token?: string }
+        const f = JSON.parse(String(raw)) as { kind: string; nonce?: string; token?: string; id?: string }
         if (f.kind === 'prove') ws.send(JSON.stringify({ kind: 'proof', nonce: f.nonce, mac: createHmac('sha256', String(state.key)).update(`centralu host proof v1\0${f.nonce}`).digest('base64url') }))
         else if (f.kind === 'hello') {
           tokens.push(String(f.token))
           ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0 }))
-        }
+          // Answered at once, so each note does not wait out the launcher's 5 s for an answer
+        } else if (f.kind === 'rpc') ws.send(JSON.stringify({ kind: 'res', id: f.id, ok: true, result: { ok: true } }))
       }),
     )
     const files: string[] = []

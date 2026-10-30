@@ -12,6 +12,7 @@ import { HostServer, type RpcContext } from './server.js'
 import { hostProof, proofNonce } from './host-proof.js'
 import { hostLinkKey, LINK_AUTH_MARKER, linkAddress, linkPublicKeyOf, linkTranscript, signLink, verifyLink, parseLinkPublicKey } from './link-keys.js'
 import { readCredentialFile, verifierOf } from '../lifecycle/serve-credentials.js'
+import { answerKeyProve, HostSigningKey } from './link-proof.js'
 import { limitedToken } from './limited-token.js'
 import { sessionToken } from './session-token.js'
 import { bridgeToken } from './bridge-token.js'
@@ -132,11 +133,27 @@ describe('the host signs a key prove and takes a key hello (§4.3)', () => {
     const hub = hubKeys()
     const { port } = await serveHost({ keys: [keyEntry(HUB_ID, hub.text)] })
     for (const nonce of ['A'.repeat(22), 'A'.repeat(43), proofNonce().slice(0, 31), `${proofNonce()}A`, Buffer.alloc(25).toString('base64url')]) {
-      const p = await peer(port)
-      p.send({ kind: 'prove', nonce, key: HUB_ID })
-      expect(await p.closed, nonce).toBe(4001)
-      expect(p.frames.filter((f) => f.kind === 'proof'), nonce).toEqual([])
+      // Malformed before anything else: also for an id naming no entry, which is never told "withdrawn" (a hub pairs anew on that)
+      for (const key of [HUB_ID, 'cccccccc']) {
+        const p = await peer(port)
+        p.send({ kind: 'prove', nonce, key })
+        expect(await p.closed, nonce).toBe(4001)
+        expect(p.reason(), `${nonce} ${key}`).toBe('not a hello')
+        expect(p.frames.filter((f) => f.kind === 'proof'), nonce).toEqual([])
+      }
     }
+  })
+
+  // The entry is checked here too, not only where serve.json is read: one whose public key is refused gets no proof
+  it('answers no key prove for an entry whose public key is refused, nor for one of another id', () => {
+    const hub = hubKeys()
+    const identity = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString('base64url')
+    const signing = new HostSigningKey(KEY)
+    const ask = { signing, nonce: proofNonce(), keyId: HUB_ID, address: linkAddress(4100) }
+    expect(answerKeyProve({ ...ask, entry: keyEntry(HUB_ID, identity) })).toEqual({ refused: 'withdrawn' })
+    expect(answerKeyProve({ ...ask, entry: keyEntry('bbbbbbbb', hub.text) })).toEqual({ refused: 'withdrawn' })
+    expect(answerKeyProve({ ...ask, entry: undefined })).toEqual({ refused: 'withdrawn' })
+    expect(answerKeyProve({ ...ask, entry: keyEntry(HUB_ID, hub.text) })).toHaveProperty('pending.keyId', HUB_ID)
   })
 
   it('closes on a key prove naming no entry, or one whose key is refused, as a credential withdrawn', async () => {
@@ -226,6 +243,10 @@ describe('what a key hello is refused for (§4.3, §9)', () => {
     const t = linkTranscript({ hubNonce: d.nonce, hostNonce: d.proof!.hostNonce!, hostKey: d.proof!.hostKey!, hubKey: hub.text, keyId: 'bbbbbbbb', address: linkAddress(port)! })!
     d.p.send({ ...d.helloFrame!, auth: { key: 'bbbbbbbb', sig: signLink('hub', hub.privateKey, t) } })
     expect(await d.p.closed).toBe(4001)
+    // And the signature over the prove's own transcript, under another auth.key: the key the hello names is the prove's
+    const e = await hubDial(port, hub, { send: false })
+    e.p.send({ ...e.helloFrame!, auth: { ...(e.helloFrame!.auth as { key: string; sig: string }), key: 'bbbbbbbb' } })
+    expect(await e.p.closed).toBe(4001)
   })
 
   it('refuses the marker without auth, or with a malformed one: neither full nor limited', async () => {
@@ -314,10 +335,14 @@ describe('the address a host behind a front door signs (§4.3)', () => {
   it('gives no key path for a door of another form', async () => {
     const hub = hubKeys()
     const { port } = await serveHost({ keys: [keyEntry(HUB_ID, hub.text)] }, { frontDoor: 'ws://localhost:4100' })
-    const p = await peer(port)
-    p.send({ kind: 'prove', nonce: proofNonce(), key: HUB_ID })
-    expect(await p.closed).toBe(4001)
-    expect(p.frames).toEqual([])
+    // Malformed, for an id naming no entry too: no address to sign is not a credential withdrawn
+    for (const key of [HUB_ID, 'cccccccc']) {
+      const p = await peer(port)
+      p.send({ kind: 'prove', nonce: proofNonce(), key })
+      expect(await p.closed).toBe(4001)
+      expect(p.reason(), key).toBe('not a hello')
+      expect(p.frames).toEqual([])
+    }
   })
 })
 
