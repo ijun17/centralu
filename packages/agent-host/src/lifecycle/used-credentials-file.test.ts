@@ -181,6 +181,30 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host().used.records().map((r) => r.id)).toEqual([1, 2, 3, 4].map(idOf))
   })
 
+  it('does not skip a line another host adds in the moment between the length it saw and its write', () => {
+    const f = folder()
+    const foreign = encodeUsedRecord(recordOf(1))
+    // The other host's write lands just before this one's
+    const files = new Proxy(f.os.files, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target) as unknown
+        if (key === 'writeSync') {
+          return (fd: number, data: string | Uint8Array) => {
+            target.appendFileSync(f.file, foreign)
+            return (value as (fd: number, data: string | Uint8Array) => number).call(target, fd, data)
+          }
+        }
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
+      },
+    })
+    const os = new Proxy(f.os, { get: (target, key) => (key === 'files' ? files : Reflect.get(target, key, target)) })
+    const h = f.host(256, os)
+    h.hello(c(idOf(2), 'x'))
+    h.store.refresh()
+    expect(h.used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2)])
+    expect(f.host().used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2)])
+  })
+
   it('shortens a file that grows past what is kept even when no report ever reads it', () => {
     const f = folder()
     const mine = f.host(2)

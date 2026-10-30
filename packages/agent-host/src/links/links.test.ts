@@ -3792,6 +3792,40 @@ describe('machines.revokeCredential (#1405)', () => {
     expect(second.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
   })
 
+  it('keeps what the person withdrew until the machine’s host holds no record of it, however long no hub read it, and forgets it then (#1712)', async () => {
+    // The hub did not read the machine for 20 days after the withdrawal: its host first found the credential gone only now, so it keeps its record for a week more
+    let record: string[] = ['aaaa1111']
+    const remote = await remoteHost(0, new Store(), {
+      credentials: () => ({ credentials: [own, ...record.map((id) => ({ ...cred(id, 'agent-script'), gone: true }))], usedIds: record }),
+    })
+    const store = new Store()
+    store.settings.setAppSetting('links.revoked.m1', JSON.stringify({ aaaa1111: Date.now() - 20 * 24 * 60 * 60 * 1000 }))
+    const line = () => lineFor(remote.port, { credential: 'cccc3333', pairedAs: 'hub:hub-mac-0123abcd', others: [] })
+    const hub = await hubHost(line, store, true, { credentialsMs: 20 })
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    // Read several times, with the host's record still held: not listed, and still remembered
+    await new Promise((r) => setTimeout(r, 120))
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
+    expect(store.settings.appSetting('links.revoked.m1')).toContain('aaaa1111')
+    // The host drops its record: the next read forgets the withdrawal, which is kept no longer than that
+    record = []
+    await eventually(() => store.settings.appSetting('links.revoked.m1') === null)
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
+  })
+
+  it('keeps a withdrawal for a host that does not say its ids, 20 days on', async () => {
+    const remote = await remoteHost(0, new Store(), { credentials: () => ({ credentials: [own, { ...cred('aaaa1111', 'agent-script'), gone: true }] }) })
+    const store = new Store()
+    const day = 24 * 60 * 60 * 1000
+    store.settings.setAppSetting('links.revoked.m1', JSON.stringify({ aaaa1111: Date.now() - 20 * day }))
+    const line = () => lineFor(remote.port, { credential: 'cccc3333', pairedAs: 'hub:hub-mac-0123abcd', others: [] })
+    const hub = await hubHost(line, store, true, { credentialsMs: 20 })
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    await new Promise((r) => setTimeout(r, 120))
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual([])
+    expect(store.settings.appSetting('links.revoked.m1')).toContain('aaaa1111')
+  })
+
   it('keeps the withdrawals per machine in the registry, forgets them with the machine, and ignores what is not a withdrawal', () => {
     const store = new Store()
     const registry = storeRegistry(store)

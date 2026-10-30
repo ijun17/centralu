@@ -85,8 +85,14 @@ const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAIT
 const CREDENTIALS_MS = 30_000
 /** How many of a machine's other full credentials its row lists; the rest are counted (`otherCredentialsMore`) */
 const OTHER_CREDENTIALS_SHOWN = 32
-/** How long a withdrawal from the row is remembered (#1712): longer than the week the machine's host keeps its record of the credential (`WITHDRAWN_KEPT_MS`) */
-const REVOKED_KEPT_MS = 14 * 24 * 60 * 60 * 1000
+/**
+ * The longest a withdrawal from the row is remembered (#1712). It is forgotten sooner: once a read of the machine answers
+ * that its host keeps no record of the credential any more (`usedIds`), which it does a week (`WITHDRAWN_KEPT_MS`) after
+ * it first found the credential withdrawn, and that is the first report after the withdrawal, which may be long after
+ * the person's act when no hub reads. This is for a host that does not say its ids (from before them) and for one never
+ * read again, so that a withdrawal is not kept for good
+ */
+const REVOKED_KEPT_MS = 60 * 24 * 60 * 60 * 1000
 
 /** A credential as the row shows one that is held: without the mark of one withdrawn */
 const withoutGone = ({ gone: _gone, ...c }: RemoteCredential): RemoteCredential => c
@@ -127,8 +133,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private ownCredentialTaken = false
   /**
    * The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said.
-   * Kept in the registry (#1712) for `REVOKED_KEPT_MS`, so a hub that starts again does not list them as used and withdrawn
-   * again: the machine's host keeps its record of a withdrawn credential for a week
+   * Kept in the registry (#1712) until a read of the machine answers that its host holds no record of the credential
+   * (`forgetRevoked`), and for `REVOKED_KEPT_MS` at most, so a hub that starts again does not list them as used and
+   * withdrawn again: the machine's host keeps its record of a withdrawn credential for a week from its first report after
    */
   protected revokedHere = new Set<string>()
   private revokedAt = new Map<string, number>()
@@ -494,6 +501,22 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.deps.registry.setRevoked?.(this.id, Object.fromEntries(this.revokedAt))
   }
 
+  /**
+   * Forgets the withdrawals from the row (#1712) of credentials the machine's host holds no record of any more: it dropped
+   * the record a week after it found the credential withdrawn, so it cannot list it as used again. Only from a read that
+   * began after the person's act, which says `known` (its `usedIds`) without the id and `listed` without it too
+   */
+  private forgetRevoked(known: ReadonlySet<unknown>, listed: readonly RemoteCredential[], readStartedAt: number): void {
+    let changed = false
+    for (const [credential, at] of this.revokedAt) {
+      if (at >= readStartedAt || known.has(credential) || listed.some((c) => c.id === credential) || this.endpoint?.line.others?.some((c) => c.id === credential)) continue
+      this.revokedAt.delete(credential)
+      this.revokedHere.delete(credential)
+      changed = true
+    }
+    if (changed) this.deps.registry.setRevoked?.(this.id, Object.fromEntries(this.revokedAt))
+  }
+
   /** An entry's id with its check, for telling two secrets under one id apart (`credentialCheck`) */
   private keyOf(c: RemoteCredential): string {
     return `${c.id}:${c.check ?? ''}`
@@ -619,6 +642,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     const read = async (): Promise<void> => {
       if (this.client !== client || !client.connected) return stop()
+      const startedAt = Date.now()
       // What the host told this hub of before this read was asked is in its answer (#1712)
       const told = this.reportSeq
       try {
@@ -647,6 +671,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         if (listed) {
           const known = Array.isArray(r.usedIds) ? new Set(r.usedIds) : null
           this.reportedUsed = this.reportedUsed.filter((u) => u.seq > told || (known !== null && !known.has(u.credential.id)))
+          if (known !== null) this.forgetRevoked(known, listed, startedAt)
           // What stays from before this read was answered for by it, and is not listed: withdrawn
           for (const u of this.reportedUsed) if (u.seq <= told) u.answered = true
         }
