@@ -109,6 +109,16 @@ describe("a session's subagent steps in the session archive without it (#418)", 
     s.close()
   })
 
+  it('lists sessions moved in the same millisecond by the order they were moved in, not the order they were made in', async () => {
+    const s = seeded()
+    session(s, 's3', null)
+    for (const id of ['s1', 's2', 's3']) steps(s, id, A, 1)
+    // Neither the order they were made in nor its reverse, so the result cannot be the one SQLite happens to give equal times
+    for (const id of ['s2', 's3', 's1']) await s.subagentSteps.trash(id, 100)
+    expect(s.subagentSteps.listTrashed().map((t) => t.sessionId)).toEqual(['s1', 's3', 's2'])
+    s.close()
+  })
+
   it('deleting them for good takes only the archived steps, in chunks, and leaves the session and its other steps', async () => {
     const s = seeded()
     steps(s, 's1', A, 5)

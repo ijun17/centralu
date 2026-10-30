@@ -79,6 +79,19 @@ export class TrashRecords {
   // the larger half of the store (71MB of 137MB, measured for #96). Restoring rebuilds the index from the messages.
 
   /**
+   * The time a session is archived at: now, but always later than every archived session's, even within one
+   * millisecond. `deleted_at` is also the archive's order (most recently archived first, `listTrash`), and two
+   * archivings in one millisecond (a loop, a fast machine, a coarse clock) would otherwise tie and leave the order to
+   * SQLite. The sessions table's rowid is no help: it is the order they were created in, not archived in. Call it inside
+   * the transaction that writes the stamp.
+   */
+  private nextDeletedAt(): number {
+    const { last } = oneRow(this.db.prepare<unknown[], { last: number | null }>(`SELECT MAX(deleted_at) as last FROM sessions`).get())
+    const now = Date.now()
+    return last !== null && last >= now ? last + 1 : now
+  }
+
+  /**
    * Moves a live session into the trash. `record` carries where it came from and what the person chose to remove
    * with it once it is deleted for good. Returns false when there was no live session to move.
    *
@@ -97,7 +110,7 @@ export class TrashRecords {
     const move = this.db.transaction((): boolean => {
       const moved = this.db
         .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
-        .run(Date.now(), JSON.stringify(record), sessionId).changes
+        .run(this.nextDeletedAt(), JSON.stringify(record), sessionId).changes
       if (moved === 0) return false
       // Both lists: this build's, and the one an older host still reads (v42)
       this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(sessionId)
@@ -310,7 +323,9 @@ export class TrashRecords {
                   /* a subagent's steps (#222) are part of what it holds, though not of its message count */
                   + COALESCE((SELECT SUM(LENGTH(CAST(sm.payload AS BLOB))) FROM subagent_messages sm WHERE sm.session_id = s.id), 0) as bytes
          FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
-         WHERE s.deleted_at IS NOT NULL GROUP BY s.id ORDER BY s.deleted_at DESC`,
+         WHERE s.deleted_at IS NOT NULL GROUP BY s.id
+         /* archivings no longer tie (nextDeletedAt); rows archived before that did, and newest created first is the best guess left */
+         ORDER BY s.deleted_at DESC, s.rowid DESC`,
       )
       .all()
     return rows.map(({ trash, worktreePath, worktreeBranch, hasConversationFile, ...r }) => ({
@@ -349,12 +364,12 @@ export class TrashRecords {
       }
       const left = this.db.prepare<unknown[], {
         id: string
-      }>(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL`).all(projectId)
+      }>(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY sidebar_order, created_at, rowid`).all(projectId)
       for (const { id } of left) {
         this.db.prepare(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id = ?)`).run(id)
         this.db
           .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
-          .run(Date.now(), JSON.stringify(record), id)
+          .run(this.nextDeletedAt(), JSON.stringify(record), id)
         this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(id)
         this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(id)
       }

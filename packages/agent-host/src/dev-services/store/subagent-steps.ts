@@ -41,6 +41,9 @@ const STEP_BYTES = `COALESCE(SUM(LENGTH(CAST(sm.payload AS BLOB))), 0)`
  * entry, and its purge takes them (`TrashRecords.purgeSession`); restored, its trashed steps are an entry again.
  */
 export class SubagentStepRecords {
+  /** The last time a move was stamped, so two sessions' moves never share one (`trash`) */
+  private lastMovedAt = 0
+
   constructor(private readonly db: Database.Database) {}
 
   /** The steps each live session holds under its cards, largest first; a session with none is not listed */
@@ -63,7 +66,7 @@ export class SubagentStepRecords {
            LEFT JOIN projects p ON p.id = s.project_id
           WHERE ${which}
           GROUP BY s.id
-          ORDER BY ${more ? 'deletedAt DESC' : 'bytes DESC'}`,
+          ORDER BY ${more ? 'deletedAt DESC' : 'bytes DESC'}, s.rowid DESC`,
       )
       .all()
   }
@@ -89,7 +92,13 @@ export class SubagentStepRecords {
         .prepare<unknown[], { prev: number | null }>(`SELECT MAX(trashed_at) as prev FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL`)
         .get(sessionId),
     )
-    const at = prev !== null && prev >= now ? prev + 1 : now
+    /*
+     * Also later than the last move of any session: the list is ordered by this stamp, most recently moved first, and
+     * two sessions moved in one millisecond would tie. Held in memory, not read from the table: no index leads with the
+     * stamp, and a restart takes longer than the millisecond that matters
+     */
+    const at = Math.max(now, (prev ?? 0) + 1, this.lastMovedAt + 1)
+    this.lastMovedAt = at
     const pick = this.db.prepare<unknown[], { rowid: number; bytes: number }>(
       `SELECT rowid, LENGTH(CAST(payload AS BLOB)) as bytes FROM subagent_messages
         WHERE session_id = ? AND trashed_at IS NULL AND rowid <= ? LIMIT ?`,
