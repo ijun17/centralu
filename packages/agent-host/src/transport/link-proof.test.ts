@@ -342,6 +342,50 @@ it('reads and lists no key entry whose public key is refused', () => {
 })
 
 /*
+ * #1717 recheck, F1: a key entry has no secret, so a hub that is told of it has no `check` to compare, and takes an entry of
+ * its own credential's id for its own. The host therefore takes no key entry whose id a verifier entry of the same file
+ * has: not at a hello, not in the list. The verifier entry is untouched, whichever comes first in the file
+ */
+describe('a key entry whose id is also a verifier entry’s id (#1717 recheck, F1)', () => {
+  const VERIFIER_TOKEN = 'v'.repeat(43)
+  const verifierEntry = (id: string) => ({ id, label: LABEL, verifier: verifierOf(VERIFIER_TOKEN), created: 1 })
+
+  it('is refused at a key hello, as a credential that is not there, and the verifier entry stays full', async () => {
+    const hub = hubKeys()
+    const { port, heard, used } = await serveHost({ full: [verifierEntry(HUB_ID)], keys: [keyEntry(HUB_ID, hub.text)] })
+    const d = await hubDial(port, hub)
+    expect(await accepted(d.p)).toBe(false)
+    await d.p.closed
+    expect(d.p.code()).toBe(4001)
+    expect(d.p.reason()).toBe('credential withdrawn')
+    expect(heard).toEqual([])
+    expect(used.records()).toEqual([])
+    const v = await peer(port)
+    v.send({ kind: 'hello', token: VERIFIER_TOKEN, protocolVersion: PROTOCOL_VERSION })
+    expect(await accepted(v)).toBe(true)
+    expect(heard).toEqual([expect.objectContaining({ id: HUB_ID, verifier: verifierOf(VERIFIER_TOKEN) })])
+  })
+
+  it('is neither read nor listed, whichever entry is first in the file, while a key entry of another id is', () => {
+    const [clash, fine] = [hubKeys(), hubKeys()]
+    for (const full of [[verifierEntry(HUB_ID)], [verifierEntry('bbbbbbbb'), verifierEntry(HUB_ID)]]) {
+      const text = JSON.stringify({ v: 2, key: KEY, port: null, full, keys: [keyEntry(HUB_ID, clash.text), keyEntry('cccccccc', fine.text, 'hub:other')] })
+      const read = readCredentialFile('clash-key.json', () => text, () => {})
+      expect(read.keys?.map((k) => k.id)).toEqual(['cccccccc'])
+      expect(read.openKeys?.map((k) => k.id)).toEqual(['cccccccc'])
+      const listed = credentialsReport('clash-key.json', () => text, new UsedCredentials()).credentials ?? []
+      expect(listed.map((c) => [c.id, c.publicKey ?? 'verifier'])).toEqual([...full.map((f) => [f.id, 'verifier']), ['cccccccc', fine.text]])
+    }
+  })
+
+  it('is not a reason to drop a key entry of that id when no verifier entry has it (a refused verifier entry does not count)', () => {
+    const hub = hubKeys()
+    const text = JSON.stringify({ v: 2, key: KEY, port: null, full: [{ id: HUB_ID, verifier: 'not hex' }], keys: [keyEntry(HUB_ID, hub.text)] })
+    expect(readCredentialFile('lone-key.json', () => text, () => {}).keys?.map((k) => k.id)).toEqual([HUB_ID])
+  })
+})
+
+/*
  * As for a full credential (#1405 review): while the file stays refused, a new key hello names no entry at once, and a
  * socket already in keeps the key entries the file named last, for at most LAST_READ_KEPT_MS
  */

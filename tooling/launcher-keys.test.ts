@@ -222,6 +222,21 @@ describe('serve --connection --pair-key (§4.2)', () => {
     expect(pairKeyServe(d, 'hub:a', k1, process.platform, 3).entry).toEqual(again)
   })
 
+  // #1717 recheck, F1: the host takes no key entry whose id a verifier entry has, so the hub's entry must not keep such an id
+  it('gives the hub’s entry a new id when a verifier entry has its id, and leaves the verifier entry as it is', () => {
+    const d = tempDir()
+    const k1 = hubKey()
+    const mine = pairKeyServe(d, 'hub:a', k1, process.platform, 1).entry
+    const f = fileOf(d)
+    const verifier = { id: mine.id, label: 'hub:x', verifier: 'a'.repeat(64), created: 1 }
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ ...f, full: [verifier, ...f.full] }))
+    const again = pairKeyServe(d, 'hub:a', k1, process.platform, 2).entry
+    expect(again).toMatchObject({ label: 'hub:a', publicKey: k1 })
+    expect(again.id).not.toBe(mine.id)
+    expect(fileOf(d).full).toEqual([expect.objectContaining({ id: mine.id, label: 'hub:x' })])
+    expect(pairKeyServe(d, 'hub:a', k1, process.platform, 3).entry).toEqual(again)
+  })
+
   it('withdraws a key entry by id, and every one at --rotate-token; a hand-written refused key is dropped at the next write', () => {
     const d = tempDir()
     const a = pairKeyServe(d, 'hub:a', hubKey()).entry

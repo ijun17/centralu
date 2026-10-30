@@ -494,6 +494,41 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host().used.gone([]).map((g) => g.id)).toEqual(['aaaaaaaa'])
   })
 
+  // #1717 recheck, F2: the restore of a key record. Skipped, the first note stays and the second withdrawal is judged by its date
+  it('forgets the note of a key record that serve.json names again, so a later withdrawal starts a new week and is reported, also after a restart', () => {
+    const f = folder()
+    const key = hubKey()
+    const h = f.host()
+    h.hello(k('aaaaaaaa', 'hub:a', key))
+    const day = 24 * 60 * 60 * 1000
+    const t0 = Date.UTC(2026, 5, 1)
+    const named = [{ id: 'aaaaaaaa', publicKey: key }]
+    // Withdrawn at t0, then named again (a restored serve.json) three days after
+    h.store.settle([], t0)
+    h.store.settle(named, t0 + 3 * day)
+    // Withdrawn again after the first note is older than a week: a new week, not the old one
+    h.store.settle([], t0 + 9 * day)
+    expect(h.used.ids()).toEqual(['aaaaaaaa'])
+    expect(h.used.gone([]).map((g) => g.publicKey)).toEqual([key])
+    expect(f.os.files.readFileSync(f.file, 'utf8')).toContain(`"goneAt":${t0 + 9 * day}`)
+    // The week of the new note, from the file
+    const restarted = f.host()
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS - 1)
+    expect(restarted.used.ids()).toEqual(['aaaaaaaa'])
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS)
+    expect(restarted.used.ids()).toEqual([])
+    // A restart between the restore and the second withdrawal does not bring the first note back
+    const g = folder()
+    const first = g.host()
+    first.hello(k('aaaaaaaa', 'hub:a', key))
+    first.store.settle([], t0)
+    first.store.settle(named, t0 + 3 * day)
+    const second = g.host()
+    expect(second.used.records()).toEqual([{ id: 'aaaaaaaa', publicKey: key, label: 'hub:a', created: 1, replaced: false }])
+    second.store.settle([], t0 + 9 * day)
+    expect(second.used.ids()).toEqual(['aaaaaaaa'])
+  })
+
   it('settles a key record by id and public key: the same id under another key does not keep it named, and withdrawn it is noted and expires', () => {
     const f = folder()
     const [one, two] = [hubKey(), hubKey()]
