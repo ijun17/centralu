@@ -54,6 +54,8 @@ export class UsedCredentialsFile {
   private identity: string | null = null
   /** Whether the last read reached the end of the file: a rewrite is made only from a state that holds all of it */
   private atEnd = false
+  /** Lines written since the last read that were not counted (the file was not as long as what was read, or another file): the next read counts them */
+  private pending = 0
 
   constructor(
     private readonly path: string,
@@ -82,12 +84,13 @@ export class UsedCredentialsFile {
   }
 
   /**
-   * Notes the records `listed` (what `serve.json` names now) does not hold as withdrawn now, writes that down, and drops
-   * those withdrawn a week ago (`UsedCredentials.settle`): from memory now, and from the file, which is rewritten then
+   * Notes the records `listed` (what `serve.json` names now) does not hold as withdrawn now, writes that down, forgets the
+   * note of those it names again (written too), and drops those withdrawn a week ago (`UsedCredentials.settle`): from
+   * memory now, and from the file, which is rewritten then
    */
   settle(listed: readonly { id: string; verifier?: string }[], now: number = Date.now()): void {
-    const { noted, dropped } = this.used.settle(listed, now)
-    if (noted.length > 0) this.append(noted)
+    const { noted, restored, dropped } = this.used.settle(listed, now)
+    if (noted.length + restored.length > 0) this.append([...noted, ...restored])
     if (dropped > 0) this.rewrite()
   }
 
@@ -104,6 +107,7 @@ export class UsedCredentialsFile {
       if (identity !== this.identity || st.size < this.offset) {
         this.offset = 0
         this.lines = 0
+        this.pending = 0
         this.identity = identity
       }
       let from = this.offset
@@ -122,6 +126,7 @@ export class UsedCredentialsFile {
       }
       // What follows the last newline is a line still being written, or cut short: left for the next read
       const end = buf.subarray(0, got).lastIndexOf(NEWLINE) + 1
+      this.pending = 0
       this.offset = from + end
       this.atEnd = this.offset === st.size
       // A part taken from inside the file may start inside a line: it begins at the next line
@@ -135,6 +140,7 @@ export class UsedCredentialsFile {
       if (codeOf(e) === 'ENOENT') {
         this.offset = 0
         this.lines = 0
+        this.pending = 0
         this.identity = null
         this.atEnd = true
       } else {
@@ -179,22 +185,57 @@ export class UsedCredentialsFile {
     this.append([record])
   }
 
+  /**
+   * Adds `records` at the end of the file, on the hello's path (`add`), so it reads nothing back (#1715 recheck: on Windows
+   * the first open of a file just written costs milliseconds). The memory holds these records already, so when the file is
+   * exactly as long as what was read, is the file that was read, and nothing else was added while writing, the lines are
+   * counted where they stand (`offset` moves past them). In any other case the offset stays and the next report's
+   * `refresh` reads them with whatever else is there: a known record only moves its rank
+   */
   private append(records: readonly UsedRecord[]): void {
+    let fd: number | null = null
     try {
+      fd = this.os.files.openSync(this.path, 'a', 0o600)
+      const before = this.os.files.fstatSync(fd)
+      const identity = `${before.dev}:${before.ino}`
+      // A read stops after a newline: a file of exactly the length read, and the one read, ends in one and holds nothing unread. A new file (nothing read from one yet) is empty
+      const caught = before.isFile() && before.size === this.offset && (identity === this.identity || (this.identity === null && before.size === 0))
       // A line cut short by a stop or a full disk has no newline: this record is not written onto its end, where neither would be read
-      const text = (this.endsInTornLine() ? '\n' : '') + records.map(encodeUsedRecord).join('')
-      this.os.files.appendFileSync(this.path, text, { mode: 0o600 })
+      const lead = caught || !this.endsInTornLine() ? '' : '\n'
+      const bytes = Buffer.from(lead + records.map(encodeUsedRecord).join(''), 'utf8')
+      let wrote = 0
+      while (wrote < bytes.length) {
+        const n = this.os.files.writeSync(fd, bytes.subarray(wrote))
+        if (n <= 0) throw Object.assign(new Error('nothing written'), { code: 'EIO' })
+        wrote += n
+      }
+      // Another host's line added between the size and the write would be inside what is skipped: only the exact length counts
+      if (caught && this.os.files.fstatSync(fd).size === before.size + bytes.length) {
+        this.offset = before.size + bytes.length
+        this.lines += records.length
+        this.identity = identity
+        this.atEnd = true
+      } else {
+        this.pending += records.length
+      }
     } catch (e) {
       this.log(`[agent-host] a used full credential could not be written down (${codeOf(e)}); the hubs are still told`)
       return
+    } finally {
+      if (fd !== null) {
+        try {
+          this.os.files.closeSync(fd)
+        } catch {
+          // As above
+        }
+      }
     }
-    // Read back with whatever else was added: the lines are counted where they are, not guessed
-    this.refresh()
+    // After the handle is closed: a rewrite moves a new file over this one
     this.shorten()
   }
 
   private shorten(): void {
-    if (this.lines > this.max * REWRITE_AT) this.rewrite()
+    if (this.lines + this.pending > this.max * REWRITE_AT) this.rewrite()
   }
 
   /**
@@ -223,6 +264,7 @@ export class UsedCredentialsFile {
     // The new file is this host's to read from its start: nothing of it is new, and it is not the one read before
     this.offset = 0
     this.lines = 0
+    this.pending = 0
     this.identity = null
     this.readNew()
   }

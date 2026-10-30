@@ -135,6 +135,64 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host(2).used.records().map((r) => r.id)).toEqual(['22222222', '33333333'])
   })
 
+  it('writes a first use without reading the file back, and counts its line where it stands (#1715 recheck: the read-back cost milliseconds on Windows)', () => {
+    const f = folder()
+    const { os, read } = counted(f.os)
+    const h = f.host(256, os)
+    for (let i = 1; i <= 3; i++) h.hello(c(idOf(i), 'x'))
+    read.bytes = 0
+    expect(h.hello(c(idOf(4), 'x'))).not.toBeNull()
+    expect(read.bytes).toBe(0)
+    // The next report reads nothing of it, and a line another program adds after it is read once, alone
+    h.store.refresh()
+    expect(read.bytes).toBe(0)
+    const line = encodeUsedRecord(recordOf(5))
+    f.os.files.appendFileSync(f.file, line)
+    h.store.refresh()
+    h.store.refresh()
+    expect(read.bytes).toBe(line.length)
+    expect(h.used.records().map((r) => r.id)).toEqual([1, 2, 3, 4, 5].map(idOf))
+    expect(f.host().used.records().map((r) => r.id)).toEqual([1, 2, 3, 4, 5].map(idOf))
+  })
+
+  it('leaves its line to the next report when the file is not as long as what was read: another host wrote first, the file was replaced, or it ends in a cut line', () => {
+    const f = folder()
+    const mine = f.host()
+    const other = f.host()
+    other.hello(c(idOf(1), 'x'))
+    // Another host added a line this one has not read: this use is written after it, and the report reads both, in the file's order
+    mine.hello(c(idOf(2), 'x'))
+    mine.store.refresh()
+    expect(mine.used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2)])
+    mine.store.refresh()
+    expect(mine.used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2)])
+    // The file replaced by another of the same length (a rename over it): not the one read, so not counted as read
+    const tmp = `${f.file}.other`
+    f.os.files.writeFileSync(tmp, f.os.files.readFileSync(f.file, 'utf8'))
+    f.os.files.renameSync(tmp, f.file)
+    mine.hello(c(idOf(3), 'x'))
+    mine.store.refresh()
+    expect(f.host().used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2), idOf(3)])
+    expect(mine.used.records().map((r) => r.id)).toEqual([idOf(1), idOf(2), idOf(3)])
+    // Cut short by a stop: the use that follows is on a line of its own, and is read
+    f.os.files.appendFileSync(f.file, '{"v":1,"id":"cc')
+    mine.hello(c(idOf(4), 'x'))
+    mine.store.refresh()
+    expect(f.host().used.records().map((r) => r.id)).toEqual([1, 2, 3, 4].map(idOf))
+  })
+
+  it('shortens a file that grows past what is kept even when no report ever reads it', () => {
+    const f = folder()
+    const mine = f.host(2)
+    const other = f.host(2)
+    // Every use of this host is written after a line it has not read: none is counted at the write
+    for (let i = 1; i <= 12; i++) {
+      other.hello(c(idOf(100 + i), 'y'))
+      mine.hello(c(idOf(i), 'x'))
+    }
+    expect(f.os.files.readFileSync(f.file, 'utf8').trim().split('\n').length).toBeLessThan(24)
+  })
+
   it('takes in a line another host of the folder wrote since it started, at its next report', () => {
     const f = folder()
     const mine = f.host()
@@ -316,6 +374,39 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     // And from the file: a host that starts after has only the one still named
     expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain(idOf(1))
     expect(f.host().used.ids()).toEqual([idOf(2)])
+  })
+
+  it('forgets the note of a credential that serve.json names again, so a later withdrawal starts a new week and is reported, also after a restart', () => {
+    const f = folder()
+    const h = f.host()
+    h.hello(c(idOf(1), 'x'))
+    const day = 24 * 60 * 60 * 1000
+    const t0 = Date.UTC(2026, 5, 1)
+    const named = [{ id: idOf(1), verifier: verifierOf(idOf(1)) }]
+    // Withdrawn at t0, then named again (a restored serve.json) three days after
+    h.store.settle([], t0)
+    h.store.settle(named, t0 + 3 * day)
+    // Withdrawn again after the first note is older than a week: a new week, not the old one
+    h.store.settle([], t0 + 9 * day)
+    expect(h.used.ids()).toEqual([idOf(1)])
+    expect(h.used.gone([]).map((g) => g.id)).toEqual([idOf(1)])
+    expect(f.os.files.readFileSync(f.file, 'utf8')).toContain(`"goneAt":${t0 + 9 * day}`)
+    // The week of the new note, from the file
+    const restarted = f.host()
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS - 1)
+    expect(restarted.used.ids()).toEqual([idOf(1)])
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS)
+    expect(restarted.used.ids()).toEqual([])
+    // A restart between the restore and the second withdrawal does not bring the first note back
+    const g = folder()
+    const first = g.host()
+    first.hello(c(idOf(1), 'x'))
+    first.store.settle([], t0)
+    first.store.settle(named, t0 + 3 * day)
+    const second = g.host()
+    expect(second.used.records()).toEqual([{ id: idOf(1), verifier: verifierOf(idOf(1)), label: 'x', created: 1, replaced: false }])
+    second.store.settle([], t0 + 9 * day)
+    expect(second.used.ids()).toEqual([idOf(1)])
   })
 
   it('notes nothing withdrawn while serve.json cannot be read, and never drops a credential still named', () => {

@@ -200,7 +200,9 @@ export class UsedCredentials {
    * name it: it keeps the place of its first use (`seq`, which decides whose pairer again a later credential is) and
    * takes the place of its newest line in what is kept (`rank`), so that what stays is the file's newest 256 and the
    * order of the file is the order of the records, whichever way and however often it is read. A line that only says
-   * when the credential was found withdrawn (`goneAt`) adds that and moves nothing
+   * when the credential was found withdrawn (`goneAt`) adds that and moves nothing; a line of a credential without it
+   * that is known already is the credential named again after being withdrawn (`settle`): it forgets the note and takes
+   * the newest place
    */
   load(records: readonly UsedRecord[]): void {
     for (const r of records) {
@@ -209,7 +211,10 @@ export class UsedCredentials {
       if (!known) this.used.set(key, { ...r, seq: ++this.seq, rank: ++this.rank })
       else {
         if (r.goneAt !== undefined) known.goneAt = Math.min(known.goneAt ?? r.goneAt, r.goneAt)
-        else known.rank = ++this.rank
+        else {
+          known.rank = ++this.rank
+          delete known.goneAt
+        }
       }
     }
     this.trim()
@@ -228,13 +233,23 @@ export class UsedCredentials {
   /**
    * Notes which records `listed` (what `serve.json` names now) no longer holds and had not been seen without it, with
    * `now` as when they were withdrawn, and drops those withdrawn `WITHDRAWN_KEPT_MS` ago or more (#1712). Returns the
-   * records newly noted, for the file to be told, and how many were dropped. A credential still named is not touched
+   * records newly noted, for the file to be told, and how many were dropped. A credential still named keeps its record
+   * and loses a note of being withdrawn: one named again (a restored `serve.json`) starts a new week when it is next
+   * withdrawn, and not at the old note. Those are returned as `restored`, for the file to be told too
    */
-  settle(listed: readonly { id: string; verifier?: string }[], now: number): { noted: UsedRecord[]; dropped: number } {
+  settle(listed: readonly { id: string; verifier?: string }[], now: number): { noted: UsedRecord[]; restored: UsedRecord[]; dropped: number } {
     const noted: UsedRecord[] = []
+    const restored: UsedRecord[] = []
     let dropped = 0
     for (const [key, u] of this.used) {
-      if (listed.some((c) => c.id === u.id && (c.verifier === undefined || c.verifier === u.verifier))) continue
+      if (listed.some((c) => c.id === u.id && (c.verifier === undefined || c.verifier === u.verifier))) {
+        if (u.goneAt !== undefined) {
+          delete u.goneAt
+          u.rank = ++this.rank
+          restored.push({ id: u.id, verifier: u.verifier, label: u.label, created: u.created, replaced: u.replaced })
+        }
+        continue
+      }
       if (u.goneAt === undefined) {
         u.goneAt = now
         noted.push({ id: u.id, verifier: u.verifier, label: u.label, created: u.created, replaced: u.replaced, goneAt: now })
@@ -243,7 +258,7 @@ export class UsedCredentials {
         dropped++
       }
     }
-    return { noted, dropped }
+    return { noted, restored, dropped }
   }
 
   private trim(): void {
