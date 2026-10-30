@@ -1951,11 +1951,14 @@ describe('asking the host on the port without handing the token to anyone else (
   const TOKEN = 'serve-token-'.padEnd(43, 'x')
   // `ws` is the host's dependency, not the root's: taken from there
   type Peer = { on(e: 'message', f: (d: unknown) => void): void; send(s: string): void }
-  type Wss = { on(e: 'connection', f: (ws: Peer) => void): void; once(e: 'listening', f: () => void): void; address(): unknown; close(f: () => void): void }
+  type Wss = { on(e: 'connection', f: (ws: Peer) => void): void; once(e: 'listening', f: () => void): void; once(e: 'error', f: (err: Error) => void): void; address(): unknown; close(f: () => void): void }
   const { WebSocketServer } = createRequire(join(ROOT, 'packages/agent-host/package.json'))('ws') as { WebSocketServer: new (o: { port: number; host: string }) => Wss }
-  async function squatter() {
-    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
-    await new Promise<void>((r) => wss.once('listening', () => r()))
+  async function squatter(port = 0) {
+    const wss = new WebSocketServer({ port, host: '127.0.0.1' })
+    await new Promise<void>((r, reject) => {
+      wss.once('listening', () => r())
+      wss.once('error', reject)
+    })
     const got: string[] = []
     // It answers a prove with a guess, and a hello as a host would
     wss.on('connection', (ws) => ws.on('message', (d) => {
@@ -1980,6 +1983,37 @@ describe('asking the host on the port without handing the token to anyone else (
       await s.close()
     }
   })
+
+  /*
+   * A hub's ssh forwards 127.0.0.1:DEFAULT_SERVE_PORT to a linked machine's serve host, so on a hub a stranger answers
+   * on the default port. A folder with no recorded port is probed there; its answer is not this folder's, even while
+   * a live process holds the folder's lock (the Centralu app, a keeper, another serve).
+   */
+  it('a program on the default port is not this folder’s serve: a folder with no recorded port that another host owns says so', async () => {
+    // The default port may be held already (on a hub it is ssh): that is such a stranger too
+    const s = await squatter(DEFAULT_SERVE_PORT).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'EADDRINUSE') return null
+      throw e
+    })
+    const d = tempDir()
+    // This test process stands in for the Centralu app that owns the folder
+    const held = acquireInstanceLock(join(d, 'store.db'))
+    expect(held.ok).toBe(true)
+    try {
+      expect(readServeState(d)).toBeNull()
+      const run = serve(d, ['--port', String(await freePort())])
+      expect(await run.exited).toBe(1)
+      expect(run.out.stderr).not.toContain('is already running')
+      expect(run.out.stderr).toContain(`belongs to another Centralu host (pid ${process.pid})`)
+      // --connection and --stop read the same probe: nothing of this folder's runs
+      expect((await cli(d, ['--connection'])).line).toMatchObject({ hostRunning: false, port: DEFAULT_SERVE_PORT })
+      expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: false })
+      if (s) expect(s.got.map((g) => JSON.parse(g).kind)).not.toContain('hello')
+    } finally {
+      if (held.ok) held.release()
+      await s?.close()
+    }
+  }, 90_000 * SLOW)
 
   it('the real host proves it and then gets the hello', async () => {
     const server = new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '9.9.9' } })
@@ -2065,6 +2099,9 @@ describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it 
     lock(d, { pid: process.pid, started })
     expect(lockHolderIsAlive(d)).toBe(true)
     expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    // An answer on a port serve.json does not name (the default one) is not this folder's, lock holder or not
+    expect(heldHere({ running: false, unproven: true }, d, undefined, false)).toBe(false)
+    expect(heldHere({ running: true }, d, undefined, false)).toBe(true)
     // The same pid, started at another time: the pid was reused
     lock(d, { pid: process.pid, started: 'Thu Jan  1 00:00:00 1970' })
     expect(lockHolderIsAlive(d)).toBe(false)
