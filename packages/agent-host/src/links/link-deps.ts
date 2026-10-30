@@ -24,6 +24,11 @@ export type MachineRecord = {
   autoReconnect?: boolean
   /** When the link was last up (#1398); absent: never, or a registry that does not keep it */
   lastConnectedAt?: number
+  /**
+   * The full credentials the person withdrew from this machine's row (#1712), by id and when (ms): not listed again after
+   * this hub restarts, for as long as the machine's host could still hold a record of them (`REVOKED_KEPT_MS`). Absent: none, or a registry that keeps none
+   */
+  revoked?: Record<string, number>
 }
 
 export interface MachineRegistry {
@@ -36,6 +41,8 @@ export interface MachineRegistry {
   setAutoReconnect(id: string, autoReconnect: boolean): void
   /** The link was up at this time (#1398), kept so "last connected" survives a restart; a registry may keep none */
   setLastConnected?(id: string, at: number): void
+  /** The credentials withdrawn from the machine's row, whole (#1712); a registry may keep none */
+  setRevoked?(id: string, revoked: Record<string, number>): void
 }
 
 /**

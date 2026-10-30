@@ -292,8 +292,9 @@ export const MachineInfo = z.object({
    * asked for another way (a `--pair window` in the window's place; the window or a hub pairing again is not marked).
    * `hubsName`: it carries this hub's own label, and this hub did not make it. `gone` (#1405 review): no longer held,
    * but something said hello with it on that host before it went, so a credential used and withdrawn between two reads
-   * still shows; the row offers nothing to withdraw for it. The first 32; `otherCredentialsMore` counts the rest. Null while it is not known: not
-   * connected yet, or a Centralu there from before it. Additive
+   * still shows; the row offers nothing to withdraw for it (#1712: also one the host told the hub of, over the link, as it let it in,
+   * until a read answers for it, shown while the link is away as it was seen). The first 32; `otherCredentialsMore` counts the rest. Null while it is not
+   * known: not connected yet (and nothing told), or a Centralu there from before it. Additive
    */
   otherCredentials: z
     .array(

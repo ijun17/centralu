@@ -541,6 +541,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'host_handover', handover: { state: 'waiting', since: 1791182683464 } },
   { type: 'host_handover', handover: { state: 'gave_up', since: 1791182683464 } },
   { type: 'host_handover', handover: null },
+  { type: 'host_credential_used', credential: { id: 'abab1212', label: 'agent-script', created: 1791182683464, replaced: false, nonce: 'bm9uY2Vub25jZQ', check: 'Y2hlY2s' } },
   {
     type: 'worktree_pr',
     sessionId: 's1',
