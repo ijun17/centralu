@@ -601,6 +601,12 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    - A key entry's id is drawn apart from every verifier entry's and key entry's id, so `--revoke <id>` names one entry.
      `--rotate-token` clears `keys`; a hand-written key entry whose public key is refused is not listed, makes no socket
      full and is dropped at the launcher's next write.
+   - A key entry whose id a verifier entry of the same file has (written by hand; `--pair-key` gives its entry a fresh id
+     when it finds the clash) is refused as a refused key is: the host takes no hello under it and does not list it, and
+     the verifier entry keeps the id (#1717 recheck, F1). A key entry has no secret, so a hub told of it has no `check` to
+     tell it from its own credential of that id; the hub also reads any listed entry or used record that carries a
+     `publicKey` as never its own verifier credential, so a host that lists one shows it on the row. Nothing tells the
+     person of the refused entry; it stays in the file until `--revoke <id>` or `--rotate-token`.
    - *Measured with a real `centralu serve`*: `--pair-key` reports the key the running host signs with, the key hello is
      full, `host.credentials` lists the entry with its public key, and none of the file's values (the key, the limited
      credential, the hub's public key, the entry id) is a full hello. After `--rotate-token` the socket is closed (4001)

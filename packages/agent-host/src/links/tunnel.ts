@@ -209,7 +209,9 @@ export function credentialsOf(raw: unknown): RemoteCredential[] | null {
     const o = asObj(e)
     if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
     const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0
-    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true, ...(o.gone === true ? { gone: true } : {}), ...(typeof o.check === 'string' && o.check.length <= 64 ? { check: o.check } : {}) }]
+    // An entry that carries a public key is a hub's key entry (#1711): no secret and so no check, and never the verifier credential this hub holds under its id (`own: false`; #1717 recheck, F1)
+    const keyed = typeof o.publicKey === 'string'
+    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true, ...(o.gone === true ? { gone: true } : {}), ...(keyed ? { own: false } : typeof o.check === 'string' && o.check.length <= 64 ? { check: o.check } : {}) }]
   })
 }
 

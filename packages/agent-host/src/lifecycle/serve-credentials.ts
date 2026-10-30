@@ -156,7 +156,7 @@ export function readCredentialFile(
       const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
       return [{ id: f.id, label: f.label, verifier: f.verifier, created, replaced: f.replaced === true, ...(typeof f.via === 'string' ? { via: f.via } : {}) }]
     })
-    const keys = readKeyEntries(o.keys)
+    const keys = readKeyEntries(o.keys, full)
     lastRead.set(path, { full, keys, at: now() })
     return { full, open: full, unreadable: null, keys, openKeys: keys }
   }
@@ -174,13 +174,19 @@ export function readCredentialFile(
 
 /**
  * The key entries of a version 2 file's `keys` (#1711), each of the shape `isKeyEntry` takes and no other. Additive: a
- * file without `keys` (every launcher before key pairing writes none) names none
+ * file without `keys` (every launcher before key pairing writes none) names none.
+ *
+ * Nor one whose id a verifier entry of `full` has (#1717 recheck, F1): a key entry has no secret, so a hub told of it has
+ * no `check` to tell it from its own credential of that id, and an entry written by hand under the hub's id would be
+ * full here and unseen on its row. The two kinds draw their ids apart (`freshId`), so only a file written by hand has
+ * the clash; the verifier entry keeps the id
  */
-function readKeyEntries(raw: unknown): KeyCredential[] {
+function readKeyEntries(raw: unknown, full: readonly { id: string }[]): KeyCredential[] {
   if (!Array.isArray(raw)) return []
+  const verifierIds = new Set(full.map((c) => c.id))
   return raw.flatMap((e: unknown) => {
     const f = asObj(e)
-    if (!isKeyEntry(f)) return []
+    if (!isKeyEntry(f) || verifierIds.has(f.id)) return []
     const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
     // No `via` is kept: a key entry is full whatever the file says of it, so nothing in it may hide it from `UsedCredentials` (#1717 review, M1)
     return [{ id: f.id, label: f.label, publicKey: f.publicKey, created, replaced: f.replaced === true }]
@@ -499,7 +505,7 @@ function readListing(path: string, read: (p: string) => string): (ListedCredenti
     const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
     return [{ id: f.id, label: f.label, created, replaced: f.replaced === true, verifier: f.verifier }]
   })
-  const keys = readKeyEntries(o.keys).map((k) => ({ id: k.id, label: k.label, created: k.created ?? 0, replaced: k.replaced === true, publicKey: k.publicKey }))
+  const keys = readKeyEntries(o.keys, full).map((k) => ({ id: k.id, label: k.label, created: k.created ?? 0, replaced: k.replaced === true, publicKey: k.publicKey }))
   return [...full, ...keys]
 }
 
