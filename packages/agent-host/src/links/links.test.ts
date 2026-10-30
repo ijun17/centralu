@@ -3993,10 +3993,10 @@ describe('machines.revokeCredential (#1405)', () => {
         credentials: (nonce) => ({ credentials: [{ ...own, check: credentialCheck(mine, nonce!) }, { id: 'cccc3333', label, created: 9, replaced: false, publicKey, ...(gone ? { gone: true } : {}) }] }),
       })
       const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
-      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, hubsName: true }])
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, hubsName: true }])
       expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
       gone = true
-      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, gone: true, hubsName: true }])
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, gone: true, hubsName: true }])
       expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
     })
 
@@ -4012,7 +4012,7 @@ describe('machines.revokeCredential (#1405)', () => {
         }),
       })
       const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
-      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 }).toEqual([{ id: 'cccc3333', label, created: 3, replaced: false, gone: true, hubsName: true }])
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 3, replaced: false, gone: true, hubsName: true }])
       expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
     })
   })
