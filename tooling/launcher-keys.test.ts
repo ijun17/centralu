@@ -328,6 +328,10 @@ describe('what --pair-key reports for the host on the port', () => {
     expect(fileOf(d).keys).toEqual([expect.objectContaining({ label: 'hub:a', publicKey: hub })])
     await closers.pop()!()
     await newHost(d, port)
+    // A key line without --key-paired (the hub's first key link) leaves the verifier entry alone
+    const first = await cli(d, ['--connection', '--pair-key', 'hub:a', hub])
+    expect(first.line!.takes).toContain('pairKey')
+    expect(fileOf(d).full.map((e: { label: string }) => e.label).sort()).toEqual(['hub:a', 'window'])
     const keyed = await cli(d, ['--connection', '--pair-key', 'hub:a', hub, '--key-paired'])
     expect(keyed.line!.takes).toContain('pairKey')
     expect(fileOf(d).full.map((e: { label: string }) => e.label)).toEqual(['window'])
