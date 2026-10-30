@@ -570,7 +570,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: macos-14
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -605,14 +605,23 @@ jobs:
           packages/agent-host/src/lifecycle/
           packages/agent-host/src/transport/
           packages/agent-host/src/links/
+          packages/agent-host/src/adapters/ends-with-host
+          packages/agent-host/src/fs-containment
+          packages/agent-host/src/env-path
+          packages/agent-host/src/temp-dir
+          packages/agent-host/src/data-dir
+          packages/agent-host/src/tool-launch
+          packages/agent-host/src/keeper/
           tooling/launcher-
+          tooling/e2e-lock
+          tooling/screen-protocol-rules
 
       - name: pnpm test (host, protocol, launcher)
         id: full
         if: needs.changes.outputs.host_tests == 'true'
         env:
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
-        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/launcher-
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/
 
       # The time each file took, for choosing what the quick tier runs; also when a test failed
       - name: Say which test files took longest
@@ -660,7 +669,7 @@ jobs:
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
   # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 10.0/15 (the whole host). The three jobs that install a browser (#1503, 2026-10-24) limit
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 10.0/20 (the whole host). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
   # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux

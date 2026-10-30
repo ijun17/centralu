@@ -162,13 +162,15 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const full = mac.slice(mac.indexOf('id: full'))
     expect(quick).toContain("if: needs.changes.outputs.host_tests == 'off'")
     expect(full).toContain("if: needs.changes.outputs.host_tests == 'true'")
-    expect(full).toContain('packages/agent-host packages/protocol tooling/launcher-\n')
+    expect(full).toContain('packages/agent-host packages/protocol tooling/\n')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
     const filters = quick.split('\n').map((l) => l.trim()).filter((l) => /^(packages|tooling)\//.test(l))
     expect(filters.length).toBeGreaterThan(5)
     const files = execFileSync('git', ['ls-files'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' }).split('\n')
     const tests = files.filter((f) => /\.test\.(ts|tsx)$/.test(f))
     for (const f of filters) expect(tests.some((t) => t.includes(f)), `${f} matches no test file`).toBe(true)
+    // The tooling tests that failed on a Mac and nowhere else (#1695: a SIGTERM hang, macOS's /var -> /private/var link)
+    for (const f of ['tooling/e2e-lock', 'tooling/screen-protocol-rules', 'tooling/launcher-']) expect(filters, f).toContain(f)
     // A landing condition: the board waits for the check of this name on a batch (project.json ci.quickChecks)
     const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
     expect(board.ci.quickChecks).toContain('macos tests')
