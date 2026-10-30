@@ -59,7 +59,9 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { credentialsReport, readCredentialFile, UsedCredentials, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
+import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-credentials-file.js'
+import { realOs } from './os/real.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -758,6 +760,9 @@ const requests: HostRequests = new HostRequests({
 })
 /** The full credentials a socket said hello with on this host, for `host.credentials` once they are gone (#1405 review) */
 const usedCredentials = new UsedCredentials()
+/** And the file that keeps them across a restart of this host, beside `serve.json` (#1712); read back here, before any hello */
+const usedCredentialsFile = launch.serveState ? new UsedCredentialsFile(usedCredentialsPath(launch.serveState, realOs()), usedCredentials, realOs()) : null
+usedCredentialsFile?.load()
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
@@ -767,7 +772,14 @@ const router: Router = new Router({
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
     // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
     // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
-    serveCredentials: (nonce) => (launch.serveState ? credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce) : null),
+    serveCredentials: (nonce) => {
+      if (!launch.serveState) return null
+      // What another host of this folder wrote since this one started (a swap's overlap, #1712)
+      usedCredentialsFile?.refresh()
+      // A record of a credential that serve.json no longer names is noted withdrawn, and dropped a week after (#1712)
+      const settle = (listed: readonly { id: string; verifier?: string; publicKey?: string }[]) => (usedCredentialsFile ? usedCredentialsFile.settle(listed) : usedCredentials.settle(listed, Date.now()))
+      return credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce, settle)
+    },
     themes,
     terminals,
     updates,
@@ -816,6 +828,17 @@ const elevation = detectToken().then((t) => {
     )
   }
 })
+/**
+ * A full credential, or a hub's key entry (#1711), is about to be let in (#1712): its first use on this host is written down in the file, then the
+ * hubs linked to it are told at once, over their open links and without waiting for them. A hub whose link is down reads
+ * it at its next `host.credentials` (the file is read back by a restarted host)
+ */
+function onFullHello(c: FullCredential | KeyCredential): void {
+  const first = usedCredentials.saw(c)
+  if (!first) return
+  usedCredentialsFile?.add(first)
+  server.tellHubs(usedEvent(first))
+}
 /** Where a `centralu serve` host's full credentials are (#1405), when it is one */
 const serveState = launch.serveState
 const server = new HostServer({
@@ -827,7 +850,7 @@ const server = new HostServer({
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
   ...(serveState
-    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential | KeyCredential) => usedCredentials.saw(c) }
+    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential | KeyCredential) => onFullHello(c) }
     : {}),
   // What a hub's key pairing signs as this host's address under a keeper: the front door's, not the inner port (#1711)
   ...(launch.frontDoor !== undefined ? { frontDoor: launch.frontDoor } : {}),

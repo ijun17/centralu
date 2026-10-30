@@ -182,6 +182,8 @@ describe('the full credentials used here (#1405 review)', () => {
       ],
       unreadable: null,
       usedUnderHubLabels: [{ id: 'cccccccc', label: 'hub:mac-0123abcd', created: 1 }],
+      // Every id in the record, also one the list leaves out (#1712)
+      usedIds: ['aaaaaaaa', 'cccccccc'],
     })
     const denied = () => {
       throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })

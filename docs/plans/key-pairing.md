@@ -386,7 +386,7 @@ host. §3 has the comparison.
 - The **method rights** otherwise do not change: a key hello is full, as a hub's verifier hello is.
 - **The row's listing.** A key entry under the hub's label is the hub's own exactly when its public key is the hub's,
   so `credentialCheck`'s HMAC is not needed for key entries. `host.credentials` adds `publicKey` to key entries
-  (public), and `UsedCredentials` keys them by id and public key. Once the hub's record says it has paired by key with
+  (public), and `UsedCredentials` keys them by id and public key (see "The record of used credentials" below). Once the hub's record says it has paired by key with
   the machine, a **verifier** entry under its own label is never its own (it holds no credential to `check` it, and it
   removed its own with `--key-paired`): the hub shows it among the other credentials, with Revoke, as it shows any other
   credential today. So someone else's `serve --pair hub:<label>` between two links is judged like any other. It gets no
@@ -577,6 +577,20 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
      not "credential withdrawn". `--pair-key` gives the hub's entry a new id (reported in the line) when another key entry
      shares its id, since the host takes the first entry of an id; a file with such a twin written by hand is otherwise
      left as it is (both are listed). Not changed: the CLI's sentence for `--revoke <key id>`.
+   - *The record of used credentials* (#1712 on main, merged into this slice). `UsedRecord` holds either a `verifier` (a
+     verifier entry) or a `publicKey` (a key entry), never both; a record is kept under the id and the verifier, or the
+     id and `key:` and the public key, so an id reused under another key is another credential, matching the
+     `(id, publicKey)` sweep. `saw` records a key hello the same way; only an older launcher's one-call verifier entry is
+     skipped. `settle` and `gone` match a listed key entry by `(id, publicKey)`, as they match a verifier entry by
+     `(id, verifier)`. The file `serve-used.jsonl` writes `publicKey` instead of `verifier` for a key record, and reads
+     either shape (a line with both, with neither, or with a refused key is skipped). An older build skips the key lines,
+     which is fine: it accepts no key hello. A public key is not secret, so a key record has no HMAC: `host.credentials`
+     entries (`gone`), `usedUnderHubLabels` and the `host_credential_used` event carry `publicKey` and no `nonce` or
+     `check` (`nonce` and `check` became optional in the event, additive). **Slice 4:** the hub knows such a record for
+     its own by comparing the `publicKey` with its own public key (the verifier path compares a `check`). A hub from
+     before this drops an event with no `check` (`credentialUsed`) and lists the use at its next `host.credentials`
+     read, where an entry it did not pair is shown among the other credentials; it never pairs by key, so this only
+     concerns a hand-written or foreign key entry.
    - *Item 4.* What a key `prove` left is taken off the socket at its first hello attempt, before that hello is judged.
    - *The probe* (§4.2): `signed` (the running host signs, and the line reports its key), `unsigned` (a proof with none
      of the three fields: a host from before key pairing), `none` (the connection is refused) and `unknown` (anything

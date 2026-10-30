@@ -37,7 +37,7 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const own = ownCredentials(state, entry)
   const probe = () => probeHost({ port, ...own, protocolVersion: installed, prove })
   const first = await probe()
-  if (!heldHere(first, dataDir)) return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` }
+  if (!heldHere(first, dataDir, undefined, state.port != null)) return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` }
 
   const hostPid = lockHolderPid(dataDir)
   const launcher = readServePid(dataDir)

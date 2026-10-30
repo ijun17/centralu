@@ -9,7 +9,7 @@ import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
 import { hostProof, proofNonce } from './host-proof.js'
 import { hostLinkKey, LINK_AUTH_MARKER, linkAddress, linkPublicKeyOf, linkTranscript, signLink, verifyLink, parseLinkPublicKey } from './link-keys.js'
-import { credentialsReport, readCredentialFile, UsedCredentials, verifierOf } from '../lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, verifierOf } from '../lifecycle/serve-credentials.js'
 import { answerKeyProve, HostSigningKey } from './link-proof.js'
 import { limitedToken } from './limited-token.js'
 import { sessionToken } from './session-token.js'
@@ -43,6 +43,8 @@ async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { por
   let denied = false
   const used = new UsedCredentials()
   const heard: unknown[] = []
+  /** What main.ts does at a full hello: the first use of a credential is recorded and told to the hubs (#1712) */
+  const told: ReturnType<typeof usedEvent>[] = []
   const write = (f: { full?: object[]; keys?: object[] }) => (text = JSON.stringify({ v: 2, key: KEY, port: null, full: f.full ?? [], ...(f.keys ? { keys: f.keys } : {}) }))
   write(file)
   const calls: Call[] = []
@@ -56,7 +58,10 @@ async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { por
       }, () => {}),
     onFullHello: (c) => {
       heard.push(c)
-      used.saw(c)
+      const first = used.saw(c)
+      if (!first) return
+      told.push(usedEvent(first))
+      server?.tellHubs(usedEvent(first))
     },
     ...(opts.frontDoor !== undefined ? { frontDoor: opts.frontDoor } : {}),
     ...(opts.credentialSweepMs ? { credentialSweepMs: opts.credentialSweepMs } : {}),
@@ -66,7 +71,7 @@ async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { por
     },
   })
   const port = await server.listen()
-  return { port, write, calls, used, heard, text: () => text, deny: (v: boolean) => (denied = v) }
+  return { port, write, calls, used, heard, told, text: () => text, deny: (v: boolean) => (denied = v) }
 }
 
 /** One socket to the host (Node's own WebSocket, as a hub's would be a client): what it sends, and what comes back */
@@ -389,6 +394,24 @@ describe('a key entry used for a full hello is always recorded (#1717 review, M1
     const used = new UsedCredentials()
     used.saw({ id: 'eeeeeeee', label: 'handover', verifier: verifierOf('h'.repeat(43)), created: 1, replaced: false, via: 'handover' })
     expect(used.gone([])).toEqual([])
+  })
+})
+
+// #1711, with the #1717 review: a key hello is recorded as a hub's key entry and told to the hubs linked, with its public key
+describe('a key hello is told to the hubs (#1712, #1711)', () => {
+  it('records it with its public key and tells the hubs linked at once, with no nonce or check, also those in by key', async () => {
+    const [one, two] = [hubKeys(), hubKeys()]
+    const { port, told } = await serveHost({ keys: [keyEntry(HUB_ID, one.text), keyEntry('bbbbbbbb', two.text, 'hub:other-89abcdef')] })
+    const first = await hubDial(port, one)
+    expect(await accepted(first.p)).toBe(true)
+    expect(told).toEqual([{ type: 'host_credential_used', credential: { id: HUB_ID, label: LABEL, created: 1, replaced: false, publicKey: one.text } }])
+    // The first hub, linked by key, is told when the second says hello (it was told its own use too, in the replay of its hello)
+    const second = await hubDial(port, two, { keyId: 'bbbbbbbb' })
+    expect(await accepted(second.p)).toBe(true)
+    const used = (p: Awaited<ReturnType<typeof peer>>) => p.frames.filter((f) => f.kind === 'event').map((f) => (f.event as { credential: { id: string } }).credential.id)
+    expect(await first.p.wait(() => used(first.p).includes('bbbbbbbb'))).toBe(true)
+    expect(first.p.frames.find((f) => f.kind === 'event' && (f.event as { credential: { id: string } }).credential.id === 'bbbbbbbb')).toMatchObject({ event: { type: 'host_credential_used', credential: { publicKey: two.text } } })
+    expect(JSON.stringify(told)).not.toContain('"check"')
   })
 })
 

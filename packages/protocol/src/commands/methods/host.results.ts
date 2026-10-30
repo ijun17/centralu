@@ -69,6 +69,12 @@ export const hostResults = {
      * hub of that label tells the ones it paired itself from one something else paired under it. Additive
      */
     usedUnderHubLabels: z.array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), check: z.string().max(64).optional(), publicKey: z.string().max(64).optional().catch(undefined) })).optional(),
+    /**
+     * The id of every credential this host's record holds as used, whether the list shows it or not (#1712): a hub that was
+     * told of a use clears it once the host it is read from has it in its record, and keeps it when a host that started
+     * again has no record of it. Absent from a host before it: the hub clears what it was told as before. Additive
+     */
+    usedIds: z.array(z.string().max(16)).optional(),
   }),
   'host.lastAnswer': HostLastAnswerResult,
   'host.send': z.object({ ok: z.literal(true) }),

@@ -41,7 +41,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
   const probe = await probeHost({ port, ...own, protocolVersion: installed, prove: proof })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
-  const hostRunning = heldHere(probe, dataDir)
+  const hostRunning = heldHere(probe, dataDir, undefined, state.port != null)
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
   const verifiers = takesVerifiers(entry)
@@ -158,7 +158,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   const recorded = state.port ?? DEFAULT_SERVE_PORT
   const existing = await probeHost({ port: recorded, ...ownCredentials(state, entry), protocolVersion, prove: hostProvesOf(entry) })
   // A host the hub's ssh started before anyone signed in moves into this sign-in, once idle (#1224, serve-handover.mjs)
-  if (heldHere(existing, dataDir) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
+  if (heldHere(existing, dataDir, undefined, state.port != null) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
     const pid = lockHolderPid(dataDir)
     say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${recorded}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
     return 1

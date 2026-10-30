@@ -568,10 +568,14 @@ export function removeServePid(dataDir, pid) {
  * A probe that did not prove the token, while this data folder's host is alive (`host.lock`): a host from before #838
  * still running after an update. It is running, and is not sent the token; a hub asking it for a proof is refused
  * until it restarts. Without a live lock holder, what answered is not ours.
+ *
+ * `portRecorded`: serve.json names the port the probe went to (`state.port != null`). A folder that has none was probed
+ * on the default port, where whatever listens is as likely another host's (a hub's ssh forward to a linked machine's serve
+ * lands there): an unproven answer from it says nothing about this folder, whoever holds the lock.
  */
-export function heldHere(probe, dataDir, startOf = processStartTime) {
+export function heldHere(probe, dataDir, startOf = processStartTime, portRecorded = true) {
   if (probe.running) return true
-  if (!probe.unproven) return false
+  if (!probe.unproven || !portRecorded) return false
   return lockHolderIsAlive(dataDir, startOf)
 }
 

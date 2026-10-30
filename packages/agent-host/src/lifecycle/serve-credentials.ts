@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { asObj } from '../json-value.js'
 import { parseLinkPublicKey } from '../transport/link-keys.js'
 import { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE } from './credential-id.js'
@@ -55,7 +55,8 @@ export function isKeyEntry(f: Record<string, unknown>): f is Record<string, unkn
 /**
  * A hub's key entry (#1711, `centralu serve --connection --pair-key`): the hub's Ed25519 public key, which the hub signs
  * the link transcript with (`transport/link-proof.ts`). Public: nothing in it opens the host. A socket in under it stays
- * full while an entry with its id **and** its public key is listed (`HostServer` `sweepWithdrawn`)
+ * full while an entry with its id **and** its public key is listed (`HostServer` `sweepWithdrawn`). It has no `via`: it
+ * is full whatever the file says of it, so nothing in it may keep `UsedCredentials` from recording it (#1717 review, M1)
  */
 export type KeyCredential = {
   id: string
@@ -218,31 +219,104 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  * What this cannot tell is two askers of the same way under one label (a program's `--pair hub:<name>-<key>` that the
  * hub's own next link takes the place of). So every id used under a hub's label is also given as it is (`underHubLabels`),
  * and the hub of that label compares them with the ids it paired itself: any other is one it did not make (#1405
- * review). At most `max` are kept, the oldest dropped first; a restart of this host forgets them.
+ * review). At most `max` are kept, the one used longest ago dropped first. A restart of this host reads them back from the file it keeps beside `serve.json` (#1712, `UsedCredentialsFile`).
  */
 export class UsedCredentials {
   private seq = 0
-  /*
-   * By id and verifier, or by id and public key for a key entry (#1711): an id another secret or another key reused is a
-   * second entry, not the first one overwritten (#1405 review)
-   */
-  private readonly used = new Map<string, { id: string; verifier?: string; publicKey?: string; label: string; created: number; replaced: boolean; seq: number }>()
+  private rank = 0
+  // By id and verifier, or id and public key (#1711): an id another secret or key reused is a second entry, not the first one overwritten (#1405 review)
+  private readonly used = new Map<string, Kept>()
 
   constructor(private readonly max = 256) {}
 
-  /** A socket said hello with `c`: a full credential, or a hub's key entry (#1711) */
-  saw(c: FullCredential | KeyCredential): void {
-    // Only an older launcher's one-call verifier entry is left out, never a key entry (which has no `via`, `readKeyEntries`)
-    if ('verifier' in c && c.via === 'handover') return
-    const secret = 'verifier' in c ? { verifier: c.verifier } : { publicKey: c.publicKey }
-    const key = `${c.id}:${secret.verifier ?? `key:${secret.publicKey}`}`
-    const known = this.used.get(key)
-    this.used.delete(key)
-    this.used.set(key, { id: c.id, ...secret, label: c.label, created: c.created ?? 0, replaced: c.replaced === true, seq: known?.seq ?? ++this.seq })
-    for (const id of this.used.keys()) {
-      if (this.used.size <= this.max) break
-      this.used.delete(id)
+  /**
+   * A socket said hello with `c`, a full credential or a hub's key entry (#1711). The record when this is the first use
+   * of this credential (this id under this verifier, or under this public key) that this host knows of, here or in the
+   * file it kept (`load`): the caller writes it down and tells the hubs (#1712). Null for one already known, and for the
+   * launcher's own one-call verifier entry (`via: handover`), which is not kept. A key entry is always kept, whatever
+   * the file says of it (#1717 review, M1)
+   */
+  saw(c: FullCredential | KeyCredential): UsedRecord | null {
+    if ('verifier' in c && c.via === 'handover') return null
+    const rec: UsedRecord = { id: c.id, ...secretOf(c), label: c.label, created: c.created ?? 0, replaced: c.replaced === true }
+    const key = keyOf(rec)
+    if (this.used.has(key)) return null
+    this.used.set(key, { ...rec, seq: ++this.seq, rank: ++this.rank })
+    this.trim()
+    return rec
+  }
+
+  /**
+   * Takes in lines of the file (#1712), in the order they were written. A credential is one record however many lines
+   * name it: it keeps the place of its first use (`seq`, which decides whose pairer again a later credential is) and
+   * takes the place of its newest line in what is kept (`rank`), so that what stays is the file's newest 256 and the
+   * order of the file is the order of the records, whichever way and however often it is read. A line that only says
+   * when the credential was found withdrawn (`goneAt`) adds that and moves nothing; a line of a credential without it
+   * that is known already is the credential named again after being withdrawn (`settle`): it forgets the note and takes
+   * the newest place
+   */
+  load(records: readonly UsedRecord[]): void {
+    for (const r of records) {
+      const key = keyOf(r)
+      const known = this.used.get(key)
+      if (!known) this.used.set(key, { ...r, seq: ++this.seq, rank: ++this.rank })
+      else {
+        if (r.goneAt !== undefined) known.goneAt = Math.min(known.goneAt ?? r.goneAt, r.goneAt)
+        else {
+          known.rank = ++this.rank
+          delete known.goneAt
+        }
+      }
     }
+    this.trim()
+  }
+
+  /** The id of every record kept (#1712, `host.credentials` `usedIds`) */
+  ids(): string[] {
+    return [...new Set([...this.used.values()].map((u) => u.id))]
+  }
+
+  /** Every record kept, in the order of the file they are written to: what the file is rewritten from when it grows past `max` */
+  records(): UsedRecord[] {
+    return [...this.used.values()].sort((a, b) => a.rank - b.rank).map(({ seq: _seq, rank: _rank, ...r }) => r)
+  }
+
+  /**
+   * Notes which records `listed` (what `serve.json` names now) no longer holds and had not been seen without it, with
+   * `now` as when they were withdrawn, and drops those withdrawn `WITHDRAWN_KEPT_MS` ago or more (#1712). Returns the
+   * records newly noted, for the file to be told, and how many were dropped. A credential still named keeps its record
+   * and loses a note of being withdrawn: one named again (a restored `serve.json`) starts a new week when it is next
+   * withdrawn, and not at the old note. Those are returned as `restored`, for the file to be told too
+   */
+  settle(listed: readonly { id: string; verifier?: string; publicKey?: string }[], now: number): { noted: UsedRecord[]; restored: UsedRecord[]; dropped: number } {
+    const noted: UsedRecord[] = []
+    const restored: UsedRecord[] = []
+    let dropped = 0
+    for (const [key, u] of this.used) {
+      if (listed.some((c) => c.id === u.id && sameSecretOf(c, u))) {
+        if (u.goneAt !== undefined) {
+          delete u.goneAt
+          u.rank = ++this.rank
+          restored.push(plainRecord(u))
+        }
+        continue
+      }
+      if (u.goneAt === undefined) {
+        u.goneAt = now
+        noted.push({ ...plainRecord(u), goneAt: now })
+      } else if (now - u.goneAt >= WITHDRAWN_KEPT_MS) {
+        this.used.delete(key)
+        dropped++
+      }
+    }
+    return { noted, restored, dropped }
+  }
+
+  private trim(): void {
+    if (this.used.size <= this.max) return
+    // The one whose newest line is the oldest first
+    const byRank = [...this.used].sort(([, a], [, b]) => a.rank - b.rank)
+    for (const [key] of byRank.slice(0, this.used.size - this.max)) this.used.delete(key)
   }
 
   /** Those used here that `listed` no longer names and no same-way successor took the place of, as `gone` */
@@ -291,8 +365,85 @@ function secretFields(u: { verifier?: string; publicKey?: string }, nonce: strin
   return u.publicKey !== undefined ? { publicKey: u.publicKey } : {}
 }
 
+/** The secret a record is kept under: a full credential's verifier, or a key entry's public key (never both) */
+function secretOf(c: { verifier?: string; publicKey?: string }): { verifier?: string; publicKey?: string } {
+  return c.verifier !== undefined ? { verifier: c.verifier } : c.publicKey !== undefined ? { publicKey: c.publicKey } : {}
+}
+
 /** A credential used on this host under a hub's label (`UsedCredentials.underHubLabels`) */
 export type UsedUnderHubLabel = { id: string; label: string; created: number; check?: string; publicKey?: string }
+
+/**
+ * One full credential a socket said hello with on this host (`UsedCredentials`), as the host keeps it in memory and in its file (#1712).
+ * `goneAt`: when the host found `serve.json` no longer naming it (ms), absent while it does
+ */
+export type UsedRecord = { id: string; verifier?: string; publicKey?: string; label: string; created: number; replaced: boolean; goneAt?: number }
+
+/** How long the record of a credential that `serve.json` no longer names is kept, from when the host found it withdrawn (#1712): 7 days */
+export const WITHDRAWN_KEPT_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * What a record is kept under: the id and the verifier, or for a key entry (#1711) the id, `key:` and its public key, so
+ * an id another secret or another key reused is another credential (a verifier is 64 hex digits, so none shares a name with a key)
+ */
+const keyOf = (c: { id: string; verifier?: string; publicKey?: string }): string => (c.verifier !== undefined ? `${c.id}:${c.verifier}` : `${c.id}:key:${c.publicKey}`)
+
+/** A record as the file and the hubs have it: without the places it holds in memory or a note of being withdrawn */
+function plainRecord(u: UsedRecord): UsedRecord {
+  return { id: u.id, ...secretOf(u), label: u.label, created: u.created, replaced: u.replaced }
+}
+
+/** A record in memory: `seq` is the order of first use, `rank` the order of its newest line in the file */
+type Kept = UsedRecord & { seq: number; rank: number }
+
+/** One line of the file of used credentials (#1712): a record, as JSON. Lines are only ever added at the end, each ending in a newline */
+export function encodeUsedRecord(r: UsedRecord): string {
+  return `${JSON.stringify({ v: 1, id: r.id, ...secretOf(r), label: r.label, created: r.created, replaced: r.replaced, ...(r.goneAt !== undefined ? { goneAt: r.goneAt } : {}) })}\n`
+}
+
+/**
+ * The records a file of used credentials holds (#1712): each line of the shape `encodeUsedRecord` writes and that
+ * `isListedEntry` would take, in the order written. A line that is not one (cut short by a stop in the middle of a
+ * write, or written by hand) is skipped, and no other line is lost with it
+ */
+export function parseUsedRecords(text: string): UsedRecord[] {
+  return text.split('\n').flatMap((line): UsedRecord[] => {
+    if (line.trim() === '') return []
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      return []
+    }
+    const f = asObj(parsed)
+    if (f.v !== 1) return []
+    const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
+    const goneAt = typeof f.goneAt === 'number' && Number.isFinite(f.goneAt) && f.goneAt > 0 ? f.goneAt : undefined
+    const rest = { created, replaced: f.replaced === true, ...(goneAt !== undefined ? { goneAt } : {}) }
+    // One secret: a verifier (a full credential) or a public key (a hub's key entry, #1711), never both and never neither
+    if (f.verifier !== undefined && f.publicKey === undefined) return isListedEntry(f) ? [{ id: f.id, verifier: f.verifier, label: f.label, ...rest }] : []
+    if (f.publicKey !== undefined && f.verifier === undefined) return isKeyEntry(f) ? [{ id: f.id, publicKey: f.publicKey, label: f.label, ...rest }] : []
+    return []
+  })
+}
+
+/**
+ * What a hub linked to this host is told when a full credential said hello (#1712, the `host_credential_used` event):
+ * the record without its verifier, and a `check` of a nonce chosen here for this event, with which a hub that holds the
+ * secret under that id knows it for its own (`credentialCheck`), and no one else learns the verifier from. A hub's key
+ * entry (#1711) has no secret: its record names the public key, which a hub compares with its own
+ */
+export function usedEvent(r: UsedRecord, nonce: string = randomBytes(16).toString('base64url')) {
+  const credential: { id: string; label: string; created: number; replaced: boolean; nonce?: string; check?: string; publicKey?: string } = {
+    id: r.id,
+    label: r.label,
+    created: r.created,
+    replaced: r.replaced,
+    // A key entry's secret is public: its event names the public key and has no nonce or check (#1711)
+    ...(r.verifier !== undefined ? { nonce, check: credentialCheck(r.verifier, nonce) } : { publicKey: r.publicKey }),
+  }
+  return { type: 'host_credential_used' as const, credential }
+}
 
 /**
  * What `host.credentials` answers (#1405): the full credentials the file names, and those used here and gone since
@@ -300,16 +451,24 @@ export type UsedUnderHubLabel = { id: string; label: string; created: number; ch
  * it cannot be read (`unreadable`, #1405 review), so the hub's row can say the machine's credential file cannot be
  * read; and the ids used under hub labels, for the hub of each to check against its own (`underHubLabels`)
  */
-export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[] }
+export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[]; usedIds?: string[] }
 
 /** `host.credentials` for the serve.json at `path` and the credentials used on this host (main.ts) */
-export function credentialsReport(path: string, read: (p: string) => string, used: UsedCredentials, nonce?: string): CredentialsReport {
+export function credentialsReport(
+  path: string,
+  read: (p: string) => string,
+  used: UsedCredentials,
+  nonce?: string,
+  /** Told what the file names, before the answer is made from it: where the records of withdrawn credentials are noted and expire (#1712) */
+  onListed?: (listed: readonly { id: string; verifier?: string; publicKey?: string }[]) => void,
+): CredentialsReport {
   // Read again when the second read finds the file readable after all (a busy moment), so the answer is not null for nothing
   let listed = readListing(path, read)
   const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
   if (!listed && unreadable === null) listed = readListing(path, read)
+  if (listed) onListed?.(listed)
   const shown = listed?.map(({ verifier, publicKey, ...c }) => ({ ...c, ...secretFields({ verifier, publicKey }, nonce) }))
-  return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce) }
+  return { credentials: listed && shown ? [...shown, ...used.gone(listed, nonce)] : null, unreadable, usedUnderHubLabels: used.underHubLabels(nonce), usedIds: used.ids() }
 }
 
 /**

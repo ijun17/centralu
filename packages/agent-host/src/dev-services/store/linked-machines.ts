@@ -19,6 +19,8 @@ export type LinkedMachineRow = {
   asks?: boolean
   /** When the link to it was last up (#1398), from `app_settings` (`SEEN_KEY`); absent when it never was */
   lastConnectedAt?: number
+  /** The full credentials withdrawn from its row (#1712), by id and when (ms), from `app_settings` (`REVOKED_KEY`); absent when none */
+  revoked?: Record<string, number>
 }
 
 /** A pair the person approved for the reverse direction (#550, v60): a session of a linked machine, a project here */
@@ -40,6 +42,16 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
  * a restart of this host. A setting the previous build never reads, so it needs no migration step
  */
 const SEEN_KEY = 'links.lastConnected.'
+
+/**
+ * The full credentials the person withdrew from a machine's row (#1712), per machine: a JSON object of credential id and
+ * time (ms). A machine's host keeps its record of a withdrawn credential for a week, and the row must not list again after
+ * this hub restarts one the person withdrew. A setting the previous build never reads, so it needs no migration step
+ * (expand only: nothing here changes what a build before it reads)
+ */
+const REVOKED_KEY = 'links.revoked.'
+/** The most ids kept per machine: the newest */
+const REVOKED_MOST = 256
 
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
@@ -90,7 +102,27 @@ export class LinkedMachineRecords {
       autoReconnect: r.connect !== 'when_needed',
       asks: r.asks === 1,
       ...this.lastSeen(r.id),
+      ...this.revokedOf(r.id),
     }))
+  }
+
+  /** The credentials withdrawn from the machine's row, as `{ revoked }`, or nothing when there are none or the setting is not what was written */
+  private revokedOf(id: string): { revoked?: Record<string, number> } {
+    const raw = this.settings.appSetting(`${REVOKED_KEY}${id}`)
+    if (raw === null) return {}
+    const parsed = parseJson(raw)
+    if (!isObj(parsed)) return {}
+    const revoked: Record<string, number> = {}
+    for (const [credential, at] of Object.entries(parsed)) if (typeof at === 'number' && Number.isFinite(at) && at > 0) revoked[credential] = at
+    return Object.keys(revoked).length > 0 ? { revoked } : {}
+  }
+
+  /** The credentials withdrawn from the machine's row, whole (#1712): the newest `REVOKED_MOST` */
+  setLinkedMachineRevoked(id: string, revoked: Record<string, number>): void {
+    if (!this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(id)) return
+    const newest = Object.entries(revoked).sort(([, a], [, b]) => b - a).slice(0, REVOKED_MOST)
+    if (newest.length === 0) this.settings.deleteAppSetting(`${REVOKED_KEY}${id}`)
+    else this.settings.setAppSetting(`${REVOKED_KEY}${id}`, JSON.stringify(Object.fromEntries(newest)))
   }
 
   /** When the link to the machine was last up, as `{ lastConnectedAt }`, or nothing when it never was or the setting is not a time */
@@ -147,6 +179,7 @@ export class LinkedMachineRecords {
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
       this.settings.deleteAppSetting(`${SEEN_KEY}${id}`)
+      this.settings.deleteAppSetting(`${REVOKED_KEY}${id}`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)
     })()
