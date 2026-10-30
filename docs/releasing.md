@@ -8,8 +8,12 @@ page and no update server.
 All workflows use explicit hosted runner labels, including matrix values; the guard in
 `tooling/workflow-runners.test.ts` rejects floating `ubuntu-latest`, `macos-latest` and
 `windows-latest` labels. General Linux jobs use `ubuntu-24.04`. Native Linux bundles keep
-`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-14`
-(arm64), and Windows on `windows-2022`.
+`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-15`
+(arm64), and Windows on `windows-2022`. GitHub retires the macOS 14 images on 2026-11-02 (and fails every job on them
+during the brownouts before it, runner-images#13518), so the same guard rejects `macos-14` and older. The app's
+oldest macOS is not the runner's: the macOS builds set `MACOSX_DEPLOYMENT_TARGET: '11.0'`, and `build.yml` fails the
+bundle when an executable in it says otherwise (`minos` in `otool -l`). That is what macos-14 produced, so moving to
+macos-15 changed no supported macOS. What CI no longer runs is macOS 14 itself (see runtime-lessons.md TE4).
 
 Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
 and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
@@ -181,7 +185,7 @@ script rehearses by default and why nothing publishes automatically.
   runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
   So what differs there must not decide a result: `pnpm typecheck` gives tsc a fixed 4 GB heap
   (package.json), not Node's default of a quarter of the machine's memory, which on the 7 GB
-  macos-14 runner is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap there).
+  macos-15 runner is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap there).
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -491,7 +495,7 @@ path is removed.
 ```
 guard ──┬── linux-x64 (ubuntu-22.04) ──────┐
         ├── linux-arm64 (ubuntu-22.04-arm) ─┤
-        ├── darwin-arm64 (macos-14) ────────┤
+        ├── darwin-arm64 (macos-15) ────────┤
         └── win32-x64 (windows-2022) ───────┴── centralu (shim)
 ```
 

@@ -163,8 +163,10 @@ jobs:
             runner: ubuntu-22.04
           # Pinned for the same reason `build.yml` pins it: `macos-latest` moves between
           # Xcode and SDK versions without warning, and a release is not where to find out.
+          # macos-15 since GitHub retires the macOS 14 images on 2026-11-02 (runner-images#13518); the build below
+          # still targets macOS 11.0, as it did on macos-14.
           - target: darwin-arm64
-            runner: macos-14
+            runner: macos-15
           # linux-arm64 (#29), on from 0.1.0-beta.3. `ubuntu-22.04-arm` is deliberately the
           # same distro version as the x64 pin above, so arm64 users get the same glibc floor
           # rather than a newer one — and the runner is free only while this repository is
@@ -249,6 +251,8 @@ jobs:
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
           SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
           TARGET: ${{ matrix.target }}
+          # The oldest macOS the app runs on, as build.yml's macOS build states it (checked there on the built app).
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.target == 'darwin-arm64' && '11.0' || '' }}
           # pnpm verify's styles.test.ts: main's bundle comparison is build.yml's verify job's (#1181)
           CC_BUNDLE_COMPARED_BY: build.yml verify
           # The content signing key (docs/plans/thin-shell.md §4), PKCS#8 PEM. An environment

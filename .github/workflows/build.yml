@@ -169,7 +169,10 @@ jobs:
           - target: darwin-arm64
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
-            runner: macos-14
+            # macos-15, not macos-14: GitHub retires the macOS 14 images on 2026-11-02 (runner-images#13518).
+            # The newer Xcode and SDK do not change the oldest macOS the app runs on: the build step
+            # below states it, and the step after it checks it.
+            runner: macos-15
             # npm publishes the `.app`; no workflow consumes the DMG (#628).
             # Tar the app first (below) to preserve its executable bits and signature.
             artifacts: |
@@ -264,7 +267,24 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS'
         # The unused DMG's intermittent bundle_dmg.sh failures must not block releases.
+        env:
+          # The oldest macOS the app runs on (what rustc targets for arm64, and what the app was built for on
+          # macos-14), stated rather than left to the toolchain and the runner's SDK, which a later Xcode could raise.
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
         run: pnpm --filter @cc/desktop exec tauri build --bundles app
+
+      - name: Check the oldest macOS the app runs on
+        if: runner.os == 'macOS'
+        # Each executable in the bundle says the macOS it was built for (`minos`). A newer SDK or a dependency that
+        # builds C code can raise it without any error, and the app would then fail to open on the older Macs.
+        working-directory: apps/desktop/src-tauri/target/release/bundle/macos
+        run: |
+          set -euo pipefail
+          for exe in Centralu.app/Contents/MacOS/*; do
+            minos=$(otool -l "$exe" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')
+            echo "$exe: minos ${minos:-none}"
+            [ "$minos" = "11.0" ] || { echo "::error::$exe was built for macOS ${minos:-none}, not 11.0"; exit 1; }
+          done
 
       - name: Tar the .app
         if: runner.os == 'macOS'
@@ -426,7 +446,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -442,7 +462,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - run: echo "Nothing outside the window and the tests changed (.github/scripts/ci-changes.mjs)"
 
@@ -1038,7 +1058,7 @@ jobs:
     name: keeper e2e
     needs: changes
     if: needs.changes.outputs.host == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     env:
       # The scripts build into a folder under /tmp by default. rust-cache keeps only folders under

@@ -1830,7 +1830,9 @@ table and ends every descendant and group of each recorded pid; the installed ap
 names (#349, AGENTS.md).
 
 **TE4. The oldest supported OS is the one that fails.** #445 merged with CI red and failed only on macOS 14 (FI8). Do
-not merge on red; keep the oldest supported macOS in CI.
+not merge on red; keep the oldest supported macOS in CI. Since 2026-11-02, when GitHub retired the macOS 14
+images, CI's oldest macOS is 15: the behavior FI8 describes is no longer run by any job, so a change near it needs a
+manual run on a macOS 14 machine.
 
 **TE5. Wall-clock waits fail under load.** #368 collects them; Windows needed 3× limits, a process stops answering
 `kill(pid, 0)` before it releases its working directory, and probes outlive the host and write into the workspace
