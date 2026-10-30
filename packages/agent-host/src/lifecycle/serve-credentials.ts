@@ -64,7 +64,6 @@ export type KeyCredential = {
   publicKey: string
   created?: number
   replaced?: boolean
-  via?: string
 }
 
 /** One full credential the host accepts: its id, for the proof (`prove.credential`), who it was made for, and its verifier */
@@ -182,7 +181,8 @@ function readKeyEntries(raw: unknown): KeyCredential[] {
     const f = asObj(e)
     if (!isKeyEntry(f)) return []
     const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
-    return [{ id: f.id, label: f.label, publicKey: f.publicKey, created, replaced: f.replaced === true, ...(typeof f.via === 'string' ? { via: f.via } : {}) }]
+    // No `via` is kept: a key entry is full whatever the file says of it, so nothing in it may hide it from `UsedCredentials` (#1717 review, M1)
+    return [{ id: f.id, label: f.label, publicKey: f.publicKey, created, replaced: f.replaced === true }]
   })
 }
 
@@ -232,7 +232,8 @@ export class UsedCredentials {
 
   /** A socket said hello with `c`: a full credential, or a hub's key entry (#1711) */
   saw(c: FullCredential | KeyCredential): void {
-    if (c.via === 'handover') return
+    // Only an older launcher's one-call verifier entry is left out, never a key entry (which has no `via`, `readKeyEntries`)
+    if ('verifier' in c && c.via === 'handover') return
     const secret = 'verifier' in c ? { verifier: c.verifier } : { publicKey: c.publicKey }
     const key = `${c.id}:${secret.verifier ?? `key:${secret.publicKey}`}`
     const known = this.used.get(key)

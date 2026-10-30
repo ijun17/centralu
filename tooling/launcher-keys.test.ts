@@ -204,6 +204,24 @@ describe('serve --connection --pair-key (§4.2)', () => {
     expect(fileOf(d).keys).toHaveLength(2)
   })
 
+  // #1717 review, L2: the host takes the first entry of an id, so an entry ahead of the hub's with its id would keep the hub from linking
+  it('gives the hub’s entry a new id when another key entry shares its id, and keeps the id when none does', () => {
+    const d = tempDir()
+    const k1 = hubKey()
+    const mine = pairKeyServe(d, 'hub:a', k1, process.platform, 1).entry
+    const f = fileOf(d)
+    const squatter = { id: mine.id, label: 'hub:x', publicKey: hubKey(), created: 1, via: 'pair-key' }
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ ...f, keys: [squatter, ...f.keys] }))
+    const again = pairKeyServe(d, 'hub:a', k1, process.platform, 2).entry
+    expect(again).toMatchObject({ label: 'hub:a', publicKey: k1 })
+    expect(again.id).not.toBe(mine.id)
+    const ids = fileOf(d).keys.map((k: { id: string }) => k.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // The other entry stays, and the next call finds no clash
+    expect(fileOf(d).keys).toContainEqual(expect.objectContaining({ label: 'hub:x', id: mine.id }))
+    expect(pairKeyServe(d, 'hub:a', k1, process.platform, 3).entry).toEqual(again)
+  })
+
   it('withdraws a key entry by id, and every one at --rotate-token; a hand-written refused key is dropped at the next write', () => {
     const d = tempDir()
     const a = pairKeyServe(d, 'hub:a', hubKey()).entry
@@ -395,6 +413,20 @@ describe('what --pair-key reports for the host on the port', () => {
     const { line } = await cli(d, ['--connection', '--pair-key', 'hub:a', hub])
     expect(line).toMatchObject({ token: expect.any(String), credential: expect.any(String) })
     expect(line!.takes).not.toContain('pairKey')
+  }, 30_000 * SLOW)
+
+  // Something listens and takes the WebSocket, then closes it before any proof: not nothing, so not a key derived from the file
+  it('a port that accepts the connection and closes it before a proof: unknown, a verifier pairing, never the derived key', async () => {
+    const { d, port, hub } = await folder()
+    const wss = new WebSocketServer({ port, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    closers.push(() => new Promise<void>((r) => wss.close(() => r())))
+    wss.on('connection', (ws: any) => ws.close())
+    expect(await probeKeyProof({ port, keyId: 'a1b2c3d4', hubKey: hub })).toEqual({ outcome: 'unknown' })
+    const { line } = await cli(d, ['--connection', '--pair-key', 'hub:a', hub])
+    expect(line).toMatchObject({ token: expect.any(String), credential: expect.any(String) })
+    expect(line!.takes).not.toContain('pairKey')
+    expect(line!.hostKey).toBeUndefined()
   }, 30_000 * SLOW)
 
   it('nothing listening and nothing holding the folder: the key derived from the file, which the host started next signs with', async () => {

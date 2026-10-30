@@ -376,7 +376,10 @@ host. §3 has the comparison.
   - a host from before verifiers gets the one token it knows (`legacyHostToken`), as today: that token is in the file;
   - an older launcher with a new host still makes a `via: 'handover'` entry; a new host takes such an entry as
     **limited**, never full, which is enough for the call now. `UsedCredentials.saw` keeps skipping them while a reader
-    can still meet one.
+    can still meet one, and **only** them: a verifier entry. A key entry carries no `via` for the host (`readKeyEntries`
+    keeps none), so nothing a file says of a key entry can hide a full hello from `UsedCredentials` (the #1717 review, M1:
+    `via: "handover"` on a hand-written key entry gave full rights that no listing ever showed). The launcher still
+    writes `via: 'pair-key'`, which only a reader of the file sees.
 - The **window** on a machine (`serve --window`) stays a verifier credential; its residual is #1417's (§2).
 - The **limited credential**, a session's (`ccs1`, `CC_HOST_CREDENTIAL`, #1438) and a bridge's (`ccb1`) stay derived
   from the key, as today. Agents and scripts see no key and no signature.
@@ -568,6 +571,12 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
      a verifier credential. Ignoring cannot raise any rights, and a hub never sends both, so refusing would only add a
      way to fail. The marker with `auth` absent, malformed or not verifying is refused (4001) before the limited paths
      are tried, so it is neither full nor limited. The marker is never compared with a verifier entry.
+   - *The #1717 review* (M1, L2): a key entry has no `via` for the host, and `saw` skips only an older launcher's
+     one-call verifier entry, so every full hello, by key or by verifier, is recorded and its removal listed as `gone`.
+     The key `prove` answers from the entries a socket in may keep (`openKeys`), so a file that cannot be read yet is
+     not "credential withdrawn". `--pair-key` gives the hub's entry a new id (reported in the line) when another key entry
+     shares its id, since the host takes the first entry of an id; a file with such a twin written by hand is otherwise
+     left as it is (both are listed). Not changed: the CLI's sentence for `--revoke <key id>`.
    - *Item 4.* What a key `prove` left is taken off the socket at its first hello attempt, before that hello is judged.
    - *The probe* (§4.2): `signed` (the running host signs, and the line reports its key), `unsigned` (a proof with none
      of the three fields: a host from before key pairing), `none` (the connection is refused) and `unknown` (anything

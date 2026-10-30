@@ -39,13 +39,25 @@ type Call = { method: string; ctx: RpcContext | undefined }
 /** A host as `centralu serve` starts one, its serve.json in memory: `write` replaces it as the launcher does */
 async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { port?: number; frontDoor?: string; credentialSweepMs?: number } = {}) {
   let text = ''
+  /** While set, the file is there but cannot be read (permission denied, a scanner holding it) */
+  let denied = false
+  const used = new UsedCredentials()
+  const heard: unknown[] = []
   const write = (f: { full?: object[]; keys?: object[] }) => (text = JSON.stringify({ v: 2, key: KEY, port: null, full: f.full ?? [], ...(f.keys ? { keys: f.keys } : {}) }))
   write(file)
   const calls: Call[] = []
   server = new HostServer({
     port: opts.port ?? 0,
     token: KEY,
-    fullCredentials: () => readCredentialFile('link-proof.json', () => text, () => {}),
+    fullCredentials: () =>
+      readCredentialFile('link-proof.json', () => {
+        if (denied) throw Object.assign(new Error('denied'), { code: 'EACCES' })
+        return text
+      }, () => {}),
+    onFullHello: (c) => {
+      heard.push(c)
+      used.saw(c)
+    },
     ...(opts.frontDoor !== undefined ? { frontDoor: opts.frontDoor } : {}),
     ...(opts.credentialSweepMs ? { credentialSweepMs: opts.credentialSweepMs } : {}),
     onRpc: async (method, _params, ctx) => {
@@ -54,7 +66,7 @@ async function serveHost(file: { full?: object[]; keys?: object[] }, opts: { por
     },
   })
   const port = await server.listen()
-  return { port, write, calls }
+  return { port, write, calls, used, heard, text: () => text, deny: (v: boolean) => (denied = v) }
 }
 
 /** One socket to the host (Node's own WebSocket, as a hub's would be a client): what it sends, and what comes back */
@@ -243,6 +255,35 @@ describe('what a key hello is refused for (§4.3, §9)', () => {
     expect(await e.p.closed).toBe(4001)
   })
 
+  /*
+   * §10 "The marker", the other half: a key hello that is good, in a file that also holds the marker's own verifier as a full
+   * entry, is full under its key entry only. Taking the marker as a verifier credential too would record that entry as used
+   * at this hello (and list it as gone later, under a label no hub paired it for)
+   */
+  it('takes a good key hello as the key entry alone, not also as a verifier entry equal to the marker', async () => {
+    const hub = hubKeys()
+    const { port, heard } = await serveHost({ full: [{ id: 'dddddddd', label: 'hub:x', verifier: verifierOf(LINK_AUTH_MARKER), created: 1 }], keys: [keyEntry(HUB_ID, hub.text)] })
+    const d = await hubDial(port, hub)
+    expect(await accepted(d.p)).toBe(true)
+    expect(heard).toEqual([expect.objectContaining({ id: HUB_ID, publicKey: hub.text })])
+  })
+
+  // The sweep and the key prove read the same file as hellos do, but a prove is answered from what a socket in may keep
+  it('answers a key prove from the last key entries while serve.json cannot be read, then refuses the hello for the unreadable file', async () => {
+    const hub = hubKeys()
+    const { port, deny } = await serveHost({ keys: [keyEntry(HUB_ID, hub.text)] })
+    // One read of the file now, so that the last good list is kept
+    expect(await accepted((await hubDial(port, hub)).p)).toBe(true)
+    deny(true)
+    const d = await hubDial(port, hub)
+    // Not "credential withdrawn": the entry is not known to be gone, only unreadable (a hub that was told it pairs anew)
+    expect(d.proof?.hostKey).toBe(hostLinkKey(KEY).publicKey.text)
+    expect(d.hostSigned).toBe(true)
+    expect(await d.p.closed).toBe(4001)
+    expect(d.p.reason()).toBe('credential file unreadable')
+    expect(d.p.frames.some((f) => f.kind === 'hello_ok')).toBe(false)
+  })
+
   it('refuses the marker without auth, or with a malformed one: neither full nor limited', async () => {
     const hub = hubKeys()
     const { port } = await serveHost({ keys: [keyEntry(HUB_ID, hub.text)] })
@@ -323,6 +364,32 @@ it('lists a used key entry as gone once its id is listed under another public ke
   used.saw(keyEntry(HUB_ID, first))
   expect(used.gone([{ ...keyEntry(HUB_ID, first), replaced: false }])).toEqual([])
   expect(used.gone([{ ...keyEntry(HUB_ID, second), replaced: true }])).toEqual([expect.objectContaining({ id: HUB_ID, gone: true, publicKey: first })])
+})
+
+// M1 of the #1717 review: whatever a key entry carries, a socket in under it is recorded, so its removal is listed as gone
+describe('a key entry used for a full hello is always recorded (#1717 review, M1)', () => {
+  it.each(['handover', 'pair-key', 'window', ''])('lists it as gone once removed, whatever its via (%j)', async (via) => {
+    const hub = hubKeys()
+    const entry = { id: HUB_ID, label: LABEL, publicKey: hub.text, created: 1, via }
+    const { port, write, text, used, calls } = await serveHost({ keys: [entry] })
+    const d = await hubDial(port, hub)
+    expect(await accepted(d.p)).toBe(true)
+    expect((await d.p.call('host.sessions'))?.ok).toBe(true)
+    expect(calls.at(-1)?.ctx?.rights).toBe('full')
+    // Listed while it is there, with no via of its own
+    expect(credentialsReport('link-proof.json', text, used).credentials).toEqual([expect.objectContaining({ id: HUB_ID, publicKey: hub.text })])
+    // Removed before any read of the hub: still told of, as gone, with its public key
+    write({})
+    const report = credentialsReport('link-proof.json', text, used)
+    expect(report.credentials).toEqual([expect.objectContaining({ id: HUB_ID, label: LABEL, gone: true, publicKey: hub.text })])
+    expect(report.usedUnderHubLabels).toEqual([expect.objectContaining({ id: HUB_ID, publicKey: hub.text })])
+  })
+
+  it('still leaves an older launcher’s one-call verifier entry out, which only a limited hello ever uses', () => {
+    const used = new UsedCredentials()
+    used.saw({ id: 'eeeeeeee', label: 'handover', verifier: verifierOf('h'.repeat(43)), created: 1, replaced: false, via: 'handover' })
+    expect(used.gone([])).toEqual([])
+  })
 })
 
 describe('a socket in by key (§4.4)', () => {

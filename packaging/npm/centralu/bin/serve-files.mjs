@@ -444,7 +444,12 @@ export function pairKeyServe(dataDir, label, publicKey, platform = process.platf
   let entry = null
   const state = changeServeState(dataDir, (s) => {
     const before = s.keys.find((k) => k.label === label)
-    if (before && before.publicKey === publicKey) {
+    /*
+     * The host takes the first key entry of an id (#1717 review, L2), so one written by hand ahead of the hub's, with its id
+     * and another key, keeps the hub from linking. Such an id is not kept: the entry gets a fresh one, which the line reports
+     */
+    const shared = before !== undefined && s.keys.some((k) => k !== before && k.id === before.id)
+    if (before && before.publicKey === publicKey && !shared) {
       entry = before
       return s
     }
