@@ -511,9 +511,11 @@ export function removeServePid(dataDir, pid) {
 }
 
 /**
- * A probe that did not prove the token, while this data folder's host is alive (`host.lock`): a host from before #838
- * still running after an update. It is running, and is not sent the token; a hub asking it for a proof is refused
- * until it restarts. Without a live lock holder, what answered is not ours.
+ * A probe that did not prove the token, while this data folder's `serve` is alive (`host.lock`): a host from before #838
+ * still running after an update, or one still on its old key after `--rotate-token`. It is running, and is not sent the
+ * token; a hub asking it for a proof is refused until it restarts. Without a live lock holder that `serve` started
+ * (`startedByServe`), what answered is not ours: a live holder the app or the keeper started owns the folder, and
+ * whatever sits on the recorded port (a hub's ssh forward, #1722) is not that holder.
  *
  * `portRecorded`: serve.json names the port the probe went to (`state.port != null`). A folder that has none was probed
  * on the default port, where whatever listens is as likely another host's (a hub's ssh forward to a linked machine's serve
@@ -522,7 +524,35 @@ export function removeServePid(dataDir, pid) {
 export function heldHere(probe, dataDir, startOf = processStartTime, portRecorded = true) {
   if (probe.running) return true
   if (!probe.unproven || !portRecorded) return false
-  return lockHolderIsAlive(dataDir, startOf)
+  return lockHolderIsAlive(dataDir, startOf) && startedByServe(dataDir)
+}
+
+/**
+ * Whether the process `host.lock` names is a host `centralu serve` started (#1722): what lets the launcher signal it.
+ * The lock says so itself (`by: 'serve'`, #1223); a lock that names another starter (`app`, `keeper`) is that one's. A
+ * lock from before `by` is believed only when `serve.pid` names the same pid as the host its launcher started, the way
+ * `stopServedHost` believes the launcher. A bare pid, or a lock nothing else vouches for, is no one's we know.
+ */
+export function startedByServe(dataDir) {
+  const holder = lockHolder(dataDir)
+  if (!holder) return false
+  if (holder.by) return holder.by === 'serve'
+  return readServePid(dataDir)?.hostPid === holder.pid
+}
+
+/** Who `by` in host.lock says started the host, as a phrase (#1223); an absent `by` is most likely the app */
+export function holderWho(by) {
+  return { app: 'the Centralu window on this machine', keeper: "Centralu's keeper on this machine", serve: 'another centralu serve' }[by] ?? 'probably the Centralu app on this machine'
+}
+
+/**
+ * The live process that holds this folder's lock and that `centralu serve` did not start, `{ pid, started, by? }`, or
+ * null (#1722): `--stop` names it rather than signal it. Only named, so a pid that is alive is enough (no start time:
+ * Windows has none), as for the message `serve` itself prints when the lock stops its host.
+ */
+export function foreignHolder(dataDir) {
+  const holder = lockHolder(dataDir)
+  return holder && isAlive(holder.pid) && !startedByServe(dataDir) ? holder : null
 }
 
 /**

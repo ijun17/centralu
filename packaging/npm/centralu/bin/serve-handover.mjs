@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, lockHolderPid, readServePid, pairServe, revokeServe } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid, pairServe, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials, takesVerifiers } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
@@ -20,7 +20,9 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * one still there afterwards is ended.
  *
  * Only the processes serve.pid and host.lock name, and only while they agree with each other and the host answered
- * with this folder's token: a stale pid is never signalled.
+ * with this folder's token: a stale pid is never signalled. And only a host `serve` started (`startedByServe`, #1722):
+ * a lock held by the app's or the keeper's host is theirs, whatever answers on the port, so `--stop` says whose it is
+ * and leaves it.
  *
  * `{ ok, wasRunning, how?, message? }`, the `--stop` line's `stop`. With `ifIdle` (#1224, the hand-over) the host stops only
  * when nothing runs there, and `{ ok: false, busy: true }` says it did not. `forUpdate` (#1618): a hub's update stops it, and
@@ -37,12 +39,19 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const own = ownCredentials(state, entry)
   const probe = () => probeHost({ port, ...own, protocolVersion: installed, prove })
   const first = await probe()
-  if (!heldHere(first, dataDir, undefined, state.port != null)) return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` }
+  if (!heldHere(first, dataDir, undefined, state.port != null)) {
+    // The folder is held, but not by a serve (#1722): the app's or the keeper's host, whatever answered on the port
+    const other = foreignHolder(dataDir)
+    const whose = other ? `. It belongs to another Centralu host (pid ${other.pid}), ${holderWho(other.by)}; not stopping it` : ''
+    return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}${whose}` }
+  }
 
   const hostPid = lockHolderPid(dataDir)
+  // Only a host `serve` started is ever signalled, whoever answered with this folder's token
+  const mayKill = startedByServe(dataDir)
   const launcher = readServePid(dataDir)
   // serve.pid is only believed when it names the host that holds the folder now
-  const launcherPid = launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
+  const launcherPid = mayKill && launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
   let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle, forUpdate })
@@ -53,7 +62,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   let stopped = asked.ok && (await waitUntil(down, timeoutMs))
   let note = asked.ok ? null : `the host did not take the request to stop (${asked.message})`
   if (!stopped) {
-    const target = platform !== 'win32' && launcherPid ? launcherPid : hostPid
+    const target = platform !== 'win32' && launcherPid ? launcherPid : mayKill ? hostPid : null
+    if (hostPid && !mayKill) note = `${note ? `${note}; ` : ''}the lock names pid ${hostPid}, which centralu serve did not start, so it was not signalled`
     if (target) {
       how = platform === 'win32' ? 'ended' : 'signal'
       try {

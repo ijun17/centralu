@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid, pairServe, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, ownCredentials } from './serve-host.mjs'
@@ -217,8 +217,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
         const holder = lockHolder(dataDir)
         if (holder && holder.pid !== child.pid && isAlive(holder.pid)) {
           // Who it is, when its host.lock says (#1223)
-          const who = { app: 'the Centralu window on this machine', keeper: "Centralu's keeper on this machine", serve: 'another centralu serve' }[holder.by] ?? 'probably the Centralu app on this machine'
-          say(`the host did not start. ${dataDir} belongs to another Centralu host (pid ${holder.pid}), ${who}. Quit it, or point CC_DATA_DIR at another folder.`)
+          say(`the host did not start. ${dataDir} belongs to another Centralu host (pid ${holder.pid}), ${holderWho(holder.by)}. Quit it, or point CC_DATA_DIR at another folder.`)
         }
       }
       if (logFd !== null) say(`the host exited (${signal ?? code})`)
