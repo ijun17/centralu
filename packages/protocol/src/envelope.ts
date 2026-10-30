@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { NormalizedEvent } from './events.js'
 import { ProtocolError } from './entities.js'
 import { HostHandover, HostLogon } from './host-logon.js'
+import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES, base64urlShape } from './link-wire.js'
 
 /** Transport envelope (docs/protocol.md §1). One WS text frame equals one value of this type. */
 
@@ -105,6 +106,16 @@ export const ProofServer = z.object({
   kind: z.literal('proof'),
   nonce: z.string(),
   mac: z.string(),
+  /**
+   * A host's answer to a `prove` that named `key` (#1711, docs/plans/key-pairing.md §4.3): the nonce it drew for this
+   * socket (24 bytes, base64url, 32 characters), the public key it signs with (32 bytes, 43 characters) and its Ed25519
+   * signature over the link transcript (64 bytes, 86 characters). Only the shape is checked here; the strict decoding,
+   * the key's checks and the signature are agent-host's (`link-keys.ts`). Each malformed one reads as absent, and a hub
+   * takes the three together or not at all. Additive: an older hub ignores them
+   */
+  hostNonce: z.string().regex(base64urlShape(LINK_NONCE_BYTES)).optional().catch(undefined),
+  hostKey: z.string().regex(base64urlShape(LINK_PUBLIC_KEY_BYTES)).optional().catch(undefined),
+  sig: z.string().regex(base64urlShape(LINK_SIGNATURE_BYTES)).optional().catch(undefined),
 })
 export type ProofServer = z.infer<typeof ProofServer>
 

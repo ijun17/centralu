@@ -1654,7 +1654,7 @@ A host started with `centralu serve` on another machine is reached by the app th
   held the token itself, but a reader of `serve.json` gets more than the limited credential through it. Closing it needs
   an asymmetric pairing (the verifier a public key, the hub signing the host's nonce instead of sending a bearer
   credential); until the owner decides, it stays a stated residual. Another account cannot take this path: it cannot
-  read the 0600 file.
+  read the 0600 file. The design that closes it (#1711, proposed): [plans/key-pairing.md](plans/key-pairing.md).
 - **The same on the linked machine.** `serve --connection`, `serve` and `serve --stop` ask the host on the recorded
   port with the token, and another account there can hold that port while the host is down. When the installed
   build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
