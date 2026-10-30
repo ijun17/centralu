@@ -32,6 +32,7 @@ import {
   parseLinkPublicKey,
   hostLinkPublicKey,
   signedHostKey,
+  probeKeyProof,
   linkTranscript as launcherTranscript,
   SERVE_STATE_FILE,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -59,12 +60,12 @@ const hubKey = () => linkPublicKeyOf(generateKeyPairSync('ed25519').privateKey)!
 const IDENTITY = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString('base64url')
 
 /** `centralu serve <args>` in a temporary data folder: exit code, the last stdout line as JSON, stderr */
-async function cli(dataDir: string, args: string[]): Promise<{ code: number; line: Record<string, any> | null; stderr: string }> {
+async function cli(dataDir: string, args: string[], extra: NodeJS.ProcessEnv = {}): Promise<{ code: number; line: Record<string, any> | null; stderr: string }> {
   return await new Promise((resolve) => {
     execFile(
       process.execPath,
       [CLI, 'serve', ...args],
-      { cwd: ROOT, env: { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1', CENTRALU_SIGNIN_TASK: 'off' } },
+      { cwd: ROOT, env: { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1', CENTRALU_SIGNIN_TASK: 'off', ...extra } },
       (err, stdout, stderr) => {
         const last = stdout.trim().split('\n').at(-1) ?? ''
         let line: Record<string, any> | null = null
@@ -141,6 +142,8 @@ describe('the launcher holds the host’s key rules (§4.1, §4.3)', () => {
     expect(signedHostKey(proof, { ...want, hubNonce: Buffer.alloc(24, 0x12).toString('base64url') })).toBeNull()
     expect(signedHostKey({ ...proof, hostKey: hubKey() }, want)).toBeNull()
     expect(signedHostKey({ kind: 'proof', nonce: hubNonce, mac: 'x' }, want)).toBeNull()
+    // An answer to another prove: the nonce it echoes is not this one
+    expect(signedHostKey({ ...proof, nonce: Buffer.alloc(24, 0x12).toString('base64url') }, want)).toBeNull()
   })
 })
 
@@ -303,14 +306,42 @@ describe('what --pair-key reports for the host on the port', () => {
   it('a host that signs: a key line with the key it signs with and the entry, pairKey in takes, and no credential', async () => {
     const { d, port, hub } = await folder()
     await newHost(d, port)
+    const other = hubKey()
+    pairKeyServe(d, 'hub:b', other)
     const { code, line } = await cli(d, ['--connection', '--pair-key', 'hub:a', hub])
     expect(code).toBe(0)
-    const entry = fileOf(d).keys[0]
+    const entry = fileOf(d).keys.find((k: { label: string }) => k.label === 'hub:a')
     expect(line).toMatchObject({ hostKey: hostLinkKey(String(readServeState(d).key)).publicKey.text, keyId: entry.id, takes: expect.arrayContaining(['pairKey']) })
     expect(line!.token).toBeUndefined()
     expect(line!.credential).toBeUndefined()
     expect(fileOf(d).full).toEqual([])
-    expect(line!.others).toEqual([])
+    // Another hub's key entry is listed with its public key; the one this line pairs is not
+    expect(line!.others).toEqual([expect.objectContaining({ label: 'hub:b', publicKey: other })])
+  })
+
+  it('a host that answers a proof with only some of the signed fields: unknown, never unsigned', async () => {
+    const { port, hub } = await folder()
+    const wss = new WebSocketServer({ port, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    closers.push(() => new Promise<void>((r) => wss.close(() => r())))
+    let answer: (nonce: string) => object = () => ({})
+    wss.on('connection', (ws: any) => ws.on('message', (raw: unknown) => ws.send(JSON.stringify(answer((JSON.parse(String(raw)) as { nonce: string }).nonce)))))
+    answer = (nonce) => ({ kind: 'proof', nonce, mac: 'x' })
+    expect(await probeKeyProof({ port, keyId: 'a1b2c3d4', hubKey: hub })).toEqual({ outcome: 'unsigned' })
+    for (const extra of [{ hostKey: hub }, { hostNonce: Buffer.alloc(24).toString('base64url') }, { sig: 'A'.repeat(86) }]) {
+      answer = (nonce) => ({ kind: 'proof', nonce, mac: 'x', ...extra })
+      expect(await probeKeyProof({ port, keyId: 'a1b2c3d4', hubKey: hub }), JSON.stringify(extra)).toEqual({ outcome: 'unknown' })
+    }
+  })
+
+  it('nothing listening, nothing holding the folder, and an installed host from before key pairing: a verifier pairing', async () => {
+    const { d, hub } = await folder()
+    const bundle = tempDir()
+    writeFileSync(join(bundle, 'bundle-info.json'), JSON.stringify({ protocolVersion: PROTOCOL_VERSION, verifiers: 1, hostProof: 1 }))
+    const { line } = await cli(d, ['--connection', '--pair-key', 'hub:a', hub], { CENTRALU_HOST_ENTRY: join(bundle, 'main.mjs') })
+    expect(line).toMatchObject({ token: expect.any(String), credential: expect.any(String), hostRunning: false })
+    expect(line!.hostKey).toBeUndefined()
+    expect(line!.takes).not.toContain('pairKey')
   })
 
   it('--key-paired removes the label’s verifier entry on a key line, and only on one', async () => {
