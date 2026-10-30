@@ -3,7 +3,7 @@
 // About 25 jobs run per push and the free plan runs about 20 at once, so runs queue one behind
 // another. Two tiers (the owner's decision of 2026-10-18):
 //
-//   quick   a pull request: `changes`, `verify` and the Windows unit tests, the jobs that catch most
+//   quick   a pull request: `changes`, `verify`, the Windows unit tests and the macOS tests, the jobs that catch most
 //           problems cheaply. Every other job is left out, and reports nothing.
 //   full    everything else: a commit already on main, a manual run (workflow_dispatch: a person
 //           asking for it on a branch, or the main guard's bisect), and a release bump's pull
@@ -39,7 +39,7 @@
 // changes the version's source (a release bump's run is never cut short, docs/releasing.md), or that is on main, or
 // whose files are not known. `full` is `true` on a full run: the jobs every
 // full run has (the WebKit UI scenarios, the Windows lint and types, the `full tier` job), and `off`
-// on a quick one. `quick` is `true` on both: `verify` and the Windows unit tests; `off`, with every
+// on a quick one. `quick` is `true` on both: `verify`, the Windows unit tests and the macOS tests; `off`, with every
 // other answer, for a draft.
 //
 // Which files: everything a commit adds to main. A commit already on main (a push to main, every

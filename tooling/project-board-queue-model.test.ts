@@ -85,6 +85,7 @@ const REQUIRED = [
   'verify',
   'windows tests (vitest 1/2)',
   'windows tests (vitest 2/2)',
+  'macos tests',
   'e2e (webkit 1/2)',
   'e2e (webkit 2/2)',
   'e2e (chromium 1/2)',
@@ -143,7 +144,7 @@ function proof(run: Run | undefined, { heavy, shards = SHARDS }: { heavy: boolea
   if (run.conclusion !== 'success') return `the run concluded ${run.conclusion}`
   const by = (name: string) => run.checks.find((c) => c.name === name)
   const ok = (name: string) => by(name)?.status === 'completed' && by(name)?.conclusion === 'success'
-  for (const n of ['changes', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)']) if (!ok(n)) return `${n} did not succeed`
+  for (const n of ['changes', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'macos tests']) if (!ok(n)) return `${n} did not succeed`
   if (!heavy) return null
   if (run.tier !== 'full') return 'the heavy jobs were needed and the run was the fast tier'
   if (!ok('full tier')) return 'the full tier did not pass'
@@ -330,7 +331,7 @@ class World {
   private fill(run: Run) {
     const done = run.age >= run.duration
     if (this.jobList && run.tier === 'full') return this.fillRecorded(run, done)
-    const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', ...(run.tier === 'full' ? SHARDS : [])]
+    const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'macos tests', ...(run.tier === 'full' ? SHARDS : [])]
     const id = (n: string) => run.id * 100 + REQUIRED.indexOf(n) + 1
     const rows: CheckRow[] = []
     if (run.tier === 'full') rows.push({ name: STAND_IN_SKIPPED, status: 'completed', conclusion: 'skipped', id: run.id * 100 + 99, steps: [] })
@@ -613,7 +614,8 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     const r = await simulate(1, {
       steps: 0,
       setup: (world, dir) => {
-        world.jobList = RUN_220
+        // The recorded run predates the macOS job (#1704): its job list gains the check the quick tier now asks for
+        world.jobList = { ...RUN_220, jobs: [...RUN_220.jobs, { ...RUN_220.jobs.find((j: { name: string }) => j.name === 'verify')!, name: 'macos tests' }] }
         world.required = RUN_220.jobs.map((j) => j.name).filter((n) => !n.includes('${{'))
         world.shards = world.required.filter((n) => /^e2e \((webkit|chromium) \d+\/\d+\)$/.test(n))
         world.open(1)
@@ -698,7 +700,7 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
       createdAt: '',
       status: 'completed',
       conclusion: 'success',
-      checks: ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)'].map((name, id) => ({ name, status: 'completed', conclusion: name === 'full tier' ? 'skipped' : 'success', id })),
+      checks: ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'macos tests'].map((name, id) => ({ name, status: 'completed', conclusion: name === 'full tier' ? 'skipped' : 'success', id })),
       ...extra,
     })
     const full = (patch: (rows: CheckRow[]) => CheckRow[] = (r) => r, extra: Partial<Run> = {}): Run => {

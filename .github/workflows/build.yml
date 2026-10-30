@@ -46,7 +46,7 @@ jobs:
   #
   # A draft pull request (a stack's lower, #1066) runs `changes` alone, and every other job skips.
   #
-  # The quick tier, on a pull request: `changes`, `verify` and the Windows unit tests. The full tier,
+  # The quick tier, on a pull request: `changes`, `verify`, the Windows unit tests and the macOS tests. The full tier,
   # every job: a push to main, a manual run (the merge queue's batches; a person on a branch) and a
   # release bump's pull request (it changes the file that declares the version). The merge queue lands
   # nothing on the quick tier alone: only from a full run on what lands, which the `full tier` job
@@ -547,6 +547,96 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # The host's tests on macOS (#1704). Until this job existed no CI job ran a unit test on a Mac: the release
+  # rehearsal's darwin job was the first to, so a difference between macOS and Linux (APFS keeps file times in
+  # nanoseconds and `name/` is ENOENT, #1650; libuv 1.51 cuts file times to microseconds, #1713) passed every pull
+  # request and failed the next release instead. The same runner and Node as the darwin build (release.yml: macos-14,
+  # setup-node 22), so a pass here is a pass there.
+  #
+  # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
+  # OS the most, the filters in the step below; `macos tests` is one of `ci.quickChecks`, so nothing lands without it.
+  # A full run whose files change the host's tests (`host_tests`): the whole host, as `host tests, remote Node` runs it.
+  # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
+  # Measured on macos-14 and Node 22.23.2 (2026-10-30, #1704): the whole host, 491 test files, 564 s of vitest (222 s of
+  # it collecting the files, which three cores share), the job 10.0 minutes with the install. The quick tier's files are
+  # 148 of them, 405 of the 797 s of file time, so about 6 minutes a job. The release's darwin job ran every test of the
+  # repository in about 17 minutes on the same runner.
+  #
+  # Not the Node the remotes are pinned to (packaging/remote-runtime.json): the hub installs that Node only where
+  # the installer serves it (Linux and Windows, `host tests, remote Node`), and refuses a Mac (links/install.ts).
+  # A Mac linked as a machine runs the host on the Node the person has, which is what this job runs on.
+  macos-tests:
+    name: macos tests
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # The release's darwin build (release.yml) runs its tests on this
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Say which Node runs the tests
+        run: echo "node $(node -p 'process.versions.node') (libuv $(node -p 'process.versions.uv')) on macOS $(sw_vers -productVersion)"
+
+      # Never the real data folder (AGENTS.md)
+      - name: pnpm test (the tests that touch the OS)
+        id: quick
+        if: needs.changes.outputs.host_tests == 'off'
+        env:
+          CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+        # vitest takes each argument as a part of a test file's path. tooling/build-workflow.test.ts holds that each
+        # matches a test file, since vitest leaves a filter that matches none out without a word.
+        run: >-
+          pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
+          packages/agent-host/src/os
+          packages/agent-host/src/process.test
+          packages/agent-host/src/adapters/local-process
+          packages/agent-host/src/apps/
+          packages/agent-host/src/dev-services/
+          packages/agent-host/src/lifecycle/
+          packages/agent-host/src/transport/
+          packages/agent-host/src/links/
+          tooling/launcher-
+
+      - name: pnpm test (host, protocol, launcher)
+        id: full
+        if: needs.changes.outputs.host_tests == 'true'
+        env:
+          CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/launcher-
+
+      # The time each file took, for choosing what the quick tier runs; also when a test failed
+      - name: Say which test files took longest
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f "$RUNNER_TEMP/vitest-times.json" ] || exit 0
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+            const files = r.testResults.map((t) => ({ f: t.name.replace(process.cwd() + "/", ""), s: (t.endTime - t.startTime) / 1000 }))
+            files.sort((a, b) => b.s - a.s)
+            const total = files.reduce((n, x) => n + x.s, 0)
+            console.log(`${files.length} files, ${total.toFixed(0)} s of file time in all`)
+            for (const x of files.slice(0, 25)) console.log(`${x.s.toFixed(1).padStart(7)} s  ${x.f}`)
+          ' "$RUNNER_TEMP/vitest-times.json"
+
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-test-times
+          path: ${{ runner.temp }}/vitest-times.json
+          retention-days: 30
+          if-no-files-found: warn
+
   # The UI scenarios (e2e/, Playwright) in WebKit, on every full run (owner decisions, 2026-10-11:
   # every pull request; 2026-10-18: every full run, which is what lands). The desktop app is WKWebView,
   # and until this job existed no CI job ran Playwright at all: nine WebKit-only failures piled up on
@@ -570,7 +660,7 @@ jobs:
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
   # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10. The three jobs that install a browser (#1503, 2026-10-24) limit
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 10.0/15 (the whole host). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
   # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux

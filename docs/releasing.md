@@ -72,7 +72,7 @@ script rehearses by default and why nothing publishes automatically.
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
 - **Two tiers** (owner decision, 2026-10-18): a full run is about 24 jobs and the free plan runs 20
   at once, so every push of every pull request used to queue a whole run behind the others. A pull
-  request now runs the **quick tier**: `changes`, `verify` and the Windows unit tests
+  request now runs the **quick tier**: `changes`, `verify`, the Windows unit tests and the macOS tests
   (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
   94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
   is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
@@ -105,6 +105,16 @@ script rehearses by default and why nothing publishes automatically.
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
   the pull request.
+- **`macos tests`** (#1704) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
+  (`macos-14`, Node 22), because until it existed the release rehearsal was the first place any unit test ran on macOS: the
+  differences it found there (#1650's contract cases, #1713's file times under libuv 1.51) failed the release instead of the
+  pull request. In the quick tier it runs the tests that reach the OS the most (the OS layer, the process adapter, apps,
+  dev services, lifecycle, transport, links and the npm launcher: 148 of the host's 491 test files, about 6 minutes); on a
+  full run that changes the host's tests, the whole host, as `host tests, remote Node` runs it (about 10 minutes); on a full
+  run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
+  with it. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
+  (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
+  the Node this job runs. The release's darwin job still runs `pnpm verify` whole.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
   tier, leaves out what a run cannot affect, by the files it adds to main (compared with its
   merge-base with main, whatever its base branch, so a stacked pull request is judged by the whole
@@ -217,7 +227,7 @@ squash merge commit, and `git rev-parse <sha>^{tree}` must match for that commit
 A commit landed after the release commit does not matter (#1350). Every required
 check on that exact PR head must be reported and green; missing, pending or failed
 checks refuse it, and so does a run that did not pass the `full tier` check, when the required
-set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
+set names it: a quick run skips every job but `changes`, `verify`, the Windows unit tests and the macOS tests, and a
 skipped job reads as passed. `bump` still requires main's own green CI.
 
 Main's green checks are used directly. A failing main check blocks reuse, including a
@@ -263,7 +273,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, `macos-tests`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
