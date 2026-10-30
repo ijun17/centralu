@@ -1559,7 +1559,9 @@ A host started with `centralu serve` on another machine is reached by the app th
       shorter; one read takes at most 1 MiB of new lines, the newest, and says on stderr when it skips older ones), so a
       program that appends to the file cannot make a report slow, and the file is rewritten (past four times the
       records kept) only from a state that holds all of it, so a fresh use is never rewritten away. A record whose
-      line was cut short (a full disk, a power loss) is skipped, and the next record is written on a line of its own.
+      line was cut short (a full disk, a power loss) is skipped, and the next record is written on a line of its own. A
+      hello reads nothing back: it appends and, when the file was exactly as long as what was read, counts its line
+      where it stands; otherwise the next report reads it with whatever else was added (#1715).
       Agents' per-session credentials are not full credentials and are not reported. The owner's constraint
       (2026-10-29) is that this never slows or blocks ordinary work: the hello is not held for the hub (the event is
       queued on the hub's socket, a hub that stopped reading is cut as for any event), with the hub's link down the
@@ -1568,12 +1570,14 @@ A host started with `centralu serve` on another machine is reached by the app th
       **Records do not stay for good** (owner decision, 2026-10-30): the first report that finds a recorded
       credential no longer named by `serve.json` writes down when (`goneAt`, a line added to the file) and the host
       drops the record, from memory and at the file's next rewrite, 7 days after (a restart does not renew the clock,
-      since it is in the file; a credential still named is never dropped; while `serve.json` cannot be read nothing is
-      noted or dropped). The date is when the host found it withdrawn, which is the first report after the withdrawal,
+      since it is in the file; a credential still named is never dropped, and one named again loses its note, so a later
+      withdrawal starts a new week; while `serve.json` cannot be read nothing is noted or dropped). The date is when the host found it withdrawn, which is the first report after the withdrawal,
       or after a host that was stopped starts and reports again. The hub keeps what the person withdrew from a
       machine's row, by id and time, in its store (`app_settings` `links.revoked.<machine>`, the newest 256, written
-      with no migration step; forgotten with the machine and after 14 days), so a record the machine's host still keeps
-      does not bring a withdrawn credential back on the row after the hub restarts. What is left is the same
+      with no migration step; forgotten with the machine, once a read of the machine answers that its host keeps no
+      record of the credential (`usedIds`, which is a week after the host's first report after the withdrawal, however
+      long no hub read it), and at the latest after 60 days), so a record the machine's host still keeps does not bring
+      a withdrawn credential back on the row after the hub restarts. What is left is the same
       user's: drop the hub's link first (the event has nowhere to go; the file is read at the next link), or delete the
       file or make it unwritable, which that user can do as easily as `serve.json` (the hub's event still arrives while
       its link is up, and it keeps it across the restart; with the link down too, nothing is left to show). A swap's
