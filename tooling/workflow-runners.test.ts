@@ -22,3 +22,24 @@ describe('workflow runner images change only when explicitly upgraded', () => {
     expect(floating, 'Pin runner images, including matrix values, to explicit OS versions').toEqual([])
   })
 })
+
+describe('macOS runners and the oldest macOS the app runs on', () => {
+  it.each(workflows)('%s uses no macOS image GitHub has retired', (name) => {
+    // macos-14 and earlier (and their -large and -xlarge twins) stop running on 2026-11-02 (actions/runner-images#13518),
+    // and fail every job during the brownouts before it. Comments may name them.
+    const retired = readFileSync(new URL(name, directory), 'utf8').split('\n')
+      .flatMap((line, index) => {
+        const config = line.replace(/(^|\s)#.*$/, '')
+        return /\bmacos-(?:\d|1[0-4])\b/.test(config) ? [`${name}:${index + 1}: ${config.trim()}`] : []
+      })
+    expect(retired, 'Move the job to macos-15 or later, and its check name in tooling/project-board-ci.test.ts').toEqual([])
+  })
+
+  it('states the oldest macOS in every build of the app, so a newer runner SDK cannot raise it', () => {
+    const build = readFileSync(new URL('build.yml', directory), 'utf8')
+    const release = readFileSync(new URL('release.yml', directory), 'utf8')
+    expect(build).toContain("MACOSX_DEPLOYMENT_TARGET: '11.0'")
+    expect(build).toContain('[ "$minos" = "11.0" ]')
+    expect(release).toContain("MACOSX_DEPLOYMENT_TARGET: ${{ matrix.target == 'darwin-arm64' && '11.0' || '' }}")
+  })
+})

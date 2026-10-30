@@ -61,8 +61,8 @@ describe('the shell release workflow', () => {
 
   it('builds on an Apple silicon runner, from a fresh target folder with no cache', () => {
     const build = job('build').join('\n')
-    // macos-14 and later are arm64; macos-13 and the -large images are Intel.
-    expect(build).toMatch(/runs-on: macos-1[4-9]$/m)
+    // macos-14 and later are arm64 (macos-14 itself is retired, see workflow-runners.test.ts); macos-13 and the -large images are Intel.
+    expect(build).toMatch(/runs-on: macos-1[5-9]$/m)
     expect(build).not.toMatch(/rust-cache|actions\/cache/)
     expect(build).toMatch(/shell-bundle\.mts build --out "\$RUNNER_TEMP\/shell" --target-dir "\$RUNNER_TEMP\/shell-target"/)
     expect(build).toContain("MACOSX_DEPLOYMENT_TARGET: '11.0'")
