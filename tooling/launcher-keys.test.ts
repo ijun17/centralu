@@ -166,11 +166,17 @@ describe('serve --connection --pair-key (§4.2)', () => {
     const r = await cli(d, ['--connection', '--pair-key', 'hub:a', IDENTITY])
     expect(r.code).toBe(2)
     expect(r.line).toBeNull()
+    // Refused for its key, not as an option this serve does not know (an older one exits 2 for that)
+    expect(r.stderr).toMatch(/--pair-key needs an Ed25519 public key/)
     expect(existsSync(join(d, SERVE_STATE_FILE))).toBe(false)
+    // The same command with a key the host takes pairs
+    const good = tempDir()
+    expect((await cli(good, ['--connection', '--pair-key', 'hub:a', hubKey()])).code).toBe(0)
+    expect(fileOf(good).keys).toHaveLength(1)
     // And the writer refuses one handed to it directly
     ensureServeState(d)
     const before = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
-    expect(() => pairKeyServe(d, 'hub:a', IDENTITY)).toThrow()
+    expect(() => pairKeyServe(d, 'hub:a', IDENTITY)).toThrow(/refused public key/)
     expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).toBe(before)
   })
 
