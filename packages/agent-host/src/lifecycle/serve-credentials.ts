@@ -178,8 +178,9 @@ export function readCredentialFile(
  *
  * Nor one whose id a verifier entry of `full` has (#1717 recheck, F1): a key entry has no secret, so a hub told of it has
  * no `check` to tell it from its own credential of that id, and an entry written by hand under the hub's id would be
- * full here and unseen on its row. The two kinds draw their ids apart (`freshId`), so only a file written by hand has
- * the clash; the verifier entry keeps the id
+ * full here and unseen on its row. The launcher draws a key entry's id apart from every other entry's (`freshId`), so the
+ * clash comes from a file written by hand, or from a verifier entry's 32-bit draw that happens to be a key entry's id; the
+ * verifier entry keeps the id, and the next `--pair-key` gives the key entry another
  */
 function readKeyEntries(raw: unknown, full: readonly { id: string }[]): KeyCredential[] {
   if (!Array.isArray(raw)) return []

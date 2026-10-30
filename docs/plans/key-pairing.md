@@ -601,8 +601,8 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    - A key entry's id is drawn apart from every verifier entry's and key entry's id, so `--revoke <id>` names one entry.
      `--rotate-token` clears `keys`; a hand-written key entry whose public key is refused is not listed, makes no socket
      full and is dropped at the launcher's next write.
-   - A key entry whose id a verifier entry of the same file has (written by hand; `--pair-key` gives its entry a fresh id
-     when it finds the clash) is refused as a refused key is: the host takes no hello under it and does not list it, and
+   - A key entry whose id a verifier entry of the same file has (written by hand, or a verifier entry's 32-bit draw that
+     met it; `--pair-key` gives its entry a fresh id when it finds the clash) is refused as a refused key is: the host takes no hello under it and does not list it, and
      the verifier entry keeps the id (#1717 recheck, F1). A key entry has no secret, so a hub told of it has no `check` to
      tell it from its own credential of that id; the hub also reads any listed entry or used record that carries a
      `publicKey` as never its own verifier credential, so a host that lists one shows it on the row. Nothing tells the
