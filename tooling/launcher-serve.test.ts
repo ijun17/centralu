@@ -1020,12 +1020,13 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       const port = await freePort()
       const s = serve(d, ['--port', String(port)])
       await s.until(/listening on 127\.0\.0\.1:\d+/)
+      // The key the host started with, which it signs with and hands out until it restarts
+      const startKey = String(readServeState(d).key)
       try {
         const hubPair = generateKeyPairSync('ed25519')
         const hub = linkPublicKeyOf(hubPair.privateKey)!.text
-        const started = String(readServeState(d).key)
         const first = (await cli(d, ['--connection', '--pair-key', 'hub:test-0123abcd', hub])).line
-        expect(first).toMatchObject({ hostKey: hostLinkKey(started).publicKey.text, keyId: expect.stringMatching(/^[0-9a-f]{8}$/), hostRunning: true, takes: expect.arrayContaining(['pairKey']) })
+        expect(first).toMatchObject({ hostKey: hostLinkKey(startKey).publicKey.text, keyId: expect.stringMatching(/^[0-9a-f]{8}$/), hostRunning: true, takes: expect.arrayContaining(['pairKey']) })
         expect(first.token).toBeUndefined()
         const linked = await keyLink(port, hubPair.privateKey, hub, String(first.keyId))
         expect(linked.first).toBe('hello_ok')
@@ -1033,22 +1034,24 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         expect(r.credentials).toEqual([expect.objectContaining({ id: first.keyId, label: 'hub:test-0123abcd', publicKey: hub })])
         expect(r.usedUnderHubLabels).toEqual([expect.objectContaining({ id: first.keyId, publicKey: hub })])
         // A same-user reader of the file gets the key, the limited credential and the hub's public key: none is a hub's hello
-        for (const v of [started, hub, String(first.keyId), limitedOf(started)]) {
+        for (const v of [startKey, hub, String(first.keyId), limitedOf(startKey)]) {
           const got = await hello(port, v).then((f) => String(f.kind), (e: Error) => e.message)
-          if (v === limitedOf(started)) expect(got).toBe('hello_ok')
+          if (v === limitedOf(startKey)) expect(got).toBe('hello_ok')
           else expect(got, v).toMatch(/closed 4001/)
         }
-        expect((await cli(d, ['--rotate-token'])).code).toBe(0)
+        // --rotate-token prints no line on stdout, only what it did on stderr
+        expect(await new Promise((r) => spawn(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d), stdio: 'ignore' }).once('close', r))).toBe(0)
         expect(await linked.closed).toBe(4001)
         const again = (await cli(d, ['--connection', '--pair-key', 'hub:test-0123abcd', hub])).line
-        expect(again.hostKey).toBe(hostLinkKey(started).publicKey.text)
+        expect(again.hostKey).toBe(hostLinkKey(startKey).publicKey.text)
         expect(again.keyId).not.toBe(first.keyId)
         const relinked = await keyLink(port, hubPair.privateKey, hub, String(again.keyId))
         expect(relinked.first).toBe('hello_ok')
         relinked.close()
       } finally {
+        // The host still runs on the key it started with, which --stop no longer has after the rotation (§7)
         if (POSIX) s.child.kill('SIGTERM')
-        else await cli(d, ['--stop'])
+        else await askHost(port, limitedOf(startKey), 'host.stop').catch(() => undefined)
         await s.exited
       }
     },
