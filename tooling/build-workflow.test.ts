@@ -163,6 +163,8 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(quick).toContain("if: needs.changes.outputs.host_tests == 'off'")
     expect(full).toContain("if: needs.changes.outputs.host_tests == 'true'")
     expect(full).toContain('packages/agent-host packages/protocol tooling/\n')
+    // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
+    expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
     const filters = quick.split('\n').map((l) => l.trim()).filter((l) => /^(packages|tooling)\//.test(l))
     expect(filters.length).toBeGreaterThan(5)

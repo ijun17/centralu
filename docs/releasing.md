@@ -109,12 +109,13 @@ script rehearses by default and why nothing publishes automatically.
   (`macos-14`, Node 22), because until it existed the release rehearsal was the first place any unit test ran on macOS: the
   differences it found there (#1650's contract cases, #1713's file times under libuv 1.51) failed the release instead of the
   pull request. In the quick tier it runs the tests that reach the OS the most (the OS layer, the process adapter, apps,
-  dev services, lifecycle, transport, links and the npm launcher: 148 of the host's 491 test files, about 6 minutes); on a
-  full run that changes the host's tests, the whole host, as `host tests, remote Node` runs it (about 10 minutes); on a full
-  run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
+  dev services, lifecycle, transport, links, the keeper, a few single files such as `ends-with-host`, and three tooling tests:
+  the npm launcher's, `e2e-lock` and `screen-protocol-rules`, the two that failed on a Mac and nowhere else in #1695: 158 test
+  files, about 5.5 minutes); on a full run that changes the host's tests, the whole host, the protocol and every test of
+  `tooling/` (573 files, about 14 minutes); on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
   with it. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
   (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
-  the Node this job runs. The release's darwin job still runs `pnpm verify` whole.
+  the Node this job runs. The release's darwin job still runs `pnpm verify` whole. Its `pnpm test` stays until a change decides otherwise: `tooling/` has Mac-only failures (#1695), and the UI and core tests run on Linux only.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
   tier, leaves out what a run cannot affect, by the files it adds to main (compared with its
   merge-base with main, whatever its base branch, so a stacked pull request is judged by the whole

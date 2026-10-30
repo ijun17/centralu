@@ -554,13 +554,17 @@ jobs:
   # setup-node 22), so a pass here is a pass there.
   #
   # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
-  # OS the most, the filters in the step below; `macos tests` is one of `ci.quickChecks`, so nothing lands without it.
-  # A full run whose files change the host's tests (`host_tests`): the whole host, as `host tests, remote Node` runs it.
+  # OS the most, the filters in the step below (the OS layer, the process adapter, apps, dev services, lifecycle,
+  # transport, links, keeper/, a few single files, and three tooling tests: the launcher's, e2e-lock and
+  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `macos tests` is one of
+  # `ci.quickChecks`, so nothing lands without it.
+  # A full run whose files change the host's tests (`host_tests`): the whole host, the protocol and every test of
+  # tooling/. Linux runs tooling/ too, but only a Mac found #1695's two failures there.
   # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
-  # Measured on macos-14 and Node 22.23.2 (2026-10-30, #1704): the whole host, 491 test files, 564 s of vitest (222 s of
-  # it collecting the files, which three cores share), the job 10.0 minutes with the install. The quick tier's files are
-  # 148 of them, 405 of the 797 s of file time, so about 6 minutes a job. The release's darwin job ran every test of the
-  # repository in about 17 minutes on the same runner.
+  # Measured on macos-14 and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
+  # job 5.5 minutes with the install. The whole host alone (491 files) was 564 s of vitest (222 s of it collecting the
+  # files, which three cores share), the job 10.0 minutes; with tooling/ (573 files) 822 s of vitest, the job 14.2
+  # minutes. The release's darwin job ran every test of the repository in about 17 minutes on the same runner.
   #
   # Not the Node the remotes are pinned to (packaging/remote-runtime.json): the hub installs that Node only where
   # the installer serves it (Linux and Windows, `host tests, remote Node`), and refuses a Mac (links/install.ts).
@@ -570,7 +574,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -621,6 +625,8 @@ jobs:
         if: needs.changes.outputs.host_tests == 'true'
         env:
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+          # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
+          CC_BUNDLE_COMPARED_BY: verify
         run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/
 
       # The time each file took, for choosing what the quick tier runs; also when a test failed
@@ -669,7 +675,7 @@ jobs:
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
   # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 10.0/20 (the whole host). The three jobs that install a browser (#1503, 2026-10-24) limit
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
   # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux
