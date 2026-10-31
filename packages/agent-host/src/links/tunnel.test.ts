@@ -98,17 +98,13 @@ fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) 
 const has = (process.env.FAKE_SSH_HAS || '').split('|')
 const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
 const answer = () => {
-  // A serve from before #1405 refuses --pair, as it refuses any option it does not know
-  // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
-  if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
-  if (process.env.FAKE_SSH_NO_PAIR_FILE && !/ --pair /.test(cmd) && !fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) return process.stdout.write(line({ token: undefined, takes: ['from', 'window', 'pair'] }) + String.fromCharCode(10))
   // A serve.json this user may not read there (#1405 review), as the launcher says it
   if (process.env.FAKE_SSH_DENIED) { process.stderr.write('centralu serve: /d/serve.json cannot be read by this user (EACCES). Give this user read and write access to it again (on Linux and macOS: chmod 600 /d/serve.json) and run again; do not move it aside.' + String.fromCharCode(10)); process.exit(1) }
+  // A serve from before #1405 refuses --pair, as it refuses any option it does not know
   if (process.env.FAKE_SSH_NO_PAIR && / --pair /.test(cmd)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
     const how = process.env.FAKE_SSH_DETACH
-    if (how === 'old') { process.stderr.write('unknown option for serve: --detach\n'); process.exit(2) }
     if (how === 'blocked') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'Windows did not start Centralu through WMI (returned 2).' } }) + '\n')
     if (how === 'old_node') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: null, reason: 'node_too_old', message: 'centralu serve needs Node 22.14.0 or newer and this is Node 22.12.0: update Node.', node: '22.12.0', floor: '22.14.0' } }) + '\n')
     if (how === 'crashed') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'exited', message: 'centralu serve exited (3221225477) before its host answered' } }) + '\n')
@@ -483,29 +479,11 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(forwards[1]).not.toContain('-N')
   })
 
-  it('pairs for a credential of its own, and asks a serve from before pairing as before, once (#1405)', async () => {
+  it('pairs for a credential of its own, and tells a serve from before pairing to update there, asked once (#1405)', async () => {
     const t = tunnel({ FAKE_SSH_NO_PAIR: '1' })
-    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    await expect(t.open()).rejects.toThrow(/may predate `centralu serve` \(update it there: npm i -g centralu\): unknown option for serve: --pair/)
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
-    expect(runs.map((r) => / --pair hub:/.test(r))).toEqual([true, false])
-    // The refusal is remembered for this link: the next open asks without --pair at once
-    await t.close()
-    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
-    const after = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
-    expect(after.slice(2).map((r) => / --pair hub:/.test(r))).toEqual([false])
-  })
-
-  it('asks with --pair again once a remote that refused it was updated, rather than linking with no credential (#1405 review)', async () => {
-    const flag = join(dir, `no-pair-${Date.now()}`)
-    writeFileSync(flag, '')
-    const t = tunnel({ FAKE_SSH_NO_PAIR_FILE: flag })
-    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
-    await t.close()
-    // Updated there: it takes --pair now, and prints no token without it
-    rmSync(flag, { force: true })
-    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
-    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => / --pair hub:/.test(x.run!))
-    expect(runs).toEqual([true, false, false, true])
+    expect(runs.map((r) => / --pair hub:/.test(r))).toEqual([true])
   })
 
   it('pairs under a label of its own: its name, and a key that tells it from a hub of the same name', () => {
@@ -595,13 +573,12 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000 * SLOW)
 
-    it('says why a start failed, and that a remote too old for --detach has to be started there', async () => {
+    it('says why a start failed', async () => {
       const at = async (how: string) => {
         const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: how, FAKE_SSH_LINE: line({ port: await freePort() }) })
         return t.startHost()
       }
       await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
-      await expect(at('old')).rejects.toThrow(/too old to be started from here: run `centralu serve` there/)
       await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
     }, 30_000 * SLOW)
 

@@ -275,7 +275,7 @@ export class StartedNotServing extends Error {
   }
 }
 
-/** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
+/** Reads the one JSON line `--detach` prints; throws when there is none */
 export function parseDetachLine(stdout: string): DetachAnswer {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -829,9 +829,6 @@ export class SshTunnel implements Tunnel {
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
-      if (/unknown option for serve: --detach/.test(r.stderr)) {
-        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${shimNames(remote).centralu} serve\` there, or update it (${npmInstall(remote)})`)
-      }
       const why = lastLine(r.stderr)
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
     }
@@ -955,9 +952,6 @@ export class SshTunnel implements Tunnel {
     return this.opts.configFile ? ['-F', this.opts.configFile] : []
   }
 
-  /** An older remote refused `--pair` once (#1405): asked without it from then on, for this tunnel's life */
-  private pairs = true
-
   /** The label this hub pairs as there (#1405, `pairLabel`): its computer's name and its own key */
   get pairsAs(): string {
     return pairLabel(this.opts.hubName ?? hostname(), this.opts.hubKey)
@@ -968,28 +962,16 @@ export class SshTunnel implements Tunnel {
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
     /*
      * A full credential of this hub's own, made there at each link (#1405): `--connection` alone prints none since. A
-     * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token
+     * remote from before `--pair` refuses it and prints no line, which says to update it there (`parseConnectionLine`)
      */
-    const pair = this.pairs ? this.pairsAs : null
-    let r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
-    if (pair && r.code !== 0 && r.code !== 255 && /unknown option for serve: --pair/.test(r.stderr + r.stdout)) {
-      this.pairs = false
-      r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
-    }
-    /*
-     * A remote updated since it refused `--pair` says it takes it now, and prints no token without it: asked again with
-     * it, once, rather than linking with no credential until this hub restarts (#1405 review)
-     */
-    if (!this.pairs && r.code === 0 && /"takes":\[[^\]]*"pair"/.test(r.stdout) && !/"token":/.test(r.stdout)) {
-      this.pairs = true
-      return this.connectionLine()
-    }
+    const pair = this.pairsAs
+    const r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
       const line = parseConnectionLine(r.stdout, remote)
       // Under which label this hub's own credential was made: another of that label on the row is not this hub's
-      return pair && this.pairs && line.credential ? { ...line, pairedAs: oneLineText(pair, 80) } : line
+      return line.credential ? { ...line, pairedAs: oneLineText(pair, 80) } : line
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)
