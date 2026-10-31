@@ -8,12 +8,25 @@ page and no update server.
 All workflows use explicit hosted runner labels, including matrix values; the guard in
 `tooling/workflow-runners.test.ts` rejects floating `ubuntu-latest`, `macos-latest` and
 `windows-latest` labels. General Linux jobs use `ubuntu-24.04`. Native Linux bundles keep
-`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-14`
-(arm64), and Windows on `windows-2022`.
+`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-15`
+(arm64), and Windows on `windows-2022`. GitHub retires the macOS 14 images on 2026-11-02 (and fails every job on them
+during the brownouts before it, runner-images#13518), so the same guard rejects `macos-14` and older. The app's
+oldest macOS is not the runner's. `bundle.macOS.minimumSystemVersion` in `tauri.conf.json` is 11.0 (the Tauri CLI
+sets `MACOSX_DEPLOYMENT_TARGET` from it, and it is what `LSMinimumSystemVersion` in the app's Info.plist says), and the
+macOS builds repeat it in the environment. Nothing reaches the files that are only copied (node-pty and better-sqlite3
+arrive as upstream prebuilds), so `scripts/macos-minos.mjs` reads every Mach-O file (`minos` in `otool -l`) and fails on
+one that asks for more than 11.0: `build.yml` runs it on the built bundle and `release-npm.mts` on the staged package,
+the keeper copy in the content folder and the shell included. `build.yml` also fails on the linker's "was built for
+newer" warning, which a compiled object can raise without changing the file's number. 11.0 is what macos-14 produced
+(measured on a main build and in 0.1.0-beta.45), so moving to macos-15 changed no supported macOS. The Rust cache keys
+carry the runner image, so a runner move rebuilds every dependency. What CI no longer runs is macOS 14 itself (see
+runtime-lessons.md TE4 and FI8).
 
 Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
 and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
-on 2026-10-14. An OS label pins the OS generation, not GitHub's weekly image revision.
+on 2026-10-14. An OS label pins the OS generation, not GitHub's weekly image revision. Those runs show the macOS
+image of the time, `macos-14`; the move to `macos-15` is confirmed from [build run 41108759817](https://github.com/ijun17/centralu/actions/runs/41108759817)
+on 2026-10-30 (image `macos-15-arm64`, version 20261028.0489.1).
 The Ubuntu 26 migration of `ubuntu-latest` starts on 2026-10-19 (#639); a separate PR
 should try `ubuntu-26.04` across the matrix before changing these pins.
 
@@ -192,7 +205,8 @@ script rehearses by default and why nothing publishes automatically.
   runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
   So what differs there must not decide a result: `pnpm typecheck` gives tsc a fixed 4 GB heap
   (package.json), not Node's default of a quarter of the machine's memory, which on the 7 GB
-  macos-14 runner is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap there).
+  macOS runners is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap on `macos-14`; `macos-15` has the same
+  7 GB).
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -502,7 +516,7 @@ path is removed.
 ```
 guard ──┬── linux-x64 (ubuntu-22.04) ──────┐
         ├── linux-arm64 (ubuntu-22.04-arm) ─┤
-        ├── darwin-arm64 (macos-14) ────────┤
+        ├── darwin-arm64 (macos-15) ────────┤
         └── win32-x64 (windows-2022) ───────┴── centralu (shim)
 ```
 

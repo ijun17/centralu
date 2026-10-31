@@ -1,7 +1,8 @@
 # Pairing a hub and a linked machine with keys (#1711)
 
-> **Status: slice 2 built (2026-10-30); revised after the adversarial review and its recheck on #1714.** Slice 2 (the
-> keys, the transcript and the protocol fields, §9) is built and no live path calls it yet; nothing else is built. The
+> **Status: slices 2 and 3 built (2026-10-30); revised after the adversarial review and its recheck on #1714.** Slice 2
+> (the keys, the transcript and the protocol fields) and slice 3 (the machine side: `--pair-key`, the host's signed
+> proof and key hello, the hand-over with limited rights) are built (§9); no hub pairs by key until slice 4. The
 > first pull request carries this document with slice 2; each later one updates it with what it built and measured. It closes
 > the residual in [security-boundaries.md](../security-boundaries.md), "The remote host", **Residual: the proof under a
 > stored verifier** (#1405 review, held for the owner; owner decision 2026-10-29: do it after the #1405 stack).
@@ -375,14 +376,17 @@ host. §3 has the comparison.
   - a host from before verifiers gets the one token it knows (`legacyHostToken`), as today: that token is in the file;
   - an older launcher with a new host still makes a `via: 'handover'` entry; a new host takes such an entry as
     **limited**, never full, which is enough for the call now. `UsedCredentials.saw` keeps skipping them while a reader
-    can still meet one.
+    can still meet one, and **only** them: a verifier entry. A key entry carries no `via` for the host (`readKeyEntries`
+    keeps none), so nothing a file says of a key entry can hide a full hello from `UsedCredentials` (the #1717 review, M1:
+    `via: "handover"` on a hand-written key entry gave full rights that no listing ever showed). The launcher still
+    writes `via: 'pair-key'`, which only a reader of the file sees.
 - The **window** on a machine (`serve --window`) stays a verifier credential; its residual is #1417's (§2).
 - The **limited credential**, a session's (`ccs1`, `CC_HOST_CREDENTIAL`, #1438) and a bridge's (`ccb1`) stay derived
   from the key, as today. Agents and scripts see no key and no signature.
 - The **method rights** otherwise do not change: a key hello is full, as a hub's verifier hello is.
 - **The row's listing.** A key entry under the hub's label is the hub's own exactly when its public key is the hub's,
   so `credentialCheck`'s HMAC is not needed for key entries. `host.credentials` adds `publicKey` to key entries
-  (public), and `UsedCredentials` keys them by id and public key. Once the hub's record says it has paired by key with
+  (public), and `UsedCredentials` keys them by id and public key (see "The record of used credentials" below). Once the hub's record says it has paired by key with
   the machine, a **verifier** entry under its own label is never its own (it holds no credential to `check` it, and it
   removed its own with `--key-paired`): the hub shows it among the other credentials, with Revoke, as it shows any other
   credential today. So someone else's `serve --pair hub:<label>` between two links is judged like any other. It gets no
@@ -536,7 +540,7 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
         allows 22 to 128 characters); otherwise close as malformed, and never answer with the mac path.
      3. *Host, at hello.* A `token === LINK_AUTH_MARKER` with `auth` absent (a malformed one included) is refused. An
         `auth` beside any other token is ignored or refused, and the choice is written down here. `auth` never upgrades a
-        limited or verifier hello.
+        limited or verifier hello. *Chosen in slice 3: ignored* (below).
      4. *Host, after any hello attempt.* `Ns` and the stored `Nh` and `keyId` are dropped after any hello attempt, failed
         ones included.
      5. *Hub.* A line whose `hostKey` fails `parseLinkPublicKey` is dropped. `Pm` is compared as the parsed text, which
@@ -551,6 +555,78 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
    from `CC_FRONT_DOOR`, and takes a key hello; the sweep compares `(id, publicKey)`; `host.credentials` covers key
    entries. The hand-over call: `host.handover` limited, the launcher makes no hand-over credential, a host takes a
    `via: 'handover'` entry as limited (§4.4). An old hub sees no change. The acceptance run measures macOS port sharing.
+
+   **Built.** The host's side in `transport/link-proof.ts` (called from `server.ts`), the key entries in
+   `lifecycle/serve-credentials.ts`, `host.handover` everyday in `method-rights.ts`; the launcher's side in
+   `serve-keys.mjs` (its own copy of the key check, the derived host key and the proof check, held to the host's answers
+   and to the pinned vector by `tooling/launcher-keys.test.ts`), `serve-args.mjs`, `serve-files.mjs`, `serve-host.mjs`
+   (`probeKeyProof`, `takesKeyHellos`), `serve-run.mjs` and `serve-handover.mjs`; `keyPairing: 1` in the bundle's
+   `bundle-info.json`. What it settled:
+   - *Item 2.* The nonce is checked first: with `key`, a nonce that is not exactly 24 bytes, or no address to sign (a
+     `CC_FRONT_DOOR` of another form), closes the socket (4001, "not a hello") with no proof, before any entry is looked
+     up. Only then does an id naming no key entry, or one whose public key is refused, close it as "credential
+     withdrawn", which tells a hub to pair anew.
+   - *Item 3, the choice: an `auth` beside any other token is ignored.* The hello is judged by its token alone, as if no
+     `auth` came: the limited, a session's and a bridge's credential stay what they are, and a verifier credential stays
+     a verifier credential. Ignoring cannot raise any rights, and a hub never sends both, so refusing would only add a
+     way to fail. The marker with `auth` absent, malformed or not verifying is refused (4001) before the limited paths
+     are tried, so it is neither full nor limited. The marker is never compared with a verifier entry.
+   - *The #1717 review* (M1, L2): a key entry has no `via` for the host, and `saw` skips only an older launcher's
+     one-call verifier entry, so every full hello, by key or by verifier, is recorded and its removal listed as `gone`.
+     The key `prove` answers from the entries a socket in may keep (`openKeys`), so a file that cannot be read yet is
+     not "credential withdrawn". `--pair-key` gives the hub's entry a new id (reported in the line) when another key entry
+     shares its id, since the host takes the first entry of an id; a file with such a twin written by hand is otherwise
+     left as it is (both are listed). Not changed: the CLI's sentence for `--revoke <key id>`.
+   - *The record of used credentials* (#1712 on main, merged into this slice). `UsedRecord` holds either a `verifier` (a
+     verifier entry) or a `publicKey` (a key entry), never both; a record is kept under the id and the verifier, or the
+     id and `key:` and the public key, so an id reused under another key is another credential, matching the
+     `(id, publicKey)` sweep. `saw` records a key hello the same way; only an older launcher's one-call verifier entry is
+     skipped. `settle` and `gone` match a listed key entry by `(id, publicKey)`, as they match a verifier entry by
+     `(id, verifier)`. The file `serve-used.jsonl` writes `publicKey` instead of `verifier` for a key record, and reads
+     either shape (a line with both, with neither, or with a refused key is skipped). An older build skips the key lines,
+     which is fine: it accepts no key hello. A public key is not secret, so a key record has no HMAC: `host.credentials`
+     entries (`gone`), `usedUnderHubLabels` and the `host_credential_used` event carry `publicKey` and no `nonce` or
+     `check` (`nonce` and `check` became optional in the event, additive). **Slice 4:** the hub knows such a record for
+     its own by comparing the `publicKey` with its own public key (the verifier path compares a `check`). A hub from
+     before this drops an event with no `check` (`credentialUsed`) and lists the use at its next `host.credentials`
+     read, where an entry it did not pair is shown among the other credentials; it never pairs by key, so this only
+     concerns a hand-written or foreign key entry.
+   - *Item 4.* What a key `prove` left is taken off the socket at its first hello attempt, before that hello is judged.
+   - *The probe* (§4.2): `signed` (the running host signs, and the line reports its key), `unsigned` (a proof with none
+     of the three fields: a host from before key pairing), `none` (the connection is refused) and `unknown` (anything
+     else: no answer in 2 s, a socket closed first, a proof with some of the fields or one that does not verify). Only
+     `none`, with no live holder of `host.lock` and an installed host that says `keyPairing`, reports the key derived
+     from the file; every other outcome pairs by verifier, with no `pairKey` and no verifier entry removed, so a slow old
+     host never gets a key line and a keeper's host with an old copy of the key never gets a derived one.
+   - A key entry's id is drawn apart from every verifier entry's and key entry's id, so `--revoke <id>` names one entry.
+     `--rotate-token` clears `keys`; a hand-written key entry whose public key is refused is not listed, makes no socket
+     full and is dropped at the launcher's next write.
+   - A key entry whose id a verifier entry of the same file has (written by hand, or a verifier entry's 32-bit draw that
+     met it; `--pair-key` gives its entry a fresh id when it finds the clash) is refused as a refused key is: the host takes no hello under it and does not list it, and
+     the verifier entry keeps the id (#1717 recheck, F1). A key entry has no secret, so a hub told of it has no `check` to
+     tell it from its own credential of that id; the hub also reads any listed entry or used record that carries a
+     `publicKey` as never its own verifier credential, so a host that lists one shows it on the row. Nothing tells the
+     person of the refused entry; it stays in the file until `--revoke <id>` or `--rotate-token`.
+   - *Measured with a real `centralu serve`*: `--pair-key` reports the key the running host signs with, the key hello is
+     full, `host.credentials` lists the entry with its public key, and none of the file's values (the key, the limited
+     credential, the hub's public key, the entry id) is a full hello. After `--rotate-token` the socket is closed (4001)
+     by the sweep, the next `--pair-key` reports the running host's old key under a new id, and the hub links at once.
+   - *Mixed builds, measured* (WSL, Node 22.23.4 and 24.22.1): main's hub code (`links/` is unchanged here) running
+     `--pair` against this machine side pairs by verifier and links as before, with `takes` of
+     `["from", "window", "pair"]` and the key entries untouched; with main's host still running under this launcher,
+     `--pair-key ... --key-paired` gives a verifier line (no `pairKey`) and keeps the verifier entry, and a hub links to
+     that host by verifier with that line as with one from `--pair`.
+   - *Mutation check.* 52 rules of this slice were removed one at a time (23 in the host, 29 in the launcher and the
+     bundle). Each now turns a test red but four. Two are hidden by the socket's own handling: dropping what a `prove`
+     left at the first hello (a failed hello closes the socket and a second hello after `hello_ok` is ignored, so no
+     hello is ever judged on the same nonces twice) and refusing the marker before the limited paths (none of them
+     takes the marker, slice 2). Both stay as guards. One is random: a new entry id that avoids the key entries' ids
+     (a 32-bit draw). One changes nothing a reader sees: removing the verifier entry also on a verifier line, which
+     `--pair` then makes again under the label. `keyPairing: 1` in the bundle has no unit test, as `verifiers` and
+     `hostProof` have none: a host bundled into a temporary folder was paired by key, on Node 22.23.4 and 24.22.1.
+   - The tests run on Node 22.23.4 and on Node 24.22.1, on Windows and in WSL (§9 item 6); CI's remote-Node job runs
+     `tooling/key-pairing-vector` too. macOS port sharing was not measured in this slice: it stays for an acceptance run
+     on a Mac.
 4. **The hub side, with D2's sentence.** The key file; `--pair-key` at every link and `--key-paired` from the
    record; the record (§5.1) and the refusal, with the made credential withdrawn; the key handshake in `RemoteClient`;
    its own entry recognised by public key, and a verifier entry under its label shown as another's; the additive store

@@ -937,6 +937,29 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('host_handover'), handover: HostHandover.nullable() }),
   /**
+   * A full credential other than the hub's own was just used to say hello to this host (#1712, `centralu serve`'s
+   * `serve.json`), sent at once to the hubs linked to it, so a use withdrawn before their next `host.credentials` read
+   * still shows on the machine's row. The host has kept the record in a file of its own before the socket got its
+   * rights. `nonce` and `check` let a hub tell its own credential from one that only reuses its id
+   * (`credentialCheck(verifier, nonce)`, never the verifier). A key entry (#1711) carries its `publicKey` instead, which a
+   * hub compares with its own; an older hub that finds no `check` drops the event (the next `host.credentials` read lists
+   * the use). A hub that does not know this event drops it. Additive
+   */
+  z.object({
+    ...appScoped,
+    type: z.literal('host_credential_used'),
+    credential: z.object({
+      id: z.string().max(16),
+      label: z.string().max(80),
+      created: z.number(),
+      replaced: z.boolean().catch(false).default(false),
+      /* A verifier credential: a `nonce` of the host's and the `check` of it. A key entry (#1711) has neither: it carries its `publicKey`, which is not secret */
+      nonce: z.string().min(8).max(64).optional(),
+      check: z.string().max(64).optional(),
+      publicKey: z.string().max(64).optional(),
+    }),
+  }),
+  /**
    * What the UI holds about one linked machine has to be read again (#82): the link (re)connected,
    * the remote host restarted, or the machine was removed. The UI re-reads `sessions.list` and
    * `projects.list` and runs its reconnect recovery for that machine's sessions alone: a session it

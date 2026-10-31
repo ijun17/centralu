@@ -85,6 +85,7 @@ With the limited credential: runs.
 - `git.status`
 - `grid.get`
 - `host.activity`
+- `host.handover`
 - `host.stop`
 - `machines.activity`
 - `machines.askConsents`
@@ -236,7 +237,6 @@ With the limited credential: refused, never a card: the person's own answers and
 With the limited credential: refused: a hub linked to this host calls it, with the token.
 
 - `host.credentials`
-- `host.handover`
 - `host.hubAuto`
 - `host.hubOffer`
 - `host.lastAnswer`

@@ -1522,7 +1522,7 @@ A host started with `centralu serve` on another machine is reached by the app th
     connect and every 30 seconds: a pairing there while the link is up shows within that. It is shown while connected,
     its labels cleaned to one line. A pairing under a label already there replaces that credential, as the hub's own
     re-pairing at each link does. Each entry keeps how it was asked for (`via`: `pair` for `--connection --pair`,
-    `window` for `--window`, `handover` for the launcher's own one-call credential), and a pairing is marked `replaced`
+    `window` for `--window`, `handover` for the launcher's own one-call credential, which a launcher from before #1711 made and a host since takes as limited only), and a pairing is marked `replaced`
     in the file and on the row ("which replaced an earlier one of that name") only when the entry it took the place of
     was asked for another way, or does not say (#1405 review): the window pairing at each start and a hub at each link
     are their own pairer again, and marking them made the flag mean nothing. So `--pair window` in the window's place,
@@ -1541,10 +1541,47 @@ A host started with `centralu serve` on another machine is reached by the app th
     also leaves out one used and then withdrawn when the label was paired the same way again; that new pairing is
     listed itself, with Revoke. Before, `--pair x`, a hello and
     `--revoke` within 135 ms left no trace on any row. The machine's user can get around this at will in two ways:
-    - **Kill the host.** The record is in the host's memory (at most 256 entries). Use a credential, kill the machine's
-      host and withdraw the credential before the hub's next read, and the restarted host has no record of it: up to
-      the 30 s between two reads, nothing shows. This stays. Any record the host kept on disk, the same user could
-      delete just as easily; it is a residual of an attacker who is this machine's user, at most 30 s of use.
+    - **Kill the host.** Closed while the hub's link is up (#1712). The first time a full credential says hello on a
+      host, the host appends its record (id, label, date, verifier, never the credential) to `serve-used.jsonl` beside
+      `serve.json`, BEFORE the socket gets its rights, and tells the hubs linked to it at once with a
+      `host_credential_used` event over their open links (the sockets in with a `hub:`-labelled credential; the event
+      carries a `check` of a nonce of its own, so a hub knows its own credential from one that only reuses its id, and
+      never the verifier; a hub's key entry, #1711, has no secret to check and carries its public key instead, which a hub compares with its own, and a hub from before key pairing drops such an event and lists the use at its next read). A hub puts the credential on its row and starts a `host.credentials` read at once (a burst
+      of events costs one read in flight and one waiting), whose answer then replaces it, provided that host's record
+      holds the credential (`usedIds`; one that started again without it, because the file was removed or could not be
+      written, leaves what the hub was told on the row). Until a read has answered, the hub cannot know whether the
+      credential is still held, so the row shows it as a held credential is shown, not as "used, then withdrawn" (and
+      not at all while the first read the event started is in flight); once a read has answered and does not list it,
+      it reads "used, then withdrawn". If the host is stopped first, or the read cannot answer (the file unreadable),
+      the use stays on the row as held, also while the link is down, until a read says otherwise. A restarted host
+      reads the file back (at most 256 records, the newest; a credential named by more than one line is one record), and
+      every report takes in only the lines added since the last read (a byte offset, reset when the file is replaced or
+      shorter; one read takes at most 1 MiB of new lines, the newest, and says on stderr when it skips older ones), so a
+      program that appends to the file cannot make a report slow, and the file is rewritten (past four times the
+      records kept) only from a state that holds all of it, so a fresh use is never rewritten away. A record whose
+      line was cut short (a full disk, a power loss) is skipped, and the next record is written on a line of its own. A
+      hello reads nothing back: it appends and, when the file was exactly as long as what was read, counts its line
+      where it stands; otherwise the next report reads it with whatever else was added (#1715).
+      Agents' per-session credentials are not full credentials and are not reported. The owner's constraint
+      (2026-10-29) is that this never slows or blocks ordinary work: the hello is not held for the hub (the event is
+      queued on the hub's socket, a hub that stopped reading is cut as for any event), with the hub's link down the
+      record stays in the file, and a record that cannot be written (a full disk) is said on stderr while the hello
+      goes on.
+      **Records do not stay for good** (owner decision, 2026-10-30): the first report that finds a recorded
+      credential no longer named by `serve.json` writes down when (`goneAt`, a line added to the file) and the host
+      drops the record, from memory and at the file's next rewrite, 7 days after (a restart does not renew the clock,
+      since it is in the file; a credential still named is never dropped, and one named again loses its note, so a later
+      withdrawal starts a new week; while `serve.json` cannot be read nothing is noted or dropped). The date is when the host found it withdrawn, which is the first report after the withdrawal,
+      or after a host that was stopped starts and reports again. The hub keeps what the person withdrew from a
+      machine's row, by id and time, in its store (`app_settings` `links.revoked.<machine>`, the newest 256, written
+      with no migration step; forgotten with the machine, once a read of the machine answers that its host keeps no
+      record of the credential (`usedIds`, which is a week after the host's first report after the withdrawal, however
+      long no hub read it), and at the latest after 60 days), so a record the machine's host still keeps does not bring
+      a withdrawn credential back on the row after the hub restarts. What is left is the same
+      user's: drop the hub's link first (the event has nowhere to go; the file is read at the next link), or delete the
+      file or make it unwritable, which that user can do as easily as `serve.json` (the hub's event still arrives while
+      its link is up, and it keeps it across the restart; with the link down too, nothing is left to show). A swap's
+      overlap, two hosts of one folder, may lose a line to the rewrite that shortens a file past four times its bound.
     - **Take the hub's label while its link is down** (end the user's own ssh session, pair under
       `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
       the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also

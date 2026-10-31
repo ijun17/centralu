@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -538,13 +538,23 @@ describe('delete_all_archived', () => {
   })
 
   it('names how many sessions it leaves out of the list, and what goes with them', async () => {
-    for (let i = 1; i <= 12; i++) await trashed(`Session ${i}`)
+    // One frozen clock for every deletion: they all land in the same millisecond, as they can on a fast machine
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.UTC(2026, 0, 2))
+      for (let i = 1; i <= 12; i++) await trashed(`Session ${i}`)
+    } finally {
+      vi.useRealTimers()
+    }
     const orc = await mgr.orchestrator()
     const { question } = await answered(orc.id, 'delete_all_archived', {}, 'deny')
     expect(question).toContain('delete 12 sessions')
     expect(question).toContain('and 2 more sessions')
-    expect(question).toContain('"Session 3"')
+    // The newest ten, and by name: with every deletion in one millisecond, the order of equal times must still be the order they were archived in
+    for (let i = 3; i <= 12; i++) expect(question).toContain(`"Session ${i}"`)
     expect(question).not.toContain('"Session 2"')
+    expect(question).not.toContain('"Session 1"')
+    expect((await trash()).sessions.map((s) => s.name)).toEqual(Array.from({ length: 12 }, (_, i) => `Session ${12 - i}`))
   })
 
   it('deletes nothing when the person denies it', async () => {

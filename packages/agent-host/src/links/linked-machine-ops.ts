@@ -428,6 +428,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     if (said === null) throw linkError(`${this.name} did not say whether it withdrew the credential${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ''}`)
     // Gone there (now, or before): gone from the row too, also from a line a reconnect read before the revoke landed
     this.revokedHere.add(credentialId)
+    this.rememberRevoked(credentialId)
     this.deps.log?.(`[links] ${this.name}: ${said ? 'withdrew' : 'found no'} full credential ${credentialId}`)
     // And the list read again, through the link when it is up: what else changed there shows with it
     await this.readCredentials?.()

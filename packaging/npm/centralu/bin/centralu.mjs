@@ -661,7 +661,7 @@ switch (cmd) {
       if (spec) Object.assign(process.env, spec.env)
       // realpath: npm's bin is a symlink to this file, and the launcher must not depend on the link
       const opts = { env: process.env, home: HOME, entry: requireHostEntry(), version: pkg.version, cliPath: realpathSync(process.argv[1]) }
-      if (args.mode === 'connection') process.exitCode = await printConnection({ ...opts, pair: args.pair ?? null })
+      if (args.mode === 'connection') process.exitCode = await printConnection({ ...opts, pair: args.pair ?? null, pairKey: args.pairKey ?? null, keyPaired: args.keyPaired === true })
       else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port, from: args.from })
       else if (args.mode === 'stop') process.exitCode = await runStop(opts)
       else if (args.mode === 'window') process.exitCode = await runWindow(opts)

@@ -169,7 +169,10 @@ jobs:
           - target: darwin-arm64
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
-            runner: macos-14
+            # macos-15, not macos-14: GitHub retires the macOS 14 images on 2026-11-02 (runner-images#13518).
+            # The newer Xcode and SDK do not change the oldest macOS the app runs on: the build step
+            # below states it, and the step after it checks it.
+            runner: macos-15
             # npm publishes the `.app`; no workflow consumes the DMG (#628).
             # Tar the app first (below) to preserve its executable bits and signature.
             artifacts: |
@@ -239,8 +242,10 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          # The cache is only valid per platform; the key would otherwise collide.
-          key: ${{ matrix.target }}
+          # The cache is only valid per platform; the key would otherwise collide. The runner image is in it too:
+          # moving to another one (macos-14 to macos-15) must rebuild every dependency, C objects included, with
+          # the new toolchain rather than restore the old objects and recompile only this workspace.
+          key: ${{ matrix.target }}-${{ matrix.runner }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -264,7 +269,30 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS'
         # The unused DMG's intermittent bundle_dmg.sh failures must not block releases.
-        run: pnpm --filter @cc/desktop exec tauri build --bundles app
+        env:
+          # The oldest macOS the app runs on, stated rather than left to the toolchain and the runner's SDK, which a
+          # later Xcode could raise. Tauri sets it from `bundle.macOS.minimumSystemVersion` (tauri.conf.json), which
+          # is the knob that also writes LSMinimumSystemVersion; this repeats it for anything that builds outside Tauri.
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+        shell: bash
+        # The log is kept for the next step: the linker only warns when an object file was built for a newer macOS
+        # than the one it links for, and the file it warns about still reports the lower number.
+        run: |
+          set -o pipefail
+          pnpm --filter @cc/desktop exec tauri build --bundles app 2>&1 | tee "$RUNNER_TEMP/tauri-build.log"
+
+      - name: Check the oldest macOS the app runs on
+        if: runner.os == 'macOS'
+        # Every Mach-O file in the bundle says the macOS it was built for (`minos`): the app, the keeper, and the
+        # upstream prebuilds the host brings (better-sqlite3, node-pty), which no deployment target reaches. A newer
+        # SDK or a dependency can raise one without any error, and the app would then fail to open on the older Macs.
+        # (scripts/macos-minos.mjs; release-npm.mts runs the same check on the staged package.)
+        run: |
+          node scripts/macos-minos.mjs apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app
+          if grep -n "was built for newer" "$RUNNER_TEMP/tauri-build.log"; then
+            echo "::error::an object file was built for a newer macOS than the app supports (the linker's warning above)"
+            exit 1
+          fi
 
       - name: Tar the .app
         if: runner.os == 'macOS'
@@ -426,7 +454,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -442,7 +470,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - run: echo "Nothing outside the window and the tests changed (.github/scripts/ci-changes.mjs)"
 
@@ -1117,7 +1145,8 @@ jobs:
         env:
           # Never the real data folder, on any OS (AGENTS.md)
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
-        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher-
+        # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto
+        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher- tooling/key-pairing-vector
 
   host-tests-remote-node-skipped:
     name: host tests, remote Node (${{ matrix.runner }})
@@ -1143,7 +1172,7 @@ jobs:
     name: keeper e2e
     needs: changes
     if: needs.changes.outputs.host == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     env:
       # The scripts build into a folder under /tmp by default. rust-cache keeps only folders under
@@ -1170,8 +1199,8 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          # A debug build: it shares nothing with the darwin bundle's release cache.
-          key: keeper-darwin-arm64
+          # A debug build: it shares nothing with the darwin bundle's release cache. The runner image is in the key.
+          key: keeper-darwin-arm64-macos-15
 
       - run: pnpm install --frozen-lockfile
 

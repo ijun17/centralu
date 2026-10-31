@@ -9,6 +9,7 @@ import { chmodSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, ren
 import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
 import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
+import { parseLinkPublicKey } from './serve-keys.mjs'
 
 /**
  * The file in the data folder that holds the host's key, the full credentials' verifiers and the port, mode 0600.
@@ -24,6 +25,9 @@ import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
  *   read again at each hello, so a pairing or a revocation applies at once.
  * - `legacyHostToken`: only while the installed host is from before verifiers (a rollback): the one token such a
  *   host knows, given to it and to the hub that pairs, as before #1405.
+ * - `keys` (#1711, docs/plans/key-pairing.md §4.2, additive: still version 2): one entry per hub that paired by key,
+ *   `{ id, label, publicKey, created, via: 'pair-key' }`, the hub's Ed25519 public key. Public: nothing in it opens the
+ *   host. A host from before key pairing ignores it, and a launcher from before drops it at its next write.
  *
  * The port is the one the last `serve` actually listened on, which is how `--connection`, a separate process, learns a
  * `--port` given to `serve` in a systemd unit. A version 1 file (`{ token, port }`) is moved to version 2 on first
@@ -160,10 +164,12 @@ function parseServeState(raw) {
       // the next write leaves it out too, and the host refuses it meanwhile
       const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(PAIRED_VIA.includes(e.via) ? { via: e.via } : {}), ...(e.replaced === true ? { replaced: true } : {}) }))
       const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
-      return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
+      // The same for the hubs' key entries (#1711): one with a key the host refuses (§4.1) is dropped at the next write
+      const keys = (Array.isArray(v.keys) ? v.keys : []).filter((e) => isKeyEntry(e)).map((e) => ({ id: e.id, label: e.label, publicKey: e.publicKey, created: Number.isFinite(e.created) ? e.created : 0, via: 'pair-key', ...(e.replaced === true ? { replaced: true } : {}) }))
+      return { v: 2, key: v.key, port, full, keys, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
     }
     if (typeof v?.token !== 'string' || v.token.length < 32) return null
-    return { v: 1, token: v.token, proofKey: v.token, port, key: null, full: [], legacyHostToken: null }
+    return { v: 1, token: v.token, proofKey: v.token, port, key: null, full: [], keys: [], legacyHostToken: null }
   } catch {
     return null
   }
@@ -174,9 +180,14 @@ export function isListedEntry(e) {
   return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && typeof e.verifier === 'string' && /^[0-9a-f]{64}$/.test(e.verifier)
 }
 
-/** What version 2 writes for a state */
+/** A hub's key entry the launcher lists, `--revoke` takes and the host accepts (#1711): an 8-hex id, a label `--pair` takes, a public key the host takes (§4.1) */
+export function isKeyEntry(e) {
+  return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && parseLinkPublicKey(e.publicKey) !== null
+}
+
+/** What version 2 writes for a state; `keys` only when there are any, so a folder no hub paired by key keeps today's file */
 function stateFile(state) {
-  return { v: 2, key: state.key, port: state.port, full: state.full, ...(state.legacyHostToken ? { legacyHostToken: state.legacyHostToken } : {}) }
+  return { v: 2, key: state.key, port: state.port, full: state.full, ...(state.keys?.length ? { keys: state.keys } : {}), ...(state.legacyHostToken ? { legacyHostToken: state.legacyHostToken } : {}) }
 }
 
 /** A new full credential and its id */
@@ -421,12 +432,56 @@ function takesLegacyPlace(label) {
   return label === 'window' || label.startsWith('hub:')
 }
 
-/** Removes the full credential `id`; true when there was one. A hello with it is refused from then on */
+/**
+ * The key entry for `label` with `publicKey` (#1711, docs/plans/key-pairing.md §4.2): `--pair-key`'s write. At most one
+ * key entry per label. The same key under the same label keeps its entry and id; another key under it is a new entry
+ * with a new id, marked `replaced`, and the old key entry goes, so a socket in under the old key is closed by the sweep
+ * (which compares id and key). The label's verifier entry is never touched here. Returns `{ entry, state }`.
+ */
+export function pairKeyServe(dataDir, label, publicKey, platform = process.platform, now = Date.now()) {
+  if (!parseLinkPublicKey(publicKey)) throw new Error('A refused public key is never written')
+  ensureServeState(dataDir, platform, now)
+  let entry = null
+  const state = changeServeState(dataDir, (s) => {
+    const before = s.keys.find((k) => k.label === label)
+    /*
+     * The host takes the first key entry of an id (#1717 review, L2), so one written by hand ahead of the hub's, with its id
+     * and another key, keeps the hub from linking. Such an id is not kept: the entry gets a fresh one, which the line reports.
+     * The same for an id a verifier entry has (#1717 recheck, F1): the host takes no key entry of such an id
+     */
+    const shared = before !== undefined && (s.keys.some((k) => k !== before && k.id === before.id) || s.full.some((e) => e.id === before.id))
+    if (before && before.publicKey === publicKey && !shared) {
+      entry = before
+      return s
+    }
+    entry = { id: freshId(s), label, publicKey, created: now, via: 'pair-key', ...(before ? { replaced: true } : {}) }
+    return { ...s, keys: [...s.keys.filter((k) => k.label !== label), entry] }
+  }, platform)
+  return { entry, state }
+}
+
+/** An entry id no full credential and no key entry of `state` has: a `--revoke <id>` names one entry */
+function freshId(state) {
+  for (;;) {
+    const id = randomBytes(4).toString('hex')
+    if (!state.full.some((e) => e.id === id) && !state.keys.some((k) => k.id === id)) return id
+  }
+}
+
+/**
+ * Removes the verifier entry under `label` (#1711, `--key-paired`): the hub paired by key with this machine before and
+ * now has a key line, so the verifier entry it made under its label is no longer its own. Returns the state written.
+ */
+export function dropVerifierUnder(dataDir, label, platform = process.platform) {
+  return changeServeState(dataDir, (s) => (s.full.some((e) => e.label === label) ? { ...s, full: s.full.filter((e) => e.label !== label) } : s), platform)
+}
+
+/** Removes the full credential or the key entry `id`; true when there was one. A hello with it is refused from then on */
 export function revokeServe(dataDir, id, platform = process.platform) {
   let found = false
   changeServeState(dataDir, (s) => {
-    found = s.full.some((e) => e.id === id)
-    return found ? { ...s, full: s.full.filter((e) => e.id !== id) } : s
+    found = s.full.some((e) => e.id === id) || s.keys.some((k) => k.id === id)
+    return found ? { ...s, full: s.full.filter((e) => e.id !== id), keys: s.keys.filter((k) => k.id !== id) } : s
   }, platform)
   return found
 }
@@ -453,13 +508,13 @@ export function recordServePort(dataDir, port, platform = process.platform) {
 }
 
 /**
- * A new key, and no full credential, keeping the port. Only when the person asks (`--rotate-token`): every hub pairs
- * again at its next link, the window at its next start, and a serve already running keeps its old key (what it hands
- * out) until it restarts, while the full credentials end at once.
+ * A new key, and no full credential and no key entry, keeping the port. Only when the person asks (`--rotate-token`):
+ * every hub pairs again at its next link, the window at its next start, and a serve already running keeps its old key
+ * (what it hands out, and what it signs with, #1711 §7) until it restarts, while the full credentials end at once.
  */
 export function rotateServeToken(dataDir, platform = process.platform) {
   ensureServeState(dataDir, platform)
-  return changeServeState(dataDir, (s) => ({ ...s, key: randomBytes(32).toString('base64url'), full: [], legacyHostToken: null }), platform)
+  return changeServeState(dataDir, (s) => ({ ...s, key: randomBytes(32).toString('base64url'), full: [], keys: [], legacyHostToken: null }), platform)
 }
 
 /**
@@ -514,10 +569,14 @@ export function removeServePid(dataDir, pid) {
  * A probe that did not prove the token, while this data folder's host is alive (`host.lock`): a host from before #838
  * still running after an update. It is running, and is not sent the token; a hub asking it for a proof is refused
  * until it restarts. Without a live lock holder, what answered is not ours.
+ *
+ * `portRecorded`: serve.json names the port the probe went to (`state.port != null`). A folder that has none was probed
+ * on the default port, where whatever listens is as likely another host's (a hub's ssh forward to a linked machine's serve
+ * lands there): an unproven answer from it says nothing about this folder, whoever holds the lock.
  */
-export function heldHere(probe, dataDir, startOf = processStartTime) {
+export function heldHere(probe, dataDir, startOf = processStartTime, portRecorded = true) {
   if (probe.running) return true
-  if (!probe.unproven) return false
+  if (!probe.unproven || !portRecorded) return false
   return lockHolderIsAlive(dataDir, startOf)
 }
 

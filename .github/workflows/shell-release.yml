@@ -71,8 +71,9 @@ jobs:
   build:
     name: build shell ${{ needs.guard.outputs.version }} (darwin-arm64)
     needs: guard
-    # Apple silicon, like the darwin-arm64 package the shell ships in.
-    runs-on: macos-14
+    # Apple silicon, like the darwin-arm64 package the shell ships in. macos-15: GitHub retires the macOS 14
+    # images on 2026-11-02; the deployment target below keeps the shell's oldest macOS where it was.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
