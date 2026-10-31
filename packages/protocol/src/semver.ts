@@ -78,6 +78,23 @@ function split(raw: string): [number[], string | null] {
 const LOCAL_BUILD =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
 
+/**
+ * The oldest Centralu another one still works with (#1143): every window, host, launcher and linked machine in use runs it or
+ * later, so the code that served a peer before it is gone. A linked machine below it does not connect and is offered the
+ * update (`compareVersions` in agent-host's links/versions.ts); a window and a host of two builds already meet the "another
+ * build" bar, and the launcher ships in one package with its host. Raised when compatibility code for a release is removed.
+ */
+export const MIN_SUPPORTED_VERSION = '0.1.0-beta.45'
+
+/**
+ * Whether a release (a local build counts as the one it was cut from) is at least `MIN_SUPPORTED_VERSION`. A build from
+ * source (`0.0.0-dev`, `APP_VERSION` there) or a version that is no release is not judged: it is the current code.
+ */
+export function isSupportedVersion(v: string): boolean {
+  if (!/^\d+\.\d+\.\d+/.test(v) || v.startsWith('0.0.0')) return true
+  return !isNewerVersion(MIN_SUPPORTED_VERSION, releaseOf(v))
+}
+
 /** A maintainer's local build: `<base>.local.N`, strict SemVer, with a prerelease base and a positive N (`scripts/local-manifest.mjs`). */
 export function isLocalBuildVersion(v: string | null | undefined): boolean {
   return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
