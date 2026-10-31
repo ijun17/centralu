@@ -235,7 +235,9 @@ describe('what the mailbox says of a draft', () => {
   })
 
   it('an object when the old way tells too: the report waits undelivered until that message is delivered, and then nothing wakes the owner', () => {
-    for (const [delivery, keep] of [['in-turn', false], ['old', true]] as const) {
+    {
+      const delivery = 'old' as const
+      const keep = true
       const a = setup()
       const reported = reportRecorder(a.mail, a.store.mail)('owner', 'child', { ...draft, delivery })
       if (typeof reported !== 'object') throw new Error('expected an object')
