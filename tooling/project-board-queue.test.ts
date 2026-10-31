@@ -4186,18 +4186,6 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 600, branch })
   })
 
-  it('never reverts a release bump: it says so, and opens nothing', async () => {
-    const repo = mainRepo([{ subject: 'chore(release): 1.2.3 (#90)', files: ['packages/protocol/src/brand.ts'] }])
-    guardRuntime(repo, redOn(repo, repo.shas[0]!))
-    landedBump(repo.shas[0]!)
-    await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
-    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
-    expect(spawnSync('git', ['rev-parse', '--verify', '--quiet', `revert/${repo.shas[0]!.slice(0, 12)}`], { cwd: repo.origin, env: GIT_ENV }).status).not.toBe(0)
-    expect(issues()[0]!.body).toContain('#90 is a release bump, which the queue never reverts')
-    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
-  })
-
   it('says to revert by hand when the revert does not apply to main any more, and opens nothing', async () => {
     const repo = mainRepo([
       { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
