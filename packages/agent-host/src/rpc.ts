@@ -210,8 +210,10 @@ export function createRpcHandler(
   }
 
   /*
-   * Two methods read their parameters themselves: both accept no parameters at all (`p ?? {}`), and `host.stop` checks that it
-   * can stop before it looks at them. Every other method has its parameters parsed once, by the dispatcher below.
+   * These methods read their parameters themselves, as they always did, because something comes first: `host.credentials` and
+   * `host.stop` accept no parameters (`p ?? {}`) and `host.stop` checks it can stop; the rest ask for an optional service
+   * (`requireX()`, `service?.`) before the parse, so a host without it answers that, not a validation error. Every other
+   * method has its parameters parsed once, by the dispatcher below.
    */
   const raw = {
     'host.credentials': async (p: unknown) => serveCredentials?.(RpcMethods['host.credentials'].params.parse(p ?? {}).nonce) ?? { credentials: null },
@@ -231,7 +233,48 @@ export function createRpcHandler(
       setTimeout(() => stopHost({ forUpdate: forUpdate === true }), 50)
       return { ok: true as const }
     },
-  } satisfies Record<string, (p: unknown) => Promise<unknown>>
+    'agents.versions': async (p: unknown) => requireAgentVersions().check(RpcMethods['agents.versions'].params.parse(p).force),
+    'agents.setAutoApplyVersions': async (p: unknown) =>
+      requireAgentVersions().setAutoApply(RpcMethods['agents.setAutoApplyVersions'].params.parse(p).enabled),
+    'agents.applyVersions': async (p: unknown) => requireAgentVersions().applyNow({ keepQuiet: RpcMethods['agents.applyVersions'].params.parse(p).keepQuiet === true }),
+    'agents.setSleepPolicy': async (p: unknown) => requireSleeper().setAfterMinutes(RpcMethods['agents.setSleepPolicy'].params.parse(p).afterMinutes),
+    'mail.resume': async (p: unknown) => {
+      requireMail().resume(RpcMethods['mail.resume'].params.parse(p))
+      return { ok: true as const }
+    },
+    'mail.wake': async (p: unknown) => {
+      requireMail().wake(RpcMethods['mail.wake'].params.parse(p).wake)
+      return { ok: true as const }
+    },
+    'apps.inlineViews': async (p: unknown) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
+    'apps.importPrepare': async (p: unknown) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
+    'apps.importCancel': async (p: unknown) => {
+      requireExternalApps().cancelImport(RpcMethods['apps.importCancel'].params.parse(p).token)
+      return { ok: true as const }
+    },
+    'projects.deleteOutlook': async (p: unknown) => ({ folder: (await deleteOutlook?.(RpcMethods['projects.deleteOutlook'].params.parse(p).projectId)) ?? 'stays' }),
+    'terminal.close': async (p: unknown) => {
+      requireTerminals().close(RpcMethods['terminal.close'].params.parse(p).terminalId)
+      return { ok: true as const }
+    },
+    'themes.import': async (p: unknown) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
+    'themes.resolve': async (p: unknown) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
+    'machines.add': async (p: unknown) => {
+      return requireMachines().add(RpcMethods['machines.add'].params.parse(p))
+    },
+    'machines.probe': async (p: unknown) => requireMachines().probe(RpcMethods['machines.probe'].params.parse(p).sshTarget),
+    'machines.reconnect': async (p: unknown) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
+    'machines.disconnect': async (p: unknown) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.install': async (p: unknown) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
+    'machines.cancelUpdate': async (p: unknown) => requireMachines().cancelUpdate(RpcMethods['machines.cancelUpdate'].params.parse(p).machineId),
+    'machines.rollback': async (p: unknown) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
+    'machines.uninstall': async (p: unknown) => requireMachines().uninstall(RpcMethods['machines.uninstall'].params.parse(p).machineId),
+    'machines.activity': async (p: unknown) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
+    'machines.acceptVersions': async (p: unknown) =>
+      requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
+    'updates.status': async (p: unknown) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
+    'updates.setAuto': async (p: unknown) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
+  } satisfies Record<string, (p: unknown, ctx?: RpcContext) => Promise<unknown>>
 
   /** The answer of a method that only does something: `ack(work)` runs the work as an argument and answers `{ ok: true }` */
   const ack = (_done?: unknown) => ({ ok: true as const })
@@ -321,12 +364,7 @@ export function createRpcHandler(
       if (!a) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
       return a.capabilities
     },
-    'agents.versions': async (p) => requireAgentVersions().check(p.force),
-    'agents.setAutoApplyVersions': async (p) =>
-      requireAgentVersions().setAutoApply(p.enabled),
-    'agents.applyVersions': async (p) => requireAgentVersions().applyNow({ keepQuiet: p.keepQuiet === true }),
     'agents.sleepPolicy': async () => requireSleeper().policy(),
-    'agents.setSleepPolicy': async (p) => requireSleeper().setAfterMinutes(p.afterMinutes),
     'agents.detect': async () =>
       Promise.all(
         [...adapters.values()].map(async (a) => {
@@ -405,8 +443,6 @@ export function createRpcHandler(
     'mail.held': async ({ action, recipient, messageIds }) => {
       return requireMail().held(action, recipient, messageIds)
     },
-    'mail.resume': async (p) => ack(requireMail().resume(p)),
-    'mail.wake': async (p) => ack(requireMail().wake(p.wake)),
     'approvals.deleteRule': async (p) => ack(mgr.approvalRules.deleteApprovalRule(p.id)),
     'workspace.save': async (p) => ack(mgr.prefs.saveWorkspace(p.layout)),
     'workspace.load': async () => mgr.prefs.loadWorkspace(),
@@ -460,7 +496,6 @@ export function createRpcHandler(
       return inlineViews.reopen(sessionId, callId)
     },
     // A host with no app runtime holds no views either — a reopened UI shows nothing but "open app"
-    'apps.inlineViews': async (p) => inlineViews?.list(p.sessionId) ?? [],
     'apps.viewMessage': async ({ sessionId, instanceId, text }) => {
       /*
        * The app is decided by **the instance** — whatever the caller claims is only checked against
@@ -519,13 +554,11 @@ export function createRpcHandler(
     },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
     // with a review step if requested). All the judgment calls are made by the runtime's handoff
-    'apps.importPrepare': async (p) => requireExternalApps().prepareImport(p.source),
     'apps.importCommit': async ({ token, enable, reviewKey, parent }) => {
       // An import lands as a project of its own (#1141): `<parent>/<id>`, `~/Centralu` unless the person chose a parent
       requireExternalApps()
       return mgr.appSessions.commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }, parent)
     },
-    'apps.importCancel': async (p) => ack(requireExternalApps().cancelImport(p.token)),
     'apps.review': async ({ appId, projectId }) => {
       return requireExternalApps().reviewApp({ appId, projectId })
     },
@@ -628,7 +661,6 @@ export function createRpcHandler(
     'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(p.projectId) }),
     'projects.reorder': async (p) =>
       mgr.projectRegistry.reorderProjects(p.orderedIds),
-    'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(p.projectId)) ?? 'stays' }),
     'projects.delete': async ({ projectId }) => {
       /*
        * That project's terminals and Run-menu executions are also ended here (#177). Both use the
@@ -708,7 +740,6 @@ export function createRpcHandler(
     'terminal.create': async ({ projectId, cols, rows }) => {
       return toInfo(requireTerminals().create(mgr.cwdOfProject(projectId), cols, rows))
     },
-    'terminal.close': async (p) => ack(requireTerminals().close(p.terminalId)),
     'terminal.input': async ({ terminalId, data }) => ack(requireTerminals().input(terminalId, data)),
     'terminal.resize': async ({ terminalId, cols, rows }) => ack(requireTerminals().resize(terminalId, cols, rows)),
     'terminal.restart': async ({ terminalId, cols, rows }) => {
@@ -741,8 +772,6 @@ export function createRpcHandler(
     'themes.save': async ({ id, content }) => {
       return requireThemes().save(id, content)
     },
-    'themes.import': async (p) => requireThemes().importFrom(p.path),
-    'themes.resolve': async (p) => ({ path: requireThemes().pathOf(p.id) }),
     'approvals.rules': async () => mgr.approvalRules.listApprovalRules(),
     /*
      * The session archive (#204; "trash" until #1404, kept in the method names because the protocol only grows).
@@ -783,26 +812,19 @@ export function createRpcHandler(
     'trash.purgeSubagentSteps': async ({ sessionId, upTo }) => ack(await mgr.trash.purgeSubagentSteps(sessionId, upTo)),
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
     'machines.list': async () => machines?.list() ?? [],
-    'machines.add': async (p) => {
-      return requireMachines().add(p)
-    },
     'machines.sshHosts': async () => requireMachines().sshHosts(),
-    'machines.probe': async (p) => requireMachines().probe(p.sshTarget),
     'machines.remove': async ({ machineId }) => {
       await requireMachines().remove(machineId)
       // Its asks' cards close with it (#550 review)
       mgr.closeMachineAskCards(machineId)
       return { ok: true as const }
     },
-    'machines.reconnect': async (p) => requireMachines().reconnect(p.machineId),
-    'machines.disconnect': async (p) => requireMachines().disconnect(p.machineId),
     'machines.revokeCredential': async ({ machineId, credentialId }) => {
       return requireMachines().revokeCredential(machineId, credentialId)
     },
     'machines.setAutoReconnect': async ({ machineId, autoReconnect }) => {
       return requireMachines().setAutoReconnect(machineId, autoReconnect)
     },
-    'machines.install': async (p) => requireMachines().install(p.machineId),
     'machines.update': async ({ machineId, when }, ctx) => {
       /*
        * A limited caller's update that went without a card (#1508, method-rights.ts; the transport's verdict, not judged again here)
@@ -811,13 +833,9 @@ export function createRpcHandler(
       const unasked = ctx?.covered === true
       return requireMachines().update(machineId, { when: when ?? 'idle', ...(unasked ? { unasked } : {}) })
     },
-    'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(p.machineId),
-    'machines.rollback': async (p) => requireMachines().rollback(p.machineId),
-    'machines.uninstall': async (p) => requireMachines().uninstall(p.machineId),
     'machines.autostart': async ({ machineId, on }) => {
       return requireMachines().autostart(machineId, on)
     },
-    'machines.activity': async (p) => ({ activity: await requireMachines().activity(p.machineId) }),
     'machines.hubAuto': async ({ machineId, allowed }) => {
       return { state: await requireMachines().hubAuto(machineId, allowed) }
     },
@@ -866,10 +884,6 @@ export function createRpcHandler(
     // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
     'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: p.allowed })) }),
     'host.send': async ({ sessionId, text, from, ask }) => ack(await mgr.sendFromHub(sessionId, text, from.name, ask)),
-    'machines.acceptVersions': async (p) =>
-      requireMachines().acceptVersions(p.machineId),
-    'updates.status': async (p) => requireUpdates().check(p.force),
-    'updates.setAuto': async (p) => requireUpdates().setAuto(p.enabled),
     'updates.setAutoApply': async (p) => {
       const enabled = p.enabled
       const status = requireUpdates().setAutoApply(enabled)
@@ -921,7 +935,7 @@ export function createRpcHandler(
      * parsing for itself threw. A handler that takes no parameter (`async () =>`) never had them looked at, and still has not.
      * The limited credential's rights were judged before this (transport/server.ts), on the parameters as sent.
      */
-    const result: unknown = await Reflect.apply(h, undefined, [method in raw || h.length === 0 ? params : RpcMethods[name].params.parse(params), ctx])
+    const result: unknown = await Reflect.apply(h, undefined, [Object.hasOwn(raw, method) || h.length === 0 ? params : RpcMethods[name].params.parse(params), ctx])
 
     /*
      * Checks here whether what is being sent out **matches its declared shape.**
