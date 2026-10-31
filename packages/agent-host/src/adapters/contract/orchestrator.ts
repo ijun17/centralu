@@ -257,14 +257,13 @@ export type LinkedSessions = {
   ): Promise<Outcome<{ sessionId: string; name: string; preset?: PermissionPreset }>>
   /**
    * Whether a machine runs an `auto` caller's child under `auto` too (#1273, `host.hubAuto` there): its "Allow auto from
-   * a linked computer" switch. `olderBuild`: the machine runs a Centralu from before it, which keeps `normal`
+   * a linked computer" switch
    */
-  hubAuto(machineId: string): Promise<Outcome<{ allowed: boolean }> | { ok: false; error: string; olderBuild: true }>
+  hubAuto(machineId: string): Promise<Outcome<{ allowed: boolean }>>
   /**
-   * A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none. `olderBuild`: the
-   * machine runs a Centralu from before it, which also drops `createSession`'s `agentDepth`
+   * A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none
    */
-  origin(project: LinkedProject): Promise<Outcome<{ origin: string | null }> | { ok: false; error: string; olderBuild: true }>
+  origin(project: LinkedProject): Promise<Outcome<{ origin: string | null }>>
   /** Stops a machine's session's running turn (`agents.interrupt` there, #1038) */
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's session archive, its worktree left in place (`agents.deleteSession` there, #1038) */
@@ -277,12 +276,9 @@ export type LinkedSessions = {
   agentInstructions?(project: LinkedProject): Promise<Outcome<{ text: string }>>
   /**
    * A start_agent child deleted there with the worktree made for it on `branch`, when nothing would be lost
-   * (`agents.deleteAgentChild` there, #1161 item 3). `olderBuild`: the machine predates it, and nothing was deleted
+   * (`agents.deleteAgentChild` there, #1161 item 3)
    */
-  deleteAgentChild?(
-    sessionId: string,
-    branch: string,
-  ): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> | { ok: false; error: string; olderBuild: true }>
+  deleteAgentChild?(sessionId: string, branch: string): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }>>
   /**
    * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
    * last thousand messages: whose turn it is running (#1038 review). `seq`: its row there. `atRest`: the session is in no

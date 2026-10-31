@@ -559,8 +559,8 @@ refuse it on a machine they share; a record that cannot be read, or a value that
 `fromHub` runs `normal` at most there. The machine does not tell the hub's call from any other holder of its token:
 whoever holds the token could already ask for `auto` outright (`permissionPreset`), so `fromHub` gives no one more. The hub asks the
 machine first (`host.hubAuto`): a machine whose switch is off keeps the card, which says the child runs under `normal`
-and why (`autoWithheld: "machine_off"`), and so does a machine from before #1273 (`"older"`), which drops `fromHub`
-and keeps `normal`; the start's answer to the caller says the same, never silently. A switch turned off between the
+and why (`autoWithheld: "machine_off"`; a hub of 0.1.0-beta.45 also sent `"older"` for a machine from before #1273, which
+a window still reads); the start's answer to the caller says the same, never silently. A switch turned off between the
 hub's question and the start starts nothing there: the child made without a card is given no task and goes to that
 machine's session archive. The child is never above its caller (#1273 review): the preset is decided from the caller as it is once
 the machine has answered, so the card states the preset the child will get; the caller is read again after the card

@@ -70,20 +70,14 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     })
   })
 
-  // #1038 review: a machine from before #1038 drops createSession's agentDepth, so start_agent must know it is one
-  it("says a project's origin cannot be read on a machine from before projects.origin, apart from a failure", async () => {
+  it("reads a project's origin there, and says a failure as it came", async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
     const [project] = await find(linkedSessions(() => [m]), 'apps')
-    const older = linkedSessions(() => [m], async (method) => {
-      throw new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
-    })
-    expect(await older.origin(project!)).toMatchObject({ ok: false, olderBuild: true })
     const failing = linkedSessions(() => [m], async () => {
       throw new Error('git said no')
     })
     const r = await failing.origin(project!)
-    expect(r).toMatchObject({ ok: false, error: 'git said no' })
-    expect('olderBuild' in r).toBe(false)
+    expect(r).toEqual({ ok: false, error: 'git said no' })
     const reading = linkedSessions(() => [m], async () => ({ origin: 'git@github.com:me/apps.git' }))
     expect(await reading.origin(project!)).toEqual({ ok: true, origin: 'git@github.com:me/apps.git' })
   })
@@ -146,9 +140,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
 
   it("reads a session's last words from their head, as this host cuts its own preview (#428)", async () => {
     const answer = `Done: ${'x'.repeat(50)} the tail`
-    const reader = linkedSessions(() => [
-      machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ role: 'assistant', text: answer }), JSON.stringify({ role: 'tool', tool: 'Bash', title: 'ls' })] } }),
-    ])
+    const reader = linkedSessions(() => [machine({ 'host.lastAnswer': { text: answer, length: answer.length, seq: 3 } })])
     expect(await reader.lastWords('m1.w1', 20)).toMatchObject({ ok: true, text: `${answer.slice(0, 20)}…` })
     expect(await reader.lastWords('m1.w1', 600)).toMatchObject({ ok: true, text: answer })
   })
@@ -218,18 +210,6 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     })
   })
 
-  it('reads the head of a long answer an older machine cut, rather than an older line or nothing', async () => {
-    const long = JSON.stringify({ ts: '2026-10-18 10:00', role: 'assistant', text: `HEAD "quoted" \\ ${'y'.repeat(5000)}` })
-    // An older machine's cut: 2,000 characters of the line's JSON and an ellipsis, here inside an escape
-    const cut = `${long.slice(0, 2000)}…`
-    const older = machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ role: 'assistant', text: 'an older answer' }), cut] } })
-    const r = await linkedSessions(() => [older]).lastWords('m1.w1', 100_000)
-    expect(r).toMatchObject({ ok: true, seq: null })
-    if (!r.ok) throw new Error(r.error)
-    expect(r.text.startsWith('HEAD "quoted" \\ yyy')).toBe(true)
-    expect(r.text.endsWith('…')).toBe(true)
-    expect(r.text).not.toContain('an older answer')
-  })
 
   it('says why a last answer could not be read, rather than answering empty', async () => {
     const away = machine({}, { reachable: false })
@@ -264,7 +244,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
       return { state: 'working', lines: [] }
     }
     await linkedSessions(() => [m]).read('m1.w1', 10, { around: 42, tools: true })
-    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true, toolLines: 'full' } }])
+    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, toolLines: 'full' } }])
     // A long line read on from where it was cut (#1186) is the machine's to read, with the same offset
     await linkedSessions(() => [m]).read('m1.w1', 40, { around: 42, offset: 2000 })
     expect(asked[1]).toEqual({ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, around: 42, offset: 2000 } })
@@ -332,7 +312,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   })
 
   // #1480 review: the reads a budget's notes name go to the machine, and an older one that would answer the plain read is said, not shown again
-  it('passes before and from on to a machine, and says a machine from before them cannot continue a read', async () => {
+  it('passes before and from on to a machine', async () => {
     const asked: unknown[] = []
     const current = machine({})
     current.call = async (method, params) => {
@@ -345,25 +325,10 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
       { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, before: 12 } },
       { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, from: 30 } },
     ])
-    const older = machine({ 'host.readSession': { state: 'idle', lines: ['{"role":"user","text":"hi"}'] } })
-    for (const opts of [{ before: 12 }, { from: 30 }]) {
-      expect(await linkedSessions(() => [older]).read('m1.w1', 40, opts)).toMatchObject({ ok: false, error: expect.stringContaining('from before reading on from a line') })
-    }
   })
 
-  /*
-   * #1186 review: an older machine ignores `offset` and answers its plain read, so every read on would show the same cut
-   * lines again. That is said, and a machine of this build's answer is passed on
-   */
-  it('says a machine cannot read from an offset when it answers the plain read instead', async () => {
-    const plain = ['{"role":"user","text":"hi"}', `${JSON.stringify({ role: 'assistant', text: 'x'.repeat(3000) }).slice(0, 2000)}…`]
-    const older = machine({ 'host.readSession': { state: 'idle', lines: plain } })
-    expect(await linkedSessions(() => [older]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({
-      ok: false,
-      error: 'Box runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters',
-    })
-    // Without an offset the same answer is the plain read it always was
-    expect(await linkedSessions(() => [older]).read('m1.w1')).toEqual({ ok: true, state: 'idle', lines: plain })
+  // #1186 review: a long line read on from an offset is the machine's answer, passed on
+  it('gives the line a machine read from an offset as it answered', async () => {
     const line = JSON.stringify({ role: 'assistant', text: 'x'.repeat(1000), shown: 'characters 2000-3000 of 3000' })
     const current = machine({ 'host.readSession': { state: 'idle', lines: [line] } })
     expect(await linkedSessions(() => [current]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: [line] })
