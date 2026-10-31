@@ -2,9 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import {
-  AGENT_TOOLS,
-  APP_ACCESS_TOOLS,
-  MAIL_TOOLS,
   COMMANDS_INSTRUCTION,
   DEFAULT_RARE_TIER,
   ORCHESTRATOR_INSTRUCTIONS,
@@ -28,7 +25,6 @@ import { residentCost } from './tool-cost.js'
 const PROFILES: ToolProfile[] = ['orchestrator', 'scoped', 'builder', 'reader']
 const RARE = RARE_COMMANDS.orchestrator ?? []
 const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
-const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const }
 
 function fakeTools() {
   return {

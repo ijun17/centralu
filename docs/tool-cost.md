@@ -377,8 +377,8 @@ gives three arms on the same prompts:
   to use it, in every arm.
 
 Claude Code 2.1.289 on haiku 4.5 (3 repetitions), codex-cli 0.160.0 on gpt-6.1-sol (2 repetitions), macOS, base
-commit 81d17084 with this change. `pnpm measure:tools --live --rare <arm> (a flag since removed) --phases resident,selection --kinds
-none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json`. The nine prompts name no
+commit 81d17084 with this change. `pnpm measure:tools --live --rare <arm> --phases resident,selection --kinds
+none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json` (`--rare` is a flag since removed). The nine prompts name no
 tool: four need a rare command (an app for a project, an app of the person's own, a weekly procedure to keep, a
 browser), one needs `propose_worktree_session`, four need a core one (`list_sessions`/`read_session`,
 `send_to_session`, `recall`, `create_session`). Every repetition runs in a new orchestrator and what the run made

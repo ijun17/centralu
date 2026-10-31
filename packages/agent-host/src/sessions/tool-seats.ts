@@ -32,8 +32,8 @@ export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolNa
 /**
  * How a seat's rarely used commands reach the model (#512; the comparison is in docs/tool-cost.md §9). The host runs
  * the `commands` tier (the owner's decision of 2026-10-12: no loss on Sonnet, 835 tokens fewer per orchestrator request,
- * and a tool list that does not grow with the commands). The `resident` tier, every tool in every request as before #512,
- * is what the tests that call a command by its own name ask for (`setRareTier`).
+ * and a tool list that does not grow with the commands). The `resident` tier, every tool in every request as before #512, still serves the guide (`toolsFor`) and
+ * the tests that call a command by its own name (`setRareTier`, for tests only).
  *
  *   - `resident`: every tool in every request.
  *   - `commands`: the rare ones leave the tool list. Three fixed tools stand in for them (COMMAND_TOOLS):
