@@ -2,10 +2,10 @@ import { describe, expect, it, vi, afterEach, onTestFinished } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { homedir, tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { alive as isAlive, cleanUp, consoleHosts, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
-import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
+import { TerminalService, commandShell, interactiveShell, shellPath, type PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
 import { ownProcesses } from '../process.test-helpers.js'
@@ -458,12 +458,6 @@ describe('shell selection', () => {
     } finally {
       error.mockRestore()
     }
-  })
-
-  it('shortens the home path to ~', () => {
-    // homedir(), not $HOME: Windows has no HOME (#14)
-    expect(shortCwd(join(homedir(), 'work'))).toBe(`~${sep}work`)
-    expect(shortCwd('/opt/x')).toBe('/opt/x')
   })
 })
 

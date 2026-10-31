@@ -130,7 +130,7 @@ export function App({
    * until the preferences arrive for the theme's reason: main.tsx already put the cached ones on.
    *
    * The text size is a single CSS zoom on the root — all text is pinned in px, so there is no way
-   * to grow just the font (see the TEXT_SCALES comment in the store), and zoom works in both
+   * to grow just the font (see the `useTextZoom` comment in the store), and zoom works in both
    * WKWebView (Tauri) and the browser.
    */
   const bodyFont = useStore((s) => s.prefs.bodyFont)

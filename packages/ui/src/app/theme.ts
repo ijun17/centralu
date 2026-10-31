@@ -24,15 +24,9 @@ export type { ThemePreset }
 
 export { THEME_TOKENS }
 
-/** The tokens the accent replaces when it is on. The signal colour is never among them. */
-export const ACCENT_TOKENS = [
-  '--color-focus',
-  '--color-selection',
-] as const
-
 /**
- * What the accent writes over those tokens. The selection stays translucent (it brightens
- * whatever is under it, see ::selection in index.css).
+ * What the accent writes over the tokens it replaces when it is on (focus and selection; the signal colour is never
+ * among them). The selection stays translucent (it brightens whatever is under it, see ::selection in index.css).
  */
 export function accentTokens(accent: string): Record<string, string> {
   const mix = (pct: number, other: string) => `color-mix(in oklab, ${accent} ${pct}%, ${other})`

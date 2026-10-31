@@ -3,46 +3,29 @@ import { isObj } from '../json-value.js'
 import { pragmaNumber } from './store/rows.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
+import { AppRunRecords } from './store/app-runs.js'
 import { KeptRuns } from './store/kept-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
-import { LinkedMachineRecords, type LinkedMachineRow } from './store/linked-machines.js'
+import { LinkedMachineRecords } from './store/linked-machines.js'
 import { MailRecords } from './store/mail.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
-import { MessageRecords, type ReadOpts } from './store/messages.js'
+import { MessageRecords } from './store/messages.js'
 import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
 import { type MigrationStep } from './store/migrations/context.js'
 import { migrationSteps } from './store/migrations/index.js'
-import {
-  PermissionRecords,
-  type AppPermissionRecord,
-  type ConsentRow,
-  type ProjectConsentKind,
-} from './store/permissions.js'
+import { PermissionRecords } from './store/permissions.js'
 import { ProjectRecords } from './store/projects.js'
 import { StoreTooNewError, storeTooNewMessage } from './store/reader-gate.js'
 import { SessionRecords } from './store/sessions.js'
 import { SettingsRecords } from './store/settings.js'
 import { UsageRecords } from './store/usage-history.js'
-import { TrashRecords, type TrashedRow, type TrashRecord } from './store/trash.js'
+import { TrashRecords } from './store/trash.js'
 import { SubagentStepRecords } from './store/subagent-steps.js'
 
 // The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
-export type {
-  AppPermissionRecord,
-  AppRunRecord,
-  LinkedMachineRow,
-  ConsentRow,
-  ProjectConsentKind,
-  QueuedRequest,
-  ReadOpts,
-  StoreInspection,
-  StoreOptions,
-  TrashedRow,
-  TrashRecord,
-}
+export type { QueuedRequest, StoreInspection }
 
 // The migration runner and the reader gate `Store` stands on are named here as they always were
 export { StoreTooNewError, storeTooNewMessage }

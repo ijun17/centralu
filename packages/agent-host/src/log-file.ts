@@ -191,17 +191,3 @@ export function startupBanner(info: { build: string; db: string; pid: number }):
 export function hostLogPath(dataDir: string): string {
   return `${dataDir}/host.log`
 }
-
-/** Appends a single line without keeping the file handle open (for when the stream cannot be trusted, as right before exit) */
-export function appendLine(path: string, line: string): void {
-  try {
-    const fd = openSync(path, 'a', 0o600)
-    try {
-      writeSync(fd, line.endsWith('\n') ? line : `${line}\n`)
-    } finally {
-      closeSync(fd)
-    }
-  } catch {
-    /* If even the log cannot be written, do not throw again here */
-  }
-}

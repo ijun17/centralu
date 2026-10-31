@@ -9,6 +9,5 @@
  * `LinkedMachine`), and every link of this hub with the ssh hosts and the probe (links-registry.ts, `Links`).
  */
 
-export type { HeadersMirror, LinkDeps, LinkInstaller, MachineRecord, MachineRegistry } from './link-deps.js'
-export { LinkedMachine } from './linked-machine-ops.js'
+export type { HeadersMirror, LinkDeps, MachineRecord, MachineRegistry } from './link-deps.js'
 export { Links } from './links-registry.js'

@@ -199,20 +199,6 @@ export function AppPlusIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/** A folder: an existing folder added as a project (the sidebar's Projects row) */
-export function FolderIcon({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <path
-        d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3.1l1.6 1.7h5.3c.7 0 1.2.5 1.2 1.2v6.6c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 /** A folder with a plus: add a folder as a project (the sidebar's Projects row, owner 2026-10-21) */
 export function FolderPlusIcon({ size = 13 }: { size?: number }) {
   return (
@@ -456,30 +442,6 @@ export function ChangesIcon({ size = 12 }: { size?: number }) {
   )
 }
 
-/**
- * Import — an arrow descending onto a tray (M4 E-3). It stands next to "new app" (+), so it is
- * told apart by shape: creating is a plus, bringing something in is the shape of a download.
- */
-export function ImportIcon({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M8 2.5v7M5 6.8 8 9.8l3-3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M2.8 10.5v1.6c0 .8.6 1.4 1.4 1.4h7.6c.8 0 1.4-.6 1.4-1.4v-1.6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
 /*
  * The categories of Settings, one mark each beside its name in the rail. Drawn on the same 16-unit grid and stroke as
  * the sidebar's marks, so the rail reads as the same family.
@@ -540,16 +502,6 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
       <rect x="2" y="2.8" width="12" height="3.2" rx="0.8" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
       <path d="M3.2 6v6.4c0 .6.4 1 1 1h7.6c.6 0 1-.4 1-1V6M6.4 9h3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-/** A keyboard — shortcuts */
-export function KeyboardIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <rect x="1.5" y="3.8" width="13" height="8.4" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M4.3 6.5h.01M6.8 6.5h.01M9.2 6.5h.01M11.7 6.5h.01M5.3 9.6h5.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   )
 }

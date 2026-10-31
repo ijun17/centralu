@@ -1,5 +1,4 @@
 import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { whichTool } from '../env-path.js'
 import { commandInterpreter, systemTool } from '../os.js'
@@ -289,8 +288,3 @@ export function shellPath(): string {
   return process.platform === 'win32' ? 'powershell.exe' : '/bin/sh'
 }
 
-/** Home directory notation — for the fallback display when there is no prompt */
-export function shortCwd(cwd: string): string {
-  const home = homedir()
-  return cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
-}

@@ -16,8 +16,6 @@ import type { PlatformPath } from 'node:path'
 import type { Duplex, Readable, Writable } from 'node:stream'
 import type { OsTraits, ToolLaunch } from './rules.js'
 
-export type { OsFamily, OsTraits, ToolLaunch } from './rules.js'
-
 /** A path in the OS's own form (backslashes and a drive on Windows). The wire form is `protocol/paths.ts`'s. */
 export type HostPath = string
 

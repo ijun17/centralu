@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
-import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, credentialCheck, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
+import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, credentialCheck, readCredentialFile } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
 import { createHmac, generateKeyPairSync, type KeyObject } from 'node:crypto'
 import { hostLinkKey, LINK_AUTH_MARKER, linkAddress, linkPublicKeyOf, linkTranscript, parseLinkPublicKey, signLink, verifyLink } from '../packages/agent-host/src/transport/link-keys.js'
@@ -171,7 +171,7 @@ describe('the data folder and the state file', () => {
     writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key, port: null, full: entries }))
     const listed = (readServeState(d).full as { id: string }[]).map((e) => e.id)
     expect(listed).toEqual(['cccccccc'])
-    expect(readFullCredentials(join(d, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')).map((e) => e.id)).toEqual(listed)
+    expect(readCredentialFile(join(d, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')).full.map((e) => e.id)).toEqual(listed)
     // And the next write leaves the others out of the file
     pairServe(d, 'hub:laptop')
     const kept = (JSON.parse(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')) as { full: { id: string }[] }).full.map((e) => e.id)
@@ -761,7 +761,7 @@ function serve(dataDir: string, args: string[]) {
  * those serve.json names, read at each hello
  */
 function serveHostCredentials(dataDir: string) {
-  return { token: String(readServeState(dataDir).key), fullCredentials: () => readFullCredentials(join(dataDir, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')) }
+  return { token: String(readServeState(dataDir).key), fullCredentials: () => readCredentialFile(join(dataDir, SERVE_STATE_FILE), (f) => readFileSync(f, 'utf8')).full }
 }
 
 async function connection(dataDir: string, extra: NodeJS.ProcessEnv = {}): Promise<Record<string, unknown>> {

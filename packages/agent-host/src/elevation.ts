@@ -39,8 +39,3 @@ export function detectToken(o: Probe = {}): Promise<HostToken> {
     () => ({ elevated: null, logon: null }),
   )
 }
-
-/** `detectToken`'s `elevated` alone */
-export function detectElevation(o: Probe = {}): Promise<boolean | null> {
-  return detectToken(o).then((t) => t.elevated)
-}

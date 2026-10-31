@@ -12,11 +12,9 @@ import { RemoteAgents } from './remote-agents.js'
 
 // Moved with start_agent (#850); still importable from here
 export type { DelegationHost } from './delegation-host.js'
-export { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS, agentStartPersonText } from './start-agent-flow.js'
+export { ASK_THE_PERSON, agentStartPersonText } from './start-agent-flow.js'
 // Moved with stopping a child's background work (#428); still importable from here
-export { STOP_REPORTED_MS, taskList } from './background-stops.js'
-// Moved with the waits on a delegated turn (#428); still importable from here
-export type { TurnWait } from './delegation-waits.js'
+export { taskList } from './background-stops.js'
 
 // Moved to a module of its own, which the linked reports read without this one's imports (#1082); still importable from here
 export { HUB_SENDER } from './hub-sender.js'

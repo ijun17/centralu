@@ -129,7 +129,6 @@ export const SessionUpdate = z.discriminatedUnion('sessionUpdate', [
   z.looseObject({ sessionUpdate: z.literal('notice'), severity: z.string(), title: z.string(), description: nullish(z.string()) }),
 ])
 export type SessionUpdate = z.infer<typeof SessionUpdate>
-export type SessionUpdateKind = SessionUpdate['sessionUpdate']
 
 export const SessionNotification = z.looseObject({ sessionId: z.string(), update: z.looseObject({ sessionUpdate: z.string() }) })
 

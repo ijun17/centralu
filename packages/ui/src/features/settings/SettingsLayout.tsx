@@ -1,5 +1,4 @@
 import { useState, type HTMLAttributes, type ReactNode } from 'react'
-import { ChevronIcon } from '../../components/icons.jsx'
 
 /**
  * The parts every Settings category is laid out with, so the pages read as one window (owner, 2026-10-19).
@@ -7,7 +6,6 @@ import { ChevronIcon } from '../../components/icons.jsx'
  * - `SettingsPage`: the category's name and one short line under it.
  * - `SettingsGroup`: a card of rows split by hairlines, with an optional small heading above it.
  * - `SettingsRow`: a label (and a short hint under it) on the left, its control on the right, centred.
- * - `SettingsDisclosure`: settings most people never need, folded under one heading ("Advanced") until opened.
  * - `More`: the rest of an explanation, one press away. It stays in the page while closed (`hidden`), so what a row
  *   says for safety is still there for a screen reader's search and for a test that reads the section's text; it is
  *   only out of the way.
@@ -131,43 +129,6 @@ export function SettingsRow({
       </div>
       {more && <MoreText open={open}>{more}</MoreText>}
       {children}
-    </div>
-  )
-}
-
-/**
- * A folded section of a page (owner, 2026-10-20: the Orchestrator's agent limits and models, under "Advanced"). Closed,
- * only its heading is drawn and nothing under it is built: a control present but unseen is one a test can pass on and
- * a screen reader can walk into (Settings.tsx). Opening it is not remembered; the page opens folded each time.
- */
-export function SettingsDisclosure({
-  title,
-  hint,
-  children,
-  testId,
-}: {
-  title: string
-  hint?: ReactNode
-  children: ReactNode
-  testId?: string
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div data-testid={testId}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="group/disclosure flex w-full items-center gap-1.5 px-1 text-left"
-        data-testid={testId && `${testId}-toggle`}
-      >
-        <span className="text-ink-faint transition-colors group-hover/disclosure:text-ink-muted">
-          <ChevronIcon open={open} />
-        </span>
-        <span className="text-xs font-medium text-ink-muted transition-colors group-hover/disclosure:text-ink">{title}</span>
-        {hint && !open && <span className="min-w-0 truncate text-xs text-ink-faint">{hint}</span>}
-      </button>
-      {open && <div className="mt-3 space-y-6">{children}</div>}
     </div>
   )
 }

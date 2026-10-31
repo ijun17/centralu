@@ -162,8 +162,6 @@ import type { AppMessageSource, AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { MachineAsks } from './machine-asks.js'
 import type { HubsReader } from './ask-project-flow.js'
-export { appMessageFrame } from './app-messages.js'
-export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
