@@ -1193,6 +1193,41 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
   )
 
   it(
+    'ignores a stale serve.pid when choosing the port: a plain start keeps the recorded one (--port 0 host, launcher killed)',
+    async () => {
+      const d = tempDir()
+      ensureServeState(d)
+      const recorded = await freePort()
+      recordServePort(d, recorded)
+      // The launcher of a `--port 0` host was killed and its pid reused: serve.pid names a live pid and an ephemeral port
+      writeFileSync(join(d, SERVE_PID_FILE), JSON.stringify({ pid: process.pid, hostPid: process.pid, port: 45678 }))
+      const s = serve(d, [])
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      expect(s.out.stderr).toContain(`listening on 127.0.0.1:${recorded} `)
+      expect((JSON.parse(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')) as { port: number }).port).toBe(recorded)
+    },
+    90_000 * SLOW,
+  )
+
+  it(
+    'a launcher the data folder lock refuses leaves serve.pid of the host that holds it alone',
+    async () => {
+      const d = tempDir()
+      const first = await serveOnAnyPort(d)
+      const pidFile = join(d, SERVE_PID_FILE)
+      // As an older launcher leaves it: the probe of the second one looks where nothing listens, so it starts a host the lock refuses
+      const mine = readFileSync(pidFile, 'utf8')
+      const hidden = JSON.stringify({ ...JSON.parse(mine), port: await freePort() })
+      writeFileSync(pidFile, hidden)
+      const second = serve(d, ['--port', '0'])
+      expect(await second.exited).not.toBe(0)
+      expect(readFileSync(pidFile, 'utf8')).toBe(hidden)
+      first.child.kill()
+    },
+    90_000 * SLOW,
+  )
+
+  it(
     'takes the host down when the launcher itself is killed, instead of leaving it unsupervised',
     async () => {
       const d = tempDir()

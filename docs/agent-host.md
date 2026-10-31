@@ -3134,7 +3134,7 @@ this one for you.
 |---|---|
 | `centralu serve` | Starts the host in the foreground on `127.0.0.1:<port>`. Exit code: the host's own (0 after a clean stop) |
 | `centralu serve --port <n>` | The same, on that port. The port is recorded, and the next `serve` without a flag uses it |
-| `centralu serve --port 0` | The same, on a free port the host picks, for this run only: the `listening on 127.0.0.1:<port>` line says which, serve.pid holds it, and serve.json keeps the port it had (the next start is not given the system's pick). `--connection`, `--detach` and `--stop` find the running host by serve.pid |
+| `centralu serve --port 0` | The same, on a free port the system picks, for this run only: the `listening on 127.0.0.1:<port>` line says which, serve.pid holds it, and serve.json keeps the port it had (the next start is not given the system's pick). `--connection`, `--detach` and `--stop` find the running host by serve.pid |
 | `centralu serve --detach [--port <n>]` | Starts `serve` outside this session and returns once its host answers a hello (below). Prints one JSON line. A host already running is reported, not started twice |
 | `centralu serve --detach --from <hub>` | The same; `<hub>` is the name of the computer whose link asks (letters, digits, `.`, `_`, `-`), written with the ssh client's address to the host's `host.lock`, so a second Centralu refused on this folder names that link (#1223). A hub always sends it: every `serve` from 0.1.0-beta.45 on takes it (#1143) |
 | `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line |
