@@ -350,65 +350,65 @@ export function createRpcHandler(
     'agents.cancelInstallTool': async (p) => toolSetup(RpcMethods['agents.cancelInstallTool'].params.parse(p).tool).cancelInstall(),
     'agents.signIn': async (p) => toolSetup(RpcMethods['agents.signIn'].params.parse(p).tool).signIn(),
     'agents.cancelSignIn': async (p) => toolSetup(RpcMethods['agents.cancelSignIn'].params.parse(p).tool).cancelSignIn(),
-    'git.status': async (p) => mgr.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
+    'git.status': async (p) => mgr.files.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
     'git.diff': async (p) => {
       const { projectId, path, staged } = RpcMethods['git.diff'].params.parse(p)
-      return mgr.gitDiff(projectId, path, staged)
+      return mgr.files.gitDiff(projectId, path, staged)
     },
     'git.log': async (p) => {
       const { projectId, limit } = RpcMethods['git.log'].params.parse(p)
-      return mgr.gitLog(projectId, limit)
+      return mgr.files.gitLog(projectId, limit)
     },
     'git.commitDetail': async (p) => {
       const { projectId, sha } = RpcMethods['git.commitDetail'].params.parse(p)
-      return mgr.gitCommitDetail(projectId, sha)
+      return mgr.files.gitCommitDetail(projectId, sha)
     },
-    'git.branches': async (p) => mgr.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
+    'git.branches': async (p) => mgr.files.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
     'git.ignoredEntries': async (p) =>
       mgr.gitIgnoredEntries(RpcMethods['git.ignoredEntries'].params.parse(p).projectId),
     'git.checkout': async (p) => {
       const { projectId, branch, dryRun } = RpcMethods['git.checkout'].params.parse(p)
-      return mgr.gitCheckout(projectId, branch, dryRun)
+      return mgr.files.gitCheckout(projectId, branch, dryRun)
     },
     'git.stage': async (p) => {
       const { projectId, paths, unstage } = RpcMethods['git.stage'].params.parse(p)
-      await mgr.gitStage(projectId, paths, unstage)
+      await mgr.files.gitStage(projectId, paths, unstage)
       return { ok: true as const }
     },
     'git.commit': async (p) => {
       const { projectId, message } = RpcMethods['git.commit'].params.parse(p)
-      return mgr.gitCommit(projectId, message)
+      return mgr.files.gitCommit(projectId, message)
     },
-    'git.push': async (p) => mgr.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
-    'git.cancel': async (p) => mgr.gitCancel(RpcMethods['git.cancel'].params.parse(p).projectId),
+    'git.push': async (p) => mgr.files.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
+    'git.cancel': async (p) => mgr.files.gitCancel(RpcMethods['git.cancel'].params.parse(p).projectId),
     'attachments.save': async (p) => {
       const { sessionId, name, mime, dataBase64 } = RpcMethods['attachments.save'].params.parse(p)
       return mgr.saveAttachment(sessionId, name, mime, dataBase64)
     },
     'fs.listDir': async (p) => {
       const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
-      return mgr.listDir(projectId, path)
+      return mgr.files.listDir(projectId, path)
     },
     'fs.watch': async (p, ctx) => {
       const { projectId, paths } = RpcMethods['fs.watch'].params.parse(p)
       // Each window's set is its own, and the watchers are the union (#842 item 6)
-      return { watched: mgr.watchDirs(projectId, paths, ctx?.client) }
+      return { watched: mgr.files.watchDirs(projectId, paths, ctx?.client) }
     },
     'fs.readFile': async (p) => {
       const { projectId, path, sessionId } = RpcMethods['fs.readFile'].params.parse(p)
-      return mgr.readTextFile(projectId, path, sessionId)
+      return mgr.files.readTextFile(projectId, path, sessionId)
     },
     'fs.move': async (p) => {
       const { projectId, from, toDir } = RpcMethods['fs.move'].params.parse(p)
-      return mgr.moveEntry(projectId, from, toDir)
+      return mgr.files.moveEntry(projectId, from, toDir)
     },
     'fs.importFile': async (p) => {
       const { projectId, toDir, name, dataBase64 } = RpcMethods['fs.importFile'].params.parse(p)
-      return mgr.importFile(projectId, toDir, name, dataBase64)
+      return mgr.files.importFile(projectId, toDir, name, dataBase64)
     },
     'fs.resolve': async (p) => {
       const { projectId, path, purpose, sessionId } = RpcMethods['fs.resolve'].params.parse(p)
-      return { path: await mgr.resolveFile(projectId, path, purpose, sessionId) }
+      return { path: await mgr.files.resolveFile(projectId, path, purpose, sessionId) }
     },
     'messages.search': async (p) => {
       const { query, limit } = RpcMethods['messages.search'].params.parse(p)
@@ -739,7 +739,7 @@ export function createRpcHandler(
     'processes.stop': async (p) =>
       stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),
-    'projects.origin': async (p) => ({ origin: await mgr.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
+    'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
     'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(RpcMethods['projects.deleteOutlook'].params.parse(p).projectId)) ?? 'stays' }),
