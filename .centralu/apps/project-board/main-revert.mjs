@@ -1,6 +1,6 @@
 // What the main guard does about a red main (#1259 step 1, main-guard.mjs finds the culprit): reverts it in
 // a pull request queued at the front of the merge queue, through the fast tier like any change; tells the
-// session that queued it; and files an issue with the failure. A release bump is never reverted. The
+// session that queued it; and files an issue with the failure. The
 // decisions are pure here; `actOnRed` does what they say.
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -42,16 +42,6 @@ export const kindText = (red) =>
 export const failureLine = (red) => {
   const kind = kindText(red)
   return `${red.jobs?.length ? red.jobs.join(', ') : 'CI'} failed at ${short(red.red)}${kind ? ` (${kind})` : ''}${red.line ? `: ${red.line}` : ''}`
-}
-
-/**
- * A release bump (#1259: never reverted): its squash's subject is the bump's title (`chore(release): …`), or it
- * changes the file the version is declared in (project.json release.source).
- */
-export function isReleaseBump(commit) {
-  if (/^chore\(release\):/.test(String(commit.subject ?? ''))) return true
-  const source = config.release?.source?.path
-  return !!source && (commit.files ?? []).includes(source)
 }
 
 /** The branch a revert is pushed to: one per culprit */
@@ -159,7 +149,7 @@ function revertBody({ red, culprit, how, name, defaultBranch, tip }) {
 
 /**
  * Acts on a red main: `found` is the guard's (`{ red, culprit, how }`, or `{ red, culprit: null, why }`).
- * Reverts the culprit (unless it is a release bump, or the revert does not apply) in a pull request queued at the
+ * Reverts the culprit (unless the revert does not apply) in a pull request queued at the
  * front, files the issue, tells the culprit's session through its queue item (a message event: the session hears
  * it as a notice, or through its watch command), and answers what to record on the hunt; null when it no longer
  * holds the lease (another driver acts).
@@ -172,7 +162,6 @@ export async function actOnRed(dir, found, { now = clock(), ref, update, renew =
   let revert = null
   let did
   if (!culprit) did = 'Reported it here; nothing was reverted.'
-  else if (isReleaseBump(culprit)) did = `${name} is a release bump, which the queue never reverts: fix main with a change of its own.`
   else if (!dir) did = 'The queue has no checkout to make the revert in: revert it by hand.'
   else {
     if (!renew()) return null
