@@ -13,8 +13,8 @@ export type RoutedCardsHost = Pick<DelegationHost, 'autoBoundaryOpen' | 'childre
   Pick<SessionTrashHost, 'hostCards'> & {
     /** The tool bundle a session receives (tool-profiles.ts), null for none */
     toolProfileOf: (sessionId: string) => ToolProfile | null
-    /** Is this an agent session an app stood up (M4 D-1) */
-    isAppAgentSession: (m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>) => boolean
+    /** Whether a session is an agent an app stood up (M4 D-1) is asked of the app wiring (`SessionAppWiring.isAppAgentSession`) */
+    readonly apps: { isAppAgentSession(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): boolean }
     /** The person's answer to an approval card, through the manager as a window's is */
     respondApproval: (sessionId: string, requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string) => void
     /** The person's answer to a question card, through the manager as a window's is */
@@ -62,8 +62,8 @@ export class RoutedCards {
   answersApproval(callerId: string, sessionId: string, requestId: string): boolean {
     const caller = this.host.meta.get(callerId)
     const target = this.host.meta.get(sessionId)
-    if (!caller || caller.permissionPreset !== 'auto' || this.host.isAppAgentSession(caller)) return false
-    if (!target || target.permissionPreset === 'safe' || this.host.isAppAgentSession(target)) return false
+    if (!caller || caller.permissionPreset !== 'auto' || this.host.apps.isAppAgentSession(caller)) return false
+    if (!target || target.permissionPreset === 'safe' || this.host.apps.isAppAgentSession(target)) return false
     return !this.host.hostCards.hostAsks.has(requestId)
   }
 
@@ -153,7 +153,7 @@ export class RoutedCards {
     if (chosen.kind === 'approval') {
       if (!chosen.answerable || !this.host.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn')) {
         const why = this.host.hostCards.hostAsks.has(chosen.requestId) ? 'Centralu raised it there'
-          : m.permissionPreset === 'safe' || this.host.isAppAgentSession(m) ? `"${name}" runs under ${this.host.isAppAgentSession(m) ? "an app's agent" : 'safe'}, and you cannot raise its permissions`
+          : m.permissionPreset === 'safe' || this.host.apps.isAppAgentSession(m) ? `"${name}" runs under ${this.host.apps.isAppAgentSession(m) ? "an app's agent" : 'safe'}, and you cannot raise its permissions`
           : 'your permission preset is not auto'
         return { ok: false, error: `Only the person can answer this approval in "${name}": ${why}. Tell them if it matters.` }
       }

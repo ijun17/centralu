@@ -9,7 +9,7 @@ import type { SessionTrashHost } from './session-trash.js'
  */
 export type ProjectConsentsHost = Pick<DelegationHost, 'askHost' | 'emit' | 'meta' | 'store'> &
   Pick<SessionTrashHost, 'appsHub'> &
-  Pick<QueuedRequests, 'withdrawReaches'>
+  { readonly queue: Pick<QueuedRequests, 'withdrawReaches'> }
 
 /**
  * Whether a session of one project may reach another (#371): the person's card, a remembered "always" for the pair,
@@ -98,7 +98,7 @@ export class ProjectConsents {
     if (!this.host.store.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.host.emit({ type: 'project_consents_changed' })
     if (kind === 'delegate') {
-      this.host.withdrawReaches(
+      this.host.queue.withdrawReaches(
         () => false,
         (_r, from, to) => from === fromProjectId && to === toProjectId,
         'The person revoked the consent for the asking project to ask this one.',

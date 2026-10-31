@@ -191,6 +191,18 @@ Manager line counts are after each pull request.
   stay its own (the seat reads them with a wider type than `parts()` gives). A prototype, not `Object.assign`, which would
   read the `proposals` getter once and keep the value; the small `stands` guard says the type without an assertion
   (the assertion ceiling only goes down).
+- **8, `parts()` forwards to exposed modules** (`manager.ts` 2,698 to 2,690): only 8 of the 42, far fewer than the ~56 lines
+  the plan counted, because a hand-built host stops the rest: a test builds the host of `AskProjectFlow`, `DelegationFlow`,
+  `RestartPolicy`, `SessionTrash`, `HandoffFlow`, `ChildReports`, `LinkedReports`, `RemoteAgents`, `HostCards`,
+  `AppSessions`, `SessionEvents`, `WorktreeSessions`, `ChildOwnership` and the orchestrator seat, and the shared
+  `DelegationHost` is in most of them. Done where no test builds the consumer: `dropOpenedByAuto`, `withdrawReaches`
+  (`queue`), `isAppAgentSession`, `requireAppAccess` (`apps`), `appHostData`, `runAppAgent`, `agentRunEnded`
+  (`appSessions`) and `askCapability` (`hostCards`); `HandoffChildren`, `ProjectConsents`, `RoutedCards`, `LaunchInputs`,
+  `UpdatesAsked`, `SessionTools` and `SessionAppWiring` read the module off the host. The other 34 wait for a pull request
+  that also rewrites those tests' hosts.
+
+### 6.2 Work in flight
+
 - **The shared session core (#1654).** Its PRs 6–9 (PR 5 is in flight on its own branch) change `adapters/` and `adapters/core/` (the ledger, the decision
   order, events). The manager's process code (`switchTool`, `restartSession`, `sleepSession`, `handleSink`) and host
   tenure (`adoptKept`, the swap and dispose paths) read what those PRs reshape: `SessionHandle`, the sink, adopting a
