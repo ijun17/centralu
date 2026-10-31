@@ -2,9 +2,10 @@ import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadS
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
+import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
-import { isObj, tryParseJson } from '../json-value.js'
+import { asObj, isObj, tryParseJson } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -54,10 +55,38 @@ function onePath(value: unknown): string {
 /** The most of a last response a hub reads in one call (`host.lastAnswer`'s ceiling) */
 const ANSWER_MAX_CHARS = 100_000
 
-/** Whether a line of a conversation is a tool call's (#1480): left out of a `none` read whatever the machine sent */
+/**
+ * The text of an assistant line an older machine's `host.readSession` gave, or null for any other line. That machine cut
+ * a line at 2,000 characters of its JSON and added an ellipsis, so a long answer's line did not parse, and the read
+ * went on to an older line or came back empty (#1186): the head of such a line is read back here, as cut
+ */
+function assistantText(line: string): { text: string; cut: boolean } | null {
+  try {
+    const parsed = JSON.parse(line) as { role?: unknown; text?: unknown }
+    return parsed.role === 'assistant' && typeof parsed.text === 'string' ? { text: parsed.text, cut: false } : null
+  } catch {
+    const m = /^\{"ts":"[^"]*","role":"assistant","text":"((?:[^"\\]|\\.)*)/.exec(line)
+    if (!m) return null
+    // A cut can end inside an escape (`\u00`): shorten it until it reads
+    for (let end = m[1]!.length; end >= Math.max(0, m[1]!.length - 6); end--) {
+      const text = tryParseJson(`"${m[1]!.slice(0, end)}"`) as string | undefined
+      if (text !== undefined) return { text, cut: true }
+    }
+    return null
+  }
+}
+
+/** Whether a line of a conversation is a tool call's (#1480): a machine from before `tools: "none"` still sends them */
 function isToolLine(line: string): boolean {
   const parsed = tryParseJson(line)
   return isObj(parsed) && parsed.role === 'tool'
+}
+
+/** Whether a machine answered a read from an offset as one: no line, or one line that says what it shows (`lineText`) */
+function offsetAnswered(lines: readonly string[]): boolean {
+  if (lines.length === 0) return true
+  if (lines.length > 1) return false
+  return typeof asObj(tryParseJson(lines[0]!)).shown === 'string'
 }
 
 /** A machine's line of a conversation: kept when it is one line, as the machine's code makes it; quoted as one otherwise */
@@ -368,19 +397,35 @@ export function linkedSessions(
     async hubAuto(machineId) {
       const m = machineById(machineId)
       if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      return attempt(m, async () => {
-        const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
-        return { allowed: r?.allowed === true }
+      // A build from before #1273 has no `host.hubAuto`, and drops `fromHub`: said as such, not as a failure
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
+          return { allowed: r?.allowed === true }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: host.hubAuto')) older = true
+          throw err
+        }
       })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1273`, olderBuild: true } : r
     },
 
     async origin(project) {
       const m = owner(project.id)
       if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      return attempt(m, async () => {
-        const r = (await route('projects.origin', { projectId: project.id })) as { origin?: unknown }
-        return { origin: typeof r?.origin === 'string' ? r.origin : null }
+      // A build from before #1038 has no `projects.origin`, and drops `agentDepth` too: said as such, not as a failure
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const r = (await route('projects.origin', { projectId: project.id })) as { origin?: unknown }
+          return { origin: typeof r?.origin === 'string' ? r.origin : null }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: projects.origin')) older = true
+          throw err
+        }
       })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1038`, olderBuild: true } : r
     },
 
     async interrupt(sessionId) {
@@ -415,20 +460,27 @@ export function linkedSessions(
     async deleteAgentChild(sessionId, branch) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
-        const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
-        if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
-        const { worktree, path, branch: on, why, note } = answer.data
-        // The machine's words, each on one line, as every text from it the hub puts in an answer
-        return {
-          worktree,
-          ...(path ? { path: onePath(path) } : {}),
-          ...(on ? { branch: oneLine(on) } : {}),
-          // A sentence, not a label: longer, and still one line
-          ...(why ? { why: oneLine(why, 1_000) } : {}),
-          ...(note ? { note: oneLine(note, 1_000) } : {}),
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
+          if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
+          const { worktree, path, branch: on, why, note } = answer.data
+          // The machine's words, each on one line, as every text from it the hub puts in an answer
+          return {
+            worktree,
+            ...(path ? { path: onePath(path) } : {}),
+            ...(on ? { branch: oneLine(on) } : {}),
+            // A sentence, not a label: longer, and still one line
+            ...(why ? { why: oneLine(why, 1_000) } : {}),
+            ...(note ? { note: oneLine(note, 1_000) } : {}),
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: agents.deleteAgentChild')) older = true
+          throw err
         }
       })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1161`, olderBuild: true } : r
     },
 
     async lastUserMessage(sessionId) {
@@ -608,8 +660,16 @@ export function linkedSessions(
         const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
         return { ok: true, text, length: r.data.length, seq: r.data.seq }
       } catch (err) {
-        return { ok: false, error: cause(err) }
+        if (!(err instanceof Error && /Unknown method: host\.lastAnswer/.test(err.message))) return { ok: false, error: cause(err) }
       }
+      // A machine on a Centralu from before #1186: its last assistant line, which it cut at 2,000 characters of JSON
+      const r = await this.read(sessionId, 8)
+      if (!r.ok) return { ok: false, error: r.error ?? 'it could not be read' }
+      for (const line of [...(r.lines ?? [])].reverse()) {
+        const said = assistantText(line)
+        if (said !== null) return { ok: true, text: clipPreview(said.text, maxChars) + (said.cut && said.text.length <= maxChars ? '…' : ''), length: said.text.length, seq: null }
+      }
+      return { ok: true, text: '', length: 0, seq: null }
     },
 
     async list() {
@@ -644,6 +704,8 @@ export function linkedSessions(
           sessionId: m.q.strip(sessionId, 'The session'),
           ...(limit !== undefined ? { limit } : {}),
           ...(opts?.around !== undefined ? { around: opts.around } : {}),
+          // `tools` stays the boolean an older machine knows; `toolLines` is the three words, ignored by one
+          ...(toolMode === 'full' ? { tools: true } : {}),
           ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
           ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
           ...(opts?.before !== undefined ? { before: opts.before } : {}),
@@ -652,6 +714,20 @@ export function linkedSessions(
         })
         const r = HostReadSessionResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+        /*
+         * A read from an offset that an older machine answered as its plain read (#1186): it ignores `offset`, so the same
+         * cut lines would come back on every read on, and the model would read them again and again. Said instead
+         */
+        if (opts?.offset !== undefined && !offsetAnswered(r.data.lines)) {
+          return { ok: false, error: `${m.name} runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters` }
+        }
+        /*
+         * A machine that does not echo the budget is from before it (#1480): it answers every line it has, tool lines too,
+         * and ignores `before` and `from`, whose answer would be the same newest lines again
+         */
+        if (r.data.maxChars === undefined && (opts?.before !== undefined || opts?.from !== undefined)) {
+          return { ok: false, error: `${m.name} runs a Centralu from before reading on from a line, so it cannot continue that read; update it there. recall finds a passage and read_session with its seq as around reads it` }
+        }
         // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
         const all = r.data.lines
         const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all

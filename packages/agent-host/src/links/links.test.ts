@@ -2594,6 +2594,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(card()).toBeFalsy()
   })
 
+  // #1038 review: a build that drops agentDepth would let two machines linked both ways start each other's sessions for good
+  it('refuses a machine whose Centralu would not keep the child within the agent depth', async () => {
+    const { start, card } = await rig({ remote: { without: ['projects.origin'] } })
+    expect(await start()).toMatchObject({ ok: false, error: expect.stringContaining('Remote box runs an older Centralu') })
+    expect(card()).toBeFalsy()
+  })
+
   /**
    * An auto caller's child on another machine runs auto there too (#1273), where that machine's "Allow auto from a
    * linked computer" switch lets it, and then no card is raised (owner decision 2026-10-19). A machine whose switch is
@@ -2644,6 +2651,18 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', preset: 'normal', autoWithheld: 'machine_off' })
       const r = await call
       expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('it runs under normal on Remote box: that computer does not take auto') })
+      if (!r.ok) return
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+    })
+
+    it('asks with the card and keeps normal on a machine from before this, and says so', async () => {
+      const { remote, hub, answer, start } = await rig({ remote: { without: ['host.hubAuto'] } })
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const call = start()
+      const c = await answer('allow')
+      expect(c.detail).toMatchObject({ kind: 'agent_start', preset: 'normal', autoWithheld: 'older' })
+      const r = await call
+      expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('runs a Centralu from before #1273') })
       if (!r.ok) return
       expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
     })
@@ -2970,6 +2989,21 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await agent(pushed.id, 'delete')).toMatchObject({ notice: expect.stringContaining('on feat-pushed, was removed with its branch') })
     expect(existsSync(pushed.path)).toBe(false)
   }, 60_000 * SLOW)
+
+  it('delete on a machine whose build predates the worktree cleanup trashes the child there and says its worktree stays', async () => {
+    const { remote, answer, start, agent } = await rig({ remote: { without: ['agents.deleteAgentChild'] } })
+    await remote.mgr.setProjectTrusted('p-app', true)
+    const call = start({ branch: 'feat-old' })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const path = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!.worktree!.path
+    expect(await agent(r.sessionId, 'delete')).toMatchObject({
+      ok: true, state: 'deleted', notice: expect.stringContaining('on feat-old, stays: Remote box runs a Centralu from before #1161, which does not remove it'),
+    })
+    expect(remote.mgr.listSessions().some((s) => `m1.${s.id}` === r.sessionId)).toBe(false)
+    expect(existsSync(path)).toBe(true)
+  })
 
   it('tells the parent when the link drops, and reports the turn that ended meanwhile once the link is back', async () => {
     const { remote, remoteStore, hub, answer, start, agent, told } = await rig()

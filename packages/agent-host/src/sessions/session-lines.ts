@@ -91,8 +91,7 @@ export function sessionLines(rows: readonly StoredMessage[], opts: { tools?: boo
  * linked machine writes in its own, unqualified, form.
  *
  * `offsetRead`: the line answers a read from an offset, and says what it shows even when that is all of it. A hub
- * tells an older machine, which ignores the offset and answers its plain read, by its lines lacking this. This hub no
- * longer checks it, but a 0.1.0-beta.45 hub does, so the mark stays while that build is supported (as the `maxChars` echo)
+ * tells an older machine, which ignores the offset and answers its plain read, by its lines lacking this
  */
 export function lineText(line: SessionLine, from = 0, max = LINE_MAX_CHARS, offsetRead = false): string {
   const key = typeof line.fields.text === 'string' ? 'text' : typeof line.fields.title === 'string' ? 'title' : null

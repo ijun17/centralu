@@ -256,7 +256,7 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    goes on (`readOn`: the same call with `around` at the line's first seq and `offset`), and a read with `offset`
    shows up to 8,000 characters of that one line (`sessions/session-lines.ts`). `offset` is in no tool definition:
    the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
-   (`host.readSession`'s `offset`; a read from an offset always says what it shows). The cut used to send the caller
+   (`host.readSession`'s `offset`, additive: an older machine answers its plain read, and the hub says that machine cannot read from an offset rather than showing the same cut lines again; a read from an offset always says what it shows, which is how the hub tells them apart). The cut used to send the caller
    to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
    the middle of a long answer could not be read back at all. **A read has a total, too (#1480)**: 40 lines of 2,000 characters
    were about 80,000 characters in one call, all read again on every later request of the reader. The lines of one call, notes
@@ -267,10 +267,12 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    `from=<seq of the first line not shown>` forward, so following it shows nothing twice (`around` centres, and showed half of it
    again). `tools` is `none` (tool calls left out, and the texts a call separated stay separate lines, so the end of a turn is a line of
    its own), `titles` (one line each, the default, `false`) or `full` (`true`). For a linked machine, `host.readSession` takes
-   `maxChars`, `toolLines`, `before` and `from` (additive) and answers the
+   `maxChars`, `toolLines`, `before` and `from` (additive; `tools` stays the boolean an older machine's schema accepts) and answers the
    `maxChars` it held. The hub bounds every answer itself (`fitMachineLines`): tool lines out for `none`, then the budget, keeping the
    lines nearest the spot of an `around` read (the machine centres its window on it) and the newest otherwise, a machine's own notes
-   counted. A note's call repeats the `tools` (when not `titles`) and `maxChars` the reader gave, so
+   counted. A machine from before it answers every line it has and no `maxChars`: its note cannot name the read that goes on, since
+   those lines carry no seq, and says to find the passage with `recall` and read around its seq; `before` and `from` to such a machine
+   are refused, since it would answer the plain read again. A note's call repeats the `tools` (when not `titles`) and `maxChars` the reader gave, so
    following it reads the same way, and a read answered to a hub (`hubView`) adds that a hub from before `before` and `from` strips them from the call
    (its schema lacks them, so the newest lines would come back again): "the hub needs an update to read on", and `around=<seq>` reads near the same spot (`ReadOn`
    in `sessions/session-lines.ts`, #1487). **A session reads and recalls its handoff lineage (#1487)**: its predecessor by its newest handoff marker, that one's
@@ -366,7 +368,8 @@ machine's own events, which the hub relays qualified (`observeLinked`). The answ
 words, read there whole (`host.lastAnswer`, #1186: its text up to 100,000 characters, its length and its first
 message's seq there), cut as an answer is cut here, the cut naming `read_session` on that session with that seq and
 an offset. The hub used to read it from `host.readSession`'s lines, which the machine cut at 2,000 characters of JSON,
-so a long answer came back as an older line or empty. A read that failed is said (the turn ended, the answer could not be read, read it with
+so a long answer came back as an older line or empty; an older machine is still read that way, its cut line read back
+as far as it goes. A read that failed is said (the turn ended, the answer could not be read, read it with
 `read_session` once the machine answers), here, in start_agent's answers for a child there and in a report's preview,
 where it used to come back as an empty answer. It runs on that machine with its own logins, folder and preset.
 
@@ -678,7 +681,7 @@ the card. The card is `agent_start` with `machine`: it names the computer, is ra
 "always", as ask_project's card for another machine's project (#700); it is bounded like a local start's setup
 (`START_AGENT_SETUP_MS`). An `auto` caller's start raises no card where the machine takes `auto` from this computer
 (#1273): the hub asks it first (`host.hubAuto`, its "Allow auto from a linked computer" switch); a machine whose switch is
-off gets the card, which says why the child runs under `normal` (`autoWithheld`). The child
+off, or one from before #1273, gets the card, which says why the child runs under `normal` (`autoWithheld`). The child
 is made over the link (`agents.createSession` there) under the caller's preset capped at `normal` (as create_session
 over a link, #838) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
