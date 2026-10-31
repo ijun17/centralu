@@ -23,8 +23,6 @@ export type WorkspaceSnapshot = {
   focusedApp?: { projectId: string | null; appId: string; machine?: string | null } | null
   /** Whether the evidence panel (git/files) was open */
   panelOpen?: boolean
-  /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */
-  panelTab?: string
   /**
    * The panel's tab arrangement (#20): vertically stacked groups, each an ordered tab
    * list plus its active tab. One arrangement for the whole app — the panel is a way
@@ -38,13 +36,6 @@ export type WorkspaceSnapshot = {
   panelWidth?: number
   /** Session list width (px) */
   sidebarWidth?: number
-  /**
-   * @deprecated The text size step (0..4) from before #312 step 5. The text size is a preference
-   * now (`UiPreferences.textSize`); this is only read, once, to move an old value there.
-   */
-  textScale?: number
-  /** @deprecated The tab structure was replaced by three lanes. Appears only when reading an old snapshot */
-  tab?: string
 }
 
 /**

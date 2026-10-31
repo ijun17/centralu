@@ -1,4 +1,4 @@
-import { releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
+import { MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
@@ -207,6 +207,11 @@ export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'> & Partial<Pick<
 export type VersionPrompt = {
   /** The two sides speak one protocol: "connect anyway" is possible */
   compatible: boolean
+  /**
+   * Held only because the remote runs a release below `MIN_SUPPORTED_VERSION` (#1143): one protocol, and this computer
+   * names the remote as the side to update. The oldest version this computer works with, else null
+   */
+  minimum: string | null
   /** Which side to update, when that is known (one channel, no dev build) */
   older: 'hub' | 'remote' | null
   /** The version to bring the older side to */
@@ -243,8 +248,11 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   const remoteCommand = v.older === 'remote' ? `${shims(m).npm} i -g centralu@${hubRelease}` : null
   const updateHere = v.older === 'remote' && !v.hub.dev && !m.command
   const or = held ? 'connect anyway' : 'keep it as it is'
+  const minimum = !v.compatible && v.hub.protocolVersion === v.remote.protocolVersion ? MIN_SUPPORTED_VERSION : null
   let text: string
-  if (!v.compatible) {
+  if (minimum) {
+    text = `${m.name} runs Centralu ${remote}, older than ${minimum}, the oldest this computer works with. They cannot connect until ${m.name} is updated.`
+  } else if (!v.compatible) {
     const side = v.older === 'hub' ? 'this computer' : v.older === 'remote' ? m.name : 'one side'
     text = `${m.name} runs Centralu ${remote} (protocol ${v.remote.protocolVersion}) and this computer runs ${hub} (protocol ${v.hub.protocolVersion}). They cannot talk to each other until ${side} is updated.`
   } else if (v.older === 'hub') {
@@ -254,7 +262,7 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   } else {
     text = `${m.name} runs Centralu ${remote} and this computer runs ${hub}${v.sameChannel ? '' : ', from another release channel'}. Align them, or ${or}.`
   }
-  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text, held, centralu: shims(m).centralu }
+  return { compatible: v.compatible, minimum, older: v.older, target, remoteCommand, updateHere, text, held, centralu: shims(m).centralu }
 }
 
 /** Plural for counts in a sentence: "1 terminal", "2 terminals" */

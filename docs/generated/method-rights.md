@@ -92,12 +92,10 @@ With the limited credential: runs.
 - `machines.cancelUpdate`
 - `machines.disconnect`
 - `machines.list`
-- `machines.need`
 - `machines.probe`
 - `machines.reconnect`
 - `machines.revokeCredential`
 - `machines.setAutoReconnect`
-- `machines.setConnect`
 - `machines.sshHosts`
 - `machines.withdrawAsk`
 - `messages.image`
@@ -145,7 +143,6 @@ With the limited credential: runs.
 - `updates.status`
 - `usage.history`
 - `workspace.load`
-- `worktrees.createManager`
 - `worktrees.setTrunk`
 
 ## asks

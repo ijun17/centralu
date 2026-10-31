@@ -16,21 +16,11 @@ export const settingsParams = {
    * or an app of a project that is not registered is left out. An app is not checked against the
    * app list, which can lag behind its folder; the screen leaves out one it cannot find.
    *
-   * **Expanded, not replaced (protocol.md §4).** Before #288 both methods spoke in bare session
-   * ids: `grid.get` answered them, `grid.set` took `{ sessionIds }`. A build that knows panels asks
-   * for them (`tagged: true`, `panels`) and gets panels back; a request without them gets the old
-   * shape, the sessions only. A newer UI also sends `sessionIds` next to `panels`, so an older host,
-   * which strips the field it does not know, still saves the sessions. So a UI and a host one build
-   * apart keep working either way, and `PROTOCOL_VERSION` stays where it is. The old fields go one
-   * release later.
+   * Both speak in panels (#288). `tagged` is what a host up to 0.1.0-beta.45 needs to answer panels rather than
+   * bare session ids (`MIN_SUPPORTED_VERSION`); this host answers panels either way.
    */
   'grid.get': z.object({ tagged: z.literal(true).optional() }),
-  'grid.set': z
-    .object({
-      panels: z.array(GridPanel).max(256).optional(),
-      sessionIds: z.array(z.string()).max(256).optional(),
-    })
-    .refine((p) => p.panels !== undefined || p.sessionIds !== undefined, 'panels or sessionIds is required'),
+  'grid.set': z.object({ panels: z.array(GridPanel).max(256) }),
   /**
    * Reads screen settings (UiPreferences).
    *

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { SessionId } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
-import { MachineConnect, MachineId, RemoteShell } from '../../machines.js'
+import { MachineId, RemoteShell } from '../../machines.js'
 import { HubOffer } from '../../machines-hub.js'
 
 /** The parameters of the `host` methods, which the host validates (docs/protocol.md §3). Their results: ./host.results.ts */
@@ -139,17 +139,6 @@ export const hostParams = {
    * off while connected leaves the link up; turning it on while the link is away tries again now. Additive
    */
   'machines.setAutoReconnect': z.object({ machineId: MachineId, autoReconnect: z.boolean() }),
-  /**
-   * The older connect mode (#1134), kept for one release (#1341): `at_start` is Auto reconnect on, `when_needed` off.
-   * Use `machines.setAutoReconnect`
-   */
-  'machines.setConnect': z.object({ machineId: MachineId, connect: MachineConnect }),
-  /**
-   * Said by a window of the connect mode (#1134) while one of a machine's projects or sessions was open. Nothing connects
-   * a machine on a need any more (#1341): it answers the row as it is and does nothing. Accepted for one release so an
-   * older window does not fail
-   */
-  'machines.need': z.object({ machineId: MachineId, repeat: z.boolean().optional() }),
   /**
    * Connects although the two sides run different versions of one protocol: the person declined to
    * align them (plan §4). Remembered for this pair of versions only; when either side moves, the

@@ -73,13 +73,9 @@ export function visibleGridPanels(
 }
 
 /**
- * A grid list read from somewhere untyped — an older host, or the client's own storage once the
- * grid moves there (#82).
- *
- * A bare string is a session id: that is what the grid stored before apps could stand on it, so a
- * list written by an older build keeps every panel. Anything else that is not a well-formed
- * reference is dropped rather than trusted, and a panel named twice keeps its first place — one
- * bad entry costs that entry, never the list.
+ * A grid list read from somewhere untyped: the host's answer, or the client's own storage once the grid moves there (#82).
+ * An entry that is not a well-formed reference is dropped rather than trusted, and a panel named twice keeps its first
+ * place: one bad entry costs that entry, never the list.
  */
 export function sanitizeGridPanels(raw: unknown): GridPanel[] {
   if (!Array.isArray(raw)) return []
@@ -92,10 +88,6 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
     out.push(p)
   }
   for (const item of raw) {
-    if (typeof item === 'string') {
-      if (item) put(sessionGridPanel(item))
-      continue
-    }
     if (!isRecord(item)) continue
     const v = item
     if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId)

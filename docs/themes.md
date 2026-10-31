@@ -194,7 +194,7 @@ typed is quoted name by name (`JetBrains Mono` becomes `"JetBrains Mono"`; a gen
 | A default writes nothing on the root | The stylesheet's own values show, so a person who never opens these settings sees exactly the screen from before they existed (checked with the style snapshot) |
 | The terminal follows the code font | The terminal is text a machine wrote, like a path or a log. Step 1 kept xterm on its own stack only so that the token rename moved nothing. On a font change xterm re-reads it and refits, so the shell gets its new columns |
 | Line height leaves `--leading-tight` and the fixed-row views alone | A heading or a two-line label is set to fit its box. The code viewer (18px rows), the diff (~17px) and the commit graph (38px) are virtual lists or drawn lanes that know their row height in pixels (see the comments there) |
-| The text size moved out of the workspace snapshot | It is a way of looking, like the theme, not a place things are. The host moves the snapshot's old step (`textScale`, 0..4) into the record once, on the first read that finds no `textSize` there; after that the record has its own value and the old field is ignored |
+| The text size moved out of the workspace snapshot | It is a way of looking, like the theme, not a place things are |
 | Markdown keeps its em sizes | A heading (1.25em) or a code span (0.92em) is sized against the reply's own text, so it keeps its proportion whichever font is picked; the text size is a zoom over everything, so there is nothing else for them to follow |
 
 Like the theme, the last choice is cached (`cc-typography` in `localStorage`) and applied in `main.tsx`

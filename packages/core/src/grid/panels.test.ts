@@ -92,10 +92,6 @@ describe('visibleGridPanels', () => {
 })
 
 describe('sanitizeGridPanels', () => {
-  it('reads a list of bare session ids — what the grid stored before apps — as session panels', () => {
-    expect(sanitizeGridPanels(['s3', 's1'])).toEqual([sessionGridPanel('s3'), sessionGridPanel('s1')])
-  })
-
   it('keeps well-formed references of both kinds, a user-folder app included', () => {
     const list = [sessionGridPanel('s1'), appGridPanel('p1', 'slider'), appGridPanel(null, 'notes')]
     expect(sanitizeGridPanels(list)).toEqual(list)
@@ -105,6 +101,7 @@ describe('sanitizeGridPanels', () => {
     expect(
       sanitizeGridPanels([
         's1',
+        { kind: 'session', sessionId: 's1' },
         null,
         42,
         '',

@@ -32,16 +32,6 @@ export function nearestTextSize(value: number): number {
   return best
 }
 
-/**
- * Where the text size used to live: an index (0..4) into the same five steps, in the workspace
- * snapshot's `textScale`. Read once to move it into the preferences, then never again; anything
- * that is not a number is no text size at all.
- */
-export function textSizeFromLegacyStep(step: unknown): number | null {
-  if (typeof step !== 'number' || !Number.isFinite(step)) return null
-  return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, Math.round(step)))] ?? null
-}
-
 export type NotifyPolicy = {
   /** Notify at once when an approval starts waiting */
   approval: boolean

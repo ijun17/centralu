@@ -6,7 +6,7 @@ import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/cl
  * (`AgentPort.subscribe`), naming the thread; the Inbox reads `list` or `thread` again.
  *
  * Whatever the person writes is theirs by who is asking, not by a field of the call. A rule that says no arrives as an error with
- * the code `refused` and `data.reason` (docs/protocol.md §5). A host from before the mailbox answers "Unknown method".
+ * the code `refused` and `data.reason` (docs/protocol.md §5).
  */
 export interface MailPort {
   /** The threads the person is in (unread first), the mail held for them, and how many sleeping sessions wait for their word */
