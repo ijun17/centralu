@@ -539,13 +539,24 @@ describe('the runners (real processes)', () => {
   }
   const logLine = (id: string, what: string) => `require('node:fs').appendFileSync(${JSON.stringify(join(dir, 'log.txt'))}, '${id} ${what}\\n')`
   const win = process.platform === 'win32'
+  /**
+   * A command that logs its start and ends, logging its end, once the test creates `gate`. It holds the lock for as long as the
+   * test needs, not for a length of time a loaded machine can overrun: a run that arrives late would find the lock free and
+   * never wait. It ends by itself after two minutes, so a failed test leaves no run polling for a gate that never comes.
+   */
+  const heldUntilGate = (id: string) =>
+    `${logLine(id, 'start')}; const t = setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(dir, 'gate'))})) { clearInterval(t); clearTimeout(cap); ${logLine(id, 'end')} } }, 20); const cap = setTimeout(() => process.exit(1), 120_000)`
+  const openGate = () => writeFileSync(join(dir, 'gate'), '')
+  const isWaiting = (r: { stderr: () => string }) => /waiting for the e2e lock: held by pid \d+/.test(r.stderr())
 
   it(
     'lets two runs started together go one after the other, and the second says who it waits for',
     async () => {
-      const run = (id: string) => runner(`${logLine(id, 'start')}; setTimeout(() => { ${logLine(id, 'end')} }, 1500)`)
-      const a = run('a')
-      const b = run('b')
+      const a = runner(heldUntilGate('a'))
+      const b = runner(heldUntilGate('b'))
+      // The holder keeps the lock until the other has said it waits
+      await eventually(() => isWaiting(a) || isWaiting(b) || undefined, 60_000)
+      openGate()
       expect(await Promise.all([a.done, b.done])).toEqual([0, 0])
       const log = readFileSync(join(dir, 'log.txt'), 'utf8').trim().split('\n')
       // Never interleaved: each run ends before the other starts
@@ -581,8 +592,10 @@ describe('the runners (real processes)', () => {
       // A lock whose holder is a process that has ended
       const dead = spawnSync(process.execPath, ['-e', '0']).pid
       write(holder(dead, 123 * HOUR, { at: 5_000, command: 'a run that was killed' }))
-      const run = (id: string) => runner(`${logLine(id, 'start')}; setTimeout(() => { ${logLine(id, 'end')} }, 600)`)
-      const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map(run)
+      const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => runner(heldUntilGate(id)))
+      // The one that took the lock holds it until the other five have said they wait
+      await eventually(() => runs.filter(isWaiting).length === 5 || undefined, 60_000)
+      openGate()
       expect(await Promise.all(runs.map((r) => r.done))).toEqual([0, 0, 0, 0, 0, 0])
       const log = readFileSync(join(dir, 'log.txt'), 'utf8').trim().split('\n')
       // Each run ended before the next one started
@@ -598,12 +611,14 @@ describe('the runners (real processes)', () => {
   it(
     'does not take a live lock over because the second run has another time zone and locale',
     async () => {
-      const run = (id: string, env: Record<string, string>) => runner(`${logLine(id, 'start')}; setTimeout(() => { ${logLine(id, 'end')} }, 2500)`, env)
+      const run = (id: string, env: Record<string, string>) => runner(heldUntilGate(id), env)
       // The holder is in one zone and locale, and the runs that wait are in others: the writer of the lock and the reader differ
       const a = run('a', { TZ: 'Pacific/Auckland', LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' })
       await eventually(() => lockFiles().length > 0 || undefined, 60_000)
       const b = run('b', { TZ: 'UTC', LC_ALL: 'C', LANG: 'C' })
       const c = run('c', { TZ: 'America/Los_Angeles', LC_ALL: 'de_DE.UTF-8', LANG: 'de_DE.UTF-8' })
+      await eventually(() => (isWaiting(b) && isWaiting(c)) || undefined, 60_000)
+      openGate()
       expect(await Promise.all([a.done, b.done, c.done])).toEqual([0, 0, 0])
       const log = readFileSync(join(dir, 'log.txt'), 'utf8').trim().split('\n')
       // Three runs, one after another: nobody ran alongside a live holder
