@@ -3,16 +3,12 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import { asObj } from '../../json-value.js'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
-import { startToolProcess } from '../core/tool-process.js'
-import { AcpConnection } from '../acp/connection.js'
+import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
 import { findCursor } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
 
 const exec = promisify(execFile)
-
-const Initialized = z.looseObject({ agentCapabilities: z.unknown().optional(), authMethods: z.array(z.looseObject({ id: z.string() })).optional() })
 
 /**
  * What the installed Cursor CLI offers (#270), read without a session and without a login: its `--help` commands, the
@@ -24,14 +20,7 @@ async function gather(): Promise<SurfaceInputs> {
   if (!install) throw new Error('Cursor CLI is not installed on this machine (https://cursor.com/install)')
   const env = { ...process.env, ...install.env }
   const { stdout: help } = await exec(install.command, [...install.args, '--help'], { timeout: 30_000, windowsHide: true, env })
-  const proc = startToolProcess({ command: install.command, args: [...install.args, 'acp'], cwd: process.cwd(), env })
-  const conn = new AcpConnection(proc, { onNotification: () => {}, onRequest: async () => null, onExit: () => {} }, 'cursor-surface')
-  let init: unknown
-  try {
-    init = await conn.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'centralu-surface', version: '1' } }, 60_000)
-  } finally {
-    await conn.dispose()
-  }
+  const initialize = await acpInitialize({ command: install.command, args: [...install.args, 'acp'], env }, 'cursor-surface')
   const dir = dirname(install.args[0] ?? install.command)
   const names = new Set<string>()
   for (const f of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
@@ -42,19 +31,10 @@ async function gather(): Promise<SurfaceInputs> {
       if (name) names.add(name)
     }
   }
-  return { version: install.version, help, initialize: JSON.stringify(init), bundle: JSON.stringify([...names].sort()) }
-}
-
-/** Keys of a capability object, flattened (`sessionCapabilities.list`), so a new one shows as a new name */
-function capabilityNames(value: unknown, prefix = ''): string[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return prefix ? [prefix] : []
-  const entries = Object.entries(asObj(value))
-  if (entries.length === 0) return prefix ? [prefix] : []
-  return entries.flatMap(([k, v]) => (typeof v === 'object' && v !== null ? capabilityNames(v, prefix ? `${prefix}.${k}` : k) : [prefix ? `${prefix}.${k}` : k]))
+  return { version: install.version, help, initialize, bundle: JSON.stringify([...names].sort()) }
 }
 
 export function readCursorSurface(inputs: SurfaceInputs): ToolSurface {
-  const init = Initialized.parse(JSON.parse(inputs.initialize ?? '{}'))
   const commands = [...(inputs.help ?? '').matchAll(/^ {2}([a-z][\w-]*)(?: |$)/gm)].flatMap((m) => (m[1] ? [m[1]] : []))
   const bundle = z.array(z.string()).parse(JSON.parse(inputs.bundle ?? '[]'))
   return {
@@ -62,7 +42,7 @@ export function readCursorSurface(inputs: SurfaceInputs): ToolSurface {
     offered: {
       command: [...new Set([...commands, ...bundle.filter((n) => n.startsWith('cursor/'))])].sort(),
       message: bundle.filter((n) => !n.startsWith('cursor/')).sort(),
-      capability: [...capabilityNames(init.agentCapabilities), ...(init.authMethods ?? []).map((a) => `authMethods.${a.id}`)].sort(),
+      capability: acpCapabilities(inputs.initialize),
     },
   }
 }

@@ -1,15 +1,10 @@
-import { z } from 'zod'
-import { asObj } from '../../json-value.js'
 import type { AdapterSurface, SurfaceBaseline, SurfaceInputs, ToolSurface } from '../contract.js'
-import { AcpConnection } from '../acp/connection.js'
-import { startToolProcess } from '../core/tool-process.js'
+import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
 import { agyHome, agyPlatformKey, isInstalled } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE } from './release.js'
 import { agyStderrLine } from './shape.js'
 import { dataRoot } from '../../data-dir.js'
-
-const Initialized = z.looseObject({ agentCapabilities: z.unknown().optional(), authMethods: z.array(z.looseObject({ id: z.string() })).optional() })
 
 /** What the installed agent offers (#270): the capabilities and sign-in methods its `initialize` answers, without a session */
 async function gather(): Promise<SurfaceInputs> {
@@ -19,29 +14,14 @@ async function gather(): Promise<SurfaceInputs> {
   if (!archive || !isInstalled(home, archive)) throw new Error('Antigravity is not installed by Centralu on this machine')
   // `initialize` alone starts no sign-in, so no helper: an empty `BROWSER` still keeps the person's own out
   const launch = agyLaunch(home, archive, '')
-  const proc = startToolProcess({ ...launch, cwd: home.root, env: { ...process.env, ...launch.env } })
-  const conn = new AcpConnection(proc, { onNotification: () => {}, onRequest: async () => null, onExit: () => {} }, 'antigravity-surface', agyStderrLine)
-  let init: unknown
-  try {
-    init = await conn.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'centralu-surface', version: '1' } }, 60_000)
-  } finally {
-    await conn.dispose()
-  }
-  return { version: AGY_RELEASE.version, initialize: JSON.stringify(init) }
-}
-
-function capabilityNames(value: unknown, prefix = ''): string[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return prefix ? [prefix] : []
-  const entries = Object.entries(asObj(value))
-  if (entries.length === 0) return prefix ? [prefix] : []
-  return entries.flatMap(([k, v]) => (typeof v === 'object' && v !== null ? capabilityNames(v, prefix ? `${prefix}.${k}` : k) : [prefix ? `${prefix}.${k}` : k]))
+  const initialize = await acpInitialize({ ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }, 'antigravity-surface', agyStderrLine)
+  return { version: AGY_RELEASE.version, initialize }
 }
 
 export function readAgySurface(inputs: SurfaceInputs): ToolSurface {
-  const init = Initialized.parse(JSON.parse(inputs.initialize ?? '{}'))
   return {
     version: `antigravity-acp ${inputs.version ?? 'unknown'}`,
-    offered: { capability: [...capabilityNames(init.agentCapabilities), ...(init.authMethods ?? []).map((a) => `authMethods.${a.id}`)].sort() },
+    offered: { capability: acpCapabilities(inputs.initialize) },
   }
 }
 
