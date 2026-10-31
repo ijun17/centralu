@@ -778,6 +778,18 @@ async function serveOnFreePort(dataDir: string, pick: () => Promise<number> = fr
 }
 
 /**
+ * `serve --detach` on a port of its own, tried again once like `serveOnFreePort` (#1788). A detached serve whose port was
+ * taken answers `detach: { ok: false, reason: 'exited', message: '…Port N is already in use…' }` and exits 1.
+ */
+async function detachOnFreePort(dataDir: string, pick: () => Promise<number> = freePort) {
+  for (let attempt = 1; ; attempt++) {
+    const port = await pick()
+    const r = await cli(dataDir, ['--detach', '--port', String(port)])
+    if (attempt >= 2 || !JSON.stringify(r.line).includes(`Port ${port} is already in use`)) return { ...r, port }
+  }
+}
+
+/**
  * The options a host `centralu serve` runs is started with since #1405: its key as the token, and the full credentials
  * those serve.json names, read at each hello
  */
@@ -2001,14 +2013,33 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
     }
   }
 
+  it('detaches again on another port when the one it picked was taken before the host could bind it (#1788)', async () => {
+    const d = tempDir()
+    const holder = createServer((socket) => socket.destroy())
+    await new Promise<void>((r) => holder.listen({ host: '127.0.0.1', port: 0 }, r))
+    const taken = (holder.address() as { port: number }).port
+    const picks = [taken]
+    try {
+      ensureServeState(d)
+      const r = await detachOnFreePort(d, async () => picks.shift() ?? (await freePort()))
+      expect(r.port).not.toBe(taken)
+      expect(picks).toEqual([])
+      expect(r.line).toMatchObject({ port: r.port, hostRunning: true, detach: { ok: true } })
+      await cli(d, ['--stop'])
+    } finally {
+      await new Promise((r) => holder.close(r))
+      cleanup(d)
+    }
+  }, 180_000 * SLOW)
+
   it(
     'starts the host in the background and returns once it answers, then stops it in order on request',
     async () => {
       const d = tempDir()
       try {
         ensureServeState(d)
-        const port = await freePort()
-        const started = await cli(d, ['--detach', '--port', String(port)])
+        const started = await detachOnFreePort(d)
+        const port = started.port
         expect(started.code).toBe(0)
         expect(started.line).toMatchObject({ v: 1, port, hostRunning: true, detach: { ok: true, how: POSIX ? 'setsid' : 'wmi', already: false } })
         const pids = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
@@ -2050,8 +2081,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       const d = tempDir()
       try {
         ensureServeState(d)
-        const port = await freePort()
-        expect((await cli(d, ['--detach', '--port', String(port)])).line).toMatchObject({ hostRunning: true })
+        expect((await detachOnFreePort(d)).line).toMatchObject({ hostRunning: true })
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
         expect(await connection(d)).not.toHaveProperty('stopped')
         expect((await cli(d, ['--detach'])).line).toMatchObject({ hostRunning: true })
@@ -2079,19 +2109,26 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       const d = tempDir()
       try {
         ensureServeState(d)
-        const port = await freePort()
-        // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
-        const session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port ${port}; sleep 60`], {
-          cwd: ROOT,
-          env: cliEnv(d),
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: true,
-        })
-        started.push(session)
+        let session: ChildProcess
         let out = ''
-        session.stdout!.on('data', (b) => (out += String(b)))
-        const deadline = Date.now() + 60_000
-        while (!out.includes('"hostRunning":true') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
+        for (let attempt = 1; ; attempt++) {
+          const port = await freePort()
+          // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
+          session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port ${port}; sleep 60`], {
+            cwd: ROOT,
+            env: cliEnv(d),
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: true,
+          })
+          started.push(session)
+          out = ''
+          session.stdout!.on('data', (b) => (out += String(b)))
+          const deadline = Date.now() + 60_000
+          while (!out.includes('"hostRunning":true') && !out.includes('"ok":false') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
+          // The number was taken between freePort() and the host's bind (#1788): once more with another
+          if (attempt >= 2 || !out.includes(`Port ${port} is already in use`)) break
+          process.kill(-session.pid!, 'SIGKILL')
+        }
         expect(out).toContain('"detach":{"ok":true')
         /*
          * What lets the launcher and the host outlive the session is being outside its process group (#845). The test
