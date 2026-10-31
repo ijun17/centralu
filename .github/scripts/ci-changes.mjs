@@ -6,10 +6,9 @@
 //   quick   a pull request: `changes`, `verify`, the Windows unit tests and the macOS tests, the jobs that catch most
 //           problems cheaply. Every other job is left out, and reports nothing.
 //   full    everything else: a commit already on main, a manual run (workflow_dispatch: a person
-//           asking for it on a branch, or the main guard's bisect), and a release bump's pull
-//           request. Inside the full tier the files still leave out what they cannot affect.
+//           asking for it on a branch, or the main guard's bisect). Inside the full tier the files still leave out what they cannot affect.
 //           A manual run that asks for the quick tier (input `tier: quick`) runs the quick tier
-//           instead (#1259): the merge queue's batches, unless it is a release bump or on main.
+//           instead (#1259): the merge queue's batches, unless it is on main.
 //   none    a draft pull request (#1066): `changes` alone. A stack's lower PRs are drafts
 //           (CONTRIBUTING.md): the top's run, and the merge queue's batch, are what prove the
 //           stack, and a lower's own run only queued behind them. Marked ready for review (a lower
@@ -35,8 +34,7 @@
 // Each is `true` or `false` on a full run (`false` runs the job's stand-in, which reports its checks
 // as passed), and `off` on a quick one (neither runs). `fail_fast` (2026-10-19, the owner's decision) is `true` on a
 // manual run alone, the merge queue's batches: there a failed `verify` cancels the rest of the run (build.yml's
-// `fail fast` job), since no other job can make that run land. `false` on every other run, and on a manual run that
-// changes the version's source (a release bump's run is never cut short, docs/releasing.md), or that is on main, or
+// `fail fast` job), since no other job can make that run land. `false` on every other run, and on a manual run that is on main, or
 // whose files are not known. `full` is `true` on a full run: the jobs every
 // full run has (the WebKit UI scenarios, the Windows lint and types, the `full tier` job), and `off`
 // on a quick one. `quick` is `true` on both: `verify`, the Windows unit tests and the macOS tests; `off`, with every
@@ -53,10 +51,7 @@
 //
 // One fact comes from the event, and only after everything else is decided: whether a pull request is
 // a draft (`pull_request.draft` in $GITHUB_EVENT_PATH). Whether a commit is on main is a fact of the
-// history, and a manual run is the one with the `everything` input set. A release bump changes the
-// file that declares the version, which makes its pull request a full run of every job, as main's
-// is, draft or not, so the release script's audit still holds (docs/releasing.md, "Workflow event
-// audit"). When main or the merge-base is not in the checkout, everything runs.
+// history, and a manual run is the one with the `everything` input set. When main or the merge-base is not in the checkout, everything runs.
 //
 // Local check: node .github/scripts/ci-changes.mjs   (prints the answer; GITHUB_OUTPUT unset)
 
@@ -104,12 +99,6 @@ const EVERYTHING = [
   /(^|\/)vite\.config\.[cm]?[jt]s$/,
   /^\.github\/(workflows|scripts|actions)\//,
 ]
-/**
- * The file that declares the version (project.json `release.source.path`, which a test holds this to):
- * a pull request that changes it is a release bump, whose checks the release reads (docs/releasing.md).
- */
-export const VERSION_SOURCE = 'packages/protocol/src/brand.ts'
-
 const matches = (patterns, file) => patterns.some((p) => p.test(file))
 const ALL = { bundle: true, host: true, host_tests: true, code: true }
 /** The groups a file list answers; the order of the outputs. */
@@ -153,17 +142,16 @@ export const screenChanged = (files) => screenFiles(files)?.length !== 0
  * The tier of a run (see the header), with why. `onMain`: HEAD is already on main. `dispatch`: a
  * manual run (the workflow_dispatch input `everything` is set, true or false). `files`: what HEAD adds
  * to main, or null when that is not known. `draft`: the run is a draft pull request's, which is
- * asked last: a release bump runs in full, a draft or not.
+ * asked last.
  */
 export function tierOf({ files, onMain = false, dispatch = false, dispatchTier = 'full', draft = false }) {
   if (onMain) return { tier: 'full', why: 'the commit is on main' }
-  // A manual run that asks for the quick tier (#1259): the merge queue's batch. A release bump still runs in full
-  if (dispatch && dispatchTier === 'quick' && files !== null && !files.includes(VERSION_SOURCE)) {
+  // A manual run that asks for the quick tier (#1259): the merge queue's batch
+  if (dispatch && dispatchTier === 'quick' && files !== null) {
     return { tier: 'quick', why: 'a manual run that asked for the quick tier, as the merge queue starts for a batch' }
   }
   if (dispatch) return { tier: 'full', why: 'a manual run (workflow_dispatch)' }
   if (files === null) return { tier: 'full', why: 'the changed files are not known' }
-  if (files.includes(VERSION_SOURCE)) return { tier: 'full', why: `it changes ${VERSION_SOURCE}, as a release bump does` }
   if (draft) return { tier: 'none', why: "a draft pull request, as a stack's lower PRs are: nothing runs until it is marked ready for review" }
   return { tier: 'quick', why: 'a pull request: the full tier runs in the merge queue' }
 }
@@ -176,10 +164,10 @@ export function outputs(tier, needs) {
 
 /**
  * Whether a failed `verify` cancels the rest of the run (see the header): a manual run (`dispatch`) off main whose
- * files are known and do not include the version's source. Everything else keeps every job running to its end.
+ * files are known. Everything else keeps every job running to its end.
  */
 export function failFastOf({ files, onMain = false, dispatch = false }) {
-  return dispatch && !onMain && files !== null && !files.includes(VERSION_SOURCE)
+  return dispatch && !onMain && files !== null
 }
 
 /** Whether the event that started the run is a draft pull request's ($GITHUB_EVENT_PATH). Unreadable: not a draft. */
@@ -241,7 +229,7 @@ function main() {
   const failFast = failFastOf({ files: changed.files, onMain: changed.onMain === true, dispatch })
   const lines = [...Object.entries(outputs(tier, classify(files))).map(([k, v]) => `${k}=${v}`), `fail_fast=${failFast}`]
   console.log(`The ${tier} tier: ${why}.`)
-  if (failFast) console.log('A failed verify cancels the rest of this run (a manual run, not a release bump).')
+  if (failFast) console.log('A failed verify cancels the rest of this run (a manual run).')
   if (tier === 'full') console.log(files === null ? `Every job runs: ${process.env.EVERYTHING === 'true' ? 'a manual run asked for everything' : changed.why}.` : `${files.length} changed file(s), ${changed.why}:\n${files.map((f) => `  ${f}`).join('\n')}`)
   console.log(lines.join('\n'))
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`)
