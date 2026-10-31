@@ -4,7 +4,8 @@
  * `scripts/stamp-version.mjs` writes it into the carriers and puts the placeholder back. Run against temporary git
  * repositories and copies of this repository's carriers, so nothing here touches the checkout.
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { gitAsT as git } from './git-fixture.test-helpers.js'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { constants as osConstants, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -29,8 +30,6 @@ const temp = () => {
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
 /** A git repository holding a copy of this repository's carriers, committed as they are (the placeholder) */
 function carriers(): string {

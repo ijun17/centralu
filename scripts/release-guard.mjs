@@ -26,58 +26,25 @@
 
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
-import { sourceScheme } from '../.centralu/apps/project-board/versions.mjs'
+import { isMain } from './is-main.mjs'
+import { compareVersions, nextVersion, parseVersion, sourceScheme } from '../.centralu/apps/project-board/versions.mjs'
 
 // Where the version is declared and how the tag scheme reads: the board's release configuration, one definition for both
 const SOURCE = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')).release.source
 export const BRAND = SOURCE.path
-// SemVer without build metadata: content-verify's Rust parser refuses `+meta`, and npm drops it
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/
 export const TAG_PREFIX = 'v'
 export const SHIM = 'centralu'
 
 /** brand.ts's scheme: `{ scheme: 'brand', version }`, `{ scheme: 'tag' }`, or `{ scheme: null, problem }` (`sourceScheme`). */
 export const schemeOf = (text) => sourceScheme(text, SOURCE)
 
-export function parseVersion(text) {
-  const m = SEMVER.exec(String(text ?? ''))
-  if (!m) return null
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split('.') : [] }
-}
-
-const isNum = (s) => /^\d+$/.test(s)
-
-/** Negative, zero or positive, as SemVer orders them. */
-export function compareVersions(a, b) {
-  const x = parseVersion(a)
-  const y = parseVersion(b)
-  if (!x || !y) throw new Error(`Not a version: ${!x ? a : b}`)
-  for (const k of ['major', 'minor', 'patch']) if (x[k] !== y[k]) return x[k] - y[k]
-  if (!x.pre.length || !y.pre.length) return (x.pre.length ? -1 : 0) + (y.pre.length ? 1 : 0)
-  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
-    const p = x.pre[i]
-    const q = y.pre[i]
-    if (p === undefined) return -1
-    if (q === undefined) return 1
-    if (p === q) continue
-    if (isNum(p) && isNum(q)) return Number(p) - Number(q)
-    if (isNum(p)) return -1
-    if (isNum(q)) return 1
-    return p < q ? -1 : 1
+/** The next prerelease, or null when there is none to count (`nextVersion` throws a sentence instead). */
+function nextPrerelease(version) {
+  try {
+    return nextVersion(version)
+  } catch {
+    return null
   }
-  return 0
-}
-
-/** The next prerelease: the last number of the prerelease counted up. Null when there is none to count. */
-export function nextPrerelease(version) {
-  const v = parseVersion(version)
-  if (!v?.pre.length) return null
-  const i = v.pre.findLastIndex(isNum)
-  if (i < 0) return null
-  const pre = [...v.pre]
-  pre[i] = String(Number(pre[i]) + 1)
-  return `${v.major}.${v.minor}.${v.patch}-${pre.join('.')}`
 }
 
 /** Release tags (`v` and a version) of `names`, newest first. */
@@ -238,4 +205,4 @@ async function main() {
   process.exitCode = result.ok ? 0 : 1
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main()
+if (isMain(import.meta.url)) await main()

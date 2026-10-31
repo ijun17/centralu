@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,6 +22,7 @@ import {
 import { topLevel } from '../.centralu/apps/project-board/git.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+import { g, githubStandIn } from './git-fixture.test-helpers.js'
 
 /**
  * The project board's contribution tools (#386 step 2): comment, file_issue, open_pr, commit_check,
@@ -506,8 +506,6 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
 
 // --- rebase_stack, on real repositories ------------------------------------------------------------
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }
-const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim()
 const commit = (cwd: string, file: string, text: string, message: string) => {
   writeFileSync(join(cwd, file), text)
   g(cwd, 'add', file)
@@ -528,15 +526,7 @@ type Stack = { work: string; origin: string; c0: string; l1: string; l2: string;
  * - `stale`: `up` was cut from `low`'s first commit, and `low` got its second one after
  */
 function stack({ mainMoves = 'none', stale = false }: { mainMoves?: 'none' | 'other' | 'conflict' | 'near'; stale?: boolean } = {}): Stack {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { origin, work } = githubStandIn(root)
   const lines = (changed: Record<number, string> = {}) => Array.from({ length: 10 }, (_, i) => changed[i + 1] ?? `line ${i + 1}`).join('\n') + '\n'
   writeFileSync(join(work, 'e.txt'), lines())
   g(work, 'add', 'e.txt')
@@ -579,14 +569,7 @@ const leftovers = (work: string) => ({ worktrees: g(work, 'worktree', 'list').sp
 
 describe('topLevel on a real repository', { timeout: 60_000 * SLOW }, () => {
   const bare = () => {
-    const origin = join(root, 'origin.git')
-    const work = join(root, 'work')
-    g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-    g(root, 'init', '-q', '-b', 'main', work)
-    g(work, 'config', 'user.name', 'Tester')
-    g(work, 'config', 'user.email', 'tester@example.test')
-    g(work, 'config', 'commit.gpgsign', 'false')
-    g(work, 'remote', 'add', 'origin', origin)
+    const { origin, work } = githubStandIn(root, { plain: true })
     commit(work, 'a.txt', 'a\n', 'base')
     return { origin, work }
   }
@@ -755,15 +738,7 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
  * called and which of the board's refs it saw, and answers what the test put in pre-pr-answer.json.
  */
 function prePrCheckout() {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { work } = githubStandIn(root)
   commit(work, 'a.txt', 'a\n', 'base')
   g(work, 'checkout', '-q', '-b', 'feat/low')
   const low = commit(work, 'b.txt', 'b\n', 'low')

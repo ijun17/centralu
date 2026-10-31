@@ -28,7 +28,8 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 export const PIN_FILE = fileURLToPath(new URL('../packaging/remote-runtime.json', import.meta.url))
 
@@ -208,7 +209,7 @@ async function main(argv) {
   console.log(`pinned Node ${version} (signed by ${signer}, release-keys ${commit}) in ${PIN_FILE}`)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     console.error(`node-pin: ${e.message}`)
     process.exit(1)

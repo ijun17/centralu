@@ -30,9 +30,9 @@ import { execFile } from './system.mjs'
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { GitError, fetchRefs, git, remoteFor, topLevel } from './git.mjs'
+import { GitError, fetchRefs, git, isAncestor, remoteFor, topLevel } from './git.mjs'
 import { pathMatches } from './versions.mjs'
-import { listSome, short } from './util.mjs'
+import { alive, listSome, short } from './util.mjs'
 
 /** Where fetched refs land for a moment (git.mjs fetchRefs): one driver at a time, so names never collide. */
 const REF_SPACE = 'refs/centralu-queue'
@@ -130,17 +130,6 @@ export function commandEnv(env = process.env) {
   for (const [k, v] of Object.entries(env)) if (COMMAND_ENV.has(k.toUpperCase()) && v !== undefined) out[k] = v
   out.CI = '1'
   return out
-}
-
-/** Whether the process `pid` still runs (a folder of one that does may be in use). */
-function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return e.code === 'EPERM'
-  }
 }
 
 /** A link to a folder: a junction on Windows (no privilege needed), a symbolic link elsewhere */
@@ -312,15 +301,8 @@ function failure(argv, e, timeoutMs) {
   return `${commandLine(argv)} failed (exit ${e.code ?? '?'})${said ? `: ${said.length > 200 ? `${said.slice(0, 199)}…` : said}` : ''}`
 }
 
-/** Whether `a` is an ancestor of `b` in `dir` (false when either is not there). */
-async function isAncestor(dir, a, b) {
-  try {
-    await git(dir, ['merge-base', '--is-ancestor', a, b])
-    return true
-  } catch {
-    return false
-  }
-}
+/** Whether `a` is an ancestor of `b` in `dir`; false on any error, as when a landed head is not in the checkout (a deleted branch). */
+const ancestor = (dir, a, b) => isAncestor(dir, a, b).catch(() => false)
 
 /**
  * The pull request the queue landed as a squash whose original commits `branchTip` still carries: of
@@ -331,8 +313,8 @@ export async function landedUnder(dir, landed, branchTip, mainTip) {
   let best = null
   for (const l of landed ?? []) {
     if (!l?.head || l.head === branchTip) continue
-    if (!(await isAncestor(dir, l.head, branchTip)) || (await isAncestor(dir, l.head, mainTip))) continue
-    if (!best || (await isAncestor(dir, best.head, l.head))) best = l
+    if (!(await ancestor(dir, l.head, branchTip)) || (await ancestor(dir, l.head, mainTip))) continue
+    if (!best || (await ancestor(dir, best.head, l.head))) best = l
   }
   return best
 }

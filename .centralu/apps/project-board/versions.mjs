@@ -1,11 +1,12 @@
 // The release's version rules as pure functions (no git, no gh, no IO): the next prerelease, the order of two
 // versions, which scheme a commit's version source is in, and which files a pattern names. release.mjs puts them to work.
 
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
+// SemVer without build metadata (content-verify's Rust parser refuses `+meta`, npm drops it); a numeric prerelease id has no leading zero
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/
 
 /** `1.2.3-beta.4` as numbers and prerelease parts; null when it is not a version. */
 export function parseVersion(text) {
-  const m = SEMVER.exec(String(text ?? '').trim())
+  const m = SEMVER.exec(String(text ?? ''))
   if (!m) return null
   return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split('.') : [] }
 }

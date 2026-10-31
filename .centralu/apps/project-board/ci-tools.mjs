@@ -10,7 +10,7 @@ import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
 import { short } from './util.mjs'
-import { now as clock } from './clock.mjs'
+import { freshCache } from './cache.mjs'
 
 // --- CI: ci_status -------------------------------------------------------------
 // The decisions are pure functions in ci.mjs; this part reads GitHub, asks them, and says the answer
@@ -18,15 +18,10 @@ import { now as clock } from './clock.mjs'
 // passed. No checks reported, or any still running, is not green.
 
 const MAX_LOGS = 4
-const KNOWN_TTL_MS = 5 * 60_000
-let known = null
+const known = freshCache({ ttlMs: 5 * 60_000 })
 
 /** The issue listing known intermittent failures (project.json ci.knownFailuresIssue), kept 5 minutes. */
-async function knownFailures() {
-  if (known && clock() - known.at < KNOWN_TTL_MS) return known
-  known = { at: clock(), ...(await readIssueText(config.repository, CI.knownFailures)) }
-  return known
-}
+const knownFailures = () => known.get('issue', () => readIssueText(config.repository, CI.knownFailures))
 
 function rowState(r) {
   const c = r.check

@@ -12,9 +12,10 @@
 // whether it was opened as a draft: the queue marks a draft ready only for a pull request opened as one (a later
 // draft is someone's hold). `readied` is set the first time the pull request is seen ready for review, by the queue or
 // by anyone: after that a draft is a hold (a person turned it back), and the queue does not mark it ready again.
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { now as clock, systemNow } from './clock.mjs'
+import { now as clock } from './clock.mjs'
+import { writeJsonAtomic } from './util.mjs'
 
 export const OPENED_FILE = 'opened-prs.json'
 /** How many are kept: the newest; a pull request is queued within hours of being opened */
@@ -50,29 +51,7 @@ export function noteReadied(dir, repo, number) {
   writeAll(dir, all)
 }
 
-function writeAll(dir, all) {
-  const kept = Object.fromEntries(Object.entries(all).slice(-OPENED_MAX))
-  const tmp = join(dir, `${OPENED_FILE}.${process.pid}.tmp`)
-  writeFileSync(tmp, `${JSON.stringify(kept)}\n`)
-  // Windows refuses a rename onto a file another process has open for a moment: try again shortly
-  for (let i = 0; ; i++) {
-    try {
-      renameSync(tmp, join(dir, OPENED_FILE))
-      return
-    } catch (e) {
-      if (i >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) {
-        try {
-          unlinkSync(tmp)
-        } catch {
-          // nothing left to remove
-        }
-        throw e
-      }
-      const until = systemNow() + 25
-      while (systemNow() < until);
-    }
-  }
-}
+const writeAll = (dir, all) => writeJsonAtomic(join(dir, OPENED_FILE), Object.fromEntries(Object.entries(all).slice(-OPENED_MAX)))
 
 /** The record of a pull request, or null. */
 export const openedBy = (opened, repo, number) => opened?.[keyOf(repo, number)] ?? null

@@ -32,7 +32,9 @@ import { createRequire } from 'node:module'
 import net from 'node:net'
 import { constants as osConstants, homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 import { readFileSync } from 'node:fs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -218,6 +220,6 @@ export async function run(env: Env = process.env, deps: Deps = {}): Promise<numb
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   process.exitCode = await run()
 }
