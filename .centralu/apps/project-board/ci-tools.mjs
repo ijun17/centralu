@@ -11,7 +11,7 @@ import { answer, asError, linesAnswer, reason } from './reply.mjs'
 import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
-import { short, sleep, span } from './util.mjs'
+import { short, sleep } from './util.mjs'
 import { now as clock } from './clock.mjs'
 
 // --- CI: ci_status and merge_when_green -------------------------------------------------------------
@@ -139,7 +139,7 @@ async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
 
 /**
  * Tells the caller the call is alive. Centralu ends a call after 10 minutes without progress
- * (docs/apps.md §5), and a wait for CI runs up to 40; the message shows under the session's tool card.
+ * (docs/apps.md §5); the message shows under the session's tool card.
  */
 export function progress(ctx, n, message) {
   console.error(`[project-board] ${message}`)
@@ -152,12 +152,12 @@ export function progress(ctx, n, message) {
 const MERGEABLE_RETRIES = 3
 const MERGEABLE_WAIT_MS = 2_000
 
-async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, intoBatch = false, detail = 'compact' }, ctx) {
+async function mergeWhenGreen({ pr, body, deleteBranch: del = false, intoBatch = false, detail = 'compact' }) {
   const want = itemOf(pr)
   const repo = want.repo
   const what = `PR ${want.ref}`
   // A merge outside the queue moves the default branch under a batch it is running (#1548): said in the answer. Read fresh
-  // each time, since a batch may start or end while this waits; a queue file that does not read is no reason to refuse
+  // each time, since a batch may start or end meanwhile; a queue file that does not read is no reason to refuse
   const queueNote = (p) => {
     try {
       return mergeWarning(readQueue(centralu.dataDir), { repo, pr: want.number, baseRefName: p.baseRefName, defaultBranch, ref: queueRef })
@@ -177,54 +177,26 @@ ${note}` : summary
   const { permissions, defaultBranch } = await readRepo(repo)
   if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
 
-  let p = await readPr(repo, want.number)
-  const firstHead = p.headRefOid
+  const p = await readPr(repo, want.number)
   const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
-  const limitMs = Math.min(60, Math.max(0, Number(waitMinutes ?? CI.waitMinutes) || 0)) * 60_000
-  const started = clock()
-  const signal = ctx?.mcpReq?.signal
-  let quick = 0
-  let beat = 0
-  for (;;) {
-    const checks = await evaluate(repo, p.headRefOid, req)
-    const d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
-    if (d.action === 'refuse') {
-      const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
-      return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
-    }
-    if (d.action === 'merge') {
-      // Said before it happens, not after (the review of #1563): a merge here moves the default branch under a batch that
-      // is running. Read now, at the moment of merging, since a batch may have started while this waited
-      const note = queueNote(p)
-      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      if (note && !intoBatch)
-        return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict }, { isError: true })
-      return doMerge(repo, what, p, body, del, ci, note)
-    }
-    // wait
-    let pause = CI.pollMs
-    if (d.kind === 'mergeable' && quick < MERGEABLE_RETRIES) {
-      quick += 1
-      pause = MERGEABLE_WAIT_MS
-    } else if (!wait) {
-      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
-    } else if (clock() - started + pause > limitMs) {
-      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(noted(`Not merged: still not green after ${span(clock() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, p), ci, {
-        outcome: 'timeout',
-        merged: false,
-        verdict: checks.verdict,
-      })
-    } else {
-      beat += 1
-      progress(ctx, beat, `Waiting for ${what} (${span(clock() - started)} so far): ${d.reason}`)
-    }
-    if (!(await sleep(pause, signal))) return asError(answer('Not merged: cancelled while waiting.', { outcome: 'cancelled', merged: false }))
-    p = await readPr(repo, want.number)
-    if (p.headRefOid !== firstHead)
-      return refused(`its head moved from ${short(firstHead)} to ${short(p.headRefOid)} while waiting, so the checks waited on are not the ones that count. Call again to wait on the new commit.`, null, { kind: 'moved' })
+  let checks = await evaluate(repo, p.headRefOid, req)
+  let d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
+  for (let n = 0; n < MERGEABLE_RETRIES && d.action === 'wait' && d.kind === 'mergeable'; n++) {
+    await sleep(MERGEABLE_WAIT_MS)
+    checks = await evaluate(repo, p.headRefOid, req)
+    d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
   }
+  if (d.action === 'refuse') {
+    const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
+    return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
+  }
+  const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
+  if (d.action === 'wait') return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later (queue_merge merges once green).`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
+  // Said before it happens, not after (the review of #1563): a merge here moves the default branch under a batch that is running
+  const note = queueNote(p)
+  if (note && !intoBatch)
+    return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict }, { isError: true })
+  return doMerge(repo, what, p, body, del, ci, note)
 }
 
 async function doMerge(repo, what, p, body, del, ci, note = null) {
@@ -351,12 +323,10 @@ export const tools = {
     config: {
       title: 'Merge a pull request once CI is green',
       description:
-        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once, or with wait: true polls until green or failed (up to waitMinutes, default 40) and then merges or reports the failure like ci_status. When the merge queue has a batch running on the same branch, it merges nothing and says so first, because merging here moves main under the batch (it stops before it lands and is built again); queue_merge avoids that, and intoBatch: true merges anyway.',
+        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once (queue_merge merges once green). When the merge queue has a batch running on the same branch, it merges nothing and says so first, because merging here moves main under the batch (it stops before it lands and is built again); queue_merge avoids that, and intoBatch: true merges anyway.',
       inputSchema: z.object({
         pr: itemRef.describe(`The pull request: ${REF_HELP}`),
         body: z.string().optional().describe('The squash commit body; default a summary of the PR description'),
-        wait: z.boolean().optional().describe('Wait for pending checks instead of answering "pending" at once; default false'),
-        waitMinutes: z.number().positive().max(60).optional().describe('With wait: how many minutes to wait at most; default 40'),
         deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s, never a local branch: a Centralu worktree may hold it); default false'),
         intoBatch: z.boolean().optional().describe('Merge although the merge queue has a batch running on the same branch, which this stops and builds again; default false: the call answers "Not merged" and says so first'),
         detail: detailInput.describe('"full" lists passed and non-required checks too'),
