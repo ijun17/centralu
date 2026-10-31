@@ -171,7 +171,7 @@ describe('codex under the keeper', () => {
           adopt: { process: server as unknown as AgentProcess, openCalls: [] },
         },
       },
-      (e) => events.push(e as never),
+      (e) => events.push(e),
     )
     await eventually(() => server.received.some((m) => m.method === 'thread/turns/list'))
     session.send('merge this in')
