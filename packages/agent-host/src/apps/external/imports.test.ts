@@ -143,11 +143,9 @@ describe('the import book keeps exact folder identities', () => {
     book.mark('notes', dir, dir, 10)
     book.confirm('notes', dir, declaration, 20)
 
-    expect(JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes).toMatchObject({
-      ino: Number(id), inoExact: id.toString(),
-    })
+    expect(JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes).toMatchObject({ inoExact: id.toString() })
     expect(new ImportBook(dataRoot).get('notes', dir)).toMatchObject({
-      ino: Number(id), inoExact: id.toString(),
+      inoExact: id.toString(),
       confirmed: { key: reviewKey(declaration), at: 20 },
     })
   })
@@ -194,9 +192,10 @@ describe('the import book keeps exact folder identities', () => {
       book.mark('other', other, other)
       expect(JSON.parse(readFileSync(path, 'utf8')).notes, `unchanged legacy record ${id}`).toEqual(legacy)
       book.confirm('notes', dir, declaration, 30)
-      expect(JSON.parse(readFileSync(path, 'utf8')).notes).toMatchObject({
-        ino: Number(id), inoExact: id.toString(), confirmed: { at: 30 },
-      })
+      // Confirmed again, it is bound by its exact id alone: the legacy Number is not carried on
+      const rewritten = JSON.parse(readFileSync(path, 'utf8')).notes
+      expect(rewritten).toMatchObject({ inoExact: id.toString(), confirmed: { at: 30 } })
+      expect(rewritten).not.toHaveProperty('ino')
       expect(new ImportBook(dataRoot).get('notes', dir)?.confirmed?.at).toBe(30)
       if (id < boundary) {
         fileIds.set(dir, id + 1n)
@@ -226,23 +225,18 @@ describe('the import book keeps exact folder identities', () => {
     expect(rt.enableApp(userRef('notes'), review.reviewKey).status).toBe('stopped')
   })
 
-  it('new records preserve the old numeric comparison for unconfirmed and confirmed imports', () => {
+  /** The oldest host a store is shared with (a swap, a rollback) compares `inoExact` whenever a record has it */
+  it('new records carry the exact file id only, for unconfirmed and confirmed imports', () => {
     const dir = plantSource('notes-src', 'notes')
     for (const id of [7n, (1n << 53n) + 1n, (1n << 60n) + 1n]) {
       fileIds.set(dir, id)
       const book = new ImportBook(dataRoot)
       book.mark('notes', dir, dir, 10)
-      const readOldMark = () => {
-        const m = JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes
-        return statSync(dir).ino === m.ino ? m : null
-      }
-      expect(readOldMark(), `old host sees disabled import ${id}`).toMatchObject({
-        source: dir, ino: Number(id), inoExact: id.toString(), confirmed: null,
-      })
+      const stored = () => JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes
+      expect(stored(), `disabled import ${id}`).toEqual({ source: dir, importedAt: 10, inoExact: id.toString(), confirmed: null })
       book.confirm('notes', dir, declaration, 20)
-      expect(readOldMark(), `old host sees enabled import ${id}`).toMatchObject({
-        ino: Number(id), inoExact: id.toString(), confirmed: { key: reviewKey(declaration), at: 20 },
-      })
+      expect(stored(), `enabled import ${id}`).toMatchObject({ inoExact: id.toString(), confirmed: { key: reviewKey(declaration), at: 20 } })
+      expect(stored()).not.toHaveProperty('ino')
     }
   })
 })
