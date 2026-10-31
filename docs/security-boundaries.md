@@ -470,7 +470,7 @@ subject the session wrote. (2) In a turn whose thread is such a request, every s
 (`sessions/asked-acts.ts`: reads, and answering in the request's own thread) raises the person's card first, naming the session and its project, under
 every preset (`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`); the list fails closed, so a command added later
 asks until it is listed as a read. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
-an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `merge_when_green`); and the CLI's own
+an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `queue_merge`); and the CLI's own
 tools, its shell, file edits, fetches and the rest (Claude: a `PreToolUse` hook, `adapters/claude/request-hook.ts`, which the CLI runs before every tool call in every permission mode and whose
 decision stands in for its own question, so the person is asked about each step whatever the preset, and an "always" the person once saved for such a step is not consulted. A narrower
 permission mode alone was tried and is not enough: a tool that needs no permission never reaches the CLI's permission callback in it, and the review of #1516 ran a subagent and a cron prompt

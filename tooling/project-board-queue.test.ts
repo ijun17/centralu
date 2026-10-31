@@ -30,7 +30,7 @@ import { GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/a
 // @ts-expect-error — plain .mjs of a Centralu app
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, mergeWarning, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
+import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -963,42 +963,6 @@ describe('a batch stopped because main moved is batched again, not sent to its o
   })
 })
 
-describe('merge_when_green says when it would invalidate the queue\'s running batch (#1548)', () => {
-  const running = (state = 'ci') => {
-    const { q, b } = greenBatch()
-    b.state = state
-    b.landed = 0
-    return { q, b }
-  }
-  const warn = (q: any, extra: Record<string, unknown> = {}) => mergeWarning(q, { repo: R, pr: 9, baseRefName: 'main', defaultBranch: 'main', ref, ...extra })
-
-  it('names the batch, what happens to it, and what to do instead', () => {
-    const { q } = running()
-    const text = warn(q)
-    expect(text).toContain('The merge queue has batch queue/batch-1 (#1, #2) running on main as it is now.')
-    expect(text).toContain('Merging #9 here moves main under it: the batch stops before it lands, its pull requests are batched again on the new main (at most 3 times each)')
-    expect(text).toContain('queue #9 with queue_merge instead')
-    for (const state of ['building', 'landing']) expect(warn(running(state).q)).toContain('batch queue/batch-1')
-  })
-
-  it('says nothing when no batch would be affected', () => {
-    expect(warn(emptyQueue())).toBeNull()
-    expect(warn(running('done').q)).toBeNull()
-    expect(warn(running('stopped').q)).toBeNull()
-    // Another repository, or a pull request into another branch (a stack's lower)
-    expect(warn(running().q, { repo: 'someone/else' })).toBeNull()
-    expect(warn(running().q, { baseRefName: 'feat/low' })).toBeNull()
-    // Everything in it landed already: nothing left to invalidate
-    const { q, b } = running('landing')
-    b.landed = b.steps.length
-    expect(warn(q)).toBeNull()
-  })
-
-  it('says so when the pull request is itself a member of the batch', () => {
-    expect(warn(running().q, { pr: 2 })).toContain('It is itself a member of that batch.')
-  })
-})
-
 /*
  * A batch that holds a change to the screen runs the heavy jobs (the e2e shards, both browsers) before it lands; the
  * other batches land after the fast tier (the owner, 2026-10-26, #1538).
@@ -1539,6 +1503,7 @@ const IDLE_SERVER = { PROJECT_BOARD_QUEUE_STEP: '', PROJECT_BOARD_QUEUE_TICK_MS:
 const NO_TIERS = { PROJECT_BOARD_CI_FULL_TIER: '' }
 /** Two tiers, landing only from a full run (`ci.landTier: full`), as before #1259 */
 const TIERS = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'full' }
+const NO_BATCH = { ...TIERS, PROJECT_BOARD_QUEUE_BATCH: 'off' }
 /** Two tiers, landing after the fast tier (#1259, this repository's project.json) */
 const FAST_LAND = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'quick', PROJECT_BOARD_CI_QUICK_CHECKS: '["verify","windows tests"]' }
 /** Two tiers, landing after the fast tier with this repository's own quick checks (project.json ci.quickChecks) */
@@ -3007,22 +2972,18 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
   })
 
-  it("batches neither a fork's pull request nor a release bump", async () => {
+  it("does not batch a fork's pull request", async () => {
     const base = batchState()
     runtime(
       batchState({
         prs: {
           ...base.prs,
           '78': ghPr(78, { headRefOid: B, mergeStateStatus: 'UNSTABLE', isCrossRepository: true }),
-          '79': ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE', headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }),
         },
-        runs: { ...base.runs, [C]: [ownRun(79, C, 903, 5003)] },
-        checks: { ...base.checks, [C]: ownChecks(5003, null) },
       }),
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await call('queue_merge', { pr: 79, owner: 'tester' })
     await morePolls(9)
     expect(batchesOnDisk()).toEqual([])
     expect(writes()).toEqual([])
@@ -3473,29 +3434,29 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(batchesOnDisk().map((b) => b.state)).toEqual(['dropped'])
   })
 
-  it('lands a full run on its own head without a batch (a release bump), and tells the session about a fork it cannot batch', async () => {
+  it('lands a full run on its own head with batches off, and tells the session about a fork it cannot batch', async () => {
     runtime(
       tieredState({
         prs: {
-          '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }),
+          '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched' }),
           '78': ghPr(78, { headRefOid: B, isCrossRepository: true }),
         },
         runs: { [SHA]: [ghRun('success')], [B]: [ownRun(78, B, 902, 5002, 'success')] },
         checks: { [SHA]: fullChecks(5000), [B]: quickChecks().map((c) => ({ ...c, check_suite: { id: 5002 } })) },
       }),
-      TIERS,
+      NO_BATCH,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the bump to land and the fork to need attention', BATCH_WAIT_MS)
-    expect(writes().map(short2)).toEqual(['merge 77', 'delete chore/release-9.9.9-beta.1'])
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the full run to land and the fork to need attention', BATCH_WAIT_MS)
+    expect(writes().map(short2)).toEqual(['merge 77', 'delete feat/unbatched'])
     expect(batchesOnDisk()).toEqual([])
     expect(notices().find((e) => e.text.includes('#78'))!.text).toContain("ran only the quick tier of CI")
   })
 })
 
 /*
- * #1548: a batch that stops only because main moved while it ran (the release bump #1545 landed through merge_when_green
+ * #1548: a batch that stops only because main moved while it ran (the release bump #1545 landed outside the queue
  * while batch-209 tested #1542) rebatches its members on the new main, and tells no session, up to a cap per head.
  */
 describe('the merge queue batches a pull request again when main moved under its batch (#1548)', { timeout: 240_000 * SLOW }, () => {
@@ -3760,55 +3721,8 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   })
 })
 
-/*
- * #1548: merge_when_green moves main under a batch the queue is running, and says so.
- */
-describe('merge_when_green says when it moves main under a batch the queue is running (#1548)', { timeout: 120_000 * SLOW }, () => {
-  const bump = () => ghPr(79, { headRefOid: C, title: 'chore(release): 9.9.9' })
-  const running = (patch: Gh = {}) =>
-    batchState({
-      prs: { '77': ghPr(77, { headRefOid: A, mergeStateStatus: 'UNSTABLE' }), '78': ghPr(78, { headRefOid: B, mergeStateStatus: 'UNSTABLE' }), '79': bump() },
-      runs: { [A]: [ownRun(77, A, 901, 5001)], [B]: [ownRun(78, B, 902, 5002)], [C]: [ghRun('success', 1, C, { id: 903, head_branch: 'feat/b79' })] },
-      checks: { [A]: ownChecks(5001, null), [B]: ownChecks(5002, null), [C]: green() },
-      // CI on the batch never finishes in this test
-      on: { 'dispatch:queue/batch-1': { runs: { [BATCH_HEAD]: [batchRun(null)] }, checks: { [BATCH_HEAD]: batchChecks('success').map((c) => ({ ...c, status: 'in_progress', conclusion: null })) } } },
-      ...patch,
-    })
-
-  // Said before it happens, not after it (the review of #1563): by the time the answer said so, main had already moved
-  it('says that it would move main under the batch before it merges, and merges only when told to anyway', async () => {
-    runtime(running())
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run', BATCH_WAIT_MS)
-    const refused = await call('merge_when_green', { pr: 79 })
-    // An error, not a success an agent could read as merged (the re-check of #1563)
-    expect(refused.isError).toBe(true)
-    expect(refused.text).toContain('Not merged: The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
-    expect(refused.text).toContain('Merging #79 here moves main under it: the batch stops before it lands, its pull requests are batched again on the new main (at most 3 times each)')
-    expect(refused.text).toContain('queue #79 with queue_merge instead')
-    expect(refused.text).toContain('intoBatch: true')
-    expect(refused.data).toMatchObject({ outcome: 'batch-running', merged: false })
-    expect(writes().map(short2)).not.toContain('merge 79')
-    // The caller who knows (a release bump) merges anyway, and is told again what it did
-    const merged = await call('merge_when_green', { pr: 79, intoBatch: true })
-    expect(merged.isError).toBe(false)
-    expect(merged.text).toContain('Merged PR #79 (squash)')
-    expect(merged.text).toContain('The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
-    expect(writes().map(short2)).toContain('merge 79')
-    // Not green yet: said before it merges, so the caller can queue it instead
-    patchGh((s) => {
-      s.prs['79'] = ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE' })
-      s.checks[C] = [ghCheck('verify', null, 11), ghCheck('windows tests', null, 12)]
-    })
-    const waiting = await call('merge_when_green', { pr: 79 })
-    expect(waiting.text).toContain('Not merged yet:')
-    expect(waiting.text).toContain('The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
-  })
-})
-
 /**
- * #957: an agent with this app attached typed `gh pr merge` instead of using merge_when_green, because
+ * #957: an agent with this app attached typed `gh pr merge` instead of using queue_merge, because
  * deferred tools show only their names until searched. The descriptions carry the gh command each tool
  * replaces, so a search for the verb finds it, and help answers which tool for which task, on demand
  * (not in the server's instructions, which every session's cached prompt would carry, #512).
@@ -3819,7 +3733,6 @@ describe('agents find the board tool for the gh command they would type', { time
     const tools = await rt!.tools(appRef)
     const description = (name: string) => tools.find((t) => t.name === name)?.description ?? ''
     const expected: Record<string, string> = {
-      merge_when_green: 'Instead of gh pr merge',
       queue_merge: 'gh pr merge and gh run rerun',
       integrate: 'Instead of open_pr and queue_merge (gh pr create, gh pr merge)',
       merge_queue: 'Instead of gh pr list / gh run list',
@@ -3838,7 +3751,7 @@ describe('agents find the board tool for the gh command they would type', { time
     const named = new Set([...first.text.matchAll(/\b([a-z]+(?:_[a-z]+)+|help|comment|release)\b/g)].map((m) => m[1]!))
     const names = new Set(tools.map((t) => t.name))
     expect([...named].filter((n) => !names.has(n))).toEqual([])
-    for (const n of ['merge_when_green', 'queue_merge', 'rebase_stack', 'ci_status', 'read_failed_job', 'open_pr', 'comment', 'file_issue', 'release']) expect(named.has(n), n).toBe(true)
+    for (const n of ['queue_merge', 'rebase_stack', 'ci_status', 'read_failed_job', 'open_pr', 'comment', 'file_issue', 'release']) expect(named.has(n), n).toBe(true)
     // An auto-tier change goes to integrate, by its name (#1259 step 3)
     expect(first.text).toContain('hand it over with integrate')
   })
@@ -4217,7 +4130,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     ])
     // Red on #81; #82 landed on it since, changing the same file, its own run still going
     guardRuntime(repo, { ...redOn(repo, repo.shas[0]!), branchRuns: { main: [{ ...mainRun(991, repo.shas[1]!, null), status: 'in_progress' }, mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] } })
-    landedBump(repo.shas[0]!, 81)
+    landedPr(repo.shas[0]!, 81)
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
@@ -4227,7 +4140,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
 })
 
 /** The queue landed `commit` as #`pr` (the guard watches main once the queue has landed something) */
-function landedBump(commit: string, pr = 90) {
+function landedPr(commit: string, pr = 90) {
   seedQueue([{ repo: R, pr, lowers: [], owner: 'other', state: 'merged', commit, title: `change ${pr}`, updatedAt: new Date().toISOString(), reruns: {} }])
 }
 
@@ -4545,7 +4458,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
       { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] },
     ])
     const [s1, s2] = repo.shas as [string, string]
-    landedBump(s2, 82)
+    landedPr(s2, 82)
     const at = (id: number, sha: string, conclusion: string | null, attempt: number) => ({ ...mainRun(id, sha, conclusion), run_attempt: attempt, ...(conclusion === null ? { status: 'in_progress' } : {}) })
     const green = mainRun(980, repo.green, 'success')
     // A rerun in progress is not red, so main's newest red is the other run; each rerun then ends red again
@@ -4812,7 +4725,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(body).toMatch(/## Verified\n\nTier: auto, from `docs\/guide\.md` \(docs\), `docs\/new\.md` \(docs\)\. Judged by the integrator \(#1259 step 3\) from the diff of docs\/guide at [0-9a-f]{7} against main at [0-9a-f]{7}/)
     expect(body).toContain('## Not exercised\n\nNothing')
     expect(itemsOnDisk()).toMatchObject([{ pr: 600, owner: 'writer', author: 'writer', auto: { branch: 'docs/guide', head: repo.heads['docs/guide'], main: repo.main } }])
-    // A draft, which GitHub, merge_when_green and every version of the queue refuse to merge: only this queue lands it
+    // A draft, which GitHub and every version of the queue refuse to merge: only this queue lands it
     expect(gh().prs['600']).toMatchObject({ isDraft: true, mergeStateStatus: 'DRAFT' })
     // Landed by the queue's own path: a batch of the quick tier, the squash, the branch deleted, the session told
     await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
@@ -5589,35 +5502,35 @@ describe('the merge queue does by itself what it told a session to do by hand (#
 
   describe('a pull request the queue cannot batch', () => {
     const quick = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
-    const bump = (extra: Record<string, unknown> = {}) =>
+    const unbatched = (extra: Record<string, unknown> = {}) =>
       ghState({
-        prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1', ...extra }) },
+        prs: { '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched', ...extra }) },
         checks: { [SHA]: quick },
         runs: { [SHA]: [ghRun('success')] },
       })
 
     it('has the full tier started on its branch, once, when it passed only the quick tier', async () => {
-      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
-      runtime(bump(), TIERS)
+      seedQueue([item({ title: 'feat(x): unbatched' })])
+      runtime(unbatched(), NO_BATCH)
       await until(() => writes().some((w) => w[0] === 'dispatch'), 'the dispatch')
       await morePolls()
-      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'chore/release-9.9.9-beta.1']])
-      expect(gh().dispatched).toEqual([{ ref: 'chore/release-9.9.9-beta.1', inputs: null }])
-      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on chore/release-9.9.9-beta.1')
+      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'feat/unbatched']])
+      expect(gh().dispatched).toEqual([{ ref: 'feat/unbatched', inputs: null }])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on feat/unbatched')
       expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
     })
 
     it('writes the dispatch down before asking for it, so a call the network cuts off is not repeated into a second run', async () => {
-      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      seedQueue([item({ title: 'feat(x): unbatched' })])
       runtime(
         ghState({
-          prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }) },
+          prs: { '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched' }) },
           checks: { [SHA]: quick },
           runs: { [SHA]: [ghRun('success')] },
           // gh cannot reach GitHub at the dispatch: the queue pauses, and the item remembers it was asked for on this head
           dispatchError: 'dial tcp: lookup api.github.com: no such host',
         }),
-        TIERS,
+        NO_BATCH,
       )
       await until(() => queueOnDisk().pause?.kind === 'network', 'the pause')
       expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
@@ -5626,7 +5539,7 @@ describe('the merge queue does by itself what it told a session to do by hand (#
 
     it("does not run a fork's branch here: it still asks its session", async () => {
       seedQueue([item()])
-      runtime(bump({ isCrossRepository: true }), TIERS)
+      runtime(unbatched({ isCrossRepository: true }), NO_BATCH)
       await until((x) => stateOf(x) === 'attention', 'attention')
       expect(writes()).toEqual([])
       expect(queueOnDisk().items[0].reason.kind).toBe('full-tier')

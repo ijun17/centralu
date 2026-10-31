@@ -45,7 +45,6 @@ const ORDER = [
   'set_item_fields',
   'add_item',
   'ci_status',
-  'merge_when_green',
   'mark_ready',
   'help',
   'queue_merge',
