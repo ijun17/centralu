@@ -4,7 +4,7 @@
  * time zone and locale) with real processes, which on Windows ask PowerShell for a start time and on Linux read `/proc`.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,7 +16,6 @@ import {
   generations,
   holderGone,
   isAlive,
-  legacyLockDir,
   lockFile,
   ownStart,
   parseLstart,
@@ -43,11 +42,9 @@ const HOUR = 3_600_000
 
 let dir: string
 let file: string
-let legacy: string
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'e2e-lock-test-'))
   file = join(dir, 'lock.json')
-  legacy = join(dir, 'legacy.lock')
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
@@ -92,11 +89,6 @@ describe('where the lock is and how a start time is asked', () => {
         else process.env[key] = value
       }
     }
-  })
-  it('keeps the old lock folder where the shell line made it', () => {
-    expect(legacyLockDir({}, 'linux')).toBe(join('/tmp', 'centralu-e2e.lock'))
-    expect(legacyLockDir({}, 'win32')).toBe(join(tmpdir(), 'centralu-e2e.lock'))
-    expect(legacyLockDir({ E2E_LEGACY_LOCK_DIR: '/x/old' })).toBe('/x/old')
   })
   it('asks PowerShell on Windows for milliseconds since the epoch, and ps elsewhere', () => {
     const win = startTimeCommand(4321, 'win32')
@@ -328,9 +320,9 @@ describe('taking the lock', () => {
       write(holder(1, 1 * HOUR))
       const results: Record<string, Attempt> = {}
       // C judged holder 1 gone and is about to take it; before it does, B judged it too and is about to; before that, A takes it
-      const c = tryAcquire(file, holder(4, 4 * HOUR), live, null, {
+      const c = tryAcquire(file, holder(4, 4 * HOUR), live, {
         afterJudged: () => {
-          results.b = tryAcquire(file, holder(3, 3 * HOUR), live, null, {
+          results.b = tryAcquire(file, holder(3, 3 * HOUR), live, {
             afterJudged: () => {
               results.a = tryAcquire(file, holder(2, 2 * HOUR), live)
             },
@@ -347,7 +339,7 @@ describe('taking the lock', () => {
 
     it('does not take a lock that was given back and taken again since it judged the old holder gone (the number it aims at is free again)', () => {
       write(holder(1, 1 * HOUR))
-      const late = tryAcquire(file, holder(5, 5 * HOUR), live, null, {
+      const late = tryAcquire(file, holder(5, 5 * HOUR), live, {
         afterJudged: (judged) => {
           if (judged?.pid !== 1) return
           // Run 2 takes it over and gives it back; nothing is left, so run 3 makes generation 1 again, and it is live
@@ -364,7 +356,7 @@ describe('taking the lock', () => {
 
     it('withdraws when a higher generation appeared, and leaves that lock alone', () => {
       write(holder(1, 1 * HOUR))
-      const late = tryAcquire(file, holder(5, 5 * HOUR), live, null, {
+      const late = tryAcquire(file, holder(5, 5 * HOUR), live, {
         afterJudged: () => write(holder(3, 3 * HOUR), 5),
       })
       expect(late).toMatchObject({ ok: false, holder: { pid: 3 } })
@@ -376,7 +368,7 @@ describe('taking the lock', () => {
       // The check on a higher generation is for this case alone: a live holder above is refused by the liveness test and a
       // dead one is removed with the stale files, but a file that cannot be read is skipped by both
       write(holder(1, 1 * HOUR))
-      const late = tryAcquire(file, holder(5, 5 * HOUR), live, null, {
+      const late = tryAcquire(file, holder(5, 5 * HOUR), live, {
         afterJudged: (judged) => {
           if (judged?.pid === 1) writeFileSync(`${file}.5`, '')
         },
@@ -414,7 +406,7 @@ describe('taking the lock', () => {
       const eisdir = () => {
         throw Object.assign(new Error('EISDIR: illegal operation on a directory, link'), { code: 'EISDIR' })
       }
-      expect(() => tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), null, { link: eisdir })).toThrow(/cannot create the lock .*lock\.json\.1 \(EISDIR\): the folder must support hard links/)
+      expect(() => tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), { link: eisdir })).toThrow(/cannot create the lock .*lock\.json\.1 \(EISDIR\): the folder must support hard links/)
       // No private file is left behind, and nothing is held
       expect(lockFiles()).toEqual([])
     })
@@ -422,93 +414,10 @@ describe('taking the lock', () => {
       const refuse = () => {
         throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
       }
-      const r = tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), null, { link: refuse })
+      const r = tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), { link: refuse })
       expect(r.ok).toBe(true)
       expect(top()).toMatchObject({ pid: 1 })
     })
-  })
-})
-
-describe('the old lock folder (a branch from before the runners took the lock)', () => {
-  const live = probeOf({ 1: 1 * HOUR, 2: 2 * HOUR })
-  it('is made while the lock is held and removed when it is given back', () => {
-    const r = tryAcquire(file, holder(1, 1 * HOUR), live, legacy)
-    expect(r.ok).toBe(true)
-    expect(existsSync(legacy)).toBe(true)
-    expect(top()).toMatchObject({ pid: 1, legacy: true })
-    taken(r).release()
-    expect(existsSync(legacy)).toBe(false)
-    expect(lockFiles()).toEqual([])
-  })
-  it('is never waited for, and never removed when something else made it', () => {
-    // An old shell line holds the folder around a run that holds the lock itself: waiting for it would be a deadlock
-    mkdirSync(legacy)
-    const r = tryAcquire(file, holder(1, 1 * HOUR), live, legacy)
-    expect(r.ok).toBe(true)
-    expect(top()).not.toMatchObject({ legacy: true })
-    taken(r).release()
-    expect(existsSync(legacy)).toBe(true)
-    expect(lockFiles()).toEqual([])
-  })
-  it('is left alone when nothing asks for it', () => {
-    const r = tryAcquire(file, holder(1, 1 * HOUR), live)
-    expect(r.ok).toBe(true)
-    expect(existsSync(legacy)).toBe(false)
-  })
-  it('is handed on by a run that takes the lock over from a killed holder that made it, and not otherwise', () => {
-    mkdirSync(legacy)
-    write(holder(1, 1 * HOUR, { legacy: true }))
-    const r = tryAcquire(file, holder(2, 2 * HOUR), probeOf({ 2: 2 * HOUR }), legacy)
-    expect(r.ok).toBe(true)
-    expect(top()).toMatchObject({ pid: 2, legacy: true })
-    taken(r).release()
-    expect(existsSync(legacy)).toBe(false)
-    // The killed holder had not made it: the folder is not ours to remove
-    mkdirSync(legacy)
-    write(holder(1, 1 * HOUR))
-    const other = tryAcquire(file, holder(2, 2 * HOUR), probeOf({ 2: 2 * HOUR }), legacy)
-    taken(other).release()
-    expect(existsSync(legacy)).toBe(true)
-  })
-  it('is recorded before it is made: a holder killed between the two leaves a record that lets the next run clean up', () => {
-    const held = taken(tryAcquire(file, holder(1, 1 * HOUR), live))
-    let recordedWhenMade: boolean | undefined
-    held.claimLegacy(
-      legacy,
-      false,
-      (d) => {
-        // This is the moment before the folder exists
-        const h = top()
-        recordedWhenMade ??= h !== null && h !== 'unreadable' && h.legacy === true
-        mkdirSync(d, { recursive: true })
-      },
-    )
-    expect(recordedWhenMade).toBe(true)
-    held.release()
-    expect(existsSync(legacy)).toBe(false)
-    // A holder killed after the record and before the folder: the record names a folder that is not there, and the next run
-    // makes it, owns it, and removes it
-    write(holder(1, 1 * HOUR, { legacy: true }))
-    const r = tryAcquire(file, holder(2, 2 * HOUR), probeOf({ 2: 2 * HOUR }), legacy)
-    expect(existsSync(legacy)).toBe(true)
-    taken(r).release()
-    expect(existsSync(legacy)).toBe(false)
-    // A holder killed after the folder was made and before it recorded anything cannot happen: the record comes first
-    expect(lockFiles()).toEqual([])
-  })
-  it('takes the intent back when an old shell line made the folder in the meantime', () => {
-    const held = taken(tryAcquire(file, holder(1, 1 * HOUR), live))
-    held.claimLegacy(
-      legacy,
-      false,
-      (d) => {
-        mkdirSync(d, { recursive: true })
-        throw Object.assign(new Error('exists'), { code: 'EEXIST' })
-      },
-    )
-    expect(top()).not.toMatchObject({ legacy: true })
-    held.release()
-    expect(existsSync(legacy)).toBe(true)
   })
 })
 
@@ -556,7 +465,7 @@ describe('waiting for it', () => {
     write(holder(1, 1 * HOUR))
     const said: string[] = []
     setTimeout(() => rmSync(`${file}.1`), 150)
-    const held = await acquireLock({ file, command: 'x', probe: live, pollMs: 20, say: (l) => said.push(l), legacyDir: null })
+    const held = await acquireLock({ file, command: 'x', probe: live, pollMs: 20, say: (l) => said.push(l) })
     expect(held.holder.pid).toBe(process.pid)
     expect(said.filter((l) => l.includes('held by pid 1'))).toHaveLength(1)
     held.release()
@@ -564,13 +473,13 @@ describe('waiting for it', () => {
   it('takes over from a holder that is gone, with a line saying so, and can be stopped while it waits', async () => {
     write(holder(1, 1 * HOUR))
     const said: string[] = []
-    const held = await acquireLock({ file, command: 'x', probe: { alive: (pid) => pid === process.pid, startOf: () => 5 * HOUR }, pollMs: 20, say: (l) => said.push(l), legacyDir: null })
+    const held = await acquireLock({ file, command: 'x', probe: { alive: (pid) => pid === process.pid, startOf: () => 5 * HOUR }, pollMs: 20, say: (l) => said.push(l) })
     expect(said).toEqual([expect.stringContaining('pid 1')])
     expect(said[0]).toContain('is gone; taking the lock over')
     // Held by a live process: the wait ends when it is stopped
     const stop = new AbortController()
     setTimeout(() => stop.abort(), 100)
-    await expect(acquireLock({ file, command: 'y', probe: { alive: () => true, startOf: () => 5 * HOUR }, pollMs: 20, say: () => {}, signal: stop.signal, legacyDir: null })).rejects.toThrow('stopped while waiting')
+    await expect(acquireLock({ file, command: 'y', probe: { alive: () => true, startOf: () => 5 * HOUR }, pollMs: 20, say: () => {}, signal: stop.signal })).rejects.toThrow('stopped while waiting')
     held.release()
   })
 })
@@ -586,13 +495,12 @@ describe('who takes it', () => {
     expect(scripts['perf:memory']).toContain('node --import tsx e2e/perf-memory.mts')
     for (const doc of ['AGENTS.md', 'CONTRIBUTING.md', 'docs/ux-metrics.md', 'e2e/perf-memory.mts', 'docs/spikes/2026-10-memory-heavy-store.md']) expect(readFileSync(join(ROOT, doc), 'utf8'), doc).not.toMatch(/until mkdir|rmdir \/tmp\/centralu-e2e/)
   })
-  it('is explained where every session reads it: the runners’ own lock, WSL against native Windows, and the one direction the old folder protects', () => {
+  it('is explained where every session reads it: the runners’ own lock and WSL against native Windows', () => {
     const agents = readFileSync(join(ROOT, 'AGENTS.md'), 'utf8')
     expect(agents).toMatch(/WSL/)
     expect(agents).toMatch(/native Windows/)
     const contributing = readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8')
     expect(contributing).toMatch(/WSL/)
-    expect(contributing).toMatch(/old[^.]*centralu-e2e\.lock[^.]*(one direction|does not stop)/)
   })
 })
 
@@ -614,7 +522,7 @@ describe('the runners (real processes)', () => {
   function runner(script: string, env: Record<string, string> = {}) {
     const child = spawn(process.execPath, ['--import', 'tsx', 'tooling/with-e2e-lock.ts', 'node', '-e', script], {
       cwd: ROOT,
-      env: { ...process.env, E2E_LOCK_FILE: file, E2E_LEGACY_LOCK_DIR: legacy, ...env },
+      env: { ...process.env, E2E_LOCK_FILE: file, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     started.push(child)
@@ -648,7 +556,6 @@ describe('the runners (real processes)', () => {
       expect(waiter.stderr()).toMatch(/waiting for the e2e lock: held by pid \d+/)
       expect(waiter.stderr()).toContain(`pid ${first.child.pid}`)
       expect(lockFiles()).toEqual([])
-      expect(existsSync(legacy)).toBe(false)
     },
     90_000 * SLOW,
   )
@@ -716,7 +623,6 @@ describe('the runners (real processes)', () => {
       if (!seen) throw new Error('the runner wrote no holder')
       const held = seen
       expect(held.pid).toBe(long.child.pid)
-      expect(existsSync(legacy)).toBe(true)
       const childPid = held.child?.pid ?? 0
       pids.push(childPid)
       // The runner is killed
@@ -732,15 +638,13 @@ describe('the runners (real processes)', () => {
         process.kill(childPid, 'SIGKILL')
         await eventually(() => !isAlive(childPid) || undefined, 30_000)
       }
-      // The killed run left the old lock folder behind; a run that starts now takes the lock over, hands the folder on and removes it
-      expect(existsSync(legacy)).toBe(true)
+      // A run that starts now takes the lock over
       const next = runner(logLine('next', 'ran'))
       expect(await next.done).toBe(0)
       expect(next.stderr()).toContain(`the holder, pid ${held.pid}`)
       expect(next.stderr()).toContain('is gone; taking the lock over')
       expect(readFileSync(join(dir, 'log.txt'), 'utf8')).toBe('next ran\n')
       expect(lockFiles()).toEqual([])
-      expect(existsSync(legacy)).toBe(false)
     },
     120_000 * SLOW,
   )
@@ -752,7 +656,7 @@ describe('the runners (real processes)', () => {
       const script = `
         import { spawn } from 'node:child_process'
         import { acquireLock, trackChild } from './tooling/e2e-lock.ts'
-        const held = await acquireLock({ command: 'driver', legacyDir: null })
+        const held = await acquireLock({ command: 'driver' })
         const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
         void trackChild(held, child.pid, { ask: () => new Promise(() => {}) })
         console.log('child ' + child.pid)
@@ -784,24 +688,6 @@ describe('the runners (real processes)', () => {
       expect(lockFiles()).toEqual([])
     },
     120_000 * SLOW,
-  )
-
-  it(
-    'makes the old lock folder while it runs, and leaves one it did not make',
-    async () => {
-      const long = runner(`require('node:fs').writeFileSync(${JSON.stringify(join(dir, 'up'))}, ''); setTimeout(() => {}, 1500)`)
-      await eventually(() => existsSync(join(dir, 'up')) || undefined, 60_000)
-      expect(existsSync(legacy)).toBe(true)
-      expect(await long.done).toBe(0)
-      expect(existsSync(legacy)).toBe(false)
-      // An old shell line holds it: the run does not wait for it, and does not remove it
-      mkdirSync(legacy)
-      const r = runner(logLine('r', 'ran'))
-      expect(await r.done).toBe(0)
-      expect(readFileSync(join(dir, 'log.txt'), 'utf8')).toBe('r ran\n')
-      expect(existsSync(legacy)).toBe(true)
-    },
-    90_000 * SLOW,
   )
 
   it(
@@ -872,7 +758,6 @@ describe('the runners (real processes)', () => {
       expect(await running.result).toEqual(win ? { code: 1, signal: null } : { code: 143, signal: null })
       if (!win) {
         expect(lockFiles()).toEqual([])
-        expect(existsSync(legacy)).toBe(false)
       }
     },
     120_000 * SLOW,
