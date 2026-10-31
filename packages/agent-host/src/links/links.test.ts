@@ -2446,7 +2446,8 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
   })
 })
 
-describe('start_agent starts a child on a linked machine (#1038)', () => {
+// Every test here builds a rig: three git checkouts, two hosts and a link between them (about 0.4 s on an idle machine, 12 s with the CPU saturated, #1776); no step of it waits on a clock, so the room is for CPU
+describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30_000 * SLOW }, () => {
   /** A git folder whose `origin` is `url`, with one commit so a worktree can branch from it */
   function checkout(url: string | null): string {
     const dir = folder()
