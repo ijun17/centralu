@@ -44,7 +44,7 @@ export function plantApp(
  * loaded 3-core macOS runner a start took longer than the 4 s this used to be, and `reload.test.ts` failed on
  * `status === 'running'` while the runtime was still starting the app (#1704). Waiting for the runtime's own verdict
  * costs a passing test nothing, since `until` returns as soon as the value holds, and a real hang still ends the test
- * here, with the last value, before the app-runtime test limit (`15_000 × SLOW`, vitest.config.ts).
+ * here, with the last value, before the app-runtime test limit (`30_000 × SLOW`, vitest.config.ts).
  */
 export const PROCESS_WAIT_MS = 10_000
 
