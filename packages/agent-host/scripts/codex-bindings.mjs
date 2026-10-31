@@ -6,11 +6,11 @@
  * is committed, and **anything that has disappeared** is reported by diffing it against the
  * generated output (change axis C4: protocol drift detection).
  *
- * What is committed of the bindings is what the adapter is compiled against (#1339): the params
- * type of every server notification and request the contract names, read from the generated
- * `ServerNotification` and `ServerRequest` unions, every type those import, and `Verbosity` (#54,
- * the satisfies drift trap on CODEX_VERBOSITIES). A field Codex renames in one of them then fails
- * the build where the adapter reads it, as well as the drift check here.
+ * What is committed of the bindings is what the adapter is compiled against (#1339): every generated
+ * type the host's sources import, and every type those import. A field Codex renames in one of them
+ * then fails the build where the adapter reads it, as well as the drift check here. A params type the
+ * contract names but nothing imports is not committed: nothing is compiled against it, and the
+ * contract check above still holds its method and fields.
  *
  *   pnpm codex:bindings                   — verifies the contract, and writes those types into generated/ (to
  *                                           commit), replacing the folder: nothing else belongs in it; and
@@ -30,7 +30,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -42,6 +42,7 @@ const WRITE = !process.argv.some((a) => a.startsWith('--check'))
 const CHECK_CONTRACT = WRITE || flag('--check') || flag('--check-contract')
 const CHECK_TYPES = flag('--check') || flag('--check-types')
 const MANIFEST = join(ADAPTER, 'protocol-types.sha256')
+const DEST = join(ADAPTER, 'generated')
 
 /** Runs codex: through a shell on Windows, where it is an npm shim (codex.cmd) execFile cannot start; args are ours */
 const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
@@ -196,12 +197,25 @@ for (const [type, values] of Object.entries(contract.enumValues ?? {})) {
 }
 
 /*
- * The types the adapter is compiled against (#1339): each contract method's params type, as the generated unions name
- * it (`{ "method": "item/started", "params": ItemStartedNotification }`), and everything those import.
+ * The types the adapter is compiled against (#1339): what the host's sources import from generated/, and everything
+ * those import. Each contract method must still have a params type in the generated unions
+ * (`{ "method": "item/started", "params": ItemStartedNotification }`).
  */
 const committed = new Map()
+/** The generated files the sources under `dir` import (generated/ itself is read by `visit`), by path without `.ts` */
+function importedFromGenerated(dir) {
+  const found = new Set()
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    const full = join(entry.parentPath, entry.name)
+    if (!entry.isFile() || !/\.tsx?$/.test(entry.name) || full.startsWith(DEST + sep)) continue
+    for (const m of readFileSync(full, 'utf8').matchAll(/(?:from|import\()\s*'(\.[^']*\/generated\/[^']+?)(?:\.js)?'/g)) {
+      found.add(relative(DEST, resolve(dirname(full), m[1])).split('\\').join('/'))
+    }
+  }
+  return [...found]
+}
 {
-  const roots = ['Verbosity']
+  const roots = importedFromGenerated(join(ROOT, 'packages/agent-host/src'))
   for (const [union, key] of [['ServerNotification', 'serverNotifications'], ['ServerRequest', 'serverRequests']]) {
     const src = readFileSync(join(tmp, `${union}.ts`), 'utf8')
     for (const method of contract[key] ?? []) {
@@ -210,7 +224,6 @@ const committed = new Map()
       const name = m?.[1]
       const from = name ? new RegExp(`import type \\{ ${name} \\} from "\\./([^"]+)"`).exec(src)?.[1] : undefined
       if (!from) missing.push(`${union}: no params type for ${method}`)
-      else roots.push(from)
     }
   }
   const visit = (file) => {
@@ -226,7 +239,6 @@ const committed = new Map()
   }
   for (const root of roots) visit(root)
 }
-const DEST = join(ADAPTER, 'generated')
 /** What generated/ no longer matches; said apart from what disappeared from the contract, since the fix differs */
 const stale = []
 /** Every file under generated/, by path without `.ts` */
