@@ -313,7 +313,7 @@ pub(in crate::keeper) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_messa
             k.broadcast(&mut st);
         }
     };
-    let prepare = |b: &BuildSource, copy: &Path, launch: &mut host_proc::HostLaunch| prepare_host(&k, b, Some(copy), launch);
+    let prepare = |b: &BuildSource, launch: &mut host_proc::HostLaunch| prepare_host(&k, b, launch);
     let standby = |pid: Option<u32>| k.children.set_standby(pid);
     let drained = || k.state.lock().ok().and_then(|st| st.drained.clone());
     let progress = |phase: Phase| show(view(phase));

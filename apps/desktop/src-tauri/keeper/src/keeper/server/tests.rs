@@ -299,36 +299,14 @@ fn a_window_that_stops_reading_holds_up_no_push() {
     assert!(reached > 0, "the window that reads got no status");
 }
 
-/// #538: the front door's token reaches a host on its stdin when its bundle says it reads it there, and
-/// in its environment only when it is a host from before (rolled back to, or switched to by hand).
+/// #538: the front door's token reaches a host on its stdin, never in its environment.
 #[test]
-fn a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that() {
-    let d = std::env::temp_dir().join(format!("cc-token-on-stdin-{}", std::process::id()));
-    let (new, old) = (d.join("new"), d.join("old"));
-    for dir in [&new, &old] {
-        std::fs::create_dir_all(dir).unwrap();
-    }
-    std::fs::write(new.join("bundle-info.json"), r#"{"commit":"a","protocolVersion":1,"hostProof":1,"tokenOnStdin":1}"#).unwrap();
-    std::fs::write(old.join("bundle-info.json"), r#"{"commit":"b","protocolVersion":1,"hostProof":1}"#).unwrap();
-    let launch = || HostLaunch { program: "node".into(), args: vec![], env: vec![], token: None };
-    let said = std::cell::RefCell::new(Vec::<String>::new());
-    let log = |m: &str| said.borrow_mut().push(m.to_string());
-
-    for dir in [Some(new.as_path()), None] {
-        let mut l = launch();
-        host::hand_token("door-token", dir, &mut l, &log);
-        assert_eq!(l.token, Some(host_proc::HandedToken("door-token".into())), "{dir:?}");
-        assert!(l.env.contains(&("CC_HOST_TOKEN_ON_STDIN".into(), "1".into())), "{dir:?}");
-        assert!(!l.env.iter().any(|(_, v)| v.contains("door-token")), "{dir:?}: not in the environment");
-    }
-    assert!(said.borrow().is_empty());
-
-    let mut l = launch();
-    host::hand_token("door-token", Some(&old), &mut l, &log);
-    assert_eq!(l.token, None);
-    assert!(l.env.contains(&("CC_HOST_TOKEN".into(), "door-token".into())), "an older host reads only its environment");
-    assert!(said.borrow()[0].contains("older than #538"), "{:?}", said.borrow());
-    let _ = std::fs::remove_dir_all(&d);
+fn a_host_gets_the_token_on_stdin() {
+    let mut l = HostLaunch { program: "node".into(), args: vec![], env: vec![], token: None };
+    host::hand_token("door-token", &mut l);
+    assert_eq!(l.token, Some(host_proc::HandedToken("door-token".into())));
+    assert!(l.env.contains(&("CC_HOST_TOKEN_ON_STDIN".into(), "1".into())));
+    assert!(!l.env.iter().any(|(_, v)| v.contains("door-token")), "not in the environment");
 }
 
 /// #1405: every op the dispatcher answers is in `OPS`, so the token test below sends it.

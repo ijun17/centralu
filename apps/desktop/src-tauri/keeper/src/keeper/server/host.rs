@@ -126,7 +126,7 @@ pub(in crate::keeper) fn launcher(k: &Arc<Keeper>) -> Launcher {
         } else {
             host_proc::source_launch(&extra)
         };
-        prepare_host(&k, &running, running.copy_dir.as_deref().map(Path::new), &mut launch);
+        prepare_host(&k, &running, &mut launch);
         log(&format!("starting host {} from {}", running.key(), running.copy_dir.as_deref().unwrap_or("source")));
         if let Ok(mut st) = k.state.lock() {
             st.source = Some(running);
@@ -156,43 +156,21 @@ pub(super) fn host_env(k: &Keeper, running: &BuildSource) -> Vec<(String, String
 }
 
 /**
- * Readies a launch of the build `running`, from the host folder `host_dir` (None: the source), for this
- * keeper: the environment (`host_env`) and the front door's token, so every host checks the one token
- * clients hold (#280 step 3).
+ * Readies a launch of the build `running` for this keeper: the environment (`host_env`) and the front
+ * door's token, so every host checks the one token clients hold (#280 step 3).
  *
  * The token goes as the first line on the host's stdin (#538), never in its environment, which every
- * process of this user can read for as long as the host runs (#502). A host from before #538 does not
- * read that line and would make up a token no client holds, so a bundle that does not say
- * `tokenOnStdin` in its `bundle-info.json` still gets it in `CC_HOST_TOKEN`, as before, and the log says
- * so. That is the one way left for the token into an environment, for builds older than this keeper.
+ * process of this user can read for as long as the host runs (#502). Every host from 0.1.0-beta.45 on
+ * reads it there (#1143).
  */
-pub(super) fn prepare_host(k: &Keeper, running: &BuildSource, host_dir: Option<&Path>, launch: &mut HostLaunch) {
+pub(super) fn prepare_host(k: &Keeper, running: &BuildSource, launch: &mut HostLaunch) {
     launch.env.extend(host_env(k, running));
-    hand_token(k.door.token(), host_dir, launch, &|m| log(m));
+    hand_token(k.door.token(), launch);
 }
 
-/// `prepare_host`'s token, by what the host in `host_dir` reads.
-pub(in crate::keeper) fn hand_token(token: &str, host_dir: Option<&Path>, launch: &mut HostLaunch, log: &dyn Fn(&str)) {
-    if takes_token_on_stdin(host_dir) {
-        let (k, v) = host_proc::HandedToken::ENV;
-        launch.env.push((k.into(), v.into()));
-        launch.token = Some(host_proc::HandedToken(token.to_string()));
-    } else {
-        log(&format!(
-            "the host in {} is older than #538: it gets the token in its environment",
-            host_dir.map(|d| d.display().to_string()).unwrap_or_default()
-        ));
-        launch.env.push(("CC_HOST_TOKEN".into(), token.to_string()));
-    }
-}
-
-/// Whether the host in `host_dir` reads its token from stdin: its `bundle-info.json` says
-/// `"tokenOnStdin": 1` (written by `packages/agent-host/scripts/bundle.mjs` since #538). The source
-/// (`None`) always does.
-pub(in crate::keeper) fn takes_token_on_stdin(host_dir: Option<&Path>) -> bool {
-    let Some(dir) = host_dir else { return true };
-    std::fs::read_to_string(dir.join("bundle-info.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|v| v.get("tokenOnStdin").and_then(serde_json::Value::as_u64) == Some(1))
+/// `prepare_host`'s token, on the host's stdin.
+pub(in crate::keeper) fn hand_token(token: &str, launch: &mut HostLaunch) {
+    let (k, v) = host_proc::HandedToken::ENV;
+    launch.env.push((k.into(), v.into()));
+    launch.token = Some(host_proc::HandedToken(token.to_string()));
 }

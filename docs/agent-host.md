@@ -2380,17 +2380,11 @@ host the keeper runs) as the first line on its stdin, `{"token":…}`, told by `
 once read, so terminals, agents and commands do not inherit it. The token is read before the control channel takes
 stdin; a host told to expect it that gets no such line within 10 s ends its start with a line saying why.
 
-**Mixed versions during an update** (#538). Which side reads what:
+**Mixed versions during an update** (#538). The keeper hands every host the token on stdin only: every host from
+0.1.0-beta.45 on reads it there (#1143). A host not told to read it there still reads `CC_HOST_TOKEN`, as one started
+by hand from a shell does (CONTRIBUTING.md).
 
-| Keeper | Host | The token |
-|---|---|---|
-| this build or later | this build or later (its `bundle-info.json` says `tokenOnStdin`, or it runs from source) | on stdin only |
-| this build or later | older (a rollback, a switch to an older window's build) | in `CC_HOST_TOKEN`, as before; `keeper.log` says so |
-| older (one that could not hand itself over) | this build or later | in `CC_HOST_TOKEN`, as before; the host still reads it |
-| older | older | as before |
-
-The child socket checks its peer by pid whatever the host's build, so an older host under this keeper is let in
-as any host is, and this host under an older keeper meets the old same-user rule. A keeper handoff passes the token
+The child socket checks its peer by pid whatever the host's build. A keeper handoff passes the token
 on its own channel and the host's stdin unchanged, so nothing is read again. The Codex bridge is started with the
 front door's address (`swap-control.ts`, `bridgeAddress`): a running codex keeps its bridge, and only an address
 that outlives this host survives a swap. Without a keeper the bridge gets the host's own port, as before.

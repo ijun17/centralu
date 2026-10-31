@@ -182,9 +182,9 @@ pub struct Plan<'a> {
     pub sup: &'a Supervisor,
     pub door: &'a FrontDoor,
     pub drain_bound: Duration,
-    /// Readies the launch of this build from its copy: the environment every host the keeper starts
-    /// gets, and the token (`server::host::prepare_host`).
-    pub prepare: &'a (dyn Fn(&BuildSource, &Path, &mut host_proc::HostLaunch) + Sync),
+    /// Readies the launch of this build: the environment every host the keeper starts gets, and the
+    /// token (`server::host::prepare_host`).
+    pub prepare: &'a (dyn Fn(&BuildSource, &mut host_proc::HostLaunch) + Sync),
     /// Told the standby host's pid while it is one (and None after), so the child socket takes it.
     pub standby: &'a (dyn Fn(Option<u32>) + Sync),
     /// The old host's `{"drained":..}` report, once its stdout has carried one.
@@ -237,7 +237,7 @@ pub fn run(p: &Plan) -> Outcome {
             return Outcome::NotStarted(m);
         }
     };
-    (p.prepare)(&next, &copy, &mut launch);
+    (p.prepare)(&next, &mut launch);
     let mut child = match host_proc::spawn_host(&launch) {
         Ok(c) => c,
         Err(e) => {
