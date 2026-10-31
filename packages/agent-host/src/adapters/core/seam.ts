@@ -10,7 +10,7 @@ import type { ToolLaunch } from './tool-process.js'
  * phase, the queue, the input receipts, the Stop and its timer, the exit (crash or asleep) and the process; the wire owns
  * the frames and what they mean. The decision order (PR 8) and the event hygiene (PR 9) are not in the seam yet: until
  * they move, a wire keeps its cards and only hears from the core when to release them. A tool that takes input mid-turn
- * (Codex; Claude in PR 7) names its own turns, so it has a seam of its own (`MidTurnWire`, `MidTurnIo`, `mid-turn-ledger.ts`).
+ * (Codex; Claude in PR 7) names its own turns, so it has a seam of its own (`MidTurnWire`, `mid-turn-ledger.ts`).
  */
 
 export type ProtocolErrorOf = Extract<NormalizedEvent, { type: 'error' }>['error']
@@ -100,13 +100,14 @@ export type ToolTurnEnding = { how: 'complete' | 'interrupted' } | { how: 'faile
 /**
  * What the core needs from a tool that takes input mid-turn (Codex; Claude in PR 7). The tool merges an input into the turn it
  * runs or starts a turn for it, and names its turns, so the core binds each input to the turn the tool says took it instead of
- * beginning turns itself (`MidTurnLedger`). The wire owns its connection and says when it ended (`MidTurnIo.exited`).
+ * beginning turns itself (`MidTurnLedger`). The wire holds the ledger and tells it what the tool said; it owns its
+ * connection and says when it ended (`MidTurnLedger.exited`).
  */
 export interface MidTurnWire {
   /** "Codex": for messages */
   readonly label: string
   /** Opens or resumes the conversation */
-  open(io: MidTurnIo): Promise<void>
+  open(): Promise<void>
   /**
    * Writes inputs as one message: several only when they `queued` behind a blocking turn, sent then as they are. `answer`
    * settles with the tool's answer and rejects when it refused; `blocking`: they started a turn no input may join until it
@@ -127,21 +128,3 @@ export interface MidTurnWire {
   detach(): Promise<void>
 }
 
-/** What a tool that takes input mid-turn tells the core */
-export interface MidTurnIo {
-  /** A turn the tool started: the one a Stop targets */
-  turnStarted(toolTurnId: string | null): void
-  /**
-   * The tool named the turn that took these inputs (the write's answer, or the input's own item). True when the core took
-   * that turn as the running one (unless it had ended) and bound the inputs to it
-   */
-  taken(inputs: readonly MidTurnInput[], toolTurnId: string | null): boolean
-  /** A turn ended; `ending`: how, said to the host (null: the tool says no more of it) */
-  turnEnded(toolTurnId: string | null, ending: ToolTurnEnding | null): void
-  /** Our Stop was sent to this turn (#698) */
-  stopSent(toolTurnId: string): boolean
-  /** The tool reported an error: the tracked inputs still waiting fail with it, as on a Stop */
-  failed(reason: Error): void
-  /** The connection ended. `expected`: this side closed it; `crash`: what is said when it ended with work in flight */
-  exited(expected: boolean, crash: string): void
-}

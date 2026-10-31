@@ -356,7 +356,7 @@ compare the ledger's events, what the wire was asked to write on which process, 
 ### 4.2 As built in PR 6
 
 Codex runs on `core/mid-turn-ledger.ts` (`MidTurnLedger`), not on PR 5's `CoreSession`. `CodexSession` holds one and is its
-wire (`MidTurnWire`, an object it builds over its own methods); the frames, the slash commands, the cards and the child
+wire (`MidTurnWire`, an object it builds over its own methods), and tells it what Codex said; the frames, the slash commands, the cards and the child
 threads stay in `codex/`. Why a second ledger and not a branch in the first: the two kinds of tool differ in what a turn is,
 not in a setting. ACP's turn is the one prompt the core wrote, begun by the core and ended by its answer. Codex merges an input
 into the turn it runs or starts a turn for it, and says which only afterwards, by its turn id: in the `turn/start` answer, or
@@ -368,7 +368,7 @@ whose only `false` was Codex's.
 
 | Proposal (§4) | As built | Why |
 |---|---|---|
-| `CoreIo.turnStarted({ toolTurnId, inputIds })` | `MidTurnIo.turnStarted(toolTurnId)` for a turn the tool started (`turn/started`); `taken(inputs, toolTurnId)` for the turn that took inputs (the answer, or the `userMessage` item's `clientId`) | the two come apart in Codex: an answer names the turn before or after `turn/started`, and a late answer never brings an ended turn back as the one a Stop targets |
+| `CoreIo.turnStarted({ toolTurnId, inputIds })` | `MidTurnLedger.turnStarted(toolTurnId)` for a turn the tool started (`turn/started`); `taken(inputs, toolTurnId)` for the turn that took inputs (the answer, or the `userMessage` item's `clientId`) | the two come apart in Codex: an answer names the turn before or after `turn/started`, and a late answer never brings an ended turn back as the one a Stop targets |
 | `startTurn(input): Promise<{ toolTurnId?, blocking? }>` | `write(inputs, queued): { answer, blocking? }`: several inputs only when they waited behind a blocking turn, sent then as one `turn/start` | Codex sends what waited behind a `/compact` or `/review` as one turn, each message its own input item (#1604 names them all) |
 | `turnEnded(how)` | `turnEnded(toolTurnId, ending \| null)`: the core says the ending (`turn_complete`, `waiting_input`, `error`) and settles the inputs bound to it; null for a turn that ended with nothing more said (`turn/failed`) | the ending event and the inputs' completion stay in today's order: the queue behind a blocking turn is written first, then the event, then the receipts |
 | the process through `SessionProcess` | the wire owns its connection (`CodexClient`: local, the keeper's, or adopted) and says its end (`exited(expected, crash)`) | Codex's tests drive the client itself; the keeper's adoption and `detach` stay where the client is |
@@ -394,7 +394,9 @@ What the mid-turn ledger owns, Codex's copies gone (`CodexTurns`, `WakingSends`,
   message not yet written, or a blocking turn. The tracked inputs fail with "The session process ended before the parent
   note finished", and the wire's words for the crash are kept (`codex app-server exited (code N)` with its stderr tail).
 - **The close and `detach`.** The close fails the tracked inputs and says what never went, in the words of where it waited
-  ("were sent while it was opening" or "were sent during compaction"); `detach` says only what waited for the opening.
+  ("were sent while it was opening" or "were sent during compaction"); `detach` says only what waited for the opening. A
+  conversation that never opened fails the tracked inputs sent meanwhile with why, after the lazy resume's watchdog has
+  spoken (`codex/background-resume.ts`).
 
 The core tests (`core/mid-turn-ledger.test.ts`) play the tool on a scripted wire: the queue while opening and behind a
 blocking turn, binding and late answers, the Stop and a turn named after it, a refused Stop, a failed turn, a refused write,

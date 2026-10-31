@@ -27,7 +27,7 @@ import { codexCompactAt, initializeAppServer, latestRunningTurn, networkAccessOf
 import { watchBackgroundResume } from './background-resume.js'
 import { keepAttachedAppMarks } from '../tool-titles.js'
 import { MidTurnLedger } from '../core/mid-turn-ledger.js'
-import type { MidTurnInput, MidTurnIo } from '../core/seam.js'
+import type { MidTurnInput } from '../core/seam.js'
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
@@ -51,7 +51,6 @@ export class CodexSession implements SessionHandle {
    * turn", turn_processor.rs), so what is sent during one waits for its end
    */
   private readonly ledger: MidTurnLedger
-  private io!: MidTurnIo
   /** The inputs a `turn/start` sent, by the client id it gave them: the turn's first item names it (#1604) */
   private inputGroups = new Map<string, MidTurnInput[]>()
   /**
@@ -153,7 +152,7 @@ export class CodexSession implements SessionHandle {
          * while idle, #568, so a shutdown or a kill lands on sessions doing nothing, #1397). What it printed last is the reason
          * a person can act on: a lock, a bad config line, a panic
          */
-        onExit: (code, expected) => this.io.exited(expected, withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client)),
+        onExit: (code, expected) => this.ledger.exited(expected, withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client)),
       },
       {
         cwd: opts.cwd,
@@ -168,10 +167,7 @@ export class CodexSession implements SessionHandle {
     )
     this.ledger = new MidTurnLedger(opts.sessionId, this.emit, {
       label: 'Codex',
-      open: (io) => {
-        this.io = io
-        return this.start()
-      },
+      open: () => this.start(),
       write: (inputs, queued) => this.write(inputs, queued),
       refusal: (err) => turnError(err.message),
       interrupt: (turnId) => this.client.request('turn/interrupt', { threadId: this.threadId, turnId }),
@@ -247,7 +243,7 @@ export class CodexSession implements SessionHandle {
       this.threadServers.checkAppMode(res)
       this.networkAccess = networkAccessOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
-      if (adopted && this.io.taken([], runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))) this.threadWritten()
+      if (adopted && this.ledger.taken([], runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))) this.threadWritten()
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -324,11 +320,11 @@ export class CodexSession implements SessionHandle {
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') {
       this.openingTurn = turnIdOf(n.params)
-      this.io.turnStarted(this.openingTurn)
+      this.ledger.turnStarted(this.openingTurn)
       // Before the event below goes out: the manager records a handle's external id as its events arrive
       this.threadWritten()
     }
-    if (n.method === 'turn/failed') this.io.turnEnded(turnIdOf(n.params), null)
+    if (n.method === 'turn/failed') this.ledger.turnEnded(turnIdOf(n.params), null)
     if (n.method === 'turn/completed') this.compactTurn = false
 
     // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
@@ -347,7 +343,7 @@ export class CodexSession implements SessionHandle {
         const group = this.inputGroups.get(p.item.clientId)
         if (group) {
           this.inputGroups.delete(p.item.clientId)
-          if (this.io.taken(group, p.turnId)) this.threadWritten()
+          if (this.ledger.taken(group, p.turnId)) this.threadWritten()
           if (opening) this.announceStart(group.flatMap((i) => (i.receipt ? [i.receipt.id] : [])))
         }
       }
@@ -420,14 +416,14 @@ export class CodexSession implements SessionHandle {
            * Who interrupted the turn is logged (#698): a real one ended a delegated turn as "finished" seven seconds before
            * the person quit, and nothing said whether the person's Stop, the host or Codex itself had sent it.
            */
-          const ours = !!turn && this.io.stopSent(turn)
+          const ours = !!turn && this.ledger.stopSent(turn)
           console.error(`[codex] ${this.sessionId.slice(0, 8)} turn ${turn ?? '?'} interrupted ${ours ? 'by a stop from Centralu' : 'by Codex, not by a stop from Centralu'}`)
         }
-        this.io.turnEnded(turn, e.type === 'error' ? { how: 'failed', error: e.error } : { how: e.type === 'turn_complete' ? 'complete' : 'interrupted' })
+        this.ledger.turnEnded(turn, e.type === 'error' ? { how: 'failed', error: e.error } : { how: e.type === 'turn_complete' ? 'complete' : 'interrupted' })
         continue
       }
       // An error of the thread's own: the tracked inputs still waiting fail with it
-      if (e.type === 'error') this.io.failed(new Error(e.error.message))
+      if (e.type === 'error') this.ledger.failed(new Error(e.error.message))
       this.emit(e)
     }
   }
@@ -506,7 +502,7 @@ export class CodexSession implements SessionHandle {
       })
       // The turn also rides on the response, which can come before its notification (the target of a Stop)
       .then((res) => {
-        if (this.io.taken(inputs, turnIdOf(res))) this.threadWritten()
+        if (this.ledger.taken(inputs, turnIdOf(res))) this.threadWritten()
       })
       .catch((err: unknown) => {
         if (clientId) this.inputGroups.delete(clientId)

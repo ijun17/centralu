@@ -1,7 +1,7 @@
 import { INTERRUPTED_BY_TOOL, type EventSink, type InputObserver } from '../contract.js'
 import { InputReceipts, isUuid } from '../input-receipts.js'
 import { stopNotConfirmed, undeliveredError } from '../session-kit.js'
-import type { MidTurnInput, MidTurnIo, MidTurnWire, ToolTurnEnding } from './seam.js'
+import type { MidTurnInput, MidTurnWire, ToolTurnEnding } from './seam.js'
 
 /**
  * The ledger for a tool that takes input mid-turn (docs/plans/session-core.md §4.2, §7.2 PR 6, #1654): Codex, and Claude in
@@ -9,7 +9,8 @@ import type { MidTurnInput, MidTurnIo, MidTurnWire, ToolTurnEnding } from './sea
  * to the turn the tool says took them, not to one the core began. What it keeps: the phase, the inputs that wait (while the
  * conversation opens, and behind a turn no input may join), the receipts and the turn each is bound to, the turn a Stop
  * targets, the Stop, "interrupted by the tool", and the exit, a crash with work in flight and asleep when idle (#1397). The
- * wire owns its connection and the frames.
+ * wire owns its connection and the frames, and tells the ledger what the tool said (`turnStarted`, `taken`, `turnEnded`,
+ * `failed`, `exited`).
  */
 
 /** How many ended turns, and turns a Stop was sent to, are kept: more than can have an answer still in flight */
@@ -44,31 +45,22 @@ export class MidTurnLedger {
    * with success during one and dropped the input. What is sent waits, and goes as one message at its end
    */
   private blocking = false
-  private drainAsked = false
-
-  private readonly io: MidTurnIo = {
-    turnStarted: (id) => {
-      this.running = id
-    },
-    taken: (inputs, id) => this.taken(inputs, id),
-    turnEnded: (id, ending) => this.turnEnded(id, ending),
-    stopSent: (id) => this.stopped.includes(id),
-    failed: (reason) => {
-      if (this.receipts.size > 0) this.interrupt(reason)
-    },
-    exited: (expected, crash) => this.exited(expected, crash),
-  }
 
   constructor(
     private readonly sessionId: string,
     private readonly emit: EventSink,
     private readonly wire: MidTurnWire,
   ) {
-    this.ready = wire.open(this.io).then(() => {
+    this.ready = wire.open().then(() => {
       if (this.phase === 'opening') this.phase = 'ready'
       this.drain()
     })
-    this.ready.catch(() => {})
+    // It never opened: a tracked input sent meanwhile fails with why, once whoever watches the opening has spoken (a step later)
+    this.ready
+      .then(() => {})
+      .catch((err: Error) => {
+        if (this.receipts.size > 0) this.interrupt(err)
+      })
   }
 
   get closed(): boolean {
@@ -94,12 +86,7 @@ export class MidTurnLedger {
   /** Written on a later tick, as a message sent then always was: a Stop in the same tick keeps a tracked one from going */
   private enqueue(input: MidTurnInput): void {
     this.queue.push(input)
-    if (this.phase === 'opening' || this.drainAsked) return
-    this.drainAsked = true
-    queueMicrotask(() => {
-      this.drainAsked = false
-      this.drain()
-    })
+    if (this.phase !== 'opening') queueMicrotask(() => this.drain())
   }
 
   private drain(): void {
@@ -118,7 +105,13 @@ export class MidTurnLedger {
 
   private write(inputs: MidTurnInput[], queued: boolean): void {
     this.unanswered += 1
-    const { answer, blocking } = this.wire.write(inputs, queued)
+    let written: ReturnType<MidTurnWire['write']>
+    try {
+      written = this.wire.write(inputs, queued)
+    } catch (err) {
+      written = { answer: Promise.reject(err instanceof Error ? err : new Error(String(err))) }
+    }
+    const { answer, blocking } = written
     if (blocking) this.blocking = true
     answer
       .catch((err: Error) => {
@@ -139,11 +132,18 @@ export class MidTurnLedger {
     this.emit({ type: 'error', sessionId: this.sessionId, error: this.wire.refusal(err) })
   }
 
+  /** A turn the tool started: the one a Stop targets */
+  turnStarted(id: string | null): void {
+    this.running = id
+  }
+
   /**
-   * The answer and the notifications race: a turn can be named by its answer before the tool says it started (a Stop pressed
-   * very quickly), and can end before its answer comes (a short turn), so a late answer never brings an ended turn back
+   * The tool named the turn that took these inputs (the write's answer, or the input's own item). True when the turn was taken
+   * as the running one (unless it had ended) and the inputs bound to it. The answer and the notifications race: a turn can be
+   * named by its answer before the tool says it started (a Stop pressed very quickly), and can end before its answer comes (a
+   * short turn), so a late answer never brings an ended turn back
    */
-  private taken(inputs: readonly MidTurnInput[], id: string | null): boolean {
+  taken(inputs: readonly MidTurnInput[], id: string | null): boolean {
     const tracked = trackedOf(inputs)
     if (tracked.length > 0) {
       if (tracked.every((r) => r.completed)) return false
@@ -165,7 +165,8 @@ export class MidTurnLedger {
     return true
   }
 
-  private turnEnded(id: string | null, ending: ToolTurnEnding | null): void {
+  /** A turn ended; `ending`: how, said to the host with the inputs bound to it settled (null: the tool says no more of it) */
+  turnEnded(id: string | null, ending: ToolTurnEnding | null): void {
     this.running = null
     if (id) keep(this.ended, id)
     if (!ending) return
@@ -184,6 +185,16 @@ export class MidTurnLedger {
         return
     }
     if (id) this.receipts.endTurn(id)
+  }
+
+  /** Our Stop was sent to this turn (#698) */
+  stopSent(turnId: string): boolean {
+    return this.stopped.includes(turnId)
+  }
+
+  /** The tool reported an error: the tracked inputs still waiting fail with it, as on a Stop */
+  failed(reason: Error): void {
+    if (this.receipts.size > 0) this.interrupt(reason)
   }
 
   private stop(turnId: string, running: boolean): void {
@@ -213,7 +224,8 @@ export class MidTurnLedger {
     if (this.running !== null) this.stop(this.running, true)
   }
 
-  private exited(expected: boolean, crash: string): void {
+  /** The connection ended. `expected`: this side closed it; `crash`: what is said when it ended with work in flight */
+  exited(expected: boolean, crash: string): void {
     this.receipts.failAll(new Error('The session process ended before the parent note finished'))
     this.wire.connectionEnded()
     if (expected) return
@@ -243,7 +255,8 @@ export class MidTurnLedger {
     const closed = this.wire.close()
     this.receipts.failAll(new Error('The session process ended before the parent note finished'))
     this.wire.connectionEnded()
-    this.dropQueue(opening ? 'were sent while it was opening' : 'were sent during compaction')
+    // A message sent in this tick, with nothing to wait behind, is still written, and the closed connection refuses it
+    if (opening || this.blocking) this.dropQueue(opening ? 'were sent while it was opening' : 'were sent during compaction')
     await closed
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../contract.js'
 import { MidTurnLedger } from './mid-turn-ledger.js'
-import type { MidTurnInput, MidTurnIo, MidTurnWire } from './seam.js'
+import type { MidTurnInput, MidTurnWire } from './seam.js'
 
 /**
  * The ledger for a tool that takes input mid-turn, on a scripted wire in memory (docs/plans/session-core.md §4.2, §7.2 PR 6):
@@ -26,7 +26,7 @@ type Write = { inputs: readonly MidTurnInput[]; texts: string[]; queued: boolean
 
 class Wire implements MidTurnWire {
   readonly label = 'Tool'
-  io!: MidTurnIo
+  ledger!: MidTurnLedger
   readonly opened = deferred()
   readonly writes: Write[] = []
   readonly interrupts: string[] = []
@@ -35,8 +35,7 @@ class Wire implements MidTurnWire {
 
   constructor(private readonly said: string[]) {}
 
-  open(io: MidTurnIo): Promise<void> {
-    this.io = io
+  open(): Promise<void> {
     return this.opened.promise
   }
 
@@ -75,7 +74,7 @@ class Wire implements MidTurnWire {
   /** The tool answers write `n`, naming the turn that took it */
   answer(n: number, turnId: string | null): void {
     const w = this.writes[n]!
-    this.io.taken(w.inputs, turnId)
+    this.ledger.taken(w.inputs, turnId)
     w.reply.resolve(undefined)
   }
 }
@@ -88,6 +87,7 @@ function setup() {
     events.push(e)
     said.push(e.type === 'state_change' ? `${e.state}:${e.reason ?? ''}` : e.type)
   }, wire)
+  wire.ledger = ledger
   const observe = (name: string) => ({ accepted: () => said.push(`${name}:accepted`), complete: () => said.push(`${name}:complete`), fail: (e: Error) => said.push(`${name}:fail ${e.message}`) })
   return { events, said, wire, ledger, observe }
 }
@@ -137,13 +137,13 @@ describe('a tool that takes input mid-turn: the queue', () => {
     const { wire, ledger, said } = await ready()
     ledger.send('/compact')
     await tick()
-    wire.io.turnStarted('compact-1')
+    ledger.turnStarted('compact-1')
     ledger.send('a')
     ledger.send('/compact')
     await tick()
     expect(wire.writes).toHaveLength(1)
     expect(ledger.steerable()).toBeNull()
-    wire.io.turnEnded('compact-1', { how: 'complete' })
+    ledger.turnEnded('compact-1', { how: 'complete' })
     expect(wire.writes[1]).toMatchObject({ texts: ['a', '/compact'], queued: true })
     expect(said.slice(-2)).toEqual(['write:a+/compact', 'turn_complete'])
   })
@@ -168,7 +168,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     wire.answer(0, 't1')
     expect(said).toEqual(['write:a', 'a:accepted'])
     expect(ledger.steerable()).toBe('t1')
-    wire.io.turnEnded('t1', { how: 'complete' })
+    ledger.turnEnded('t1', { how: 'complete' })
     expect(said.slice(-2)).toEqual(['turn_complete', 'a:complete'])
     expect(ledger.steerable()).toBeNull()
   })
@@ -177,8 +177,8 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     const { wire, ledger, said, observe } = await ready()
     void ledger.sendTracked('a', observe('a'))
     await tick()
-    wire.io.turnEnded('before', { how: 'complete' })
-    wire.io.turnEnded('t1', { how: 'complete' })
+    ledger.turnEnded('before', { how: 'complete' })
+    ledger.turnEnded('t1', { how: 'complete' })
     expect(said).not.toContain('a:complete')
     wire.answer(0, 't1')
     expect(said.slice(-1)).toEqual(['a:complete'])
@@ -191,7 +191,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     void ledger.sendTracked('a', observe('a')).catch(() => {})
     await tick()
     wire.answer(0, 't1')
-    wire.io.turnStarted('t1')
+    ledger.turnStarted('t1')
     void ledger.sendTracked('b', observe('b')).catch(() => {})
     await tick()
     ledger.interrupt()
@@ -200,8 +200,8 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     expect(wire.log).toEqual(['releaseCards'])
     wire.answer(1, 't2')
     expect(wire.interrupts).toEqual(['t1', 't2'])
-    wire.io.turnEnded('t2', { how: 'interrupted' })
-    wire.io.turnEnded('t3', { how: 'interrupted' })
+    ledger.turnEnded('t2', { how: 'interrupted' })
+    ledger.turnEnded('t3', { how: 'interrupted' })
     expect(said.filter((s) => s.startsWith('waiting_input'))).toEqual(['waiting_input:interrupted', `waiting_input:${INTERRUPTED_BY_TOOL}`])
   })
 
@@ -210,7 +210,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     void ledger.sendTracked('a', observe('a'))
     await tick()
     wire.answer(0, 't1')
-    wire.io.turnEnded('t1', { how: 'interrupted' })
+    ledger.turnEnded('t1', { how: 'interrupted' })
     expect(said.slice(-2)).toEqual([`waiting_input:${INTERRUPTED_BY_TOOL}`, 'a:complete'])
   })
 
@@ -218,7 +218,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     const { wire, ledger, events } = await ready()
     ledger.send('a')
     await tick()
-    wire.io.turnStarted('t1')
+    ledger.turnStarted('t1')
     wire.refuseStop = 'not now'
     ledger.interrupt()
     await tick()
@@ -230,7 +230,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     void ledger.sendTracked('a', observe('a')).catch(() => {})
     await tick()
     wire.answer(0, 't1')
-    wire.io.turnEnded('t1', { how: 'failed', error: { code: 'internal', message: 'model refused', retryable: false } })
+    ledger.turnEnded('t1', { how: 'failed', error: { code: 'internal', message: 'model refused', retryable: false } })
     expect(said.slice(-2)).toEqual(['a:fail model refused', 'error'])
   })
 
@@ -254,7 +254,7 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
 describe('a tool that takes input mid-turn: the exit and the close', () => {
   const states = {
     'idle': async () => {},
-    'a turn running': async (w: Wire) => w.io.turnStarted('t1'),
+    'a turn running': async (_w: Wire, l: MidTurnLedger) => l.turnStarted('t1'),
     'a write unanswered': async (_w: Wire, l: MidTurnLedger) => {
       l.send('a')
       await tick()
@@ -271,7 +271,7 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     it(`an exit with ${state} is ${state === 'idle' ? 'sleep' : 'a crash'} (#1397)`, async () => {
       const { wire, ledger, events } = await ready()
       await enter(wire, ledger)
-      wire.io.exited(false, 'Tool exited (code 1)')
+      ledger.exited(false, 'Tool exited (code 1)')
       expect(events.at(-1)).toEqual(
         state === 'idle'
           ? { type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' }
@@ -283,11 +283,11 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
   it('an exit while it opens is a crash, and one this side caused says nothing; either way tracked inputs fail', async () => {
     const opening = setup()
     void opening.ledger.sendTracked('a', opening.observe('a')).catch(() => {})
-    opening.wire.io.exited(false, 'Tool exited (code 1)')
+    opening.ledger.exited(false, 'Tool exited (code 1)')
     expect(opening.said).toEqual(['a:fail The session process ended before the parent note finished', 'error'])
     expect(opening.wire.log).toEqual(['connectionEnded'])
     const closed = await ready()
-    closed.wire.io.exited(true, 'Tool exited (code 0)')
+    closed.ledger.exited(true, 'Tool exited (code 0)')
     expect(closed.events).toEqual([])
   })
 
@@ -308,5 +308,14 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     await swapped.ledger.detach()
     expect(swapped.events.at(-1)).toMatchObject({ type: 'error', error: { message: expect.stringContaining('as Centralu restarted') } })
     expect(swapped.ledger.closed).toBe(true)
+  })
+
+  it('a tracked input sent while it opened fails with why the opening ended, after a host swap let go of it', async () => {
+    const { wire, ledger, said, observe } = setup()
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await ledger.detach()
+    wire.opened.reject(new Error('request abandoned: this host let go of codex'))
+    await tick()
+    expect(said.at(-1)).toBe('a:fail request abandoned: this host let go of codex')
   })
 })
