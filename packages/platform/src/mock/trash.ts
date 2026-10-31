@@ -5,6 +5,7 @@ import type { ProjectStore } from './project-store.js'
 import type { ToolsMock } from './tools.js'
 import type { GridMock } from './grid.js'
 import type { Emit } from './event-bus.js'
+import { mockProjectInfo } from './session-info.js'
 import { mockError } from './mock-error.js'
 
 /** The session archive (#204), behind the `trash` port: deleting a session moves it here until it is deleted for good */
@@ -112,11 +113,7 @@ export class TrashMock {
         if (home) projectId = home.id
         else {
           // The mock has no disk: the folder is always there, so the project is registered again under its id
-          const p: ProjectInfo = {
-            id: trashedProject.id, path: trashedProject.path, name: trashedProject.name, defaultTool: this.toolsMock.firstRegisteredTool(), defaultModels: {},
-            commands: [], worktreeSetup: null, agentInstructions: '', worktreeManager: null, trusted: false,
-            git: { branch: 'main', changedFiles: 0, isRepo: true },
-          }
+          const p = mockProjectInfo({ id: trashedProject.id, path: trashedProject.path, name: trashedProject.name, defaultTool: this.toolsMock.firstRegisteredTool() })
           this.projectStore.list.push(p)
           projectId = p.id
           registered = this.projectStore.withGit(p)

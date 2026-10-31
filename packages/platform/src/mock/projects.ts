@@ -10,6 +10,7 @@ import type { GridMock } from './grid.js'
 import type { MachinesMock } from './machines.js'
 import type { TrashMock } from './trash.js'
 import type { Emit } from './event-bus.js'
+import { mockProjectInfo } from './session-info.js'
 import { mockError } from './mock-error.js'
 
 /** The host's wording and code for a project id it does not know (`SessionManager.requireProject`) */
@@ -111,23 +112,14 @@ export class ProjectsMock {
        * here meant the mock would have called a project `C:\Users\me\proj` while the host called
        * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
        */
-      const info: ProjectInfo = {
+      const info = mockProjectInfo({
         // A folder on a linked machine is named the way the hub names it: `<machine>.<id>`, with the machine said (#82)
         id: machine ? `${machine}.mock-project-${this.clock.next()}` : `mock-project-${this.clock.next()}`,
         ...(machine ? { machine } : {}),
         path,
         name: osPathBaseName(path) || path,
         defaultTool: this.toolsMock.firstRegisteredTool(),
-        // Default model and strength per tool (#107) — empty for a new project that has never had anything chosen
-        defaultModels: {},
-        commands: [],
-        worktreeSetup: null,
-        agentInstructions: '',
-        worktreeManager: null,
-        // A newly registered project starts untrusted — the same as the real thing (M4, decision 3)
-        trusted: false,
-        git: { branch: 'main', changedFiles: 0, isRepo: true },
-      }
+      })
       this.projectStore.list.push(info)
       return info
     },

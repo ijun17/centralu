@@ -1,7 +1,7 @@
 import type { ToolName } from '@cc/protocol/client'
-import { sessionLiveDefaults } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
+import { mockSessionInfo } from './session-info.js'
 import type { SessionStore } from './session-store.js'
 import type { ToolsMock } from './tools.js'
 
@@ -21,31 +21,16 @@ export class OrchestratorMock {
       const found = [...this.store.sessions.values()].find((x) => x.projectId === null)
       if (found) return found
       const id = `orc-${this.clock.next()}`
-      const info = {
+      const info = mockSessionInfo({
         // The same rule as the real thing: the tool follows the choice on the intro screen (#63)
         id,
         projectId: null,
-        kind: 'orchestrator' as const,
+        kind: 'orchestrator',
         tool: this.orchestratorTool,
         externalId: null,
         name: 'Orchestrator',
-        autoNamed: false,
-        state: 'idle' as const,
-        lastReadSeq: 0,
-        lastSeq: 0,
         createdAt: this.clock.now(),
-        waitingSince: null,
-        live: true,
-        model: null,
-        effort: null,
-        verbosity: null,
-        serviceTier: null,
-        permissionPreset: 'normal' as const,
-        importedFrom: null,
-        worktree: null,
-        parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
-        ...sessionLiveDefaults(),
-      }
+      })
       this.store.sessions.set(id, info)
       return info
     },

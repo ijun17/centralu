@@ -67,13 +67,16 @@ export type WebPlatformOptions = {
  */
 const on = (machine?: MachineRef) => (machine ? { machine } : {})
 
+/** A call whose answer the port does not return: the same rejection, no value. */
+const done = (p: Promise<unknown>): Promise<void> => p.then(() => {})
+
 class WebAgentPort implements AgentPort {
   constructor(private rpc: RpcClient) {}
   createSession(params: CreateSessionParams) {
     return this.rpc.call('agents.createSession', params)
   }
-  async send(sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent) {
-    await this.rpc.call('agents.send', { sessionId, text, attachments, ...(intent ? { intent } : {}) })
+  send(sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent) {
+    return done(this.rpc.call('agents.send', { sessionId, text, attachments, ...(intent ? { intent } : {}) }))
   }
   async reportOwed(sessionId: string) {
     return (await this.rpc.call('agents.reportOwed', { sessionId })).owed
@@ -81,17 +84,17 @@ class WebAgentPort implements AgentPort {
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
     return this.rpc.call('attachments.save', { sessionId, name, mime, dataBase64 })
   }
-  async respondApproval(
+  respondApproval(
     sessionId: string,
     requestId: string,
     decision: ApprovalDecision,
     scope?: ApprovalScope,
     matcher?: string,
   ) {
-    await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
+    return done(this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher }))
   }
-  async answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]) {
-    await this.rpc.call('agents.answerQuestion', { sessionId, requestId, answers })
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]) {
+    return done(this.rpc.call('agents.answerQuestion', { sessionId, requestId, answers }))
   }
   reorderSessions(projectId: string, orderedIds: string[]) {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
@@ -103,8 +106,8 @@ class WebAgentPort implements AgentPort {
   orchestratorPeek() {
     return this.rpc.call('orchestrator.peek', {})
   }
-  async configureOrchestrator(tool: ToolName) {
-    await this.rpc.call('orchestrator.configure', { tool })
+  configureOrchestrator(tool: ToolName) {
+    return done(this.rpc.call('orchestrator.configure', { tool }))
   }
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
@@ -122,14 +125,14 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('agents.models', { tool, ...on(machine) })
   }
 
-  async interrupt(sessionId: string) {
-    await this.rpc.call('agents.interrupt', { sessionId })
+  interrupt(sessionId: string) {
+    return done(this.rpc.call('agents.interrupt', { sessionId }))
   }
-  async stopBackgroundTask(sessionId: string, taskId: string) {
-    await this.rpc.call('agents.stopBackgroundTask', { sessionId, taskId })
+  stopBackgroundTask(sessionId: string, taskId: string) {
+    return done(this.rpc.call('agents.stopBackgroundTask', { sessionId, taskId }))
   }
-  async clearBackgroundTasks(sessionId: string) {
-    await this.rpc.call('agents.clearBackgroundTasks', { sessionId })
+  clearBackgroundTasks(sessionId: string) {
+    return done(this.rpc.call('agents.clearBackgroundTasks', { sessionId }))
   }
   restartSession(sessionId: string) {
     return this.rpc.call('agents.restartSession', {
@@ -161,24 +164,24 @@ class WebAgentPort implements AgentPort {
   async mcpProposals() {
     return this.rpc.call('agents.mcpProposals', {})
   }
-  async resolveMcpProposal(name: string, approve: boolean) {
-    await this.rpc.call('agents.resolveMcpProposal', { name, approve })
+  resolveMcpProposal(name: string, approve: boolean) {
+    return done(this.rpc.call('agents.resolveMcpProposal', { name, approve }))
   }
   async skillProposals() {
     return this.rpc.call('agents.skillProposals', {})
   }
-  async resolveSkillProposal(name: string, approve: boolean) {
-    await this.rpc.call('agents.resolveSkillProposal', { name, approve })
+  resolveSkillProposal(name: string, approve: boolean) {
+    return done(this.rpc.call('agents.resolveSkillProposal', { name, approve }))
   }
   async orchestratorSkills() {
     return this.rpc.call('agents.orchestratorSkills', {})
   }
-  async deleteOrchestratorSkill(name: string) {
-    await this.rpc.call('agents.deleteOrchestratorSkill', { name })
+  deleteOrchestratorSkill(name: string) {
+    return done(this.rpc.call('agents.deleteOrchestratorSkill', { name }))
   }
 
-  async deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false) {
-    await this.rpc.call('agents.deleteSession', { sessionId, deleteWorktree, deleteExternal })
+  deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false) {
+    return done(this.rpc.call('agents.deleteSession', { sessionId, deleteWorktree, deleteExternal }))
   }
   archiveIfAtRest(sessionId: string, deleteExternal = false) {
     return this.rpc.call('agents.archiveIfAtRest', { sessionId, deleteExternal })
@@ -200,11 +203,11 @@ class WebAgentPort implements AgentPort {
   forkConversation(sessionId: string) {
     return this.rpc.call('agents.forkConversation', { sessionId })
   }
-  async rename(sessionId: string, name: string) {
-    await this.rpc.call('sessions.rename', { sessionId, name })
+  rename(sessionId: string, name: string) {
+    return done(this.rpc.call('sessions.rename', { sessionId, name }))
   }
-  async markRead(sessionId: string, seq: number) {
-    await this.rpc.call('sessions.markRead', { sessionId, seq })
+  markRead(sessionId: string, seq: number) {
+    return done(this.rpc.call('sessions.markRead', { sessionId, seq }))
   }
   clearError(sessionId: string, seq: number) {
     return this.rpc.call('sessions.clearError', { sessionId, seq })
@@ -304,17 +307,17 @@ class WebProjectPort implements ProjectPort {
     return this.rpc.call('projects.setCommands', { projectId, commands })
   }
 
-  async setWorktreeTrunk(projectId: string, baseBranch: string) {
-    await this.rpc.call('worktrees.setTrunk', { projectId, baseBranch })
+  setWorktreeTrunk(projectId: string, baseBranch: string) {
+    return done(this.rpc.call('worktrees.setTrunk', { projectId, baseBranch }))
   }
-  async setAgentInstructions(projectId: string, text: string) {
-    await this.rpc.call('projects.setAgentInstructions', { projectId, text })
+  setAgentInstructions(projectId: string, text: string) {
+    return done(this.rpc.call('projects.setAgentInstructions', { projectId, text }))
   }
-  async setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null) {
-    await this.rpc.call('projects.setWorktreeSetup', { projectId, setup })
+  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null) {
+    return done(this.rpc.call('projects.setWorktreeSetup', { projectId, setup }))
   }
-  async setTrusted(projectId: string, trusted: boolean) {
-    await this.rpc.call('projects.setTrusted', { projectId, trusted })
+  setTrusted(projectId: string, trusted: boolean) {
+    return done(this.rpc.call('projects.setTrusted', { projectId, trusted }))
   }
 }
 
@@ -468,26 +471,18 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         // Checked as `callTool`'s and `reopenInlineView`'s results are: a result the screen cannot read is a failed one, not a crash there
         return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read' }) }
       },
-      closeView: async (instanceId) => {
-        await rpc.call('apps.closeView', { instanceId })
-      },
+      closeView: (instanceId) => done(rpc.call('apps.closeView', { instanceId })),
       holdViews: async (instanceIds) => (await rpc.call('apps.holdViews', { instanceIds })).missing,
-      sendViewMessage: async (sessionId, instanceId, text) => {
-        await rpc.call('apps.viewMessage', { sessionId, instanceId, text })
-      },
+      sendViewMessage: (sessionId, instanceId, text) => done(rpc.call('apps.viewMessage', { sessionId, instanceId, text })),
       // The result is exactly the MCP result the app gave — carried through as with openView
       inlineViews: (sessionId) => rpc.call('apps.inlineViews', { sessionId }),
       reopenInlineView: async (sessionId, callId) => {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
         return { ...v, ...(isAppToolResult(toolResult) ? { toolResult } : {}) }
       },
-      restart: async (appId, projectId, machine) => {
-        await rpc.call('apps.restart', { appId, projectId, ...on(machine) })
-      },
+      restart: (appId, projectId, machine) => done(rpc.call('apps.restart', { appId, projectId, ...on(machine) })),
       runs: (appId, projectId, limit, machine) => rpc.call('apps.runs', { appId, projectId, limit, ...on(machine) }),
-      remove: async (appId, projectId, machine) => {
-        await rpc.call('apps.remove', { appId, projectId, ...on(machine) })
-      },
+      remove: (appId, projectId, machine) => done(rpc.call('apps.remove', { appId, projectId, ...on(machine) })),
       create: (spec) => rpc.call('apps.create', spec),
       builder: (appId, projectId, machine) => rpc.call('apps.builder', { appId, projectId, ...on(machine) }),
       createBuilder: (appId, projectId, tool, machine) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}), ...on(machine) }),
@@ -496,26 +491,16 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       reach: (sessionId, appId, projectId) => rpc.call('apps.reach', { sessionId, appId, projectId }),
       sendError: (appId, projectId, at, machine) => rpc.call('apps.sendError', { appId, projectId, at, ...on(machine) }),
       questions: () => rpc.call('apps.questions', {}),
-      answerQuestion: async (questionId, decision) => {
-        await rpc.call('apps.answerQuestion', { questionId, decision })
-      },
+      answerQuestion: (questionId, decision) => done(rpc.call('apps.answerQuestion', { questionId, decision })),
       permissions: (appId, projectId, machine) => rpc.call('apps.permissions', { appId, projectId, ...on(machine) }),
-      forgetPermission: async (appId, projectId, capability, machine) => {
-        await rpc.call('apps.forgetPermission', { appId, projectId, capability, ...on(machine) })
-      },
+      forgetPermission: (appId, projectId, capability, machine) => done(rpc.call('apps.forgetPermission', { appId, projectId, capability, ...on(machine) })),
       usage: (appId, projectId, machine) => rpc.call('apps.usage', { appId, projectId, ...on(machine) }),
-      setShared: async (appId, projectId, shared) => {
-        await rpc.call('apps.setShared', { appId, projectId, shared })
-      },
-      setSecret: async (appId, projectId, name, value, machine) => {
-        await rpc.call('apps.setSecret', { appId, projectId, name, value, ...on(machine) })
-      },
+      setShared: (appId, projectId, shared) => done(rpc.call('apps.setShared', { appId, projectId, shared })),
+      setSecret: (appId, projectId, name, value, machine) => done(rpc.call('apps.setSecret', { appId, projectId, name, value, ...on(machine) })),
       importPrepare: (source) => rpc.call('apps.importPrepare', { source }),
       importCommit: (token, { enable, reviewKey, parent }) =>
         rpc.call('apps.importCommit', { token, enable, ...(reviewKey !== undefined ? { reviewKey } : {}), ...(parent ? { parent } : {}) }),
-      importCancel: async (token) => {
-        await rpc.call('apps.importCancel', { token })
-      },
+      importCancel: (token) => done(rpc.call('apps.importCancel', { token })),
       review: (appId, projectId) => rpc.call('apps.review', { appId, projectId }),
       enable: (appId, projectId, reviewKey) => rpc.call('apps.enable', { appId, projectId, reviewKey }),
       versions: (appId, projectId, machine) => rpc.call('apps.versions', { appId, projectId, ...on(machine) }),
@@ -528,15 +513,11 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     },
     rules: {
       list: () => rpc.call('approvals.rules', {}),
-      remove: async (id) => {
-        await rpc.call('approvals.deleteRule', { id })
-      },
+      remove: (id) => done(rpc.call('approvals.deleteRule', { id })),
     },
     consents: {
       list: () => rpc.call('projectConsents.list', {}),
-      revoke: async (fromProjectId, toProjectId, kind) => {
-        await rpc.call('projectConsents.revoke', { fromProjectId, toProjectId, kind })
-      },
+      revoke: (fromProjectId, toProjectId, kind) => done(rpc.call('projectConsents.revoke', { fromProjectId, toProjectId, kind })),
     },
     mail: {
       list: () => rpc.call('mail.list', {}),
@@ -546,31 +527,21 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       reassign: (threadId, sessionId, text) => rpc.call('mail.reassign', { threadId, sessionId, text }),
       unblock: (threadId, n) => rpc.call('mail.unblock', { threadId, n }),
       held: (action, recipient, messageIds) => rpc.call('mail.held', { action, recipient, messageIds }),
-      resume: async (target) => {
-        await rpc.call('mail.resume', target)
-      },
-      wake: async (wake) => {
-        await rpc.call('mail.wake', { wake })
-      },
+      resume: (target) => done(rpc.call('mail.resume', target)),
+      wake: (wake) => done(rpc.call('mail.wake', { wake })),
     },
     trash: {
       list: () => rpc.call('trash.list', {}),
       read: (sessionId, limit, beforeSeq) => rpc.call('trash.read', { sessionId, limit, beforeSeq }),
       restore: (sessionId) => rpc.call('trash.restore', { sessionId }),
-      purge: async (sessionId) => {
-        await rpc.call('trash.purge', { sessionId })
-      },
+      purge: (sessionId) => done(rpc.call('trash.purge', { sessionId })),
       empty: () => rpc.call('trash.empty', {}),
       readRun: (runId, limit, beforeSeq, machine) => rpc.call('trash.readRun', { runId, limit, beforeSeq, ...(machine ? { machine } : {}) }),
       purgeRuns: (runIds, machine) => rpc.call('trash.purgeRuns', { runIds, ...(machine ? { machine } : {}) }),
       subagentUsage: () => rpc.call('subagents.usage', {}),
       trashSubagentSteps: (sessionId) => rpc.call('subagents.trash', { sessionId }),
-      restoreSubagentSteps: async (sessionId) => {
-        await rpc.call('trash.restoreSubagentSteps', { sessionId })
-      },
-      purgeSubagentSteps: async (sessionId, upTo) => {
-        await rpc.call('trash.purgeSubagentSteps', { sessionId, upTo })
-      },
+      restoreSubagentSteps: (sessionId) => done(rpc.call('trash.restoreSubagentSteps', { sessionId })),
+      purgeSubagentSteps: (sessionId, upTo) => done(rpc.call('trash.purgeSubagentSteps', { sessionId, upTo })),
     },
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
@@ -621,9 +592,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       branches: (projectId) => rpc.call('git.branches', { projectId }),
       ignoredEntries: (projectId) => rpc.call('git.ignoredEntries', { projectId }),
       checkout: (projectId, branch, dryRun) => rpc.call('git.checkout', { projectId, branch, dryRun }),
-      stage: async (projectId, paths, unstage) => {
-        await rpc.call('git.stage', { projectId, paths, unstage })
-      },
+      stage: (projectId, paths, unstage) => done(rpc.call('git.stage', { projectId, paths, unstage })),
       commit: (projectId, message) => rpc.call('git.commit', { projectId, message }),
       push: (projectId) => rpc.call('git.push', { projectId }),
       cancel: (projectId) => rpc.call('git.cancel', { projectId }),
@@ -632,15 +601,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       list: async (projectId) =>
         (await rpc.call('terminal.list', { projectId })).terminals,
       create: (projectId, cols, rows) => rpc.call('terminal.create', { projectId, cols, rows }),
-      close: async (terminalId) => {
-        await rpc.call('terminal.close', { terminalId })
-      },
-      input: async (terminalId, data) => {
-        await rpc.call('terminal.input', { terminalId, data })
-      },
-      resize: async (terminalId, cols, rows) => {
-        await rpc.call('terminal.resize', { terminalId, cols, rows })
-      },
+      close: (terminalId) => done(rpc.call('terminal.close', { terminalId })),
+      input: (terminalId, data) => done(rpc.call('terminal.input', { terminalId, data })),
+      resize: (terminalId, cols, rows) => done(rpc.call('terminal.resize', { terminalId, cols, rows })),
       restart: (terminalId, cols, rows) => rpc.call('terminal.restart', { terminalId, cols, rows }),
       onOutput: (h) => rpc.onTerminalOutput(h),
       onExit: (h) => rpc.onTerminalExit(h),
@@ -648,14 +611,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     // The runner for frequently used commands (#60) — output rides on terminal.onOutput/onExit above, as-is
     commands: {
       run: (projectId, command, cols, rows) => rpc.call('commands.run', { projectId, command, cols, rows }),
-      stop: async (projectId, command) => {
-        await rpc.call('commands.stop', { projectId, command })
-      },
+      stop: (projectId, command) => done(rpc.call('commands.stop', { projectId, command })),
       state: async (projectId) => (await rpc.call('commands.state', { projectId })).runs,
       log: async (projectId, command) => (await rpc.call('commands.log', { projectId, command })).run,
-      resize: async (projectId, command, cols, rows) => {
-        await rpc.call('commands.resize', { projectId, command, cols, rows })
-      },
+      resize: (projectId, command, cols, rows) => done(rpc.call('commands.resize', { projectId, command, cols, rows })),
     },
     // Leftover processes still running from our folders (what the quit modal asks about)
     processes: {
@@ -667,9 +626,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       add: (spec) => rpc.call('machines.add', spec),
       sshHosts: () => rpc.call('machines.sshHosts', {}),
       probe: (sshTarget) => rpc.call('machines.probe', { sshTarget }),
-      remove: async (machineId) => {
-        await rpc.call('machines.remove', { machineId })
-      },
+      remove: (machineId) => done(rpc.call('machines.remove', { machineId })),
       reconnect: (machineId) => rpc.call('machines.reconnect', { machineId }),
       disconnect: (machineId) => rpc.call('machines.disconnect', { machineId }),
       revokeCredential: (machineId, credentialId) => rpc.call('machines.revokeCredential', { machineId, credentialId }),
@@ -685,14 +642,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       hubAuto: async (machineId, allowed) => (await rpc.call('machines.hubAuto', { machineId, ...(allowed === undefined ? {} : { allowed }) })).state,
       setAsks: (machineId, on) => rpc.call('machines.setAsks', { machineId, on }),
       askConsents: () => rpc.call('machines.askConsents', {}),
-      withdrawAsk: async (machineId, sessionId, projectId) => {
-        await rpc.call('machines.withdrawAsk', { machineId, sessionId, projectId })
-      },
+      withdrawAsk: (machineId, sessionId, projectId) => done(rpc.call('machines.withdrawAsk', { machineId, sessionId, projectId })),
     },
     workspace: {
-      async save(snapshot) {
-        await rpc.call('workspace.save', { layout: snapshot })
-      },
+      save: (snapshot) => done(rpc.call('workspace.save', { layout: snapshot })),
       async load() {
         return await rpc.call('workspace.load', {})
       },

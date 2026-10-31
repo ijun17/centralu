@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -9,6 +9,7 @@ import type { ToolsMock } from './tools.js'
 import type { OrchestratorMock } from './orchestrator.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'
+import { mockSessionInfo } from './session-info.js'
 
 /** Making an app and its builder session (M4 C), error bundles, and whether a session can reach an app (#308) */
 export class AppBuilderMock {
@@ -137,33 +138,16 @@ export class AppBuilderMock {
         throw new Error(`Could not start ${chosen} session: ${detected?.detail ?? `${chosen} is not installed`}`)
       }
       const id = `mock-session-${this.clock.next()}`
-      const info: SessionInfo = {
+      const info = mockSessionInfo({
         id,
         projectId,
-        kind: 'worker',
         tool: chosen,
         externalId: `ext-${id}`,
         name: `${app.name ?? appId} · builder`,
-        autoNamed: false,
-        state: 'idle',
-        lastReadSeq: 0,
-        lastSeq: 0,
         createdAt: this.clock.now(),
-        waitingSince: null,
-        live: true,
-        model: null,
-        effort: null,
-        verbosity: null,
-        serviceTier: null,
-        permissionPreset: 'normal',
-        importedFrom: null,
-        worktree: null,
-        parentSessionId: null,
-        scopeSessionIds: null,
         roleAppend: `(mock builder role for ${appId})`,
         appId,
-        ...sessionLiveDefaults(),
-      }
+      })
       this.store.sessions.set(id, info)
       this.registry.appBuilders.set(key, id)
       // The same rule as the real thing: creating a session sets that project's default tool (manager.createSession)

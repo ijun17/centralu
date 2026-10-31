@@ -1,6 +1,7 @@
 import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol/client'
-import { DEFAULT_AUTO_COMPACT, isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol/client'
+import { DEFAULT_AUTO_COMPACT, isRecord, oneLineText, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol/client'
 import type { AgentPort, SendIntent } from '../ports/index.js'
+import { mockSessionInfo } from './session-info.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
@@ -83,13 +84,9 @@ export class SessionsMock {
        * worktree manager it used to hang under was folded into ordinary sessions.
        */
       const parentSessionId: string | null = null
-      const info: SessionInfo = {
+      const info: SessionInfo = mockSessionInfo({
         id,
         projectId: params.projectId,
-        kind: 'worker',
-        scopeSessionIds: null,
-        roleAppend: null,
-        appId: null,
         tool: params.tool,
         externalId: `ext-${id}`,
         worktree,
@@ -109,17 +106,11 @@ export class SessionsMock {
           worktree?.branch ??
           'New session',
         autoNamed: !params.worktreeBranch?.trim(),
-        state: 'idle',
-        lastReadSeq: 0,
-        lastSeq: 0,
         createdAt: this.clock.now(),
-        waitingSince: null,
-        live: true,
         model: params.model ?? null,
         permissionPreset: params.permissionPreset ?? 'normal',
         importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
-        ...sessionLiveDefaults(),
-      }
+      })
       if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.store.sessions.set(id, info)
       // The same rule as the real thing: the last tool chosen becomes that project's default (manager.createSession)
