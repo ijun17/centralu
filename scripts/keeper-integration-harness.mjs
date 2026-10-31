@@ -1,5 +1,5 @@
 /**
- * What the keeper integration scenarios share (`keeper-integration.mjs`): where the binary and the
+ * What the keeper integration scenarios share (`keeper-integration.mjs`, `keeper-children-integration.mjs`, `keeper-handoff-integration.mjs`): where the binary and the
  * bundled host are, the processes and folders a run made (ended and removed by `cleanup`), how a
  * check is reported, and how a keeper, an attached app and a host client are started.
  */
