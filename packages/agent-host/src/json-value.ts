@@ -42,3 +42,7 @@ export const tryParseJson = (text: string): unknown => {
 
 /** The value if it is a JSON object, or the object JSON text of one holds; empty for anything else (a tool call's arguments) */
 export const jsonObject = (v: unknown): Obj => (typeof v === 'string' ? jsonObject(tryParseJson(v)) : asObj(v))
+
+/** The JSON objects printed one per line, last line first. A banner, a partial line or a non-object is skipped */
+export const jsonLines = (stdout: string): Obj[] =>
+  stdout.split('\n').reverse().map((l) => l.trim()).filter((l) => l.startsWith('{')).map(tryParseJson).filter(isObj)

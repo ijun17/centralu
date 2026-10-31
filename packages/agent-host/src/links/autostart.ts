@@ -1,5 +1,5 @@
-import { autostartCommand, lastLine, NOT_FOUND, parseAutostart, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
-import { tryParseJson } from '../json-value.js'
+import { autostartCommand, NOT_FOUND, parseAutostart, whyOrExit, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { jsonLines } from '../json-value.js'
 
 /**
  * Starting a linked machine's host at boot (docs/plans/remote-hub.md §10.4, owner decision 4: offered
@@ -18,12 +18,10 @@ export type AutostartUnasked = 'not_found' | 'too_old'
 
 /** `{ v: 1, autostart: { ok, on, how, linger, message? } }`, the line `serve --autostart` prints; null when there is none */
 export function parseAutostartLine(stdout: string): { ok: boolean; state: RemoteAutostart; message: string | null } | null {
-  for (const line of stdout.split(/\r?\n/).reverse()) {
-    const t = line.trim()
-    if (!t.startsWith('{')) continue
-    const o = tryParseJson(t) as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } } | null | undefined
-    const state = o?.v === 1 ? parseAutostart(o.autostart) : null
-    if (state && typeof o?.autostart?.ok === 'boolean') {
+  for (const raw of jsonLines(stdout)) {
+    const o = raw as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } }
+    const state = o.v === 1 ? parseAutostart(o.autostart) : null
+    if (state && typeof o.autostart?.ok === 'boolean') {
       return { ok: o.autostart.ok, state, message: typeof o.autostart.message === 'string' ? o.autostart.message : null }
     }
   }
@@ -54,8 +52,7 @@ export async function autostartRemote(
     if (/unknown option for serve: --autostart/.test(r.stderr)) {
       throw unasked('too_old', `The Centralu on ${c.target} is too old to start at boot; update it first`)
     }
-    const why = lastLine(r.stderr)
-    throw new Error(`Centralu on ${c.target} gave no answer about starting at boot${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+    throw new Error(`Centralu on ${c.target} gave no answer about starting at boot${whyOrExit(r)}`)
   }
   if (!answer.ok) throw new Error(`Centralu on ${c.target} ${FAILED[action]}: ${answer.message ?? 'no reason given'}`)
   return answer.state

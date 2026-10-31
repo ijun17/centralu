@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
-import { asObj, tryParseJson } from '../json-value.js'
+import { asObj, jsonLines } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
 import { hostname } from 'node:os'
@@ -148,15 +148,12 @@ export interface Tunnel {
  * words of the update to tell the person when there is no line (`npmInstall`)
  */
 export function parseConnectionLine(stdout: string, spec?: RemoteSpec): ConnectionLine {
-  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const raw = tryParseJson(lines[i]!)
-    if (raw === undefined) continue
+  for (const raw of jsonLines(stdout)) {
     const o = raw as Partial<ConnectionLine>
-    if (o && typeof o === 'object' && typeof o.v === 'number') {
+    if (typeof o.v === 'number') {
       if (o.v !== 1) throw new Error(`The remote's Centralu speaks connection format ${o.v}; update Centralu on this computer`)
       // A token is required only of a remote that does not pair (#1405): an older one always printed it
-      const takes: unknown = asObj(raw).takes
+      const takes: unknown = raw.takes
       const pairs = Array.isArray(takes) && takes.includes('pair')
       if (typeof o.port !== 'number' || (typeof o.token !== 'string' && !pairs) || typeof o.protocolVersion !== 'number') {
         throw new Error('The remote answered with an incomplete connection line')
@@ -276,14 +273,11 @@ export class StartedNotServing extends Error {
 
 /** Reads the one JSON line `--detach` prints; throws when there is none */
 export function parseDetachLine(stdout: string): DetachAnswer {
-  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const raw = tryParseJson(lines[i]!)
-    if (raw === undefined) continue
-    const d = asObj(raw).detach
+  for (const raw of jsonLines(stdout)) {
+    const d = raw.detach
     if (!d || typeof d !== 'object') continue
     const o = asObj(d)
-    if (o.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof o.how === 'string' ? o.how : null }
+    if (o.ok === true) return { ok: true, line: parseConnectionLine(JSON.stringify(raw)), how: typeof o.how === 'string' ? o.how : null }
     return {
       ok: false,
       reason: typeof o.reason === 'string' ? o.reason : 'failed',
@@ -616,8 +610,8 @@ export function revokeCommand(spec: RemoteSpec, id: string): string {
 
 /** `--revoke`'s line: whether there was one to withdraw, or null when it printed none (an older serve refused the option) */
 export function parseRevoke(stdout: string): boolean | null {
-  for (const l of stdout.split('\n').map((x) => x.trim()).reverse()) {
-    const revoked = asObj(tryParseJson(l)).revoked
+  for (const raw of jsonLines(stdout)) {
+    const revoked = raw.revoked
     if (typeof revoked === 'boolean') return revoked
   }
   return null
@@ -819,14 +813,13 @@ export class SshTunnel implements Tunnel {
     const remote = this.opts.remote ?? { shell: 'posix' }
     const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.opts.hubName ?? hostname())], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(unreachable(this.opts.target, r.stderr))
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     let answer: DetachAnswer
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
-      const why = lastLine(r.stderr)
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+      throw new Error(`${(err as Error).message}${whyOrExit(r)}`)
     }
     if (answer.ok) {
       this.linkBound = false
@@ -894,7 +887,7 @@ export class SshTunnel implements Tunnel {
         throw again
       }
     }
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(unreachable(this.opts.target, r.stderr))
     // The reader's lines are not the step's output
     return markers.length ? { ...r, stdout: r.stdout.split(/\r?\n/).filter((l) => !markers.includes(l.trim())).join('\n') } : r
   }
@@ -979,7 +972,7 @@ export class SshTunnel implements Tunnel {
       this.pairs = true
       return this.connectionLine()
     }
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(unreachable(this.opts.target, r.stderr))
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
       const line = parseConnectionLine(r.stdout, remote)
@@ -990,7 +983,7 @@ export class SshTunnel implements Tunnel {
       const why = lastLine(r.stderr)
       // Its serve.json may not be read there (#1405 review): the launcher's own advice, not a guess at an older Centralu
       if (r.code !== 0 && /cannot be read by this user \((EACCES|EPERM)\)/.test(why)) throw new Error(why.replace(/^centralu serve: /, ''))
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+      throw new Error(`${(err as Error).message}${whyOrExit(r)}`)
     }
   }
 
@@ -1199,6 +1192,11 @@ export function lastLine(s: string, ansi: (bytes: Buffer) => string | null = ans
   const line = [...lines].reverse().find((l) => /error|denied|refused|timed out|not found|cannot|could not/i.test(l)) ?? lines.at(-1) ?? ''
   return unescapeBytes(line, ansi)
 }
+
+/** What the person is told when ssh itself could not reach `target` (exit 255) */
+export const unreachable = (target: string, stderr: string): string => `ssh could not reach ${target}: ${lastLine(stderr) || 'no answer'}`
+/** The end of a sentence about a command that gave no answer: `: <last stderr line>`, else ` (exit <code>)` when it failed */
+export const whyOrExit = (r: RemoteRun, why = lastLine(r.stderr)): string => (why ? `: ${why}` : r.code ? ` (exit ${r.code})` : '')
 
 /**
  * A line of ssh's own with the bytes it would not print put back as text (#849).

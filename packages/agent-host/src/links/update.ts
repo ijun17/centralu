@@ -1,8 +1,8 @@
 import { isLocalBuildVersion } from '@cc/protocol'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
-import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
-import { tryParseJson } from '../json-value.js'
+import { NOT_FOUND, remoteScript, stopCommand, whyOrExit, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { jsonLines } from '../json-value.js'
 
 /**
  * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
@@ -75,11 +75,9 @@ export type HostControl = {
 
 /** `{ v: 1, stop: { ok, wasRunning, how?, message? } }`, the line `serve --stop` prints; null when there is none */
 export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolean; message: string | null } | null {
-  for (const line of stdout.split(/\r?\n/).reverse()) {
-    const t = line.trim()
-    if (!t.startsWith('{')) continue
-    const o = tryParseJson(t) as { v?: unknown; stop?: { ok?: unknown; wasRunning?: unknown; message?: unknown } } | null | undefined
-    if (o?.v === 1 && o.stop && typeof o.stop.ok === 'boolean') {
+  for (const raw of jsonLines(stdout)) {
+    const o = raw as { v?: unknown; stop?: { ok?: unknown; wasRunning?: unknown; message?: unknown } }
+    if (o.v === 1 && o.stop && typeof o.stop.ok === 'boolean') {
       return { ok: o.stop.ok, wasRunning: o.stop.wasRunning === true, message: typeof o.stop.message === 'string' ? o.stop.message : null }
     }
   }
@@ -99,8 +97,7 @@ export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'tar
   if (r.stdout.includes(NOT_FOUND)) return { wasRunning: false }
   const answer = parseStopLine(r.stdout)
   if (!answer) {
-    const why = lastLine(r.stderr)
-    throw new Error(`Stopping Centralu on ${c.target} gave no answer${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+    throw new Error(`Stopping Centralu on ${c.target} gave no answer${whyOrExit(r)}`)
   }
   if (!answer.ok) throw new Error(`Centralu on ${c.target} could not be stopped: ${answer.message ?? 'no reason given'}`)
   return { wasRunning: answer.wasRunning }

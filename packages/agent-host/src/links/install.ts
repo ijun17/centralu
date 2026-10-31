@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { NotPublished, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
 import { floorOf } from './node-floor.js'
-import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { remoteScript, whyOrExit, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
  * The hub's installer for a linked machine (docs/plans/remote-hub.md §10.2, phase 3 step 3): over the
@@ -336,8 +336,7 @@ function failure(target: string, code: string, detail: string): string {
 export function readStep(run: RemoteRun, ok: string, target: string): string {
   const line = run.stdout.split(/\r?\n/).reverse().find((l) => l.startsWith(`${STEP} `))
   if (!line) {
-    const why = lastLine(run.stderr)
-    throw new Error(`Installing on ${target} stopped without saying why${why ? `: ${why}` : run.code ? ` (exit ${run.code})` : ''}`)
+    throw new Error(`Installing on ${target} stopped without saying why${whyOrExit(run)}`)
   }
   const rest = line.slice(STEP.length + 1).trim()
   if (rest.startsWith('fail')) {
