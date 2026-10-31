@@ -749,7 +749,8 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
   it('answers pending at once while checks run, and squash-merges once with a clean message when green', async () => {
     const running = [ghRun('verify', 'success', 11), ghRun('windows tests', null, 12), ghRun('linux-x64', 'success', 13)]
     runtime(ghState({ checkRuns: [running, green()] }))
-    const pending = await call('merge_when_green', { pr: '#77' })
+    // wait: true was the way to wait; it is gone, so the call answers at once and the old argument does nothing
+    const pending = await call('merge_when_green', { pr: '#77', wait: true })
     expect(pending.data.outcome).toBe('pending')
     expect(merges()).toEqual([])
     const r = await call('merge_when_green', { pr: '#77' })
@@ -761,6 +762,13 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     ])
     expect(ghCalls().flat()).not.toContain('--auto')
     expect(ghCalls().flat()).not.toContain('--delete-branch')
+
+    // A merge GitHub refuses is reported
+    await rt!.dispose({ awaitTree: true })
+    runtime(ghState({ mergeError: 'Pull request is not mergeable: the base branch policy prohibits the merge.' }))
+    const refused = await call('merge_when_green', { pr: 77 })
+    expect(refused.isError).toBe(true)
+    expect(refused.text.split('\n')[0]).toBe('Not merged: GitHub refused the merge: Pull request is not mergeable: the base branch policy prohibits the merge.')
   })
 
   it("takes the caller's body, deletes the branch only when asked and never a fork's", async () => {
@@ -782,13 +790,6 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const f = await call('merge_when_green', { pr: 77, deleteBranch: true })
     expect(f.text.split('\n')[0]).toContain('Branch feat/merge-when-green not deleted: it is in a fork.')
     expect(ghCalls().filter((a) => a.includes('DELETE'))).toEqual([])
-  })
-
-  it('reports a merge GitHub refused', async () => {
-    runtime(ghState({ mergeError: 'Pull request is not mergeable: the base branch policy prohibits the merge.' }))
-    const refused = await call('merge_when_green', { pr: 77 })
-    expect(refused.isError).toBe(true)
-    expect(refused.text.split('\n')[0]).toBe('Not merged: GitHub refused the merge: Pull request is not mergeable: the base branch policy prohibits the merge.')
   })
 })
 
