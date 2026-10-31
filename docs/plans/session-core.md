@@ -501,7 +501,7 @@ not a conversation (`short-lived.ts`: model list, probes) pass no `sessionId` an
 | **The core, once** | a scripted `ToolWire` in memory (no process, no frames) on `memoryOs` | the ledger and its rules: queue and drain, receipts, Stop and its timer, interrupted by the tool, crash vs asleep, undelivered input, card release on stop and exit, detach and adopt; the decision order; the event hygiene |
 | **Each tool's mapping, apart** | its recordings through `frames/replay.test-helpers.ts` (`replaySpawner` with the tool's `FrameCodec`) and the scenarios (`frames/scenarios.test-helpers.ts`), at `SessionHandle` level | the tool's frames become the events they did before; the tool's requests match what it was sent |
 
-The codecs: `jsonRpcCodec` (ACP, and Codex with its id-less `jsonrpc`), `jsonLinesCodec` (`agy`), and a Claude codec
+The codecs: `jsonRpcCodec` (ACP, and Codex with its id-less `jsonrpc`), a JSON-lines codec (`agy`; not written yet), and a Claude codec
 matching stream-json lines by `type` and, for `control_request`/`control_response`, `request_id`. Recordings for
 Claude and Codex do not exist yet; they are made with the tap on a logged-in machine, scrubbed by
 `scripts/frames-scrub.mts`, and added to `frames/recordings-private.test.ts`'s `ROOTS`.
@@ -570,7 +570,7 @@ From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), wha
 | Core part | `agy` | Its doc |
 |---|---|---|
 | `tool-process.ts` start | `agy --input-format stream-json --output-format stream-json … -p=`, one process per session, `endsWithHost` | §3.1 |
-| The tap and replay | `jsonLinesCodec`; plus a `gate` direction for hook requests (a recorder entry kind to add, not a format change) | §10.1–10.2 |
+| The tap and replay | a JSON-lines codec (not written yet); plus a `gate` direction for hook requests (a recorder entry kind to add, not a format change) | §10.1–10.2 |
 | `turns.midTurnInput` | false: the core queues (agy would too, but the person's `queuedMessages` can turn that into an interrupt) | §1.6, §4.2 |
 | `turns.interruptEndsProcess` | true: SIGINT ends the process within 30 ms with a `result` `interrupted`; the next input starts a new one with `--conversation` | §1.5, §3.1 |
 | Stop confirmation | the process exit is the confirmation; the timer bounds it with the existing stop bound | §3.3 |
