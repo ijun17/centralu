@@ -52,12 +52,13 @@ const hostLog = (id: string) => {
   return existsSync(f) ? readFileSync(f, 'utf8') : ''
 }
 
+// The probe gets as long as the connect: one that ran out on a loaded machine made the app answer in the older generation, and the spec-generation test read that as the wrong era
 const make = (timing: Partial<RuntimeTiming> = {}, env?: NodeJS.ProcessEnv) => {
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projRoot, trusted }],
     dataRoot,
     reservedIds: [],
-    timing: { idleMs: 60_000, backoffBaseMs: 100, graceMs: 1_500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, ...timing },
+    timing: { idleMs: 60_000, backoffBaseMs: 100, graceMs: 1_500, probeTimeoutMs: 10_000, connectTimeoutMs: 10_000, ...timing },
     ...(env ? { env } : {}),
   })
   rt.refresh()
