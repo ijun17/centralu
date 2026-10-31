@@ -1,4 +1,5 @@
 import type { HookCallback, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk'
+import { isRecord } from '@cc/protocol'
 import type { CreateSessionOpts } from '../contract.js'
 import { appToolOf, isOrchestratorTool } from './permissions.js'
 
@@ -7,8 +8,6 @@ import { appToolOf, isOrchestratorTool } from './permissions.js'
  * wait early. Measured (scripts/probe-pretooluse-hook.mts): with this set, a 75 s wait for the answer is honoured and a denied command does not run
  */
 const HOOK_TIMEOUT_SECONDS = 3600
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /**
  * The person's card for every step of the CLI's own in a turn that a session's request is (docs/plans/mailbox.md §9.7, #1447).

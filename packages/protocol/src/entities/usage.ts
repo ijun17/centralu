@@ -99,15 +99,13 @@ export const RebuildCause = z.enum([
 ])
 export type RebuildCause = z.infer<typeof RebuildCause>
 
-/** One session's share of a cache window (`CacheWindowStats.sessions`) */
-export const CacheSessionStats = z.object({
-  sessionId: z.string(),
-  /** The session's name when the host was asked; empty for a session that no longer exists */
-  name: z.string(),
+/** What a prompt cache did over some requests: the sums every per-session and per-window figure here shares */
+const CacheCounts = z.object({
   requests: z.number(),
   inputTokens: z.number(),
   cacheReadTokens: z.number(),
   cacheCreationTokens: z.number(),
+  /** Requests that wrote most of their prompt to the cache again (the threshold: docs/agent-host.md §6.1) */
   rebuilds: z.number(),
   /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
   rebuildCauses: z.record(z.string(), z.number()).optional(),
@@ -118,6 +116,13 @@ export const CacheSessionStats = z.object({
    */
   rebuildTokens: z.number().optional(),
 })
+
+/** One session's share of a cache window (`CacheWindowStats.sessions`) */
+export const CacheSessionStats = CacheCounts.extend({
+  sessionId: z.string(),
+  /** The session's name when the host was asked; empty for a session that no longer exists */
+  name: z.string(),
+})
 export type CacheSessionStats = z.infer<typeof CacheSessionStats>
 
 /**
@@ -127,23 +132,13 @@ export type CacheSessionStats = z.infer<typeof CacheSessionStats>
  * and is computed where it is shown (`@cc/core` `cacheHitRate`), so a host and a UI of different builds cannot
  * disagree on what it means.
  */
-export const CacheWindowStats = z.object({
+export const CacheWindowStats = CacheCounts.extend({
   /** `5h`, `today` */
   id: z.string(),
   /** How the window is named on screen ("last 5 h", "today") */
   label: z.string(),
   /** ISO8601, where the window begins */
   since: z.string(),
-  requests: z.number(),
-  inputTokens: z.number(),
-  cacheReadTokens: z.number(),
-  cacheCreationTokens: z.number(),
-  /** Requests that wrote most of their prompt to the cache again (the threshold: docs/agent-host.md §6.1) */
-  rebuilds: z.number(),
-  /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
-  rebuildCauses: z.record(z.string(), z.number()).optional(),
-  /** What the rebuilds wrote to the cache, in tokens (`CacheSessionStats.rebuildTokens`) */
-  rebuildTokens: z.number().optional(),
   /**
    * What the cache cost in units of an uncached input token (#1492), for the share the writes were of it: the tokens read from the cache
    * times the price of a read, and the tokens written times the price of a write, each as a ratio to uncached input (Anthropic: read 0.1,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   builderErrorFrame,
   builderRequestFrame,
+  builderRequestOf,
   frameField,
   oneLineText,
   type BuilderRequestFacts,
@@ -113,5 +114,40 @@ describe("builderErrorFrame — the error report bundle's frame (M4 C-6)", () =>
       '> ',
       '> last',
     ])
+  })
+})
+
+describe('builderRequestOf', () => {
+  const app = { appId: 'notes', name: 'Team notes', status: 'running' }
+  const ask = { text: ' fix it ', hasAttachments: false, app, builder: 'b1', view: undefined, latestRun: undefined }
+
+  it('refuses in the order the person can fix it', () => {
+    expect(builderRequestOf({ ...ask, text: ' ' })).toEqual({ refusal: 'Write what to change, or attach a screenshot' })
+    expect(builderRequestOf({ ...ask, app: undefined })).toEqual({ refusal: 'This app no longer exists' })
+    expect(builderRequestOf({ ...ask, builder: null })).toEqual({ refusal: 'This app has no builder session yet. Start one, then ask again' })
+    expect(builderRequestOf({ ...ask, view: null })).toEqual({ refusal: "That view is not open for this app. Reopen the app's view and ask again" })
+  })
+
+  it('lets an attachment stand for the text', () => {
+    expect(builderRequestOf({ ...ask, text: '', hasAttachments: true })).toMatchObject({ builder: 'b1' })
+  })
+
+  it('builds the header from the records, and carries only a run that did not succeed', () => {
+    const run = { tool: 'save', callerKind: 'view', status: 'error', error: 'boom' }
+    const built = builderRequestOf({ ...ask, app: { ...app, status: 'crashed', error: 'died', home: 'open' }, view: { uri: 'ui://notes' }, latestRun: run })
+    expect(built).toEqual({
+      builder: 'b1',
+      frame: builderRequestFrame(
+        {
+          app: { appId: 'notes', name: 'Team notes' },
+          screen: { tool: 'open', resourceUri: 'ui://notes' },
+          stopped: { status: 'crashed', reason: 'died' },
+          latestRun: { tool: 'save', callerKind: 'view', status: 'error', error: 'boom' },
+        },
+        'fix it',
+      ),
+    })
+    const ok = builderRequestOf({ ...ask, latestRun: { ...run, status: 'ok' } })
+    expect(ok).toEqual(builderRequestOf({ ...ask, latestRun: undefined }))
   })
 })

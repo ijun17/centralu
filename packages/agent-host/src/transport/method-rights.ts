@@ -1,4 +1,4 @@
-import type { RpcMethodName } from '@cc/protocol'
+import { isRecord, type RpcMethodName } from '@cc/protocol'
 
 /**
  * What a connection holding the **limited** credential may call (#1405).
@@ -55,10 +55,6 @@ export type RightsHost = {
 /** The parameters as an object to read fields from; anything else reads as having none */
 function fields(params: unknown): Record<string, unknown> {
   return isRecord(params) ? params : {}
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
 /**

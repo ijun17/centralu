@@ -1,4 +1,4 @@
-import { builderErrorFrame, builderRequestFrame, type Attachment, type BuilderRequestFacts, type BuilderRunFact, type SessionInfo } from '@cc/protocol'
+import { builderErrorFrame, builderRequestOf, type Attachment, type SessionInfo } from '@cc/protocol'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
 import { rpcError } from './rpc-error.js'
@@ -39,46 +39,24 @@ function refuse(message: string): never {
 }
 
 export async function askBuilder(deps: BuilderRequestDeps, req: BuilderRequest): Promise<{ sessionId: string }> {
-  const text = req.text.trim()
-  if (!text && !req.attachments?.length) refuse('Write what to change, or attach a screenshot')
-  const info = deps.apps.list().find((a) => a.appId === req.ref.appId && a.projectId === req.ref.projectId)
-  if (!info) refuse('This app no longer exists')
+  const app = deps.apps.list().find((a) => a.appId === req.ref.appId && a.projectId === req.ref.projectId)
   const builder = deps.builderOf(req.ref)
-  if (!builder) refuse('This app has no builder session yet. Start one, then ask again')
-  const facts: BuilderRequestFacts = {
-    app: { appId: info.appId, name: info.name ?? info.appId },
-    screen: null,
-    stopped: info.status === 'crashed' || info.status === 'failed' ? { status: info.status, reason: info.error } : null,
-    latestRun: null,
-  }
+  let view: { uri: string } | null | undefined
   if (req.instanceId) {
     const inst = deps.views?.describe(req.instanceId) ?? null
-    if (!inst || inst.app.appId !== req.ref.appId || inst.app.projectId !== req.ref.projectId) {
-      refuse("That view is not open for this app. Reopen the app's view and ask again")
-    }
-    // The fixed view is the one the home tool opened — a view not in a conversation does not use
-    // this line
-    facts.screen = { tool: info.home ?? '(no home tool)', resourceUri: inst.uri }
+    view = inst && inst.app.appId === req.ref.appId && inst.app.projectId === req.ref.projectId ? inst : null
   }
-  // Carried only if the latest run was not a success — a successful run is not evidence for "this
-  // does not work"
-  facts.latestRun = notOk(deps.apps.runs(req.ref, 1)[0])
-  await deps.send(builder.id, builderRequestFrame(facts, text), req.attachments)
-  return { sessionId: builder.id }
-}
-
-const CALLERS: readonly string[] = ['view', 'session', 'app'] satisfies BuilderRunFact['callerKind'][]
-const NOT_OK: readonly string[] = ['running', 'error', 'cancelled', 'rejected'] satisfies BuilderRunFact['status'][]
-
-/** One record entry (the store gives it as text) → a header fact. null if it succeeded or the shape is unrecognized */
-function notOk(run: { tool: string; callerKind: string; status: string; error: string | null } | undefined): BuilderRunFact | null {
-  if (!run || !NOT_OK.includes(run.status) || !CALLERS.includes(run.callerKind)) return null
-  return {
-    tool: run.tool,
-    callerKind: run.callerKind as BuilderRunFact['callerKind'],
-    status: run.status as BuilderRunFact['status'],
-    error: run.error,
-  }
+  const built = builderRequestOf({
+    text: req.text,
+    hasAttachments: !!req.attachments?.length,
+    app,
+    builder,
+    view,
+    latestRun: deps.apps.runs(req.ref, 1)[0],
+  })
+  if ('refusal' in built) refuse(built.refusal)
+  await deps.send(built.builder.id, built.frame, req.attachments)
+  return { sessionId: built.builder.id }
 }
 
 /**

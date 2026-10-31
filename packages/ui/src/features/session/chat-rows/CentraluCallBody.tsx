@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { isRecord } from '@cc/protocol/client'
 import { Markdown } from '../Markdown.jsx'
 
 /** How many rows a closed card shows before "N more" */
@@ -49,13 +50,12 @@ type Shape = { kind: 'text'; text: string } | { kind: 'fields'; row: Row } | { k
 
 export function readShape(result: string): Shape {
   const text = result.trim()
-  const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v)
   try {
     const whole: unknown = JSON.parse(text)
-    if (Array.isArray(whole) && whole.length > 0 && whole.every(isRow)) return listOrTranscript(whole)
-    if (isRow(whole)) {
+    if (Array.isArray(whole) && whole.length > 0 && whole.every(isRecord)) return listOrTranscript(whole)
+    if (isRecord(whole)) {
       // An object that wraps its list (`{ sessions: [...] }`) is that list
-      const lists = Object.values(whole).filter((v) => Array.isArray(v) && v.length > 0 && v.every(isRow)) as Row[][]
+      const lists = Object.values(whole).filter((v) => Array.isArray(v) && v.length > 0 && v.every(isRecord)) as Row[][]
       if (lists.length === 1 && Object.keys(whole).length <= 2) return listOrTranscript(lists[0]!)
       return { kind: 'fields', row: whole }
     }
@@ -66,7 +66,7 @@ export function readShape(result: string): Shape {
   if (lines.length > 0 && lines.every((l) => l.trim().startsWith('{'))) {
     try {
       const rows = lines.map((l) => JSON.parse(l) as unknown)
-      if (rows.every(isRow)) return listOrTranscript(rows)
+      if (rows.every(isRecord)) return listOrTranscript(rows)
     } catch {
       // a line that is not JSON: the whole is text
     }
