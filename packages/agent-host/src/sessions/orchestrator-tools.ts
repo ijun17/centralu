@@ -22,7 +22,7 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
  */
 export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
 export type { AppAccessToolName, CommandToolName, OrchestratorToolName } from './tool-definitions.js'
-export { callForm, codexToolInstructionsFor, commandsFor, currentRareTier, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, orchestratorToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, rareTierFrom, setRareTier, setReaderInstructions, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
+export { callForm, codexToolInstructionsFor, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, orchestratorToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
 

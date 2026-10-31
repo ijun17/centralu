@@ -38,11 +38,11 @@
  * Run with: node packages/agent-host/scripts/smoke-delegation.mjs <start-agent|ask-project|app-access|reader>
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { openHost } from './host-client.mjs'
+import { openHost, removeTemp } from './host-client.mjs'
 
 const TOOL = process.env.TOOL ?? 'claude'
 const logger = (tag) => (...a) => console.log(`[${tag}]`, ...a)
@@ -55,10 +55,9 @@ function scratch(prefix) {
 }
 /** A host on the scratch folder: its store is a file there with `db`, in memory without */
 const open = (root, onEvent, db = false) => openHost({ ...(db ? { db: join(root, 'store.db') } : {}), env: { CC_DATA_DIR: join(root, 'data') }, onEvent })
-const finish = (c, root) => {
-  c.ws.close()
-  c.host.kill()
-  rmSync(root, { recursive: true, force: true })
+const finish = async (c, root) => {
+  await c.stop()
+  removeTemp(root)
 }
 const verdict = (checks) => {
   for (const [what, ok] of checks) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${what}`)
@@ -67,6 +66,24 @@ const verdict = (checks) => {
 const said = (evs) => evs.filter((e) => e.type === 'message_delta').map((e) => String(e.text)).join('')
 const numberIn = (file) => (existsSync(file) ? readFileSync(file, 'utf8').trim() : null)
 const withNumber = (answer, number) => !!number && answer.includes(number.replace(/\D/g, '').slice(0, 6))
+/**
+ * A session's turn can end while the session it asked still works, held on an approval the script answers a moment later,
+ * so its answer says it has not read the file yet. When the other session finishes, the host wakes the asker with a report
+ * and its turn follows; the answer is judged from that turn too, and the person asks again only if the number is still
+ * missing from it.
+ */
+async function answerWith(c, askerId, otherId, mark, file, first) {
+  let answer = first
+  const done = otherId && (await c.next((e) => e.sessionId === otherId && (e.type === 'turn_complete' || e.type === 'error'), "the other session's turn end", 300_000, mark).catch(() => null))
+  if (done) {
+    const from = c.events.indexOf(done) + 1
+    await c.next((e) => e.sessionId === askerId && e.type === 'turn_complete', 'the report turn end', 60_000, from).catch(() => {})
+    answer += said(c.events.slice(from).filter((e) => e.sessionId === askerId))
+  }
+  const number = numberIn(file)
+  if (!withNumber(answer, number)) answer += said(await c.turn(askerId, `The other session has finished. Read ${file} and tell me the number.`))
+  return { number, answer }
+}
 const settings = (tool) => (tool === 'codex' ? { model: 'gpt-5.6-luna', effort: 'low' } : { model: 'haiku' })
 
 async function startAgent() {
@@ -120,9 +137,8 @@ async function startAgent() {
   })
   const ended = await c.next((e) => e.sessionId === parentId && (e.type === 'turn_complete' || e.type === 'error'), 'parent turn end', 600_000, mark).then(() => true, () => false)
   const mine = c.events.slice(mark).filter((e) => e.sessionId === parentId)
-  const answer = said(mine)
   const result = mine.find((e) => e.type === 'tool_result' && /answered|working|did not/.test(String(e.summary)))
-  const number = numberIn(join(WORKTREE && child?.worktree ? child.worktree.path : website, 'out', 'secret.txt'))
+  const { number, answer } = await answerWith(c, parentId, child?.id, mark, join(WORKTREE && child?.worktree ? child.worktree.path : website, 'out', 'secret.txt'), said(mine))
   const consent = cards.find((x) => x.sessionId === parentId && x.detail.kind === 'agent_start')
 
   console.log('\n── start_agent result (as the model read it) ──\n' + String(result?.summary ?? '(none)').slice(0, 400))
@@ -136,7 +152,7 @@ async function startAgent() {
     ['the child wrote out/secret.txt', !!number],
     ['the parent answered with the number in the file', withNumber(answer, number)],
   ])
-  finish(c, root)
+  await finish(c, root)
   return ok
 }
 
@@ -186,11 +202,12 @@ async function askProject() {
   })
   const ended = await c.next((e) => e.sessionId === callerId && (e.type === 'turn_complete' || e.type === 'error'), 'caller turn end', 600_000, mark).then(() => true, () => false)
   const mine = c.events.slice(mark)
-  const answer = said(mine.filter((e) => e.sessionId === callerId))
   const result = mine.find((e) => e.sessionId === callerId && e.type === 'tool_result' && /answered|still working|did not/.test(String(e.summary)))
-  const number = numberIn(join(toolkit, 'out', 'secret.txt'))
+  // The read grant lasts while the delegation runs: a read the person asks for afterwards may raise a card, and is not judged
+  const cardsInTurn = cards.length
+  const { number, answer } = await answerWith(c, callerId, delegatedId, mark, join(toolkit, 'out', 'secret.txt'), said(mine.filter((e) => e.sessionId === callerId)))
   const consent = cards.find((x) => x.sessionId === callerId && x.detail.kind === 'project_access')
-  const callerReadCards = cards.filter((x) => x.sessionId === callerId && x.detail.kind !== 'project_access')
+  const callerReadCards = cards.slice(0, cardsInTurn).filter((x) => x.sessionId === callerId && x.detail.kind !== 'project_access')
 
   console.log('\n── ask_project result (as the model read it) ──\n' + String(result?.summary ?? '(none)').slice(0, 400))
   console.log('\n── caller answer ──\n' + answer.trim().slice(0, 600) + '\n')
@@ -204,7 +221,7 @@ async function askProject() {
     ['the caller answered with the number in the file', withNumber(answer, number)],
     ...(CALLER === 'claude' ? [['the caller read the file without a card (read grant)', callerReadCards.length === 0]] : []),
   ])
-  finish(c, root)
+  await finish(c, root)
   return ok
 }
 
@@ -295,7 +312,7 @@ async function appAccess() {
     await c.call('apps.setShared', { appId: 'counter', projectId: pThere.id, shared: false })
   }
   console.log(`\nConsent cards answered: ${cards.length}${cards.length ? `\n  ${cards.join('\n  ')}` : ''}`)
-  finish(c, root)
+  await finish(c, root)
   console.log(`\n${passed}/${TRIALS} trials passed`)
   return passed === TRIALS
 }
@@ -341,7 +358,7 @@ async function reader() {
     ["found the sibling's decision", answer.includes('db-migration') && /pg_?dump/i.test(answer)],
     ['other project stayed out', !leaked],
   ])
-  finish(c, root)
+  await finish(c, root)
   return ok
 }
 

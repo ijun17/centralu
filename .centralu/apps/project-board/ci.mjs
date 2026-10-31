@@ -277,7 +277,7 @@ export const NO_PERMISSION = Object.freeze({
 
 /**
  * The merge decision, in order: who is asking, what state the PR is in, what CI says, whether GitHub
- * can merge it. `action` is `merge`, `wait` (try again later, or keep polling with `wait: true`) or
+ * can merge it. `action` is `merge`, `wait` (try again later) or
  * `refuse` (stop; `reason` says why).
  */
 export function decideMerge({ permissions, pr, checks, fullTier = null }) {

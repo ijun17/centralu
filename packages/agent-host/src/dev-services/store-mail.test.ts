@@ -506,3 +506,35 @@ describe('retention of turns (§4.1)', () => {
     expect(seqs(s, 's1')).toEqual([2])
   })
 })
+
+describe('receipt updates touch only the rows their condition names', () => {
+  /** Three messages to one recipient, each with a receipt */
+  function receipts() {
+    const s = new Store()
+    s.mail.insertThread(thread(tid(1)), NOW)
+    const ids = [1, 2, 3].map(() => message(s.mail, tid(1), { recipients: ['r'] }).id)
+    const row = (id: string) => s.mail.receiptsOf(id)[0]!
+    return { s, ids, row }
+  }
+
+  it('undoing an attempt leaves a receipt that was delivered as it is', () => {
+    const { s, ids, row } = receipts()
+    s.mail.markAttempt('r', ids, NOW)
+    s.mail.markDelivered('r', [ids[0]!], [], NOW)
+    s.mail.undoAttempt('r', ids)
+    expect(row(ids[0]!)).toMatchObject({ attempts: 1, attemptAt: NOW })
+    expect(row(ids[1]!)).toMatchObject({ attempts: 0, attemptAt: null })
+  })
+
+  it('releasing held mail changes only held mail, and releasing it twice changes nothing the second time', () => {
+    const { s, ids, row } = receipts()
+    s.mail.markAttempt('r', ids, NOW)
+    s.mail.setHeld('r', [ids[0]!], 'failed')
+    s.mail.setHeld('r', [ids[2]!], 'released')
+    expect(s.mail.releaseHeld('r', ids, null, NOW + 1)).toBe(1)
+    expect(row(ids[0]!)).toMatchObject({ held: null, attempts: 0, dueAt: NOW + 1 })
+    expect(row(ids[1]!)).toMatchObject({ held: null, attempts: 1, dueAt: NOW })
+    expect(row(ids[2]!)).toMatchObject({ held: 'released', attempts: 1, dueAt: NOW })
+    expect(s.mail.releaseHeld('r', ids, null, NOW + 2)).toBe(0)
+  })
+})

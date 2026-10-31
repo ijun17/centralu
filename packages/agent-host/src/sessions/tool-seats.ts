@@ -29,51 +29,27 @@ import {
 /** A command a seat may reach through centralu_run */
 export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName | MailToolName | CompactToolName
 
-let readerInstructions = true
-
 /**
- * `CC_READER_INSTRUCTIONS=0` (read once at start, main.ts): ordinary sessions get their tools without the
- * instructions, as before #564. For measuring the instructions against their absence; on by default.
- */
-export function setReaderInstructions(on: boolean): void {
-  readerInstructions = on
-}
-
-/**
- * How a seat's rarely used commands reach the model (#512, chosen by `CC_RARE_COMMANDS`; the comparison of the
- * three is in docs/tool-cost.md §9). `commands` is the default since the owner's decision of 2026-10-12 (no loss
- * on Sonnet, 835 tokens fewer per orchestrator request, and a tool list that does not grow with the commands);
- * the other two stay selectable for measurement.
+ * How a seat's rarely used commands reach the model (#512; the comparison is in docs/tool-cost.md §9). The host runs
+ * the `commands` tier (the owner's decision of 2026-10-12: no loss on Sonnet, 835 tokens fewer per orchestrator request,
+ * and a tool list that does not grow with the commands). The `resident` tier, every tool in every request as before #512, still serves the guide (`toolsFor`) and
+ * the tests that call a command by its own name (`setRareTier`, for tests only).
  *
- *   - `resident`: every tool in every request, as before #512.
- *   - `deferred`: the rare ones wait behind Claude's tool search, the way the reader's app_guide does.
- *     Codex reaches every MCP tool through its own `exec` anyway (tool-cost.md §6.2), so this is Claude's alone.
+ *   - `resident`: every tool in every request.
  *   - `commands`: the rare ones leave the tool list. Three fixed tools stand in for them (COMMAND_TOOLS):
  *     list, describe, run. The host checks a run against the command's own schema and the seat's
  *     profile, the same gates the command has as a tool.
- *
- * One host-wide setting, read once at start (main.ts), because the tool list a session starts with is
- * its prompt prefix: a session that changed tier mid-run would rebuild its cache.
  */
-export const RARE_TIERS = ['resident', 'deferred', 'commands'] as const
+export const RARE_TIERS = ['resident', 'commands'] as const
 export type RareTier = (typeof RARE_TIERS)[number]
 
-/** The tier a host runs with when `CC_RARE_COMMANDS` names none (#512, decision of 2026-10-12) */
 export const DEFAULT_RARE_TIER: RareTier = 'commands'
 
 let rareTier: RareTier = DEFAULT_RARE_TIER
 
-/** The tier from `CC_RARE_COMMANDS`: anything else is the default */
-export function rareTierFrom(value: string | undefined): RareTier {
-  return (RARE_TIERS as readonly string[]).includes(value ?? '') ? (value as RareTier) : DEFAULT_RARE_TIER
-}
-
+/** For tests only: the host never changes tier, since the tool list a session starts with is its prompt prefix */
 export function setRareTier(tier: RareTier): void {
   rareTier = tier
-}
-
-export function currentRareTier(): RareTier {
-  return rareTier
 }
 
 /**
@@ -235,11 +211,6 @@ export function notAToolText(profile: ToolProfile | 'human', name: string, tier:
   return `${refused}. It is one of this session's commands: centralu_run(command="${name}", args={…}) runs it, and centralu_help(command="${name}") gives its arguments.`
 }
 
-/** The tools this seat's Claude server defers behind tool search in this tier (the reader set marks its own) */
-function deferredFor(profile: ToolProfile, tier: RareTier): readonly string[] {
-  return tier === 'deferred' ? (RARE_COMMANDS[profile] ?? []) : []
-}
-
 /**
  * Whether this profile allows the tool — both exposure (schemas) and execution (run) are decided by this.
  *
@@ -290,9 +261,8 @@ export function toolDefsFor(
   tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS]
-  const deferred = deferredFor(profile, tier)
   return [
-    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }
@@ -306,7 +276,7 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
     // With an app attached at the start, the line on repository work (#957, #992 review)
-    case 'reader': return readerInstructions ? (appsAttached ? READER_INSTRUCTIONS_WITH_APPS : READER_INSTRUCTIONS) : undefined
+    case 'reader': return appsAttached ? READER_INSTRUCTIONS_WITH_APPS : READER_INSTRUCTIONS
     default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
   }
 }

@@ -12,8 +12,6 @@
   "ci": {
     "workflows": [".github/workflows/build.yml"],
     "knownFailuresIssue": 368,
-    "waitMinutes": 40,
-    "pollSeconds": 30,
     "fullTier": "full tier",
     "landTier": "quick",
     "quickChecks": ["changes", "verify", "windows tests (vitest *)", "macos tests"],

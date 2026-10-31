@@ -617,7 +617,7 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions, registry
 // reads it again. Centralu keeps the call alive while it reports progress (docs/apps.md §5).
 const APPROVE_WAIT_MINUTES = 45
 const APPROVE_WAIT_MAX_MINUTES = 60
-// PROJECT_BOARD_CI_POLL_MS: for the tests only, as for merge_when_green
+// PROJECT_BOARD_CI_POLL_MS: for the tests only
 const APPROVE_POLL_MS = Number(process.env.PROJECT_BOARD_CI_POLL_MS) || 30_000
 
 /**

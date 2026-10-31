@@ -304,3 +304,27 @@ describe('temp files a crashed write left behind', () => {
     expect(readFileSync(join(dataRoot, `${SECRETS_FILE}.tmp`), 'utf8')).toBe('the old host, half written')
   })
 })
+
+describe('PrivateJsonFile.create', () => {
+  /** The class with every temp name the same, so the second write finds its temp name taken */
+  async function openWithFixedTempNames(name: string) {
+    vi.resetModules()
+    vi.doMock('node:crypto', async (original) => ({ ...(await original<typeof import('node:crypto')>()), randomBytes: () => Buffer.from([1, 2, 3, 4]) }))
+    const { PrivateJsonFile } = await import('./private-json-file.js')
+    return new PrivateJsonFile<Record<string, number>>(join(dataRoot, name), { label: 'test file', empty: () => ({}), valid: (d): d is Record<string, number> => typeof d === 'object', lost: '' })
+  }
+  afterEach(() => vi.doUnmock('node:crypto'))
+
+  it('answers false for a file that is there, and leaves it as it is', async () => {
+    writeFileSync(join(dataRoot, 'a.json'), '{"kept":1}')
+    expect((await openWithFixedTempNames('a.json')).create({ new: 2 })).toBe(false)
+    expect(readFileSync(join(dataRoot, 'a.json'), 'utf8')).toBe('{"kept":1}')
+  })
+
+  it('throws when its temp name is taken, and writes no file: the caller must not read that as "there is one"', async () => {
+    writeFileSync(join(dataRoot, `b.json.${process.pid}-01020304.tmp`), 'someone else\'s')
+    const file = await openWithFixedTempNames('b.json')
+    expect(() => file.create({ new: 2 })).toThrow(/EEXIST/)
+    expect(existsSync(join(dataRoot, 'b.json'))).toBe(false)
+  })
+})

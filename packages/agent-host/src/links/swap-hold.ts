@@ -1,4 +1,5 @@
 import { DATA_PS, DATA_SH } from './install.js'
+import { tryParseJson } from '../json-value.js'
 import { remoteScript, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 
 /**
@@ -49,11 +50,7 @@ export function parseHold(stdout: string, now: number): SwapHold | null {
     .reverse()
     .find((l) => l.startsWith(`${HOLD} {`))
   if (!line) return null
-  try {
-    const o = JSON.parse(line.slice(HOLD.length + 1)) as { until?: unknown; by?: unknown }
-    if (typeof o.until !== 'number' || o.until <= now || o.until > now + HOLD_MS * 2) return null
-    return { until: o.until, by: typeof o.by === 'string' ? o.by : 'another command' }
-  } catch {
-    return null
-  }
+  const o = tryParseJson(line.slice(HOLD.length + 1)) as { until?: unknown; by?: unknown } | null | undefined
+  if (typeof o?.until !== 'number' || o.until <= now || o.until > now + HOLD_MS * 2) return null
+  return { until: o.until, by: typeof o.by === 'string' ? o.by : 'another command' }
 }

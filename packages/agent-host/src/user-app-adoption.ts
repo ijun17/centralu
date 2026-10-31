@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
+import { isMissing } from './os/errors.js'
 import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
 
 /**
@@ -139,8 +140,7 @@ function realFolder(path: string): string | null {
   try {
     return realpathSync.native(full)
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+    if (!isMissing(e)) return null
     const parent = dirname(full)
     // A root that is not there (a drive unplugged, a `subst` gone since a restart) says nothing of where it pointed
     if (parent === full) return null
@@ -158,8 +158,7 @@ async function realFolderAsync(path: string): Promise<string | null> {
   try {
     return await realpath(full)
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+    if (!isMissing(e)) return null
     const parent = dirname(full)
     if (parent === full) return null
     const up = await realFolderAsync(parent)

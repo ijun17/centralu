@@ -274,3 +274,6 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     }
   }
 }
+
+/** "1 file", "3 files": a count with its noun, `many` where adding an s is not the plural */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
