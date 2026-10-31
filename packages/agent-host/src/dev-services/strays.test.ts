@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
-import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
+import { findStrays, insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays, type StrayStopDeps } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { ownProcesses } from '../process.test-helpers.js'
 
@@ -173,7 +173,7 @@ describe('stopStrays', () => {
   it('stops nothing when the keeper could not say what it holds', async () => {
     const sent: number[] = []
     const r = stopStrays([10], ['/p'], 1, null, { find: async () => [stray(10)], kill: (pid) => void sent.push(pid), graceMs: 5 })
-    await expect(r).rejects.toThrow(/nothing was stopped/)
+    await expect(r).rejects.toThrow(/could not be listed/)
     expect(sent).toEqual([])
   })
 
@@ -209,4 +209,53 @@ describe('stopStrays', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000 * SLOW)
+})
+
+/** A listing that timed out is not an empty one (#1793): with it read as "no leftovers", a stop under load stopped nothing and said nothing */
+describe.skipIf(!hasPs())('findStrays when a listing cannot be read', () => {
+  type Run = NonNullable<Parameters<typeof findStrays>[3]>
+  const timedOut = () => Object.assign(new Error('Command failed: timed out'), { killed: true, signal: 'SIGTERM', stdout: '' })
+  const ps = { stdout: '  100     1 ??       node /srv/dev-server.js\n', stderr: '' }
+  const answering = (byTool: Record<string, () => unknown>): Run =>
+    (async (tool: string) => {
+      const answer = byTool[tool]?.()
+      if (answer instanceof Error) throw answer
+      return answer
+    }) as Run
+
+  it('fails, and says so on stderr, when ps timed out', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(findStrays(['/p'], 999_999, [], answering({ ps: timedOut }))).rejects.toThrow(/could not be listed/)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ps listing'))
+    } finally {
+      err.mockRestore()
+    }
+  })
+
+  it('fails, and says so on stderr, when lsof timed out', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(findStrays(['/p'], 999_999, [], answering({ ps: () => ps, lsof: timedOut }))).rejects.toThrow(/could not be listed/)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('lsof listing'))
+    } finally {
+      err.mockRestore()
+    }
+  })
+
+  it('still uses what lsof printed when it exited 1 for a process it could not read', async () => {
+    const partial = Object.assign(new Error('exit 1'), { code: 1, stdout: 'p100\nn/p/app\n' })
+    const found = await findStrays(['/p'], 999_999, [], answering({ ps: () => ps, lsof: () => partial }))
+    expect(found.map((s) => s.pid)).toEqual([100])
+  })
+
+  it('stopStrays refuses, rather than report nothing stopped, when the listing timed out', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const find: StrayStopDeps['find'] = (roots, self, held) => findStrays(roots, self, held, answering({ ps: timedOut }))
+      await expect(stopStrays([100], ['/p'], 999_999, [], { find, kill: () => {}, graceMs: 5 })).rejects.toThrow(/could not be listed/)
+    } finally {
+      err.mockRestore()
+    }
+  })
 })

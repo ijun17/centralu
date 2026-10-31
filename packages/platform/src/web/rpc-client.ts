@@ -86,6 +86,8 @@ const LONG_CALLS = new Set<string>([
   'agents.createSession', // When picking up a previous conversation via resumeExternalId
   'agents.restartSession', // Swaps out the process and revives it again
   'agents.exportHandoffRecord', // Can scan a rollout hundreds of MB in size (#78)
+  'processes.strays', // Two listings (ps, lsof), each bounded at 60 s on a busy machine (#1793)
+  'processes.stop', // The same listings, twice
   /*
    * Calls that end in a revival (#164) — while these were missing here, the host would apply
    * and restart on a large conversation, but the screen showed "RPC timed out" (reading what
