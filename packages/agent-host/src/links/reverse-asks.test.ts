@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -11,9 +8,10 @@ import { Links, type LinkDeps } from './links.js'
 import { LinkedHubs } from './linked-hubs.js'
 import { reverseCalls } from './reverse-calls.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine } from './tunnel.js'
+import { DirectTunnel } from './tunnel.js'
 import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -22,26 +20,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * and server, wired as main.ts wires them; only the transport is loopback instead of ssh.
  */
 
-const TOKEN = 'tok'
-const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c()
-})
-
-function folder(): string {
-  const d = mkdtempSync(join(tmpdir(), 'cc-reverse-'))
-  cleanups.push(() => rmSync(d, { recursive: true, force: true }))
-  return d
-}
-
-function seedSession(store: Store, projectId: string, id: string, preset: SessionInfo['permissionPreset'] = 'normal') {
-  store.sessions.upsertSession({
-    id, projectId, kind: 'worker' as SessionInfo['kind'], tool: 'claude', externalId: `ext-${id}`, name: id, autoNamed: false, state: 'idle',
-    lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: false, model: null, effort: null, verbosity: null,
-    serviceTier: null, permissionPreset: preset, importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
-    roleAppend: null, appId: null, ...sessionLiveDefaults(),
-  })
-}
+afterEach(runCleanups)
 
 /** An RPC handler without these methods, as a build from before them answers */
 function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly string[]): ReturnType<typeof createRpcHandler> {
@@ -55,7 +34,7 @@ function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly
 async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number } = {}) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
-  for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id)
+  for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}) })
@@ -81,14 +60,12 @@ async function machineHost(o: { without?: readonly string[]; sessions?: readonly
   return { store, mgr, server, hubs, port, close, ask }
 }
 
-const lineFor = (port: number): ConnectionLine => ({ v: 1, port, token: TOKEN, version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dataDir: '/remote', hostRunning: true })
-
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
 async function hubHost(machinePort: number, o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset'] } = {}) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
   store.projects.addProject({ id: 'p-hub', path: folder(), name: projectName })
-  seedSession(store, 'p-hub', 'h1', o.preset)
+  seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const name = o.name ?? 'Hub mac'
