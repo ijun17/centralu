@@ -70,7 +70,7 @@ const ref = (appId: string) => ({ projectId: null, appId })
 const versions = async (appId: string) => ((await rpc('apps.versions', ref(appId))) as Extract<AppVersions, { kind: 'snapshots' }>).snapshots
 const listed = async () => ((await rpc('apps.list', {})) as { appId: string; projectId: string | null }[]).map((a) => `${a.projectId ?? 'user'}/${a.appId}`)
 
-const { card, run, answered } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_app_versions and restore_app_version', () => {
   it('lists the kept versions of a user-folder app, newest first, and marks the code now', async () => {

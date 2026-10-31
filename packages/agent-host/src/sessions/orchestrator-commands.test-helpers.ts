@@ -7,7 +7,7 @@ import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
  * The calls the `*-commands.test.ts` files share: the orchestrator runs a command through `centralu_run`, the card it
  * raises (the one whose `about` is given) stands in its session until the person answers
  */
-export function commandRig(mgr: () => SessionManager, about: string) {
+export function commandRig<C extends string>(mgr: () => SessionManager, about: string) {
   /** The card standing in a session, if one is */
   function card(sessionId: string) {
     const pending = mgr().listSessions().find((s) => s.id === sessionId)?.pendingApproval
@@ -15,12 +15,12 @@ export function commandRig(mgr: () => SessionManager, about: string) {
     return d?.kind === 'other' && d.about === about ? { requestId: pending!.requestId, text: d.raw } : undefined
   }
 
-  function run(orcId: string, command: string, args: Record<string, unknown> = {}) {
+  function run(orcId: string, command: C, args: Record<string, unknown> = {}) {
     return mgr().runOrchestratorTool(orcId, 'centralu_run', { command, args })
   }
 
   /** Runs a command whose card the person answers with `decision`; the card's question and the answer */
-  async function answered(orcId: string, command: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) {
+  async function answered(orcId: string, command: C, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) {
     const call = run(orcId, command, args)
     await eventually(() => !!card(orcId))
     const question = card(orcId)!.text

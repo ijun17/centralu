@@ -69,7 +69,7 @@ async function project(name: string, opts: { app?: Record<string, unknown> } = {
 const projects = async () => (await rpc('projects.list', {})) as ProjectInfo[]
 const trusted = async (id: string) => (await projects()).find((p) => p.id === id)?.trusted
 
-const { card, run, answered } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_projects', () => {
   it('lists each project with its id, folder and trust, and says when there is none', async () => {

@@ -211,7 +211,7 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const { card, run, answered } = commandRig(() => mgr, MACHINE_CHANGE)
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, MACHINE_CHANGE)
 
 describe('add_machine', () => {
   const posix = (sshTarget: string): MachineProbe => ({ sshTarget, reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })

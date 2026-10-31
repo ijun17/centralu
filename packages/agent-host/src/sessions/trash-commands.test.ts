@@ -88,7 +88,7 @@ async function keptRun() {
   await store.trash.purgeSession('a1')
 }
 
-const { card, run, answered } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_archive', () => {
   it('says the session archive is empty', async () => {

@@ -111,7 +111,7 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const { card, run, answered: answeredAny } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered: answeredAny } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
 
 /** Runs set_preferences, whose card the person answers with `decision`; the card's question and the answer */
 const answered = (orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) =>
