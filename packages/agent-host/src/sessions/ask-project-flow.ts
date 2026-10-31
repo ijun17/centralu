@@ -60,7 +60,7 @@ export type HubsReader = {
  * read when used, never kept.
  */
 export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
-  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'> & {
+  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'> & {
     /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
   }

@@ -163,7 +163,6 @@ import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { MachineAsks } from './machine-asks.js'
 import type { HubsReader } from './ask-project-flow.js'
 export { appMessageFrame } from './app-messages.js'
-export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
@@ -172,12 +171,6 @@ type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
-/*
- * What the value means: **everything in the external transcript up to this moment is something I
- * already know.** Two hands write it — catch-up, after it reads (the `updatedAt` the tool gave),
- * and whichever tool holds the writer lock, when its handle is released (our own clock). Since it
- * is the same machine, the two clocks are comparable.
- */
 
 /**
  * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host.md §2), so all state
@@ -472,32 +465,31 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
+    const compactSetting = () => autoCompactOf(this.uiPreferences())
+    const compactNotice = (id: string, text: string) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
     this.selfCompaction = new SelfCompaction({
       sessions: () => this.listSessions(),
       session: (id) => this.meta.get(id),
       idle: (id) => this.sessionIdle(id),
       running: (id) => this.handles.has(id),
       window: (m) => this.modelWindows.of(m),
-      setting: () => autoCompactOf(this.uiPreferences()),
+      setting: compactSetting,
       command: (id, tool, focus) => {
         const handle = this.handles.get(id)
         if (handle?.compactCommand) return handle.compactCommand(focus)
         return this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact'
       },
       send: (id, text) => this.events.sendCompact(id, text),
-      notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
+      notice: compactNotice,
     })
     this.contextNudges = new ContextNudges({
       session: (id) => this.meta.get(id),
       window: (m) => this.modelWindows.of(m),
-      setting: () => autoCompactOf(this.uiPreferences()),
+      setting: compactSetting,
       // The two seats that have the tool (tool-seats.ts): an ordinary session and the orchestrator
-      hasCompactTool: (id) => {
-        const profile = this.toolProfileOf(id)
-        return profile === 'reader' || profile === 'orchestrator'
-      },
+      hasCompactTool: (id) => this.canReadMail(id),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
-      notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
+      notice: compactNotice,
     })
     this.orchestratorSlot = new OrchestratorSlot(this.parts())
     const rawEmit = this.emit
@@ -551,7 +543,6 @@ export class SessionManager {
       const goesOn = cut && !!lists?.cut(s.id, s.lastSeq)
       const stale = cut && !goesOn
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
-      // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
       // Started from a linked computer (#1273): kept beside the row, as its depth is
       this.meta.set(s.id, withHubMark(store.settings, fixed))
       if (stale) {
@@ -573,7 +564,7 @@ export class SessionManager {
       }
     }
     // A listed session this start does not find cut by that stop (at rest, gone, or in a later turn) has nothing to continue
-    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id)) this.updateResumeDone(id)
+    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the keeper's processes, and the turns an update cut (#1618) */
     const goingOn = new Set([...(keeperOpts.keptSessions ?? []), ...cutByUpdate.map((s) => s.id)])
     /*
@@ -624,7 +615,6 @@ export class SessionManager {
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[archive] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
-    this.nameUnnamedWorktrees()
     // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
     const wildcards = store.permissions.dropWildcardApprovalRules()
     if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
@@ -637,27 +627,6 @@ export class SessionManager {
       [...this.meta.values()].filter((s) => s.worktree && s.projectId).map((s) => s.projectId as string),
     )) {
       this.merges.checkMergedInBackground(pid)
-    }
-  }
-
-  /**
-   * **Seats the branch name** on a worktree session that has not received a name yet (runs once at
-   * startup).
-   *
-   * 'New session' is not a name, it is a blank. A worktree session has a branch from the moment it
-   * is born, so something to fill that blank with is already in hand — filling it in lets sessions
-   * that have not been addressed yet still be told apart in the sidebar (dogfooding, 2026-09-07).
-   *
-   * **Only when the name is auto-generated.** autoNamed=false means the person set the name, and
-   * that is not ours to touch. The autoNamed flag is left as-is, so a meaningful name still
-   * overwrites it once the first message arrives.
-   */
-  private nameUnnamedWorktrees(): void {
-    for (const s of [...this.meta.values()]) {
-      if (!s.worktree || !s.autoNamed || s.name !== 'New session') continue
-      const renamed = { ...s, name: s.worktree.branch }
-      this.meta.set(s.id, renamed)
-      this.store.sessions.upsertSession(renamed)
     }
   }
 
@@ -1277,7 +1246,7 @@ export class SessionManager {
    * (`tellAskerOfInterruption`). A session that cannot be continued (its tool cannot resume it, it is gone there) ends
    * as a kept process that could not be re-attached does (`turnLostInSwap`): idle, marked stopped, its report or its
    * requester told. Each is taken once: the list is emptied first, and its id leaves the file once its Continue was sent
-   * or its loss reported (`updateResumeDone`), not before, so a host stopped in between leaves it for the next.
+   * or its loss reported (`UpdateResumeLists.done`), not before, so a host stopped in between leaves it for the next.
    */
   private async continueCutTurns(): Promise<void> {
     const cuts = this.updateCuts
@@ -1292,7 +1261,7 @@ export class SessionManager {
           // Gone, or stopped by the person before its Continue went in: nothing to continue
           this.restartPolicy.continuingTurns.delete(sessionId)
           this.notContinued(sessionId)
-          this.updateResumeDone(sessionId)
+          this.updateLists?.done(sessionId)
           return
         }
         try {
@@ -1308,7 +1277,7 @@ export class SessionManager {
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
           this.turnLostInSwap(m)
           this.notContinued(sessionId)
-          this.updateResumeDone(sessionId)
+          this.updateLists?.done(sessionId)
           return
         }
         /*
@@ -1318,16 +1287,11 @@ export class SessionManager {
         if (this.disposing || this.handingOver) return
         this.restartPolicy.continuingTurns.delete(sessionId)
         // Sent: a host that starts after this one does not send it again
-        this.updateResumeDone(sessionId)
+        this.updateLists?.done(sessionId)
         if (requester && !continued.has(requester)) void this.reports.tellCutByUpdate(sessionId, requester)
       }),
     )
     this.tellQuitNotices(() => true)
-  }
-
-  /** One turn the lists named is dealt with: a list goes once all its turns are (#1618, `UpdateResumeLists.done`) */
-  private updateResumeDone(sessionId: string): void {
-    this.updateLists?.done(sessionId)
   }
 
   /** A turn the start took up that is not continued after all: the hello stops naming it (#1618) */
@@ -1349,12 +1313,6 @@ export class SessionManager {
   }
 
 
-  /** A turn a quit cut in a session whose work the person owns: reported to them. */
-  private tellPersonOfInterruption(sessionId: string): void {
-    if (!this.meta.has(sessionId)) return
-    void this.reports.reportToPersonIfOwed(sessionId, { type: 'state_change', sessionId, state: 'idle' })
-  }
-
   /** Tells each requester of a turn a quit cut, once (#698); `ready` holds back one the keeper still has to hand over */
   private tellQuitNotices(ready: (requester: string) => boolean): void {
     // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
@@ -1362,7 +1320,7 @@ export class SessionManager {
     // The work the person owns (a script started the session, §8.1): the turn a quit cut is reported to their Inbox as it ended
     const person = this.quitPersonWork
     this.quitPersonWork = []
-    for (const id of person) this.tellPersonOfInterruption(id)
+    for (const id of person) if (this.meta.has(id)) void this.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
     for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester))
@@ -2239,9 +2197,6 @@ export class SessionManager {
       askProject: (...a) => self.askProject(...a),
       askCapability: (...a) => self.hostCards.askCapability(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
-      get appAccess() {
-        return self.apps.appAccess
-      },
       get appsHub() {
         return self.apps.appsHub
       },
@@ -2545,7 +2500,6 @@ export class SessionManager {
       uiPreferences: (...a) => self.uiPreferences(...a),
       untilCard: (...a) => self.cards.untilCard(...a),
       updateCentraluAsked: (...a) => self.updatesAsked.updateCentraluAsked(...a),
-      untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
       untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
       get updateApplyConsents() {
         return self.updatesAsked.updateApplyConsents
@@ -2821,14 +2775,6 @@ export class SessionManager {
     return this.orchestratorSlot.runOrchestratorTool(...a)
   }
 
-  /**
-   * Receives the external app runtime (M4 A-5) — a session that comes up after this receives whatever
-   * apps decision 4 says it should.
-   *
-   * Why this is received separately instead of as a constructor argument: the runtime and the manager
-   * never know about each other; the host (main.ts) is the one that connects them. This means the
-   * host's own tests can run with no manager, and the manager's own tests can run with no runtime.
-   */
   /** Where the installed CLI versions come from (#297) — wired by the host, like the app runtime */
   useVersionHint(hint: (tool: ToolName) => string | null): void {
     this.versionHint = hint
@@ -2987,8 +2933,7 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.usageRecorder.stop()
-    this.selfCompaction.stop()
-    this.contextNudges.stop()
+    this.stopSelfCompaction()
     this.sweepingHandles = true
     try {
       await this.disposeEverything()
@@ -3043,8 +2988,7 @@ export class SessionManager {
   async detachAll(): Promise<void> {
     this.usageRecorder.stop()
     // A compact now would reach a process the next host is meant to take over, as a sleep would (#568)
-    this.selfCompaction.stop()
-    this.contextNudges.stop()
+    this.stopSelfCompaction()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
     this.leaveHost('Centralu is restarting')
