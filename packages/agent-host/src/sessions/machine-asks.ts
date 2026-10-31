@@ -6,7 +6,7 @@ import { ASK_WAIT_MS, askFrame, clipAnswer, pickAskedSession, taskLine } from '.
 import { hubAskDepthKey } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { MACHINE_ASKER } from './hub-sender.js'
-import { raceBound } from './with-timeout.js'
+import { raceBound } from '../timing.js'
 import { turnAnswer } from './turn-answer.js'
 
 /**

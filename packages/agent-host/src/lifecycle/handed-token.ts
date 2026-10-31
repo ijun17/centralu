@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream'
-import { asObj } from '../json-value.js'
+import { asObj, tryParseJson } from '../json-value.js'
 
 /**
  * The host token handed over on stdin (#538): the first line a keeper or `centralu serve` writes to the host's
@@ -23,12 +23,8 @@ const MAX_TOKEN_LINE = 4096
 
 export async function readHandedToken(input: Readable, waitMs: number = HANDED_TOKEN_WAIT_MS): Promise<string> {
   const line = await firstLine(input, waitMs)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(line)
-  } catch {
-    throw new Error('the token line on stdin is not JSON')
-  }
+  const parsed = tryParseJson(line)
+  if (parsed === undefined) throw new Error('the token line on stdin is not JSON')
   // A `centralu serve` host that takes verifiers gets its key there instead (#1405, `serve-credentials.ts`)
   const o = asObj(parsed)
   const token = typeof o.token === 'string' ? o.token : o.key

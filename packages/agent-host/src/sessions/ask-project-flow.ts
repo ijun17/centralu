@@ -8,7 +8,7 @@ import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapter
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import type { LinkedReports } from './linked-reports.js'
-import { raceBound } from './with-timeout.js'
+import { raceBound } from '../timing.js'
 import { frameField } from '@cc/protocol'
 import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'

@@ -9,7 +9,7 @@ import { cleanUpDue } from './own-agents.js'
 import { progressOf } from './transcript-view.js'
 import { turnAnswer } from './turn-answer.js'
 import { namedCall } from './tool-seats.js'
-import { raceBound } from './with-timeout.js'
+import { raceBound } from '../timing.js'
 
 /** How a wait on a delegation's turn ended (`DelegationFlow.awaitTurn`), for each caller to word (#428) */
 export type TurnWait =

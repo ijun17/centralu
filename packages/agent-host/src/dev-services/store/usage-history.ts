@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { UsageSnapshot, type ToolName } from '@cc/protocol'
 import { isFromTheFuture } from '../../usage-clock.js'
+import { tryParseJson } from '../../json-value.js'
 
 /** One window of a limit reading, as `agents.usage` names it */
 export type StoredWindow = { id: string; scope: string | null; label: string; percent: number; resetsAt: number | null }
@@ -110,12 +111,8 @@ export class UsageRecords {
   localTotals(tool: ToolName): NonNullable<UsageSnapshot['totals']> | null {
     const row = this.db.prepare<unknown[], { at: number; totals: string }>(`SELECT at, totals FROM usage_local_totals WHERE tool = ?`).get(tool)
     if (!row) return null
-    try {
-      const parsed = UsageSnapshot.shape.totals.safeParse(JSON.parse(row.totals))
-      return parsed.success && parsed.data && parsed.data.asOf === row.at ? parsed.data : null
-    } catch {
-      return null
-    }
+    const parsed = UsageSnapshot.shape.totals.safeParse(tryParseJson(row.totals))
+    return parsed.success && parsed.data && parsed.data.asOf === row.at ? parsed.data : null
   }
 
   /**
@@ -206,14 +203,10 @@ function sameReset(a: number | null, b: number | null): boolean {
 }
 
 function parseCauses(text: string | undefined): Record<string, number> {
-  try {
-    const v: unknown = JSON.parse(text ?? '{}')
-    const out: Record<string, number> = {}
-    if (v && typeof v === 'object') for (const [k, n] of Object.entries(v)) if (typeof n === 'number') out[k] = n
-    return out
-  } catch {
-    return {}
-  }
+  const v = tryParseJson(text ?? '{}')
+  const out: Record<string, number> = {}
+  if (v && typeof v === 'object') for (const [k, n] of Object.entries(v)) if (typeof n === 'number') out[k] = n
+  return out
 }
 
 /** Sums two counts of rebuilds by cause */

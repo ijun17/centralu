@@ -1,6 +1,6 @@
 import { errorMessage } from '@cc/protocol'
-import { isObj } from '../json-value.js'
-import { errnoCode } from './errno.js'
+import { isObj, tryParseJson } from '../json-value.js'
+import { errnoCode } from '../os/errors.js'
 import { execFileSync } from 'node:child_process'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -89,25 +89,21 @@ const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
 function parseHolder(raw: string): Holder {
   const text = raw.trim()
   if (/^\d+$/.test(text)) return { pid: Number(text), started: null }
-  try {
-    const v: unknown = JSON.parse(text)
-    if (!isObj(v)) return { pid: NaN, started: null }
-    const holder: Holder = {
-      pid: typeof v.pid === 'number' ? v.pid : NaN,
-      started: typeof v.started === 'string' ? v.started : null,
-    }
-    if (typeof v.at === 'number' && Number.isFinite(v.at)) holder.at = v.at
-    if (v.by === 'app' || v.by === 'keeper' || v.by === 'serve') holder.by = v.by
-    const f = isObj(v.from) ? v.from : {}
-    const from = {
-      ...(typeof f.hub === 'string' && NAME_RE.test(f.hub) ? { hub: f.hub } : {}),
-      ...(typeof f.ssh === 'string' && NAME_RE.test(f.ssh) ? { ssh: f.ssh } : {}),
-    }
-    if (from.hub || from.ssh) holder.from = from
-    return holder
-  } catch {
-    return { pid: NaN, started: null }
+  const v = tryParseJson(text)
+  if (!isObj(v)) return { pid: NaN, started: null }
+  const holder: Holder = {
+    pid: typeof v.pid === 'number' ? v.pid : NaN,
+    started: typeof v.started === 'string' ? v.started : null,
   }
+  if (typeof v.at === 'number' && Number.isFinite(v.at)) holder.at = v.at
+  if (v.by === 'app' || v.by === 'keeper' || v.by === 'serve') holder.by = v.by
+  const f = isObj(v.from) ? v.from : {}
+  const from = {
+    ...(typeof f.hub === 'string' && NAME_RE.test(f.hub) ? { hub: f.hub } : {}),
+    ...(typeof f.ssh === 'string' && NAME_RE.test(f.ssh) ? { ssh: f.ssh } : {}),
+  }
+  if (from.hub || from.ssh) holder.from = from
+  return holder
 }
 
 /**

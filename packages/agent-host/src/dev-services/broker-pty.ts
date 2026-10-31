@@ -1,4 +1,4 @@
-import { isObj } from '../json-value.js'
+import { isObj, tryParseJson } from '../json-value.js'
 import type { Readable, Writable } from 'node:stream'
 import { spawn as startProcess, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -41,12 +41,7 @@ type BrokerEvent =
  * throw out of the line handler), or an event whose fields are not what it names (a `data` event with no text).
  */
 export function parseBrokerEvent(line: string): BrokerEvent | null {
-  let v: unknown
-  try {
-    v = JSON.parse(line)
-  } catch {
-    return null
-  }
+  const v = tryParseJson(line)
   if (!isObj(v)) return null
   const { ev, id } = v
   if (ev === 'ready') return { ev }

@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { asObj } from '../json-value.js'
+import { errnoCode } from '../os/errors.js'
+import { sleepSync } from '../timing.js'
 import { parseLinkPublicKey } from '../transport/link-keys.js'
 import { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE } from './credential-id.js'
 
@@ -140,8 +142,7 @@ export function readCredentialFile(
     try {
       parsed = JSON.parse(read(path))
     } catch (e) {
-      const c = asObj(e).code
-      code = typeof c === 'string' ? c : 'EUNREADABLE'
+      code = errnoCode(e) ?? 'EUNREADABLE'
       continue
     }
     refusedSince.delete(path)
@@ -523,11 +524,6 @@ const lastRead = new Map<string, { full: FullCredential[]; keys: KeyCredential[]
 
 /** Since when each file has been refused, for `unreadable` */
 const refusedSince = new Map<string, number>()
-
-/** Waits `ms` on this thread: the reads are a few milliseconds apart, at a hello, and the host has no other wait here */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
 
 /**
  * Whether `given` is one of `full` that opens the host whole, compared in constant time against each. An entry an older

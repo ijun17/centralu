@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { ApprovalDecision, Question, QuestionAnswer } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 import { callForm, FILL } from './tool-seats.js'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * Cards in a delegated turn (#676): a session P gave another session A a turn (ask_project, start_agent,
@@ -21,12 +22,8 @@ export function answersFrom(questions: readonly Question[], text: string): Quest
   let parts: unknown[] | undefined
   const trimmed = text.trim()
   if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown
-      if (Array.isArray(parsed)) parts = parsed
-    } catch {
-      // Not JSON: read as lines
-    }
+    const parsed = tryParseJson(trimmed)
+    if (Array.isArray(parsed)) parts = parsed
   }
   parts ??= questions.length === 1 ? [trimmed] : trimmed.split('\n').map((l) => l.trim()).filter(Boolean)
   if (parts.length !== questions.length) {

@@ -1,7 +1,7 @@
 import { ORCHESTRATOR_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
-import { plainQuoted } from './tool-answers.js'
+import { plainQuoted, plural } from './tool-answers.js'
 import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
 export type { TrashRequest }
@@ -35,7 +35,6 @@ function bytesText(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
 /** What deleting an archived session for good takes with it besides its conversation, as the window's row says it */

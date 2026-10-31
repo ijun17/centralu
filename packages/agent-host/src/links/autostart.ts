@@ -1,4 +1,5 @@
 import { autostartCommand, lastLine, NOT_FOUND, parseAutostart, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * Starting a linked machine's host at boot (docs/plans/remote-hub.md §10.4, owner decision 4: offered
@@ -20,14 +21,10 @@ export function parseAutostartLine(stdout: string): { ok: boolean; state: Remote
   for (const line of stdout.split(/\r?\n/).reverse()) {
     const t = line.trim()
     if (!t.startsWith('{')) continue
-    try {
-      const o = JSON.parse(t) as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } }
-      const state = o.v === 1 ? parseAutostart(o.autostart) : null
-      if (state && typeof o.autostart?.ok === 'boolean') {
-        return { ok: o.autostart.ok, state, message: typeof o.autostart.message === 'string' ? o.autostart.message : null }
-      }
-    } catch {
-      // not the line
+    const o = tryParseJson(t) as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } } | null | undefined
+    const state = o?.v === 1 ? parseAutostart(o.autostart) : null
+    if (state && typeof o?.autostart?.ok === 'boolean') {
+      return { ok: o.autostart.ok, state, message: typeof o.autostart.message === 'string' ? o.autostart.message : null }
     }
   }
   return null
