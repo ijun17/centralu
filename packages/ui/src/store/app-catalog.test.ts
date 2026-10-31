@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { appKeyOf } from '@cc/core'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { UNTRUSTED_REASON, appStatus, buildCatalog, isRemoteUserApp } from './app-catalog.js'
-import { externalAppKey, isApp } from './store.js'
+import { isApp } from './store.js'
 
 /**
  * One app registry (M4 A-8) — every external app stands in one list, and the rule for reading
@@ -54,9 +55,9 @@ describe('apps of a linked machine (#82, remote-hub.md §11)', () => {
     expect(c.user.map((a) => a.key)).toEqual(['_user/notes'])
     expect(c.byMachine['m1']?.map((a) => a.key)).toEqual(['m1:_user/notes'])
     // The same key a pinned view of it gets, so the sidebar row and the open view are one app
-    expect(externalAppKey(null, 'notes', 'm1')).toBe('m1:_user/notes')
-    expect(externalAppKey(null, 'notes')).toBe('_user/notes')
-    expect(externalAppKey('m1.p1', 'notes', 'm1')).toBe('m1.p1/notes')
+    expect(appKeyOf(null, 'notes', 'm1')).toBe('m1:_user/notes')
+    expect(appKeyOf(null, 'notes')).toBe('_user/notes')
+    expect(appKeyOf('m1.p1', 'notes', 'm1')).toBe('m1.p1/notes')
     expect(isRemoteUserApp(apps[1]!)).toBe(true)
     expect(isRemoteUserApp(info('board', { projectId: 'm1.p1', machine: 'm1' }))).toBe(false)
     expect(apps.filter((a) => isApp(a, null, 'notes', 'm1')).map((a) => a.name)).toEqual(['Their notes'])

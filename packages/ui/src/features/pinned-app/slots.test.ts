@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { externalAppKey, gridAppViewKey } from '../../store/store.js'
+import { appKeyOf } from '@cc/core'
+import { gridAppViewKey } from '../../store/store.js'
 import { placeSlots, registerSlot, registerSlottedView } from './slots.js'
 
 /**
@@ -49,7 +50,7 @@ describe('placeSlots', () => {
   })
 
   it('never hides a view or takes the pointer from its frame — the project screen’s and the grid’s alike', () => {
-    const pinned = slotted(externalAppKey('p1', 'slider'))
+    const pinned = slotted(appKeyOf('p1', 'slider'))
     const onGrid = slotted(gridAppViewKey('p1', 'slider'))
     placeSlots()
     for (const view of [pinned, onGrid]) {

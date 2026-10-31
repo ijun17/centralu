@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
-import { formatAgo, nextAgeTick } from '../app/labelClock.js'
+import { formatAgo } from '@cc/core'
+import { nextAgeTick } from '../app/labelClock.js'
 import { useLabelNow } from '../app/useLabelNow.js'
 
 export function RelativeAge({ when }: { when: number }) {

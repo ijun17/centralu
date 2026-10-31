@@ -22,6 +22,16 @@ type ProcessActions = Pick<
   | 'updateSessionSettings'
 >
 
+/** Holds the `resuming` lock on a session while `run` is in flight, however it ends */
+async function withResuming(set: StoreSet, sessionId: string, run: () => Promise<void>): Promise<void> {
+  set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
+  try {
+    await run()
+  } finally {
+    set((st) => ({ resuming: omitKey(st.resuming, sessionId) }))
+  }
+}
+
 export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => ({
   async resumeSession(sessionId) {
     const platform = get().platform
@@ -51,67 +61,59 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
   async wake(sessionId) {
     const s = get()
     const session = s.sessions[sessionId]
-    if (!s.platform || !session || session.live || s.resuming[sessionId]) return
+    const platform = s.platform
+    if (!platform || !session || session.live || s.resuming[sessionId]) return
     // A session on a machine that is away is never woken (#82): only its machine's resync does that, once it is back
     if (isAway(session, s.machines)) return
 
-    set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
-    try {
-      const res = await s.platform.agents.resumeSession(sessionId)
-      set(
-        ifSessionStill(sessionId, (st, cur) => ({
-          sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
-          wakeError: res.resumed
-            ? omitKey(st.wakeError, sessionId)
-            : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
-          wakeLocked:
-            res.resumed || !res.lockedElsewhere
-              ? omitKey(st.wakeLocked, sessionId)
-              : { ...st.wakeLocked, [sessionId]: true },
-        })),
-      )
-    } catch (e) {
-      set(
-        ifSessionStill(sessionId, (st) => ({
-          wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
-          wakeLocked: omitKey(st.wakeLocked, sessionId),
-        })),
-      )
-    } finally {
-      set((st) => {
-        const next = { ...st.resuming }
-        delete next[sessionId]
-        return { resuming: next }
-      })
-    }
+    await withResuming(set, sessionId, async () => {
+      try {
+        const res = await platform.agents.resumeSession(sessionId)
+        set(
+          ifSessionStill(sessionId, (st, cur) => ({
+            sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
+            wakeError: res.resumed
+              ? omitKey(st.wakeError, sessionId)
+              : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
+            wakeLocked:
+              res.resumed || !res.lockedElsewhere
+                ? omitKey(st.wakeLocked, sessionId)
+                : { ...st.wakeLocked, [sessionId]: true },
+          })),
+        )
+      } catch (e) {
+        set(
+          ifSessionStill(sessionId, (st) => ({
+            wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
+            wakeLocked: omitKey(st.wakeLocked, sessionId),
+          })),
+        )
+      }
+    })
   },
 
   async forkConversation(sessionId) {
     const s = get()
-    if (!s.platform || s.resuming[sessionId]) return
-    set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
-    try {
-      const res = await s.platform.agents.forkConversation(sessionId)
-      set(ifSessionStill(sessionId, (st, cur) => ({
-        sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
-        wakeError: res.resumed
-          ? omitKey(st.wakeError, sessionId)
-          : { ...st.wakeError, [sessionId]: res.reason ?? '' },
-        // Once forked, it is no longer locked — if it failed, the fork option is left standing
-        wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
-        toast: res.resumed
-          ? 'Continuing in a forked conversation — the original is untouched'
-          : `Could not fork: ${res.reason ?? 'unknown reason'}`,
-      })))
-    } catch (e) {
-      set({ toast: `Could not fork: ${(e as Error).message}` })
-    } finally {
-      set((st) => {
-        const next = { ...st.resuming }
-        delete next[sessionId]
-        return { resuming: next }
-      })
-    }
+    const platform = s.platform
+    if (!platform || s.resuming[sessionId]) return
+    await withResuming(set, sessionId, async () => {
+      try {
+        const res = await platform.agents.forkConversation(sessionId)
+        set(ifSessionStill(sessionId, (st, cur) => ({
+          sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
+          wakeError: res.resumed
+            ? omitKey(st.wakeError, sessionId)
+            : { ...st.wakeError, [sessionId]: res.reason ?? '' },
+          // Once forked, it is no longer locked — if it failed, the fork option is left standing
+          wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
+          toast: res.resumed
+            ? 'Continuing in a forked conversation — the original is untouched'
+            : `Could not fork: ${res.reason ?? 'unknown reason'}`,
+        })))
+      } catch (e) {
+        set({ toast: `Could not fork: ${(e as Error).message}` })
+      }
+    })
   },
 
   /**

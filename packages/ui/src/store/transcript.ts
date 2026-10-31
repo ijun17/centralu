@@ -193,49 +193,50 @@ function replaceAt(items: ChatItem[], index: number, item: ChatItem): ChatItem[]
   return next
 }
 
+/** A tool call's row, the same whether it arrived live or was read back (`appendChat`, `pushStored`) */
+function toolItem(
+  seq: number,
+  storedSeq: { storedSeq?: number },
+  callId: string | undefined,
+  summary: { tool: string; title: string; paths?: string[]; centralu?: ToolSummary['centralu'] },
+): ChatItem {
+  return {
+    kind: 'tool',
+    seq,
+    ...storedSeq,
+    tool: summary.tool,
+    title: summary.title,
+    ...(summary.paths?.length ? { paths: summary.paths } : {}),
+    ...(summary.centralu ? { centralu: summary.centralu } : {}),
+    ...(callId ? { callId } : {}),
+  }
+}
+
+/** A streamed chunk of one message: it continues the last row (`continues`) or starts a row of its own */
+function appendText(items: ChatItem[], kind: 'assistant' | 'reasoning', e: { seq?: number; text: string }): ChatItem[] {
+  const last = items[items.length - 1]
+  if (continues(last, kind, e.seq)) {
+    // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
+    return replaceAt(items, items.length - 1, {
+      ...last,
+      text: last.text + e.text,
+      ...(last.storedSeq === undefined ? stored(e.seq) : {}),
+    })
+  }
+  return [...items, { kind, seq: ++chatSeq, ...stored(e.seq), text: e.text }]
+}
+
 /** Converts an event to a conversation item (a streaming delta is appended to the same message's item — `continues`) */
 export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
-    case 'message_delta': {
-      const last = items[items.length - 1]
-      if (continues(last, 'assistant', e.seq)) {
-        // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
-        return replaceAt(items, items.length - 1, {
-          ...last,
-          text: last.text + e.text,
-          ...(last.storedSeq === undefined ? stored(e.seq) : {}),
-        })
-      }
-      return [...items, { kind: 'assistant', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
-    }
-    case 'reasoning_delta': {
+    case 'message_delta':
+      return appendText(items, 'assistant', e)
+    case 'reasoning_delta':
       // A chunk with no text (claude's token estimate) belongs to session state (`thinkingTokens`), not the conversation
-      if (!e.text) return items
-      const last = items[items.length - 1]
-      if (continues(last, 'reasoning', e.seq)) {
-        return replaceAt(items, items.length - 1, {
-          ...last,
-          text: last.text + e.text,
-          ...(last.storedSeq === undefined ? stored(e.seq) : {}),
-        })
-      }
-      return [...items, { kind: 'reasoning', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
-    }
+      return e.text ? appendText(items, 'reasoning', { seq: e.seq, text: e.text }) : items
     case 'tool_call':
       if (holds(items, e.seq)) return items
-      return [
-        ...items,
-        {
-          kind: 'tool',
-          seq: ++chatSeq,
-          ...stored(e.seq),
-          tool: e.summary.tool,
-          title: e.summary.title,
-          ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
-          ...(e.summary.centralu ? { centralu: e.summary.centralu } : {}),
-          ...(e.callId ? { callId: e.callId } : {}),
-        },
-      ]
+      return [...items, toolItem(++chatSeq, stored(e.seq), e.callId, e.summary)]
     case 'message_image':
       /*
        * With its row's number (#868), so a re-read of history matches it by number. The host's row holds a file path and
@@ -610,17 +611,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         callId?: string
         summary?: { tool: string; title: string; paths?: string[]; centralu?: ToolSummary['centralu'] }
       }
-      if (e.summary)
-        items.push({
-          kind: 'tool',
-          seq: m.seq,
-          storedSeq: m.seq,
-          tool: e.summary.tool,
-          title: e.summary.title,
-          ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
-          ...(e.summary.centralu ? { centralu: e.summary.centralu } : {}),
-          ...(e.callId ? { callId: e.callId } : {}),
-        })
+      if (e.summary) items.push(toolItem(m.seq, { storedSeq: m.seq }, e.callId, e.summary))
     } else if (m.kind === 'tool_result') {
       /*
        * A restored tool card also **carries its output** (2026-09-12, surfaced in a demo scene).

@@ -13,7 +13,7 @@
  * observer follows the window, and the project screen calls `placeSlots` after every render,
  * which is what follows a panel that moved without changing size (a drag's preview order).
  *
- * Slots and views are keyed by the pinned view's key (`externalAppKey`, `<project>/<appId>`). The
+ * Slots and views are keyed by the pinned view's key (`appKeyOf`, `<project>/<appId>`). The
  * grid lays its app panels' views out the same way (#288), keyed by the grid's own view of the app
  * (`gridAppViewKey`, `grid:<project>/<appId>`).
  *

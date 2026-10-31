@@ -8,7 +8,7 @@ import type {
 export type AppsSlice = {
   /**
    * How many times, per external app, we have heard "the state changed" (M4 B-5). Keyed by
-   * `externalAppKey`. The size of the value carries no meaning — only **the fact that it changed**
+   * `appKeyOf`. The size of the value carries no meaning — only **the fact that it changed**
    * does. An open `AppFrame` reads this as `changeSignal` and sends the view
    * `centralu/notifications/changed`. Counted even when the app is not in the list. The store does
    * not know the external app list, and missing a signal while waiting for the list is worse.
@@ -22,7 +22,7 @@ export type AppsSlice = {
   externalAppChangedBy: Record<string, string | null>
   /**
    * How many times, per external app, we have heard "a row shown in the runs panel started or
-   * finished" (M4 D-6, `external_app_runs_changed`). Keyed by `externalAppKey`. Read only by the
+   * finished" (M4 D-6, `external_app_runs_changed`). Keyed by `appKeyOf`. Read only by the
    * runs panel (`RunsPanel`) — it does not reach the view. Calls to read-only tools, and the chains
    * they start, also arrive here.
    */

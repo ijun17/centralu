@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import { appKeyOf } from '@cc/core'
 import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
-import { externalAppKey, useStore } from '../../store/store.js'
+import { useStore } from '../../store/store.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
@@ -35,7 +36,7 @@ import { Badge } from '../../components/Badge.jsx'
 /** `machine`: a linked machine's user-folder app (#82), whose runs, answers and agent use are that machine's */
 export function RunsPanel({ appId, projectId, machine }: { appId: string; projectId: string | null; machine?: string | null }) {
   const platform = usePlatform()
-  const changed = useStore((s) => s.externalAppRunChanges[externalAppKey(projectId, appId)] ?? 0)
+  const changed = useStore((s) => s.externalAppRunChanges[appKeyOf(projectId, appId)] ?? 0)
   const sessions = useStore((s) => s.sessions)
   const apps = useStore((s) => s.externalApps)
   const focusSession = useStore((s) => s.focusSession)

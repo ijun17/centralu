@@ -62,7 +62,7 @@ export function GridView() {
   const panels = useStore((s) => s.gridPanels)
   const sessions = useStore((s) => s.sessions)
   const externalApps = useStore((s) => s.externalApps)
-  // The app list, keyed the way a dragged app row names its app (`externalAppKey`)
+  // The app list, keyed the way a dragged app row names its app (`appKeyOf`)
   const appsByKey = useMemo(() => catalogByKey(externalApps), [externalApps])
   const ensureGridAppView = useStore((s) => s.ensureGridAppView)
   const openApp = useStore((s) => s.openApp)

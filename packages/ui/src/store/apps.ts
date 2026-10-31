@@ -2,8 +2,8 @@ import { APP_VIEWS_LIVE_PER_SESSION } from '@cc/protocol/client'
 import type { ExternalAppInfo, NormalizedEvent, StoredMessage } from '@cc/protocol/client'
 import type { AppToolResult } from '@cc/platform/ports'
 import type { AppState, InlineView, PinnedView, StoreGet, StoreSet } from './state.js'
-import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
-import { noteAppArrivals } from '@cc/core'
+import { gridAppViewKey, isApp } from './appKeys.js'
+import { appKeyOf, noteAppArrivals } from '@cc/core'
 import { usesLines } from './uses-lines.js'
 import { returnsToPanel } from './screens.js'
 import { reloadBudget } from './reloadBudget.js'
@@ -97,6 +97,14 @@ export function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string 
   return apps.find((a) => isApp(a, projectId, appId, machine))?.codeStamp ?? null
 }
 
+/** Patches one inline view if it still exists; `liveOnly` also skips it once it is no longer live (the close and reopen steps patch parked and closing views on purpose). */
+export function patchInlineView(set: (fn: (s: AppState) => Partial<AppState>) => void, sessionId: string, callId: string, next: Partial<InlineView>, liveOnly = false): void {
+  set((s) => {
+    const cur = s.inlineViews[sessionId]?.[callId]
+    return cur && (!liveOnly || cur.state === 'live') ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
+  })
+}
+
 /**
  * The app came up again with new code — reopen that app's open views (M4 C-4). Runs every time the
  * list is re-read.
@@ -137,11 +145,7 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
     for (const v of Object.values(views)) {
       if (v.state !== 'live' || !v.instanceId) continue
       const now = codeStampOf(externalApps, v.projectId, v.appId, get().sessions[sessionId]?.machine)
-      const patch = (next: Partial<InlineView>) =>
-        set((s) => {
-          const cur = s.inlineViews[sessionId]?.[v.callId]
-          return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [v.callId]: { ...cur, ...next } } } } : {}
-        })
+      const patch = (next: Partial<InlineView>) => patchInlineView(set, sessionId, v.callId, next)
       if ((v.codeStamp ?? null) === null) {
         if (now !== null) patch({ codeStamp: now })
         continue
@@ -408,11 +412,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   async closeInlineView(sessionId, callId, reason) {
     const v = get().inlineViews[sessionId]?.[callId]
     if (!v || v.state !== 'live') return
-    const patch = (next: Partial<InlineView>) =>
-      set((s) => {
-        const cur = s.inlineViews[sessionId]?.[callId]
-        return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
-      })
+    const patch = (next: Partial<InlineView>) => patchInlineView(set, sessionId, callId, next)
     // Closing — the frame stays standing until teardown's answer comes back. A second close arriving in this window returns from the guard above
     patch({ state: 'closing', reason })
     await inlineFrames.get(inlineFrameKey(sessionId, callId))?.teardown().catch(() => {})
@@ -431,11 +431,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     const platform = get().platform
     const v = get().inlineViews[sessionId]?.[callId]
     if (!platform || !v || v.state !== 'parked' || v.reopening || v.rejected || !v.kept) return
-    const patch = (next: Partial<InlineView>) =>
-      set((s) => {
-        const cur = s.inlineViews[sessionId]?.[callId]
-        return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
-      })
+    const patch = (next: Partial<InlineView>) => patchInlineView(set, sessionId, callId, next)
     patch({ reopening: true })
     try {
       const r = await viewReconnect(platform, () => platform.apps.reopenInlineView(sessionId, callId))
@@ -475,7 +471,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   openApp(projectId, appId, opts) {
     // Only a user-folder app needs its machine named (#82); a project app's id already carries it
     const machine = projectId ? null : (opts?.machine ?? null)
-    const key = externalAppKey(projectId, appId, machine)
+    const key = appKeyOf(projectId, appId, machine)
     set((s) => ({
       view: 'app',
       focusedApp: machine ? { projectId, appId, machine } : { projectId, appId },
@@ -505,7 +501,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   },
 
   ensurePinnedView(projectId, appId) {
-    const key = externalAppKey(projectId, appId)
+    const key = appKeyOf(projectId, appId)
     if (get().pinnedViews.some((p) => p.key === key)) return
     set((s) => ({
       pinnedViews: [
@@ -592,7 +588,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     if (!pv) return
     if (pv.instanceId) void get().platform?.apps.closeView(pv.instanceId).catch(() => {})
     set((s) => {
-      const focused = !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === key
+      const focused = !!s.focusedApp && appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === key
       return {
         pinnedViews: s.pinnedViews.filter((p) => p.key !== key),
         ...(focused ? { focusedApp: null } : {}),
@@ -669,12 +665,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     if (!v.kept) return get().closeInlineView(sessionId, callId, 'Closed because the app now runs new code')
     await get().closeInlineView(sessionId, callId, "Reopening with the app's new code")
     await get().reopenInlineView(sessionId, callId)
-    set((s) => {
-      const cur = s.inlineViews[sessionId]?.[callId]
-      return cur?.state === 'live'
-        ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, stale: false, updatedAt: Date.now() } } } }
-        : {}
-    })
+    patchInlineView(set, sessionId, callId, { stale: false, updatedAt: Date.now() }, true)
   },
 
   dismissAppArrival(key) {
@@ -692,7 +683,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     // An app the person made here is no news to them: seen before the list brings it (#1141)
     const madeIn = app.projectId
     if (madeIn && get().appsSeen[madeIn]) {
-      const key = externalAppKey(madeIn, app.appId)
+      const key = appKeyOf(madeIn, app.appId)
       set((s) => ({ appsSeen: { ...s.appsSeen, [madeIn]: [...new Set([...(s.appsSeen[madeIn] ?? []), key])].sort() } }))
     }
     /*
@@ -735,9 +726,9 @@ export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string
 export function noteArrivals(get: StoreGet, set: StoreSet): void {
   const s = get()
   const trusted = new Set(Object.values(s.projects).filter((p) => p.trusted).map((p) => p.id))
-  // Keyed as the catalog keys an app with a project (`externalAppKey`), titled as it titles one
+  // Keyed as the catalog keys an app with a project (`appKeyOf`), titled as it titles one
   const apps = s.externalApps.flatMap((a) =>
-    a.projectId ? [{ key: externalAppKey(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: a.name ?? a.appId, asks: a.uses ? usesLines(a.uses) : [] }] : [],
+    a.projectId ? [{ key: appKeyOf(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: a.name ?? a.appId, asks: a.uses ? usesLines(a.uses) : [] }] : [],
   )
   const { seen, arrived } = noteAppArrivals(apps, trusted, s.appsSeen)
   const held = new Set(s.appArrivals.map((a) => a.key))
