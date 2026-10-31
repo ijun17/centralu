@@ -105,6 +105,7 @@ const answer = () => {
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
     const how = process.env.FAKE_SSH_DETACH
+    if (how === 'old') { process.stderr.write('unknown option for serve: --detach\n'); process.exit(2) }
     if (how === 'blocked') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'Windows did not start Centralu through WMI (returned 2).' } }) + '\n')
     if (how === 'old_node') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: null, reason: 'node_too_old', message: 'centralu serve needs Node 22.14.0 or newer and this is Node 22.12.0: update Node.', node: '22.12.0', floor: '22.14.0' } }) + '\n')
     if (how === 'crashed') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'exited', message: 'centralu serve exited (3221225477) before its host answered' } }) + '\n')
@@ -573,12 +574,14 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000 * SLOW)
 
-    it('says why a start failed', async () => {
+    /** A remote without `--detach` cannot have answered `--connection --pair` first (#1143): only what it said is quoted */
+    it('says why a start failed, in what the remote said', async () => {
       const at = async (how: string) => {
         const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: how, FAKE_SSH_LINE: line({ port: await freePort() }) })
         return t.startHost()
       }
       await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
+      await expect(at('old')).rejects.toThrow('The remote did not say whether it started: unknown option for serve: --detach')
       await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
     }, 30_000 * SLOW)
 
