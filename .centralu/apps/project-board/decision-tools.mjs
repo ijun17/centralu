@@ -1,5 +1,5 @@
-// Decisions: the owner's saved answers (save_answer, delete_answer, list_owner_answers,
-// mark_answer_recorded), what each decision asks (decision_summaries) and list_needs_decision.
+// Decisions, three tools (#1143, P17): save_answer (the screen saves or deletes the owner's answer),
+// list_owner_answers (the answers, the "Needs decision" items, what each asks) and mark_answer_recorded.
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
 import { answerFor, answerKey, commentIdOf, deleteAnswer, markRecorded, saveAnswer, unrecorded } from './answers.mjs'
 import { board, byPriority, detailInput, fieldsOf, itemInput, itemOf, itemsAnswer, matches, refOf, refreshInput } from './board.mjs'
@@ -104,6 +104,19 @@ async function markOwnerAnswer({ item, url }) {
   return answer(`Marked the owner's answer on ${ref} recorded: ${url}`, { ok: true, ref, answer: answerView(r.answer) })
 }
 
+// The "Needs decision" items, one line each; an answer waiting shows on its line
+async function needsDecision({ area, detail }) {
+  const b = await board()
+  const decision = resolveOption(b.fields.status, config.decisionStatus).name
+  const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
+  const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
+  const waiting = new Set(unrecorded(await ownerAnswers()).map((a) => answerKey(a.repository, a.number)))
+  const answered = (i) => i.number != null && waiting.has(answerKey(i.repository, i.number))
+  const n = items.filter(answered).length
+  const summary = `${b.project.title}: ${plural(items.length, 'item')} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}${n ? `, ${n} ${NOT_RECORDED} (list_owner_answers)` : ''}.`
+  return itemsAnswer(b, summary, items, detail, [], (i) => (answered(i) ? ` · ${NOT_RECORDED}` : ''))
+}
+
 async function decisionSummaries({ refresh }) {
   const b = await board({ fresh: refresh === true })
   const decision = resolveOption(b.fields.status, config.decisionStatus).name
@@ -124,89 +137,51 @@ async function decisionSummaries({ refresh }) {
 }
 
 export const tools = {
-  decision_summaries: {
-    config: {
-      title: 'What each decision asks',
-      description: `The items whose Status is "${config.decisionStatus}", each with the question, options and recommendation of its latest "Decision needed (summary, …)" comment, and whether the owner answered after it.`,
-      inputSchema: z.object({ refresh: refreshInput }),
-      annotations: { readOnlyHint: true, openWorldHint: true },
-      _meta: { ui: { visibility: ['app'] } },
-    },
-    handler: forView(decisionSummaries),
-  },
-
-  // The owner's answer, saved on this machine only (never posted as written: the repository is
-  // public). Screen-only; agents read and close them with the two tools after these.
+  // The owner's answer, saved or deleted on this machine only (never posted as written: the repository is
+  // public). Screen-only; agents read and close them with the two tools after this.
   save_answer: {
     config: {
-      title: "Save the owner's answer",
+      title: "Save or delete the owner's answer",
       description:
-        "Save the person's answer to an item from the screen in this app's data folder on this computer, never on GitHub. Saving again replaces the answer not recorded yet. An agent records the decision on the issue in English and marks the answer recorded.",
+        "Save the person's answer to an item from the screen in this app's data folder on this computer, never on GitHub. Saving again replaces the answer not recorded yet; remove: true deletes it while it is not recorded yet. An agent records the decision on the issue in English and marks the answer recorded.",
       inputSchema: z.object({
         item: itemInput,
-        text: z.string().max(65536).describe('The answer, in any language'),
+        text: z.string().max(65536).optional().describe('The answer, in any language'),
         title: z.string().max(512).optional().describe("The item's title, kept for the agent's list"),
+        remove: z.boolean().optional().describe('Delete the saved answer instead of saving'),
       }),
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
-      _meta: { ui: { visibility: ['app'] } },
-    },
-    handler: serially(answering(saveOwnerAnswer)),
-  },
-
-  delete_answer: {
-    config: {
-      title: "Delete the owner's answer",
-      description: "Delete the person's saved answer to an item, while it is not recorded yet.",
-      inputSchema: z.object({ item: itemInput }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
       _meta: { ui: { visibility: ['app'] } },
     },
-    handler: serially(answering(deleteOwnerAnswer)),
+    handler: serially(answering((args) => (args.remove ? deleteOwnerAnswer(args) : saveOwnerAnswer(args)))),
   },
 
+  // Read by agents (the answers waiting, the items) and by the screen (summaries)
   list_owner_answers: {
     config: {
-      title: "The owner's answers not recorded yet",
-      description:
-        'The answers the owner saved on the board\'s screen to "Needs decision" items and no agent has recorded yet (all: true adds the recorded ones), each with the item, its title and the text as the owner wrote it (often not English; never post it as written). For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**", then call mark_answer_recorded with that comment\'s address.',
-      inputSchema: z.object({ all: z.boolean().optional().describe('Also the answers already recorded; default false') }),
-      annotations: { readOnlyHint: true },
-      _meta: { ui: { visibility: ['model'] } },
+      title: "The owner's decisions and answers",
+      description: `By default the answers the owner saved on the board's screen to "${config.decisionStatus}" items and no agent has recorded yet (all: true adds the recorded ones), each with the item, its title and the text as the owner wrote it (often not English; never post it as written). For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**", then call mark_answer_recorded with that comment's address. view "items": the items whose Status is "${config.decisionStatus}", highest priority first, one line each, optionally one Area, marked when an answer waits. view "summaries": those items each with the question, options and recommendation of its latest "Decision needed (summary, …)" comment and its answer.`,
+      inputSchema: z.object({
+        view: z.enum(['answers', 'items', 'summaries']).optional().describe('Default "answers"'),
+        all: z.boolean().optional().describe('answers: also the answers already recorded; default false'),
+        area: z.string().optional().describe('items: only this Area, for example "UI"'),
+        detail: detailInput,
+        refresh: refreshInput,
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    handler: answering(listOwnerAnswers),
+    handler: (args, ctx) => (args.view === 'summaries' ? forView(decisionSummaries) : answering(args.view === 'items' ? needsDecision : listOwnerAnswers))(args, ctx),
   },
 
   mark_answer_recorded: {
     config: {
       title: "Mark the owner's answer recorded",
       description:
-        'Mark the owner\'s saved answer on an item recorded, with the address of the English decision comment posted on it with comment (https://github.com/owner/name/issues/N#issuecomment-ID). The comment is read back from GitHub: it must be on that item, hold "Decision (owner, YYYY-MM-DD)" and be in English.',
+        `Mark the owner's saved answer on an item recorded, with the address of the English decision comment posted on it with comment (https://github.com/owner/name/issues/N#issuecomment-ID). The comment is read back from GitHub: it must be on that item, hold "Decision (owner, YYYY-MM-DD)" and be in English.`,
       inputSchema: z.object({ item: itemInput, url: z.string().describe("The decision comment's address on GitHub") }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: { 'centralu/risk': 'local', ui: { visibility: ['model'] } },
     },
     handler: serially(answering(markOwnerAnswer)),
-  },
-
-  list_needs_decision: {
-    config: {
-      title: 'List items that need a decision',
-      description: `List the items whose Status is "${config.decisionStatus}" (the owner's pending decisions), highest priority first, one line each. Optionally one Area.`,
-      inputSchema: z.object({ area: z.string().optional().describe('Only this Area, for example "UI"'), detail: detailInput }),
-      annotations: { readOnlyHint: true, openWorldHint: true },
-      _meta: { ui: { visibility: ['model'] } },
-    },
-    handler: answering(async ({ area, detail }) => {
-      const b = await board()
-      const decision = resolveOption(b.fields.status, config.decisionStatus).name
-      const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
-      const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
-      // An answer the owner saved on this machine and no agent recorded yet shows on its line
-      const waiting = new Set(unrecorded(await ownerAnswers()).map((a) => answerKey(a.repository, a.number)))
-      const answered = (i) => i.number != null && waiting.has(answerKey(i.repository, i.number))
-      const n = items.filter(answered).length
-      const summary = `${b.project.title}: ${plural(items.length, 'item')} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}${n ? `, ${n} ${NOT_RECORDED} (list_owner_answers)` : ''}.`
-      return itemsAnswer(b, summary, items, detail, [], (i) => (answered(i) ? ` · ${NOT_RECORDED}` : ''))
-    }),
   },
 }

@@ -78,7 +78,7 @@ tools agents use to record the owner's answers.
 - **"Needs decision"** (the header's second button) lists the items with that Status, each with the
   Question and Recommendation of its latest `## Decision needed (summary, …)` comment, and
   "Answered" when a `Decision (owner, …)` comment came after it (`decisionSummary` in markdown.mjs,
-  `decision_summaries` in decision-tools.mjs).
+  `list_owner_answers` with `view: "summaries"` in decision-tools.mjs, which the screen calls).
 - **The owner's answer never goes to GitHub as written** (owner decision, 2026-10-12: the
   repository is public, and the owner answers in their own words and language). The answer box
   under an item whose Status is the decision status saves it with `save_answer` ("Save answer" or
@@ -86,20 +86,20 @@ tools agents use to record the owner's answers.
   `centralu.readJson`/`writeJson`: the per-user app data Centralu gives the app, outside the
   repository (`answers.mjs` holds the rules, pure). The screen then says plainly that nothing was
   posted and that the agent records the decision in English, and shows the answer on the item
-  ("saved …, not recorded yet") with Edit and Delete (`delete_answer`) until it is recorded. Edit
+  ("saved …, not recorded yet") with Edit and Delete (`save_answer` with `remove: true`) until it is recorded. Edit
   opens it in the box; Esc steps back out of the change. Saving again replaces the answer waiting;
   a recorded answer is history and shows with its decision comment ("recorded in English"). A
-  failed save says why and keeps the text. Drafts live in the screen's memory only. Both tools are
+  failed save says why and keeps the text. Drafts live in the screen's memory only. `save_answer` is
   screen-only; nothing on the screen posts to GitHub.
-- **Agents record it** (both model-only): `list_owner_answers` (`all?`; read-only) lists the
-  answers not recorded yet with the item's title and the owner's text, which agents never post as
+- **Agents record it**: `list_owner_answers` (read-only, agents and the screen; `view?` is `answers` by default) lists the
+  answers not recorded yet (`all?` adds the recorded ones) with the item's title and the owner's text, which agents never post as
   written. The agent posts the decision on the issue in English with `comment`, in CONTRIBUTING.md's
   form `**Decision (owner, YYYY-MM-DD):** …`, then calls `mark_answer_recorded` (`item`, `url`) with
   that comment's address. It reads the comment back from GitHub and refuses unless it is on that
-  item, holds "Decision (owner, YYYY-MM-DD)" and is in English. `list_needs_decision` marks an item
+  item, holds "Decision (owner, YYYY-MM-DD)" and is in English. `list_owner_answers` with `view: "items"` (`area?`, `detail?`: the "Needs decision" items, one line each) marks an item
   with an answer waiting "· answered, not recorded yet" (and counts them in its summary), the
   screen's "Needs decision" cards say "Answered, not recorded yet", and `read_item` and
-  `decision_summaries` carry `ownerAnswer`.
+  the `summaries` view carry `ownerAnswer`.
 - **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)
   neither reviews, steps back nor closes: `composing` in the screen, the same three signs as
   Centralu's `composingKey` (docs/usability.md).
@@ -1088,8 +1088,8 @@ step shows on the screen.
   order agents and the screen list them). A new tool goes in its family's `tools` and in `ORDER`.
 - The tool families, each a `tools` table of `{ config, handler }`: `view-tools.mjs` (`show` and the
   screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
-  `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
-  decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
+  `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (save_answer, list_owner_answers,
+  mark_answer_recorded), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
   mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,

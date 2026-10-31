@@ -149,20 +149,20 @@ async function showBoard(page: Page, { failSaves = 0, queue = null as typeof QUE
           words = [...words.filter((x) => !(args.remove ?? []).includes(x)), ...(args.add ?? [])].sort()
           return wordList()
         }
-        // The owner's answers, as the server keeps them on this computer (save_answer, delete_answer)
+        // The owner's answers, as the server keeps them on this computer (save_answer)
         const withAnswer = (t: any, key: string) => ({ ...t, structuredContent: { ...t.structuredContent, ownerAnswer: saved[key] ?? null } })
         if (tool === 'read_item') return threads[args.item] ? withAnswer(threads[args.item], args.item) : { content: [{ type: 'text', text: 'missing' }], structuredContent: { ok: false, error: { kind: 'not-found', message: `${args.item} is not there.` } } }
-        if (tool === 'decision_summaries')
+        if (tool === 'list_owner_answers')
           return { ...summaries, structuredContent: { ...summaries.structuredContent, items: summaries.structuredContent.items.map((i: any) => ({ ...i, ownerAnswer: saved[`${i.repository}#${i.number}`] ?? null })) } }
+        if (tool === 'save_answer' && args.remove) {
+          delete saved[args.item]
+          return { content: [{ type: 'text', text: 'Deleted' }], structuredContent: { ok: true, ref: '#113', answer: null } }
+        }
         if (tool === 'save_answer') {
           if (failures-- > 0) return { isError: true, content: [{ type: 'text', text: 'x' }], structuredContent: { summary: 'x', error: { kind: 'internal', message: 'the data folder could not be written.' } } }
           const at = '2026-10-12T10:00:00Z'
           saved[args.item] = { text: args.text.trim(), savedAt: saved[args.item]?.savedAt ?? at, updatedAt: at, recordedAt: null, recordedUrl: null }
           return { content: [{ type: 'text', text: 'Saved' }], structuredContent: { ok: true, ref: '#113', answer: saved[args.item] } }
-        }
-        if (tool === 'delete_answer') {
-          delete saved[args.item]
-          return { content: [{ type: 'text', text: 'Deleted' }], structuredContent: { ok: true, ref: '#113', answer: null } }
         }
         return { content: [{ type: 'text', text: 'ok' }] }
       }
@@ -339,7 +339,7 @@ export function boardReaderTests(): void {
       await expect(v.locator('#answer-note')).toHaveText('Deleted the saved answer.')
       await expect(text).toBeFocused()
       await expect(text).toHaveValue('')
-      expect(await callsTo(page, 'delete_answer')).toEqual([{ item: `${REPO}#113` }])
+      expect((await callsTo(page, 'save_answer') as { remove?: boolean }[]).filter((c) => c.remove)).toEqual([{ item: `${REPO}#113`, remove: true }])
     })
 
     test('the Needs decision view shows what each item asks and which answers wait to be recorded', async ({ page }) => {
@@ -352,7 +352,7 @@ export function boardReaderTests(): void {
       await expect(cards.first()).toContainText('Fold it into #406?')
       await expect(cards.first()).toContainText('A, the smaller change.')
       await expect(cards.nth(1)).toContainText('Answered 2026-10-12')
-      expect(await callsTo(page, 'decision_summaries')).toEqual([{}])
+      expect(await callsTo(page, 'list_owner_answers')).toEqual([{ view: 'summaries' }])
 
       const answer = cards.first().getByRole('button', { name: 'Read and answer' })
       await answer.click()
