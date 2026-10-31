@@ -3,6 +3,7 @@ import { formatBytes, formatCount, formatDay } from '../../app/format.js'
 import { Button } from '../../components/Button.jsx'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { SettingsCard, SettingsEmpty } from './SettingsLayout.jsx'
 
 /**
  * A session's subagent steps in Settings → Archive (#418): what each live session's steps take, with the way to move them
@@ -13,8 +14,7 @@ import { LoadFailed } from '../../components/LoadFailed.jsx'
  * and the only way to let them go was to delete the conversation. The session archive is where this screen says what the store
  * holds, so they are said here.
  *
- * The list of what sessions hold is drawn in the conversation's card shape (docs/design-system.md §2, *owner,
- * 2026-10-18*: the bubble corner, rows split by a faint hairline), its action the shared `Button`; a trashed set of steps
+ * The list of what sessions hold is drawn in the shared Settings card (owner, 2026-10-31), its action the shared `Button`; a trashed set of steps
  * is a row of the session archive list, drawn as the archived sessions beside it are.
  */
 
@@ -64,14 +64,15 @@ export function SubagentStepsHeldList({
       {error ? (
         <LoadFailed what="what subagent steps take" error={error} onRetry={onRetry} className="mt-2" testId="subagent-steps-held-error" />
       ) : sessions === null ? (
-        <p className="readout mt-2 rounded-bubble border border-line bg-surface-raised px-4 py-3 text-xs text-ink-faint">Loading…</p>
+        <SettingsCard className="mt-2">
+          <SettingsEmpty>Loading…</SettingsEmpty>
+        </SettingsCard>
       ) : sessions.length === 0 && unreached.length === 0 ? (
-        // The empty list keeps the list's card, a quiet line inside it (the other Settings lists' empty state)
-        <p className="mt-2 rounded-bubble border border-line bg-surface-raised px-4 py-3 text-sm text-ink-faint" data-testid="subagent-steps-held-empty">
-          No session keeps subagent steps
-        </p>
+        <SettingsCard className="mt-2">
+          <SettingsEmpty testId="subagent-steps-held-empty">No session keeps subagent steps</SettingsEmpty>
+        </SettingsCard>
       ) : sessions.length === 0 ? null : (
-        <ul className="mt-2 divide-y divide-line/70 rounded-bubble border border-line bg-surface-raised" data-testid="subagent-steps-held-list">
+        <SettingsCard as="ul" className="mt-2" testId="subagent-steps-held-list">
           {[...sessions]
             .sort((a, b) => b.bytes - a.bytes)
             .map((s) => {
@@ -103,7 +104,7 @@ export function SubagentStepsHeldList({
                 </li>
               )
             })}
-        </ul>
+        </SettingsCard>
       )}
       {unreached.map((m) => (
         <p key={m.machineId} className="mt-2 text-xs leading-body text-ink" data-testid={`subagent-steps-unreached-${m.machineId}`}>

@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, type DragEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
+import { dropsLeft, moveTo } from '../sidebar/reorder.js'
 
 /**
  * What the grid and the project screen share about the panels they lay out: the element of each
@@ -96,4 +97,52 @@ export function panelClass(dragged: boolean): string {
   return `cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
     dragged ? 'opacity-40' : ''
   }`
+}
+
+/** The drag state both screens share (#53). The preview is derived from `dragging` and `over`, so cancelling is clearing them */
+export function usePanelDrag() {
+  const cards = usePanelCards()
+  const { snapshotScroll } = cards
+  const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
+  const [dragging, setDragging] = useState<string | null>(null)
+
+  /*
+   * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
+   * own dragend, and a target left behind would be the next panel drag's preview before the hand has moved. The app
+   * views laid over the panels need nothing here: their panels cover them for the length of any drag (dragShield.tsx).
+   */
+  useEffect(() => {
+    const end = () => setOver(null)
+    document.addEventListener('dragend', end)
+    return () => document.removeEventListener('dragend', end)
+  }, [])
+
+  return {
+    ...cards,
+    dragging,
+    setDragging,
+    clearOver: () => setOver(null),
+    previewOf: (visible: readonly string[]): string[] | null =>
+      dragging && over ? moveTo(visible, dragging, over.id, over.before) : null,
+    dropMark: (id: string) => (over?.id === id ? (over.before ? 'before' : 'after') : undefined),
+    /** The pointer is over panel `id`: aim at its half. Over the dragged panel itself the last target is kept, or the preview flickers */
+    aim: (id: string, e: DragEvent<HTMLElement>) => {
+      if (dragging === id) return
+      const before = dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)
+      // dragover fires continuously, even with the pointer still — only re-render on change
+      if (over?.id === id && over.before === before) return
+      snapshotScroll()
+      setOver({ id, before })
+    },
+    clearDrag: () => {
+      setOver(null)
+      setDragging(null)
+    },
+    /** A panel's own dragend, with or without a drop — clearing `over` is the rollback (the preview is derived from it) */
+    endDrag: () => {
+      snapshotScroll()
+      setOver(null)
+      setDragging(null)
+    },
+  }
 }

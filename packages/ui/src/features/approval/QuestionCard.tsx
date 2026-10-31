@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { Question, QuestionAnswer } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
-import { Pill } from '../../components/Pill.jsx'
+import { WaitCard, WaitFooter } from './WaitCard.jsx'
 
 /**
  * The choices an agent holds out (AskUserQuestion).
@@ -129,18 +129,11 @@ export function QuestionCard({
   }
 
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="question-card"
+    <WaitCard
+      pill="Agent is asking"
+      testId="question-card"
+      subtitle={tabbed ? `${questions.length} questions` : 'Pick an option'}
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Agent is asking
-        </Pill>
-        <span className="text-xs text-ink-faint">
-          {tabbed ? `${questions.length} questions` : 'Pick an option'}
-        </span>
-      </div>
 
       {tabbed && (
         /*
@@ -247,7 +240,7 @@ export function QuestionCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-2 border-t border-line px-3 py-2">
+      <WaitFooter question>
         <button
           type="button"
           data-testid="question-submit"
@@ -266,7 +259,7 @@ export function QuestionCard({
                 ? 'Click an option to answer, or write your own'
                 : 'Choose an option'}
         </span>
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }

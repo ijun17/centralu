@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type DragEvent } from 'react'
 import type { GridPanel, GridSpan } from '@cc/protocol/client'
 import {
   ONE_CELL,
@@ -21,11 +21,11 @@ import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { lookOf } from '../session/look.js'
-import { APP_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
+import { APP_MIME, SESSION_MIME, dropsLeft } from '../sidebar/reorder.js'
 import { AppPanel } from '../pinned-app/AppPanel.jsx'
 import { placeSlots } from '../pinned-app/slots.js'
 import { GRID_GAP, wholePixelTracks } from './tracks.js'
-import { panelClass, usePanelCards } from './panelCards.js'
+import { panelClass, usePanelDrag } from './panelCards.js'
 import { useRealSize } from './real-size.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from './drop.js'
 
@@ -85,11 +85,8 @@ export function GridView() {
    * panel absurd (MAX_PANEL_H)
    */
   const { width, height } = useRealSize(ref)
-  /** Which side of which panel the pointer is on — the preview order derives from this */
-  const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
-  /** The panel currently being dragged. The original is dimmed to show "this is what is moving" */
-  const [dragging, setDragging] = useState<string | null>(null)
-  const { cardOf, place, snapshotScroll, liftPanel } = usePanelCards()
+  const { cardOf, place, snapshotScroll, liftPanel, dragging, setDragging, previewOf, dropMark, aim, clearDrag, endDrag } =
+    usePanelDrag()
 
   /*
    * Put focus on the selected panel's composer.
@@ -153,7 +150,7 @@ export function GridView() {
     (browser security), so the grid cannot know *which* session is inbound until the drop —
     and a phantom new cell would change every cell's size anyway.
   */
-  const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
+  const preview = previewOf(visible)
   const order = preview ?? visible
   /*
    * Every panel's cell. A drag's preview is the same panels in another order, packed into the same columns, so the cell
@@ -174,17 +171,6 @@ export function GridView() {
       if (app) ensureGridAppView(app.projectId, app.appId, app.machine)
     }
   }, [appKeys, ensureGridAppView])
-
-  /*
-   * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
-   * own dragend, and a target left behind would be the next panel drag's preview before the hand has moved. The app
-   * views laid over the panels need nothing here: their panels cover them for the length of any drag (dragShield.tsx).
-   */
-  useEffect(() => {
-    const end = () => setOver(null)
-    document.addEventListener('dragend', end)
-    return () => document.removeEventListener('dragend', end)
-  }, [])
 
   // After every render: a panel can move without changing size (a drag's preview), and the view laid over it has to move with it
   useLayoutEffect(() => placeSlots())
@@ -242,8 +228,7 @@ export function GridView() {
         } else {
           dropPanel(panel, null, false)
         }
-        setOver(null)
-        setDragging(null)
+        clearDrag()
       }}
     >
       {visible.length === 0 ? (
@@ -331,7 +316,7 @@ export function GridView() {
                 to draw this is gone — the reflow shows it — but tests and assistive tech
                 still need the relation as a value, not as a pixel position to reverse-engineer.
               */
-                data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
+                data-drop={dropMark(id)}
                 onDragOver={(e) => {
                   if (!gridTakes(e.dataTransfer.types)) return
                   e.preventDefault()
@@ -342,26 +327,13 @@ export function GridView() {
                   half → the panels swap → the pointer is now on the dragged panel). Clearing
                   here would snap the preview back and the two orders would flicker in a loop.
                 */
-                  if (dragging === id) return
-                  const r = e.currentTarget.getBoundingClientRect()
-                  const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
-                  // dragover fires continuously, even with the pointer still — only re-render on change
-                  if (over?.id === id && over.before === before) return
-                  snapshotScroll()
-                  setOver({ id, before })
+                  aim(id, e)
                 }}
-                onDragEnd={() => {
-                  // Fires with or without a drop — Escape and dropping outside land here too,
-                  // and clearing `over` *is* the rollback (the preview is derived from it)
-                  snapshotScroll()
-                  setDragging(null)
-                  setOver(null)
-                }}
+                onDragEnd={endDrag}
                 onDrop={(e) => {
                   const dragged = dropped(e)
                   snapshotScroll()
-                  setOver(null)
-                  setDragging(null)
+                  clearDrag()
                   if (!dragged) return
                   e.preventDefault()
                   e.stopPropagation()
@@ -369,7 +341,7 @@ export function GridView() {
                   // make the drop change the screen, which is what #53 removes
                   if (gridPanelKey(dragged) === dragging && preview) return commitPreview(preview)
                   const r = e.currentTarget.getBoundingClientRect()
-                  dropPanel(dragged, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))
+                  dropPanel(dragged, id, dropsLeft(r, e.clientX))
                 }}
               >
                 {panel.kind === 'app' ? (

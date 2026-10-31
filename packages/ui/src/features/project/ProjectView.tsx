@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type DragEvent } from 'react'
 import { appPanelId, arrangePanels, columnsFor, isUnread, parsePanelId, rowsFor, sessionPanelId, withPanel, withOrder } from '@cc/core'
 import { externalAppKey, useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
@@ -9,9 +9,9 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { Button } from '../../components/Button.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { lookOf } from '../session/look.js'
-import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
+import { PANEL_MIME, SESSION_MIME, dropsLeft, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
-import { panelClass, usePanelCards } from '../grid/panelCards.js'
+import { panelClass, usePanelDrag } from '../grid/panelCards.js'
 import { useRealSize } from '../grid/real-size.js'
 import { placeSlots } from '../pinned-app/slots.js'
 import { AppPanel } from '../pinned-app/AppPanel.jsx'
@@ -50,10 +50,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const ref = useRef<HTMLDivElement>(null)
   // Real pixels, as in GridView: the text scale enlarges letters, not the minimum panel (real-size.ts)
   const { width, height } = useRealSize(ref)
-  /** Which side of which panel the pointer is on — the preview order derives from this (GridView, #53) */
-  const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
-  const [dragging, setDragging] = useState<string | null>(null)
-  const { place, snapshotScroll, liftPanel } = usePanelCards()
+  const { place, snapshotScroll, liftPanel, dragging, setDragging, previewOf, dropMark, aim, clearOver, clearDrag, endDrag } =
+    usePanelDrag()
 
   // The sidebar's order is the natural one: its sessions, then its apps
   const present = useMemo(
@@ -62,17 +60,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
   )
   const visible = useMemo(() => arrangePanels(present, saved), [present, saved])
   const appsById = useMemo(() => new Map(apps.map((a) => [a.appId, a])), [apps])
-
-  /*
-   * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
-   * own dragend, and a target left behind would be the next panel drag's preview before the hand has moved. The app
-   * views laid over the panels need nothing here: their panels cover them for the length of any drag (dragShield.tsx).
-   */
-  useEffect(() => {
-    const end = () => setOver(null)
-    document.addEventListener('dragend', end)
-    return () => document.removeEventListener('dragend', end)
-  }, [])
 
   // After every render: a panel can move without changing size (a drag's preview), which no
   // resize observer reports, and the app view laid over it has to move with it
@@ -94,7 +81,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
-  const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
+  const preview = previewOf(visible)
   const order = preview ?? visible
 
   const remove = (id: string) => {
@@ -114,11 +101,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
     liftPanel(id, e)
     setDragging(id)
   }
-  const endDrag = () => {
-    snapshotScroll()
-    setOver(null)
-    setDragging(null)
-  }
 
   /**
    * Is this drag one the screen takes? Its own panel while it is being dragged, or one of the
@@ -137,7 +119,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     snapshotScroll()
     const next = droppedArrangement(present, saved, id, target, before)
     if (next) arrange(projectId, next)
-    setOver(null)
+    clearOver()
     return true
   }
 
@@ -176,8 +158,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
             e.preventDefault()
             snapshotScroll()
             if (preview) arrange(projectId, withOrder(present, saved, preview))
-            setOver(null)
-            setDragging(null)
+            clearDrag()
             return
           }
           // A sidebar row dropped on the padding, a gap or the empty screen: at the end, as on the grid
@@ -220,19 +201,14 @@ export function ProjectView({ projectId }: { projectId: string }) {
                   className={panelClass(dragging === id)}
                   data-look={look}
                   data-testid={`project-panel-${id}`}
-                  data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
+                  data-drop={dropMark(id)}
                   onDragOver={(e) => {
                     // A sidebar row gets no preview, as on the grid: its data is unreadable until the drop
                     if (!takes(e)) return
                     e.preventDefault()
                     e.stopPropagation()
                     // Over the dragged panel itself: keep the last target, or the preview flickers (GridView)
-                    if (dragging === id) return
-                    const r = e.currentTarget.getBoundingClientRect()
-                    const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
-                    if (over?.id === id && over.before === before) return
-                    snapshotScroll()
-                    setOver({ id, before })
+                    aim(id, e)
                   }}
                   onDragEnd={endDrag}
                   onDrop={(e) => {
@@ -240,7 +216,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       // A sidebar row lands before or after this panel, by the half it is dropped on (GridView).
                       // Refused, it goes on to the screen, which refuses it too
                       const r = e.currentTarget.getBoundingClientRect()
-                      if (!dropRow(e, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))) return
+                      if (!dropRow(e, id, dropsLeft(r, e.clientX))) return
                       e.preventDefault()
                       e.stopPropagation()
                       return
@@ -256,11 +232,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       the preview of its last dragover is on the screen, and that drop used to be lost (#509).
                     */
                     const r = e.currentTarget.getBoundingClientRect()
-                    const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
+                    const before = dropsLeft(r, e.clientX)
                     const next = preview ?? (dragging === id ? null : reorderIds(visible, dragging, id, before))
                     if (next) arrange(projectId, withOrder(present, saved, next))
-                    setOver(null)
-                    setDragging(null)
+                    clearDrag()
                   }}
                 >
                   {sessionId ? (
