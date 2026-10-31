@@ -3,6 +3,7 @@ import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_proces
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
+import { finished } from 'node:stream/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -757,6 +758,26 @@ function serve(dataDir: string, args: string[]) {
 }
 
 /**
+ * A serve listening on a port of its own, with that port (#1788). `freePort()` closes its socket before serve binds, and a
+ * test running in parallel can take the number in between; an explicit `--port` refuses a taken port. serve cannot pick one
+ * itself (`--port` is 1 to 65535), so the start is tried again with another number, once, and only when serve said the
+ * number was taken. `pick` is for the test that makes it taken.
+ */
+async function serveOnFreePort(dataDir: string, pick: () => Promise<number> = freePort) {
+  for (let attempt = 1; ; attempt++) {
+    const port = await pick()
+    const s = serve(dataDir, ['--port', String(port)])
+    try {
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      return { ...s, port }
+    } catch (e) {
+      await finished(s.child.stderr!).catch(() => undefined)
+      if (attempt >= 2 || !s.out.stderr.includes(`Port ${port} is already in use`)) throw e
+    }
+  }
+}
+
+/**
  * The options a host `centralu serve` runs is started with since #1405: its key as the token, and the full credentials
  * those serve.json names, read at each hello
  */
@@ -915,9 +936,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 
       // The data folder as an older build left it (#838): the host makes it its owner's only
       chmodSync(d, 0o755)
-      const port = await freePort()
-      const s = serve(d, ['--port', String(port)])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const { port, ...s } = await serveOnFreePort(d)
       // Mode bits say nothing on Windows, where the host leaves them (`modesGuardFiles`)
       if (POSIX) expect(statSync(d).mode & 0o777).toBe(0o700)
 
@@ -989,9 +1008,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'lists a credential used and withdrawn before any read as gone, and the ids used under hub labels, from a real host',
     async () => {
       const d = tempDir()
-      const port = await freePort()
-      const s = serve(d, ['--port', String(port)])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const { port, ...s } = await serveOnFreePort(d)
       try {
         // Paired, used and withdrawn at once, by something of this user
         const x = (await cli(d, ['--connection', '--pair', 'x'])).line
@@ -1021,9 +1038,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'tells a linked hub of a full hello at once, and a restarted host reports it after a stop right behind it',
     async () => {
       const d = tempDir()
-      const port = await freePort()
-      const s = serve(d, ['--port', String(port)])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const { port, ...s } = await serveOnFreePort(d)
       let s2: ReturnType<typeof serve> | null = null
       try {
         // A hub linked to the host: its open link is what the event goes over
@@ -1056,9 +1071,8 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         await s.exited
 
         // A host that starts again reports it at the next read, listed once
-        const port2 = await freePort()
-        s2 = serve(d, ['--port', String(port2)])
-        await s2.until(/listening on 127\.0\.0\.1:\d+/)
+        const { port: port2, ...started2 } = await serveOnFreePort(d)
+        s2 = started2
         const r = (await askHost(port2, String(hub.token), 'host.credentials')) as Record<string, any>
         expect(r.credentials.filter((c: Record<string, unknown>) => c.id === x.credential)).toEqual([expect.objectContaining({ label: 'x', gone: true })])
       } finally {
@@ -1086,9 +1100,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 `
       })
       writeFileSync(join(d, 'serve-used.jsonl'), older.join(''))
-      const port = await freePort()
-      const s = serve(d, ['--port', String(port)])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const { port, ...s } = await serveOnFreePort(d)
       let s2: ReturnType<typeof serve> | null = null
       try {
         const hub = (await cli(d, ['--connection', '--pair', 'hub:test-0123abcd'])).line
@@ -1105,9 +1117,8 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         if (POSIX) s.child.kill('SIGTERM')
         else await cli(d, ['--stop'])
         await s.exited
-        const port2 = await freePort()
-        s2 = serve(d, ['--port', String(port2)])
-        await s2.until(/listening on 127\.0\.0\.1:\d+/)
+        const { port: port2, ...started2 } = await serveOnFreePort(d)
+        s2 = started2
         for (let read = 1; read <= 2; read++) {
           const r = (await askHost(port2, String(hub.token), 'host.credentials')) as Record<string, any>
           expect(r.credentials.filter((c: Record<string, unknown>) => c.id === x.credential), `after the restart, read ${read}`).toEqual([expect.objectContaining({ label: 'x', gone: true })])
@@ -1132,9 +1143,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'pairs a hub by key with a running host, lists the entry, and links again at once after --rotate-token',
     async () => {
       const d = tempDir()
-      const port = await freePort()
-      const s = serve(d, ['--port', String(port)])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const { port, ...s } = await serveOnFreePort(d)
       // The key the host started with, which it signs with and hands out until it restarts
       const startKey = String(readServeState(d).key)
       try {
@@ -1179,8 +1188,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'passes Ctrl+C (SIGINT) to the host, which shuts down cleanly',
     async () => {
       const d = tempDir()
-      const s = serve(d, ['--port', String(await freePort())])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const s = await serveOnFreePort(d)
       // At once, not after a pause: the host is still starting its services right after the ready
       // line, and a signal there used to end it by the kernel's default, skipping the shutdown
       s.child.kill('SIGINT')
@@ -1194,8 +1202,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'takes the host down when the launcher itself is killed, instead of leaving it unsupervised',
     async () => {
       const d = tempDir()
-      const s = serve(d, ['--port', String(await freePort())])
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      const s = await serveOnFreePort(d)
       const hostPid = (JSON.parse(readFileSync(join(d, 'host.lock'), 'utf8')) as { pid: number }).pid
       expect(hostPid).not.toBe(s.child.pid)
       s.child.kill('SIGKILL')
@@ -1265,6 +1272,25 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000 * SLOW,
   )
+  it('starts again on another port when the one it picked was taken before serve could bind it (#1788)', async () => {
+    const d = tempDir()
+    // Holds the number freePort() handed out, as a test running in parallel does between its close and serve's listen
+    const holder = createServer((socket) => socket.destroy())
+    await new Promise<void>((r) => holder.listen({ host: '127.0.0.1', port: 0 }, r))
+    const taken = (holder.address() as { port: number }).port
+    const picks = [taken]
+    try {
+      const s = await serveOnFreePort(d, async () => picks.shift() ?? (await freePort()))
+      expect(s.port).not.toBe(taken)
+      expect(picks).toEqual([])
+      if (POSIX) s.child.kill('SIGTERM')
+      else await cli(d, ['--stop'])
+      await s.exited
+    } finally {
+      await new Promise((r) => holder.close(r))
+    }
+  }, 90_000 * SLOW)
+
   it(
     'gives serve\'s advice, not a developer\'s, when the port given with --port is taken (#482)',
     async () => {
@@ -2247,8 +2273,7 @@ describe('asking the host on the port without handing the token to anyone else (
 
   it.skipIf(!POSIX)('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()
-    const run = serve(d, ['--port', String(await freePort())])
-    await run.until(/listening on 127\.0\.0\.1:\d+/)
+    const run = await serveOnFreePort(d)
     const hostPid = (JSON.parse(readFileSync(join(d, 'host.lock'), 'utf8')) as { pid: number }).pid
     // Prints no JSON line: not `cli`
     expect(spawnSync(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d) }).status).toBe(0)
