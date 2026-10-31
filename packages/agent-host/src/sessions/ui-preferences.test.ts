@@ -217,14 +217,14 @@ describe('screen preferences across builds', () => {
   describe('the notification switches (#1306)', () => {
     const snapshot = { approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: 'loud', volume: 11 }
 
-    it("come across from the workspace snapshot once, a switch it lacks or holds wrongly taking its default, and the move keeps the text size's", () => {
+    it("come across from the workspace snapshot once, a switch it lacks or holds wrongly taking its default", () => {
       const store = new Store()
-      store.settings.saveWorkspace({ textScale: 4, notifyPolicy: snapshot })
+      store.settings.saveWorkspace({ notifyPolicy: snapshot })
       store.settings.setAppSetting(KEY, JSON.stringify({ laterField: 1 }))
       const mgr = new SessionManager(store, new Map(), () => {})
       expect(mgr.uiPreferences().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false })
-      // Both moves happened in the one read, and what another build wrote stayed
-      expect(JSON.parse(store.settings.appSetting(KEY)!)).toEqual({ laterField: 1, textSize: 1.25, notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })
+      // What another build wrote stayed
+      expect(JSON.parse(store.settings.appSetting(KEY)!)).toEqual({ laterField: 1, notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })
     })
 
     it('are the record\'s from then on: a snapshot an older window writes later does not override a switch chosen since', () => {
@@ -278,10 +278,9 @@ describe('screen preferences across builds', () => {
     })
   })
 
-  it('a broken row is not written over by reading it, even with an old text size to move', () => {
+  it('a broken row is not written over by reading it', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const store = new Store()
-    store.settings.saveWorkspace({ textScale: 3 })
     store.settings.setAppSetting(KEY, '{"textSize": 1.1, ')
     const mgr = new SessionManager(store, new Map(), () => {})
     expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, hubAuto: false })

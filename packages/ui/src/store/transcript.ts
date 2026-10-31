@@ -66,8 +66,7 @@ export type ChatItem =
     /**
      * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
      * in — the full output lives in `result`.
-     * callId: the name by which the result/output finds its own row (#98) — falls back to the old
-     * positional rule (`ownerOf`) when absent.
+     * callId: the name by which the result/output finds its own row (#98, `ownerOf`).
      */
     | {
         kind: 'tool'
@@ -133,31 +132,13 @@ export function bumpChatKeysAbove(items: { seq: number }[]): void {
 }
 
 /**
- * The **tool row that owns** this result or live output (#98).
- *
- * Found by `callId`. This used to be found by position — a result went to "the oldest open row," and
- * live output to "the last open row." That was because a row did not carry a `callId`, and while only
- * one thing was ever open at a time, position and ownership were the same thing. A background agent's
- * card breaks that: it stays open the whole time its parent uses a different tool, so the positional
- * rule ended up **attaching the parent's Bash result to the agent card**, and routed the agent's
- * steps to the parent's open Bash card — reproducing on screen exactly the "mixed together with no
- * way to tell who did what" the issue described.
- *
- * A row with a `callId` only ever receives its own. The old positional rule is used only among rows
- * with no `callId` at all — kept for the shape of an older fixture that carries the call and its
- * result separately. Measured: across 44,140 `tool_call` rows in the store (28,517 claude, 15,623
- * codex), `callId` has never once collided within a single session (2026-09-25).
+ * The **tool row that owns** this result or live output (#98), found by `callId`: a background agent's card stays open while
+ * its parent uses another tool, so a rule by position attached the parent's results to the agent's card. Measured: across
+ * 44,140 `tool_call` rows in the store (28,517 claude, 15,623 codex), `callId` has never once collided within a single
+ * session (2026-09-25).
  */
-function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest'): number {
-  if (callId) {
-    const mine = items.findIndex((i) => i.kind === 'tool' && i.callId === callId)
-    if (mine !== -1) return mine
-  }
-  const open = (i: ChatItem | undefined) =>
-    i?.kind === 'tool' && i.callId === undefined && i.result === undefined
-  if (fallback === 'oldest') return items.findIndex(open)
-  for (let i = items.length - 1; i >= 0; i--) if (open(items[i])) return i
-  return -1
+function ownerOf(items: ChatItem[], callId: string): number {
+  return callId ? items.findIndex((i) => i.kind === 'tool' && i.callId === callId) : -1
 }
 
 /** Carries the stored number the host sent along onto the item (#79) — omitted when there is none */
@@ -276,12 +257,10 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'tool_result': {
       /*
-       * A result attaches to **its own call's row** (#98 — `ownerOf`). Among rows with no `callId`,
-       * that is the longest-open row (2026-09-12): last-wins had swapped the results of two calls
-       * opened back to back. Restoration (`messagesToChat`) uses the same rule — the same screen must
+       * A result attaches to **its own call's row** (#98 — `ownerOf`). Restoration (`messagesToChat`) uses the same rule — the same screen must
        * never end up pairing things differently across the two paths.
        */
-      const real = ownerOf(items, e.callId, 'oldest')
+      const real = ownerOf(items, e.callId)
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       // `live` is discarded here — the full completed output has already arrived as `result`, so the chunk's job is done
@@ -295,7 +274,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
      * tail is kept: what needs showing is "what is coming out right now," not the full text.
      */
     case 'tool_output_delta': {
-      const real = ownerOf(items, e.callId, 'latest')
+      const real = ownerOf(items, e.callId)
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       if (target.result !== undefined) return items
@@ -649,16 +628,14 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
        * The host keeps `tool_call` and `tool_result` as separate rows, but only the `tool_call` branch
        * existed here. So reopening a session left the card with only its title, its output gone
        * completely — a screen that had only ever been visible to whoever watched it live. The
-       * attachment rule is the same as live's (`appendChat`): **its own call's row** (`ownerOf`, #98)
-       * — among old-shaped rows with no `callId`, the longest-open row with no result yet.
+       * attachment rule is the same as live's (`appendChat`): **its own call's row** (`ownerOf`, #98).
        *
        * If no match is found (a page boundary put its `tool_call` outside this batch), it is silently
        * dropped — attaching an ownerless output to the conversation as a new row would invent a
-       * message that never existed. Attaching it to someone else's open card would also invent one:
-       * the positional rule would grab whatever background agent card happened to occupy that spot.
+       * message that never existed.
        */
       const e = m.payload as { callId?: string; summary?: string; ok?: boolean }
-      const i = ownerOf(items, e.callId ?? '', 'oldest')
+      const i = ownerOf(items, e.callId ?? '')
       const it = items[i]
       if (it?.kind === 'tool') items[i] = { ...it, result: e.summary ?? '', ok: e.ok }
     } else if (m.kind === 'image') {

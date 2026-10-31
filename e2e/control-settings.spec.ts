@@ -452,7 +452,7 @@ test("The session's settings say when Centralu has not read the model's window t
   const note = page.getByTestId('settings-auto-compact-note')
   await expect(note).toContainText("has not read this model's window yet")
 
-  // A machine from before the setting says "Unknown method"; any other failure is its own words, not that
+  // A failure is said in its own words
   const fail = (message: string) =>
     page.evaluate((m) => {
       ;(window as any).__store.getState().platform.agents.autoCompact = async () => {
@@ -460,14 +460,9 @@ test("The session's settings say when Centralu has not read the model's window t
       }
     }, message)
   await page.keyboard.press('Escape')
-  await fail('Unknown method: agents.autoCompact. This Centralu host does not have it.')
-  await page.getByTestId('settings-open').click()
-  await expect(note).toContainText('predates the Auto compact setting')
-  await page.keyboard.press('Escape')
   await fail('connection lost')
   await page.getByTestId('settings-open').click()
   await expect(note).toContainText('Could not read where this session compacts (connection lost)')
-  await expect(note).not.toContainText('predates')
 
   // Turned off in Settings: Centralu says nothing about it here
   await page.evaluate(() => (window as any).__store.getState().setPrefs({ autoCompact: { controlled: false } }))

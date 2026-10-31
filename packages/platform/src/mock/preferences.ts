@@ -1,5 +1,5 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol/client'
-import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol/client'
+import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy } from '@cc/protocol/client'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 
@@ -64,14 +64,7 @@ export class PreferencesMock {
       } catch {
         /* node, or storage denied — the in-memory copy still works */
       }
-      // The same one-time move as the host's: a record with no text size takes the snapshot's step (#312 step 5)
-      const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
-      if (!hasTextSize) {
-        const snapshot: unknown = await this.workspace.load()
-        const legacy = textSizeFromLegacyStep(isRecord(snapshot) ? snapshot.textScale : undefined)
-        if (legacy !== null) this.write({ textSize: legacy })
-      }
-      // And the notification switches (#1306): a record with none takes the snapshot's, or the defaults, once
+      // The notification switches (#1306): a record with none takes the snapshot's, or the defaults, once
       if (this.uiPrefs.notifyPolicy === undefined) {
         const snapshot: unknown = await this.workspace.load()
         const carried = readNotifyPolicy(isRecord(snapshot) ? snapshot.notifyPolicy : undefined)

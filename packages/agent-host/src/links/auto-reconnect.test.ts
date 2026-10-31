@@ -209,29 +209,13 @@ describe('the switch is kept with the machine (#1341)', () => {
     const remote = await remoteHost()
     const store = new Store()
     const first = await hubHost(() => lineFor(remote.port), { store })
-    expect(first.row()).toMatchObject({ autoReconnect: true, connect: 'at_start' })
-    expect(await first.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: false })).toMatchObject({ autoReconnect: false, connect: 'when_needed' })
+    expect(first.row()).toMatchObject({ autoReconnect: true })
+    expect(await first.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: false })).toMatchObject({ autoReconnect: false })
     await first.links.stop()
 
     expect(storeRegistry(store).list()).toEqual([expect.objectContaining({ id: 'm1', autoReconnect: false })])
     const second = await hubHost(() => lineFor(remote.port), { store })
-    expect(second.row()).toMatchObject({ autoReconnect: false, connect: 'when_needed' })
-  })
-
-  it('answers the older window’s connect mode as the switch, and its need as nothing', async () => {
-    const remote = await remoteHost()
-    const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
-    await eventually(() => hub.row().status === 'connected')
-    expect(await hub.call('machines.setConnect', { machineId: 'm1', connect: 'at_start' })).toMatchObject({ autoReconnect: true, connect: 'at_start' })
-    expect(await hub.call('machines.setConnect', { machineId: 'm1', connect: 'when_needed' })).toMatchObject({ autoReconnect: false, connect: 'when_needed' })
-    // Nothing is connected for a need any more: a disconnected machine stays so
-    await hub.call('machines.disconnect', { machineId: 'm1' })
-    const opens = hub.tunnel().opens
-    expect(await hub.call('machines.need', { machineId: 'm1' })).toMatchObject({ status: 'disconnected' })
-    expect(await hub.call('machines.need', { machineId: 'm1', repeat: true })).toMatchObject({ status: 'disconnected' })
-    await pause(300)
-    expect(hub.row().status).toBe('disconnected')
-    expect(hub.tunnel().opens).toBe(opens)
+    expect(second.row()).toMatchObject({ autoReconnect: false })
   })
 })
 
@@ -911,8 +895,6 @@ describe('the setting across builds (#1341)', () => {
     expect(MachineInfo.parse(row).autoReconnect).toBe(true)
     expect(MachineInfo.parse({ ...row, autoReconnect: 'on_tuesdays' }).autoReconnect).toBe(true)
     expect(MachineInfo.parse({ ...row, autoReconnect: false }).autoReconnect).toBe(false)
-    // The older connect mode is still read for one release
-    expect(MachineInfo.parse({ ...row, connect: 'when_needed' }).connect).toBe('when_needed')
   })
 
   it('reads a status a newer hub may send and this window does not know as unreachable', () => {

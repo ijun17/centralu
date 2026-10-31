@@ -217,7 +217,7 @@ test('Evidence panel tabs: Git shows only changes, and History shows the graph i
 
   // The chosen tab is recorded in the snapshot
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
-  expect(snap?.panelTab).toBe('files')
+  expect(snap?.panelLayout?.[0]?.active).toBe('files')
 })
 
 test('Clicking a commit in History opens it in the wide area', async ({ page }) => {
