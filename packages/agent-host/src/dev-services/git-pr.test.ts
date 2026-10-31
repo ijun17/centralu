@@ -28,6 +28,9 @@ function fakeGh(bin: string): void {
   chmodSync(gh, 0o755)
 }
 
+// `pr` creates `pids` before it writes it, so a read can find it empty: parse until it parses (`eventually` retries a throw)
+const pids = (project: string, ms: number) => eventually(() => JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number], ms)
+
 /*
  * The host's merge check runs gh in the project's folder, and stopping the host aborts it (#368). Windows refuses to
  * remove a folder a running process works in, so an abort must not return while gh is still there, and gh's own
@@ -76,8 +79,7 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await eventually(() => existsSync(join(project, 'pids')), 10_000)
-    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    const [ghPid, child] = await pids(project, 10_000)
     childPid = child
     expect(alive(child)).toBe(true)
     stop.abort()
@@ -112,8 +114,7 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await eventually(() => existsSync(join(project, 'pids')), 20_000)
-    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    const [ghPid, child] = await pids(project, 20_000)
     childPid = child
     stop.abort()
     const started = Date.now()
@@ -145,8 +146,7 @@ describe('gh stopped by an abort (#368)', () => {
     const bound = 3_000 * SLOW
     const started = Date.now()
     const answer = gitBranchPr(project, 'feat/x', undefined, bound)
-    await eventually(() => existsSync(join(project, 'pids')), 20_000)
-    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    const [ghPid, child] = await pids(project, 20_000)
     childPid = child
     expect(await answer).toBeNull()
     expect(Date.now() - started).toBeLessThan(bound + 5_000 * SLOW)
@@ -176,8 +176,7 @@ describe('gh stopped by an abort (#368)', () => {
     __forgetPrograms()
 
     const answer = gitBranchPr(project, 'feat/x', undefined, 3_000 * SLOW)
-    await eventually(() => existsSync(join(project, 'pids')), 20_000)
-    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    const [ghPid, child] = await pids(project, 20_000)
     childPid = child
     expect(await answer).toBeNull()
     expect(alive(ghPid)).toBe(false)
