@@ -31,10 +31,12 @@ describe('CI bundles carry the release their commit was cut from (#1501)', () =>
 
 describe('CI proves the macOS app bundles without making an unused disk image', () => {
   it('builds only the app on macOS and keeps the default bundles on other platforms', () => {
-    const builds = steps.filter((step) => /run:.*tauri build/.test(step))
+    const builds = steps.filter((step) => /exec tauri build/.test(step))
     const mac = builds.find((step) => step.includes("if: runner.os == 'macOS'"))
     expect(mac, 'macOS must override the default app,dmg bundles').toBeDefined()
-    expect(mac).toContain('run: pnpm --filter @cc/desktop exec tauri build --bundles app\n')
+    // Through `tee`, for the linker's warnings (the oldest-macOS check reads the log), and with `pipefail` so a failed build still fails
+    expect(mac).toContain('set -o pipefail\n')
+    expect(mac).toContain('pnpm --filter @cc/desktop exec tauri build --bundles app 2>&1 | tee "$RUNNER_TEMP/tauri-build.log"\n')
     const others = builds.find((step) => step.includes("if: runner.os != 'macOS'"))
     expect(others).toContain('run: pnpm --filter @cc/desktop exec tauri build\n')
     expect(others).toContain('APPIMAGE_EXTRACT_AND_RUN: 1')

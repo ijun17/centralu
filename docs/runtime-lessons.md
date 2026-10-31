@@ -1349,6 +1349,8 @@ Rule: rename the filled copy into place first, then `fchmod` it 0555 through a d
 list the top folder again and refuse anything unexpected.
 Guard: `verify/copy.rs` `a_filled_copy_is_placed_and_then_made_read_only_in_any_parent`; `verify/copy.rs`
 `something_added_to_the_top_folder_before_it_is_read_only_is_refused`.
+Since 2026-11-02 these guards run in CI only on macOS 15 (GitHub retired the macOS 14 images), where the macOS 14
+behavior may not reproduce, so they no longer prove this rule: a change to the copy needs a run on a macOS 14 machine.
 Platforms: macOS.
 
 **FI9. The downgrade floor rises only after a keeper served.**

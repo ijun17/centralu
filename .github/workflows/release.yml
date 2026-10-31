@@ -232,8 +232,9 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          # Only valid per platform; a shared key would let two architectures collide.
-          key: ${{ matrix.target }}
+          # Only valid per platform; a shared key would let two architectures collide. The runner image is in it
+          # too, as in build.yml: a runner move rebuilds the dependencies.
+          key: ${{ matrix.target }}-${{ matrix.runner }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -251,7 +252,8 @@ jobs:
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
           SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
           TARGET: ${{ matrix.target }}
-          # The oldest macOS the app runs on, as build.yml's macOS build states it (checked there on the built app).
+          # The oldest macOS the app runs on, as build.yml's macOS build states it. release-npm.mts checks every Mach-O
+          # file in the staged package against it (scripts/macos-minos.mjs).
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.target == 'darwin-arm64' && '11.0' || '' }}
           # pnpm verify's styles.test.ts: main's bundle comparison is build.yml's verify job's (#1181)
           CC_BUNDLE_COMPARED_BY: build.yml verify
