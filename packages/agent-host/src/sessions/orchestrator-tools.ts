@@ -18,10 +18,9 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
 /*
  * The orchestrator tools, in four modules (#850): the definitions (tool-definitions.ts), which seat is shown and
  * may run which (tool-seats.ts), the texts the answers are built from (tool-answers.ts), and here the runner both
- * paths call. Every name stays importable from here, as before the split.
+ * paths call. The names the callers still import are re-exported from here.
  */
-export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
-export type { AppAccessToolName, CommandToolName, OrchestratorToolName } from './tool-definitions.js'
+export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
 export { callForm, codexToolInstructionsFor, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, orchestratorToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
@@ -32,7 +31,7 @@ export { trustedJsonText } from './tool-answers.js'
  * and the runtime cannot import this layer (sessions). The existing consumers (the two adapters
  * and the manager) still import it from here unchanged.
  */
-export { ORCHESTRATOR_MCP_NAME, mcpServerNameError, proposedMcpServerNameError } from '../apps/contract.js'
+export { ORCHESTRATOR_MCP_NAME, proposedMcpServerNameError } from '../apps/contract.js'
 
 /** One call of a tool: what it reaches, who called, and the call's own signal where the path has one */
 type ToolCall = { tools: OrchestratorTools; caller: ToolCaller; signal?: AbortSignal }

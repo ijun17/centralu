@@ -3,7 +3,7 @@ import type { BackgroundTask } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import { isCentraluInputId } from '../adapters/input-receipts.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { PAUSED_REPORT_SETTLE_MS } from './manager.js'
+import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
 
 /**

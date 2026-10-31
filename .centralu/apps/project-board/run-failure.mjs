@@ -55,9 +55,7 @@ export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test
 
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
 export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
-/** What GitHub writes on a job (or a step) that ran out of time. */
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
-export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minutes|The action '.*' has timed out after \d+ minutes/i
 const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
 const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
 /** What GitHub writes on a job whose runner went away. */

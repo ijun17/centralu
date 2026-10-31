@@ -9,7 +9,7 @@ import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
-import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
+import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import type { ModelOption } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { orchestratorAgentsRoot } from './orchestrator-home.js'

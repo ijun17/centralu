@@ -484,11 +484,6 @@ export function programFor(
   return found ? { path: found, found: true } : { path: notOnPath(name, env), found: false }
 }
 
-/** The separator of a PATH list */
-export function pathListSeparator(family: OsFamily): string {
-  return pathRules(family).delimiter
-}
-
 /** What Windows assumes when PATHEXT is not set */
 export const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD'
 

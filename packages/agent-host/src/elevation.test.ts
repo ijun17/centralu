@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectElevation, detectToken } from './elevation.js'
+import { detectToken } from './elevation.js'
 import { elevatedFromGroups, elevationSource, logonFromGroups } from './os.js'
 
 /** Whether a host runs with administrator rights, said to a hub that links to it (#702) */
@@ -26,19 +26,19 @@ describe('telling an elevated host (#702)', () => {
   })
 
   it('answers from whoami on Windows, and says nothing when whoami cannot be run', async () => {
-    expect(await detectElevation({ platform: 'win32', env: {}, run: async () => GROUPS('High') })).toBe(true)
-    expect(await detectElevation({ platform: 'win32', env: {}, run: async () => GROUPS('Medium') })).toBe(false)
-    expect(await detectElevation({ platform: 'win32', env: {}, run: () => Promise.reject(new Error('ENOENT')) })).toBeNull()
+    expect((await detectToken({ platform: 'win32', env: {}, run: async () => GROUPS('High') })).elevated).toBe(true)
+    expect((await detectToken({ platform: 'win32', env: {}, run: async () => GROUPS('Medium') })).elevated).toBe(false)
+    expect((await detectToken({ platform: 'win32', env: {}, run: () => Promise.reject(new Error('ENOENT')) })).elevated).toBeNull()
   })
 
   it('is root elsewhere, and unknown where there is no uid', async () => {
-    expect(await detectElevation({ platform: 'linux', getuid: () => 0 })).toBe(true)
-    expect(await detectElevation({ platform: 'darwin', getuid: () => 501 })).toBe(false)
-    expect(await detectElevation({ platform: 'linux', getuid: undefined })).toBeNull()
+    expect((await detectToken({ platform: 'linux', getuid: () => 0 })).elevated).toBe(true)
+    expect((await detectToken({ platform: 'darwin', getuid: () => 501 })).elevated).toBe(false)
+    expect((await detectToken({ platform: 'linux', getuid: undefined })).elevated).toBeNull()
   })
 
   it.runIf(process.platform === 'win32')('gets an answer from this Windows machine’s own whoami', async () => {
-    expect(typeof (await detectElevation())).toBe('boolean')
+    expect(typeof ((await detectToken()).elevated)).toBe('boolean')
   })
 })
 

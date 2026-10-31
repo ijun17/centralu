@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CENTRALU, PERSON, appAddress, hostOf, parseAddress, sessionAddress } from './address.js'
+import { CENTRALU, PERSON, appAddress, parseAddress, sessionAddress } from './address.js'
 import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 
 describe('ids (§11.4)', () => {
@@ -67,8 +67,6 @@ describe('addresses (§2, §11.4)', () => {
     expect(parseAddress(appAddress('hub-1a2b3c4d', 'p1', 'project-board'))).toEqual({ kind: 'app', host: 'hub-1a2b3c4d', projectId: 'p1', appId: 'project-board' })
     expect(parseAddress(PERSON)).toEqual({ kind: 'person' })
     expect(parseAddress(CENTRALU)).toEqual({ kind: 'centralu' })
-    expect(hostOf(parseAddress(sessionAddress('hub-1a2b3c4d', 's'))!)).toBe('hub-1a2b3c4d')
-    expect(hostOf({ kind: 'person' })).toBeNull()
   })
 
   it('text that is not an address does not parse, and one cannot be built from a part with a separator in it', () => {

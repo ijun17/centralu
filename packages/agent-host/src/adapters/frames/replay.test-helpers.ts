@@ -55,12 +55,6 @@ export const jsonRpcCodec: FrameCodec = {
   },
 }
 
-/** JSON lines with a `type` (a stream-json CLI): the same type, the rest as the tool chose */
-export const jsonLinesCodec: FrameCodec = {
-  match: (sent, want) => (sent.type === want.type ? null : `the adapter sent ${String(sent.type)} where the recording sends ${String(want.type)}`),
-  rewrite: (incoming) => incoming,
-}
-
 export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
   let cursor = 0
   const frames = recording.frames

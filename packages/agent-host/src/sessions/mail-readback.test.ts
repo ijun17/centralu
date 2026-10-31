@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, HistoryMessage } from '../adapters/contract.js'
 import { __setSessionApiForTest, readClaudeHistory } from '../adapters/claude/history.js'
-import { mailFrame } from '../mail/frame.js'
+import { buildMailFrame } from '../mail/frame.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { FakeAdapter, managerWorld } from './manager.test-helpers.js'
@@ -33,7 +33,7 @@ beforeEach(() => {
 })
 afterEach(() => __setSessionApiForTest(undefined))
 
-const WAKE = mailFrame([
+const WAKE = buildMailFrame([
   {
     messageId: 'hub-aaaaaaaa.m_01J00000000000000000000001',
     threadId: 'hub-aaaaaaaa.t_01J00000000000000000000001',
@@ -42,7 +42,7 @@ const WAKE = mailFrame([
     relation: 'the person',
     inline: 'Fourth message',
   },
-])
+]).text
 
 describe('the catch-up after a restart with a mail wake in the CLI’s record', () => {
   it('stores no user row for the wake, and the answer after it', async () => {

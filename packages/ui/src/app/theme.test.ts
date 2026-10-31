@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
-import { ACCENT_TOKENS, accentTokens, activeSide, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
+import { accentTokens, activeSide, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -66,7 +66,7 @@ describe('a value a theme file holds that this window cannot use', () => {
 describe('the accent', () => {
   it('colours focus and selection, and never the signal', () => {
     const tokens = accentTokens('#6ea8fe')
-    expect(Object.keys(tokens).sort()).toEqual([...ACCENT_TOKENS].sort())
+    expect(Object.keys(tokens).sort()).toEqual(['--color-focus', '--color-selection'])
     expect(tokens).not.toHaveProperty('--color-ink-signal')
     expect(tokens['--color-focus']).toBe('#6ea8fe')
   })

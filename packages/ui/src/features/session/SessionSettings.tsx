@@ -87,20 +87,6 @@ const NO_MODELS: { models: ModelOption[]; reason?: string } = { models: [] }
 /** The same empty list each render, so a menu reading it does not see a new one every time */
 const NO_LEVELS: string[] = []
 
-/**
- * The response-length levels for this tool (#54). If empty, the tool has no such knob, so the
- * row itself does not appear.
- *
- * This does not branch on the tool's name — it reads the adapter's declared capabilities
- * (verbosities). It is a knob only Codex has today, but writing "show this if codex" would turn
- * it into code that only someone who remembers this file could fix the day Claude gets the same
- * knob.
- */
-export function useVerbosities(tool: ToolName, machine: string | null = null): string[] {
-  // The menu must still render even if capabilities cannot be read — it just loses one row
-  return useCapabilities(tool, machine)?.verbosities ?? NO_LEVELS
-}
-
 function useCapabilities(tool: ToolName, machine: string | null): AdapterCapabilities | undefined {
   const platform = usePlatform()
   return useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data

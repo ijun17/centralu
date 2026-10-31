@@ -103,7 +103,6 @@ export const tierPhrase = (b) => (TIER_NAME[b?.tier] ? `the ${TIER_NAME[b.tier]}
 export const LANDING_WAIT_MS = 30 * 60_000
 
 export const activeBatch = (q) => (q.batches ?? []).find((b) => BATCH_ACTIVE.has(b.state)) ?? null
-export const batchName = (b) => b.branch
 const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
 /**
@@ -376,9 +375,3 @@ export function batchLine(b, ref) {
             : `ended (${b.state})${b.landed ? `, landed ${b.landed} of ${prs.length}` : ''}`
   return `Batch ${b.branch}: ${refList(b, prs, ref)} — ${what}`
 }
-
-/** Members still in an active item of this batch. */
-export const liveMembers = (q, b) => b.members.filter((m) => {
-  const it = findItem(q, b.repo, m.pr)
-  return it && it.batch === b.id && ACTIVE.has(it.state)
-})

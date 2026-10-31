@@ -99,11 +99,6 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
  */
 export const RECONNECTING_FLAG_MS = 5 * 60_000
 
-/** The interruptions that outlive the process and are stored; `reconnecting` describes a running one */
-export function storedInterruption(i: Interruption | null | undefined): Interruption | null {
-  return i && i.reason !== 'reconnecting' ? i : null
-}
-
 /** One line for an orchestrator's list and agent_session (#698), in the words the model reads */
 export function interruptionWords(i: Interruption): string {
   switch (i.reason) {

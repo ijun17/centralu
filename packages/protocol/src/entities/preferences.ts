@@ -21,7 +21,7 @@ export type ThemeMode = z.infer<typeof ThemeMode>
  * The five steps of the app-wide text size (#312 step 5): the root's CSS zoom factor, with 1 as the
  * default. Why a zoom and not a font size: every text size in the UI is pinned in px, and growing
  * only the text in a narrow grid panel breaks its wrapping first; scaling the whole screen by one
- * factor follows the same rule as the OS's own display scaling (the store's TEXT_SCALES comment).
+ * factor follows the same rule as the OS's own display scaling (the `useTextZoom` comment in the UI store).
  */
 export const TEXT_SIZES = [0.85, 0.925, 1, 1.1, 1.25] as const
 

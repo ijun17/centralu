@@ -9,7 +9,8 @@ import type { Store } from '../dev-services/store.js'
 import type { createRpcHandler } from '../rpc.js'
 import { turnAnswer } from './turn-answer.js'
 import { brokerSaid, brokerWorld, type BrokerWorld, type FakeAdapter } from './app-broker.test-helpers.js'
-import { appMessageFrame, type SessionManager } from './manager.js'
+import { appMessageFrame } from './app-messages.js'
+import type { SessionManager } from './manager.js'
 
 /**
  * An agent an app has assigned (M4 D-1) — the whole path from a session's agent calling an app

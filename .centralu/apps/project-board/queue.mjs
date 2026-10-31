@@ -19,8 +19,7 @@ import { CAUSE_TEXT, onFlakyList } from './run-failure.mjs'
 import { isAcked } from './notice-acks.mjs'
 import { short } from './util.mjs'
 
-/** What an item can be in. The first three are active (the driver polls them); the last two are done. */
-export const STATES = ['waiting', 'ci', 'attention', 'merged', 'closed']
+/** What an item can be in: waiting, ci, attention (active: the driver polls them), merged, closed (done). */
 export const ACTIVE = new Set(['waiting', 'ci', 'attention'])
 /** The squash subject's limit, in characters (docs/commit-conventions.md). */
 export const SUBJECT_MAX = 72

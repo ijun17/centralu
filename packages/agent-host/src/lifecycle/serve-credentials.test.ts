@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { credentialCheck, credentialsReport, isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { credentialCheck, credentialsReport, isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -10,9 +10,9 @@ const entry = (id: string, token: string) => ({ id, label: id, verifier: verifie
 describe('reading the full credentials', () => {
   it('reads each entry of a version 2 file, and none of anything else', () => {
     const file = JSON.stringify({ v: 2, key: KEY, port: 1, full: [entry('aaaaaaaa', HUB), { id: 'bad', verifier: 'not hex' }, entry('bbbbbbbb', WINDOW)] })
-    expect(readFullCredentials('v2', () => file).map((c) => c.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
-    expect(readFullCredentials('v1', () => JSON.stringify({ v: 1, token: HUB }))).toEqual([])
-    expect(readFullCredentials('half', () => 'half', () => {})).toEqual([])
+    expect(readCredentialFile('v2', () => file).full.map((c) => c.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+    expect(readCredentialFile('v1', () => JSON.stringify({ v: 1, token: HUB })).full).toEqual([])
+    expect(readCredentialFile('half', () => 'half', () => {}).full).toEqual([])
   })
 
   it('takes only an entry of the shape the launcher lists and --revoke takes: an 8-hex id and a label', () => {
@@ -30,7 +30,7 @@ describe('reading the full credentials', () => {
         { id: 'cccccccc', label: 'hub:laptop-0123abcd', verifier: v },
       ],
     })
-    expect(readFullCredentials('shapes', () => file).map((c) => c.id)).toEqual(['cccccccc'])
+    expect(readCredentialFile('shapes', () => file).full.map((c) => c.id)).toEqual(['cccccccc'])
   })
 
   it('lists each credential the host takes as a hub row shows it, never its verifier, and none of a file it cannot read', () => {
@@ -39,23 +39,24 @@ describe('reading the full credentials', () => {
       key: KEY,
       full: [{ ...entry('aaaaaaaa', HUB), replaced: true }, { id: 'zz', label: 'hand', verifier: verifierOf(HUB) }, entry('bbbbbbbb', WINDOW)],
     })
-    expect(readListedCredentials('l', () => file)).toEqual([
+    const listed = (read: () => string) => credentialsReport('l', read, new UsedCredentials()).credentials
+    expect(listed(() => file)).toEqual([
       { id: 'aaaaaaaa', label: 'aaaaaaaa', created: 1, replaced: true },
       { id: 'bbbbbbbb', label: 'bbbbbbbb', created: 1, replaced: false },
     ])
-    expect(JSON.stringify(readListedCredentials('l', () => file))).not.toContain(verifierOf(HUB))
-    expect(readListedCredentials('l', () => 'half')).toBeNull()
-    expect(readListedCredentials('l', () => JSON.stringify({ v: 1, token: HUB }))).toBeNull()
+    expect(JSON.stringify(listed(() => file))).not.toContain(verifierOf(HUB))
+    expect(listed(() => 'half')).toBeNull()
+    expect(listed(() => JSON.stringify({ v: 1, token: HUB }))).toBeNull()
   })
 
   it('reads again when the file is caught mid-replace, and names none when it stays unreadable', () => {
     let reads = 0
     const flaky = () => (++reads < 3 ? '' : JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] }))
-    expect(readFullCredentials('flaky', flaky, () => {})).toHaveLength(1)
-    expect(readFullCredentials('never-read', () => { throw new Error('EBUSY') }, () => {})).toEqual([])
+    expect(readCredentialFile('flaky', flaky, () => {}).full).toHaveLength(1)
+    expect(readCredentialFile('never-read', () => { throw new Error('EBUSY') }, () => {}).full).toEqual([])
     // Held past the retries (a scanner on Windows): none for a new hello, what it said last for a socket already in
     const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
-    expect(readFullCredentials('held', () => good, () => {})).toHaveLength(1)
+    expect(readCredentialFile('held', () => good, () => {}).full).toHaveLength(1)
     const held = readCredentialFile('held', () => { throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }) }, () => {})
     expect(held.full).toEqual([])
     expect(held.open.map((c) => c.id)).toEqual(['aaaaaaaa'])
@@ -79,13 +80,13 @@ describe('reading the full credentials', () => {
 
   it('names none once the file is gone, though it named some before (#1405 review: moved aside)', () => {
     const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
-    expect(readFullCredentials('moved', () => good, () => {})).toHaveLength(1)
+    expect(readCredentialFile('moved', () => good, () => {}).full).toHaveLength(1)
     const gone = () => {
       throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
     }
-    expect(readFullCredentials('moved', gone, () => {})).toEqual([])
+    expect(readCredentialFile('moved', gone, () => {}).full).toEqual([])
     // And a refused read after that does not bring the old list back
-    expect(readFullCredentials('moved', () => { throw new Error('EBUSY') }, () => {})).toEqual([])
+    expect(readCredentialFile('moved', () => { throw new Error('EBUSY') }, () => {}).full).toEqual([])
   })
 
   it('keeps the last list for a socket already in only for a while, then names none', () => {
@@ -94,7 +95,7 @@ describe('reading the full credentials', () => {
     const busy = () => {
       throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' })
     }
-    expect(readFullCredentials('busy', () => good, () => {}, () => t)).toHaveLength(1)
+    expect(readCredentialFile('busy', () => good, () => {}, () => t).full).toHaveLength(1)
     t += LAST_READ_KEPT_MS
     expect(readCredentialFile('busy', busy, () => {}, () => t).open).toHaveLength(1)
     t += 1

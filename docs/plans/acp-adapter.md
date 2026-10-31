@@ -135,7 +135,7 @@ agent, [antigravity-acp.md](antigravity-acp.md)):
 | Process start and tree teardown | `adapters/local-process.ts`, the keeper's `ProcessSource` (shared already) | as is |
 | The frame recorder | `adapters/frames/recorder.ts` (`CC_RECORD_FRAMES=<folder>`, one file per process, lines both ways and the exit) | as is: it records lines of any protocol |
 | The scrubber | `scripts/frames-scrub.mts` | as is; its id keys (`sessionId`, `toolCallId`, `messageId`) may need the tool's own |
-| The replayer | `adapters/frames/replay.test-helpers.ts`, with a `FrameCodec` | with `jsonLinesCodec` (lines matched by `type`) instead of `jsonRpcCodec` |
+| The replayer | `adapters/frames/replay.test-helpers.ts`, with a `FrameCodec` | with a JSON-lines codec (lines matched by `type`; not written yet) instead of `jsonRpcCodec` |
 | The scenarios and their driver | `adapters/frames/scenarios.test-helpers.ts`, at `SessionHandle` level | as is, with a record script of its own |
 | The no-sleeps guard | the `guard/no-sleeps` block in `tooling/eslint-guards.js` | add its folder to the list |
 | The capability limits and `launchRefusal` | `@cc/protocol` | declare what it cannot keep; the host and the pickers follow |

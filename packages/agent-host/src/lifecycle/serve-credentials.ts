@@ -195,16 +195,6 @@ function readKeyEntries(raw: unknown, full: readonly { id: string }[]): KeyCrede
   })
 }
 
-/** The full credentials a new hello is checked against now (`readCredentialFile`'s `full`) */
-export function readFullCredentials(
-  path: string,
-  read: (p: string) => string,
-  pause: (ms: number) => void = sleepSync,
-  now: () => number = Date.now,
-): FullCredential[] {
-  return readCredentialFile(path, read, pause, now).full
-}
-
 /**
  * A full credential as a hub's machine row lists it (#1405): never its verifier. `gone`: no longer listed, but a socket
  * said hello with it on this host (`UsedCredentials`)
@@ -480,16 +470,7 @@ export function credentialsReport(
 }
 
 /**
- * The full credentials `serve.json` names, as the launcher's `--connection` lists them (`others`), for `host.credentials`:
- * a hub reads them through its link between links, so a pairing made while the link is up shows on its row too. Null
- * when the file cannot be read now; the hub keeps what it read last.
- */
-export function readListedCredentials(path: string, read: (p: string) => string): ListedCredential[] | null {
-  return readListing(path, read)?.map(({ verifier: _verifier, ...c }) => c) ?? null
-}
-
-/**
- * `readListedCredentials` with each full entry's verifier, which stays on this host: only a `credentialCheck` of it
+ * The full credentials `serve.json` names (`host.credentials`, read by a hub through its link between links) with each full entry's verifier, which stays on this host: only a `credentialCheck` of it
  * leaves. The hubs' key entries follow with their public keys (#1711, §4.4), which are public
  */
 function readListing(path: string, read: (p: string) => string): (ListedCredential & { verifier?: string })[] | null {

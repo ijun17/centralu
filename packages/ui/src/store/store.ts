@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_UI_PREFERENCES, TEXT_SIZES, parseUiPreferences } from '@cc/protocol/client'
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from '@cc/protocol/client'
 import type {
   AppQuestion,
   ToolStatus,
@@ -14,22 +14,13 @@ import type {
 import { DEFAULT_NOTIFY_POLICY, gridSessionIds, type ProjectArrangement } from '@cc/core'
 import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
-export {
-  audienceText,
-  compactionText,
-  errorText,
-  handoffText,
-  markerText,
-  messagesToChat,
-  noticeLine,
-  resetText,
-} from './transcript.js'
+export { audienceText, messagesToChat } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
 import { type AppState, type InlineView, type Notice, type PinnedView, type StoreSet } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
 import type { CommandRun } from './state/projects.js'
 export type { CommandRun } from './state/projects.js'
-export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
+export type { AppState, Draft, InlineView, PinnedView } from './state.js'
 export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
 export {
@@ -41,23 +32,13 @@ export {
   projectScreenSessions,
   returnsToPanel,
   screenExists,
-  screenOf,
 } from './screens.js'
 export { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS } from './sessionList.js'
 import { appActions, inlineFrameKey, inlineFrames, type InlineFrame } from './apps.js'
-export {
-  applyAppView,
-  AUTO_RELOAD_WINDOW_MS,
-  AUTO_RELOADS,
-  inlineFrameShown,
-  inlineViewsFromHistory,
-  registerPinnedFrame,
-} from './apps.js'
-export type { InlineFrame } from './apps.js'
+export { inlineFrameShown, inlineViewsFromHistory, registerPinnedFrame } from './apps.js'
 import { eventActions } from './events/index.js'
 import { layoutActions } from './layout.js'
 export {
-  CENTER_MIN,
   PANEL_DEFAULT,
   PANEL_MAX,
   PANEL_MIN,
@@ -97,19 +78,7 @@ import { focusActions } from './sessions/focus.js'
  * for what the tabs *are* (e.g. why `history` sits beside `git` rather than inside it,
  * #21) moved with the type. Re-exported so screens keep one import site for the store.
  */
-export type { PanelGroup, PanelTab } from './panelLayout.js'
-
-/**
- * The five steps of overall text size (the middle one is the default) — the protocol's
- * `TEXT_SIZES`, since the size is a preference (`UiPreferences.textSize`, #312 step 5).
- *
- * The value is the root's CSS zoom factor. The alternative of scaling only the font (switching to
- * rem) would be a full rewrite, because every bit of text in this codebase is fixed in px
- * (text-xs…), and if only the text grows while the panel does not, line wrapping breaks first
- * in a narrow grid panel. Scaling the whole screen by the same factor is predictable instead,
- * because it follows the same rule as the OS's own display scaling.
- */
-export const TEXT_SCALES = TEXT_SIZES
+export type { PanelTab } from './panelLayout.js'
 
 /** Registers a drawn frame in `inlineFrames` (apps.ts, with the reason it exists); here because each change bumps the store's counter */
 export function registerInlineFrame(sessionId: string, callId: string, frame: InlineFrame): () => void {
@@ -123,7 +92,15 @@ export function registerInlineFrame(sessionId: string, callId: string, frame: In
   }
 }
 
-/** The current scale (a `TEXT_SCALES` value). Used to convert between real pixels and zoom coordinates */
+/**
+ * The root's CSS zoom factor (a protocol `TEXT_SIZES` value; the middle of the five is the default). Used to convert
+ * between real pixels and zoom coordinates.
+ *
+ * It is a zoom, not a font-only scale: switching to rem would be a full rewrite, because every bit of text in this
+ * codebase is fixed in px (text-xs…), and if only the text grows while the panel does not, line wrapping breaks first
+ * in a narrow grid panel. Scaling the whole screen by the same factor is predictable, because it follows the same rule
+ * as the OS's own display scaling.
+ */
 export function useTextZoom(): number {
   return useStore((s) => s.prefs.textSize)
 }

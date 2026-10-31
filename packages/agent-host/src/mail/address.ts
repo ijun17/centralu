@@ -18,7 +18,6 @@
  * and goes into the wake frame as it is)
  */
 const SEGMENT = '[A-Za-z0-9][A-Za-z0-9._~-]{0,63}'
-const SEGMENT_RE = new RegExp(`^${SEGMENT}$`)
 const SESSION_RE = new RegExp(`^session:(${SEGMENT})/(${SEGMENT})$`)
 const APP_RE = new RegExp(`^app:(${SEGMENT})/(${SEGMENT})/(${SEGMENT})$`)
 
@@ -30,10 +29,6 @@ export type Party =
   | { kind: 'app'; host: string; projectId: string; appId: string }
   | { kind: 'person' }
   | { kind: 'centralu' }
-
-export function isAddressSegment(value: string): boolean {
-  return SEGMENT_RE.test(value)
-}
 
 export function sessionAddress(host: string, sessionId: string): string {
   return checked(`session:${host}/${sessionId}`)
@@ -52,11 +47,6 @@ export function parseAddress(address: string): Party | null {
   const [, appHost, projectId, appId] = APP_RE.exec(address) ?? []
   if (appHost !== undefined && projectId !== undefined && appId !== undefined) return { kind: 'app', host: appHost, projectId, appId }
   return null
-}
-
-/** The host an address lives on, or null for the person and Centralu, who are this host's own */
-export function hostOf(party: Party): string | null {
-  return party.kind === 'session' || party.kind === 'app' ? party.host : null
 }
 
 function checked(address: string): string {

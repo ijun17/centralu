@@ -144,14 +144,6 @@ function inlineHeader(i: MailFrameItem): string {
 }
 
 /**
- * The frame for these items (oldest first), or an empty string for none: with nothing left at drain time nothing is sent
- * and no turn starts (§7.5). Past `budget` characters the oldest items fold into "and N more", which stay unread
- */
-export function mailFrame(items: readonly MailFrameItem[], budget = MAIL_FRAME_BUDGET, calls: MailCalls = PLAIN_CALLS): string {
-  return buildMailFrame(items, budget, calls).text
-}
-
-/**
  * The frame, and the ids of the messages it tells the receiver of: not those folded into "and N more". A body that had to
  * be cut is told of, with the way to read the rest, and stays unread
  */

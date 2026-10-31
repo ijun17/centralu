@@ -56,33 +56,28 @@ const USER_SCOPE = USER_APP_SCOPE
 export type { AppRef } from './ref.js'
 /** The file that makes a folder an app — the host's core asks whether a folder has one (#1141) */
 export { MANIFEST_FILE } from './manifest.js'
-export type { AppProjectTarget } from './app-folders.js'
 
 /** The shape of a check report also leaves through this door (C-3) */
-export type { AppCheckReport, CheckFinding } from './check.js'
-/** The shape of an error bundle (C-6) */
-export type { HeldErrorBundle, SentErrorBundle } from './errors.js'
+export type { AppCheckReport } from './check.js'
 /** The part of the broker's body the host's core fills in (D) — the manager supplies it via `attachBrokerHost` */
-export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityOrigin, CapabilityQuestion, CapabilityDecisionListed } from './desk.js'
+export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityQuestion } from './desk.js'
 /** Where a capability approval's answer is stored (D-4) — the host fills it in with the store (`app-permission-book.ts`) */
-export type { CapabilityBook, CapabilityDecision } from './capabilities.js'
+export type { CapabilityBook } from './capabilities.js'
 /** The closed list of host data (D-3) — the manager fills in what each name gives */
-export { HOST_CAPABILITIES, type HostCapability } from './capabilities.js'
+export type { HostCapability } from './capabilities.js'
 
 /** The shape of the ledger also leaves through this door — a place for the core to fill in (main.ts, `app-run-ledger.ts`) */
-export type { RunLedger, AppRunRow, AppRunListed, AgentTokens, AgentUse } from './runs.js'
+export type { RunLedger, AppRunRow } from './runs.js'
 /** The rule for reading a tool's declared screen also leaves through this door — an in-conversation screen (B-1) uses the same validation as a fixed screen */
 export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
-export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
+export type { AppCaller, AppCallOutcome, ExternalAppsDeps, RuntimeTiming } from './runtime-types.js'
 import { invalidReason, keepsVersions, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
 export { resultText } from './app-calls.js'
-/** An app that cannot be called (`unavailable.ts`) — leaves through this door */
-export { AppUnavailableError } from './unavailable.js'
 
 export class ExternalApps {
   /** Scope key → (app id → entry) */

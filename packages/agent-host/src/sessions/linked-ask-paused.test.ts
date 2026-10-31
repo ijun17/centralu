@@ -7,7 +7,8 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import type { AskProjectResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { scriptedAdapters } from '../links/scripted-agent.test-helpers.js'
-import { PAUSED_REPORT_SETTLE_MS, SessionManager } from './manager.js'
+import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 
 /**
