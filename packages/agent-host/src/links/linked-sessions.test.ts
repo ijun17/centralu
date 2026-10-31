@@ -371,14 +371,6 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [none]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: [] })
   })
 
-  it('names a machine whose Centralu predates reading it, wherever it is asked', async () => {
-    const old = machine({}, { mirror: { sessions: [{ id: 'w1', name: 'Worker', projectId: 'p1', state: 'idle', tool: 'codex', kind: 'worker' }], projects: [{ id: 'p1', name: 'api' }] } })
-    const reader = linkedSessions(() => [old])
-    expect(await listText(old)).toBe('- Worker [m1.w1] · project api on Box · codex · idle · Box runs a Centralu too old for the orchestrator to reach; update it there')
-    expect(await reader.read('m1.w1')).toEqual({ ok: false, error: 'Box runs a Centralu too old for the orchestrator to reach; update it there' })
-    expect((await reader.recall('x', 12)).notSearched).toEqual(['Box (Box runs a Centralu too old for the orchestrator to reach; update it there)'])
-  })
-
   it('lists an away machine from the mirror without its orchestrator, and does not ask it', async () => {
     let asked = 0
     const away = machine(

@@ -1,7 +1,7 @@
 import { isLocalBuildVersion } from '@cc/protocol'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
-import { lastLine, NOT_FOUND, remoteScript, shimNames, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
 
 /**
@@ -99,9 +99,6 @@ export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'tar
   if (r.stdout.includes(NOT_FOUND)) return { wasRunning: false }
   const answer = parseStopLine(r.stdout)
   if (!answer) {
-    if (/unknown option for serve: --stop/.test(r.stderr)) {
-      throw new Error(`The Centralu running on ${c.target} is too old to be stopped from here: stop \`${shimNames(c.spec).centralu} serve\` there, then try again`)
-    }
     const why = lastLine(r.stderr)
     throw new Error(`Stopping Centralu on ${c.target} gave no answer${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
   }

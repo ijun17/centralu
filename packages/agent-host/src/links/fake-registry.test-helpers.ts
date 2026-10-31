@@ -123,7 +123,7 @@ if (a === 'serve --stop') {
   log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : '-') + (existsSync(d + '/remote/hold.json') ? ' (held)' : '') + (process.env.CENTRALU_STOP_FOR === 'update' ? ' (for update)' : ''))
   rmSync(d + '/running', { force: true })
   console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
-} else if (a === 'serve --detach') {
+} else if (a === 'serve --detach' || a.startsWith('serve --detach --from ')) {
   log('start ' + V)
   // FAKE_MIGRATES=<version>: that version migrates the store so only it reads it; any other then refuses it
   if (process.env.FAKE_MIGRATES === V) writeFileSync(d + '/store.db', 'needs ' + V)

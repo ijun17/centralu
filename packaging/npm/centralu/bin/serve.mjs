@@ -29,7 +29,7 @@ export { detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, wi
 export { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, parseNetstatListening } from './serve-port.mjs'
 export { SERVE_HELP, AUTOSTART_ACTIONS, parseServeArgs, PAIR_LABEL_RE, CREDENTIAL_ID_RE } from './serve-args.mjs'
 export { launcherScript, ensureLauncher, remoteLayout, parsePointer, installInfo, managedLauncherScript } from './serve-install.mjs'
-export { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, mismatchServerVersion, hostProvesOf, probeHost, probeKeyProof, takesKeyHellos, askHostToStop, askHostRpc, serveFrom, keyLine } from './serve-host.mjs'
+export { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, mismatchServerVersion, probeHost, probeKeyProof, takesKeyHellos, askHostToStop, askHostRpc, serveFrom, keyLine } from './serve-host.mjs'
 export { stopServedHost, moveIntoSignIn, HANDOVER_WAIT_MS } from './serve-handover.mjs'
 export { parseLinkPublicKey, hostLinkPublicKey, signedHostKey, linkTranscript } from './serve-keys.mjs'
 export { runWindow } from './serve-window.mjs'

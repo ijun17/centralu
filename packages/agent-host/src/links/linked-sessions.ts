@@ -109,11 +109,8 @@ function notWithin(ms: number): string {
 }
 
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
-function cause(m: RoutedMachine, err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err)
-  // A machine on a Centralu from before phase 4 (connected anyway, on one protocol)
-  if (message.startsWith('Unknown method: host.')) return `${m.name} runs a Centralu too old for the orchestrator to reach; update it there`
-  return oneLine(message, 300)
+function cause(err: unknown): string {
+  return oneLine(err instanceof Error ? err.message : String(err), 300)
 }
 
 /**
@@ -169,7 +166,7 @@ export function linkedSessions(
     try {
       return { ok: true, ...(await run()) }
     } catch (err) {
-      return { ok: false, error: cause(m, err) }
+      return { ok: false, error: cause(err) }
     }
   }
   /** A project row a machine answered, in the hub's terms; null when it is not a project row */
@@ -264,7 +261,7 @@ export function linkedSessions(
       if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
       return { projects: (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null), away }
     } catch (err) {
-      return { projects: mirrored(cause(m, err)), away }
+      return { projects: mirrored(cause(err)), away }
     }
   }
   /** Whether `ref` names machine `m`: `<machine>/<name>` by its name or id, or a qualified id (`<machine id>.<id>`) */
@@ -606,17 +603,7 @@ export function linkedSessions(
     async inspectFolder(machineId, path) {
       const m = machineById(machineId)
       if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      const r = await attempt(m, async () => {
-        try {
-          return { raw: await route('projects.inspect', { path, machine: m.id }) }
-        } catch (err) {
-          // A machine on a Centralu from before #1220 knows no such method
-          if (err instanceof Error && /Unknown method: projects\.inspect/.test(err.message)) {
-            throw new Error(`${m.name} runs a Centralu too old to check a folder for the orchestrator; update it there, or add the folder from its group's Add project`)
-          }
-          throw err
-        }
-      })
+      const r = await attempt(m, async () => ({ raw: await route('projects.inspect', { path, machine: m.id }) }))
       if (!r.ok) return r
       const facts = RpcMethods['projects.inspect'].result.safeParse(r.raw)
       if (!facts.success) return { ok: false, error: `${m.name} answered something that is not a folder's facts` }
@@ -673,7 +660,7 @@ export function linkedSessions(
         const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
         return { ok: true, text, length: r.data.length, seq: r.data.seq }
       } catch (err) {
-        if (!(err instanceof Error && /Unknown method: host\.lastAnswer/.test(err.message))) return { ok: false, error: cause(m, err) }
+        if (!(err instanceof Error && /Unknown method: host\.lastAnswer/.test(err.message))) return { ok: false, error: cause(err) }
       }
       // A machine on a Centralu from before #1186: its last assistant line, which it cut at 2,000 characters of JSON
       const r = await this.read(sessionId, 8)
@@ -695,7 +682,7 @@ export function linkedSessions(
             if (answer === TIMED_OUT) return lastKnown(m, notWithin(lookupMs))
             return rows(m, answer)
           } catch (err) {
-            return lastKnown(m, cause(m, err))
+            return lastKnown(m, cause(err))
           }
         }),
       )
@@ -751,7 +738,7 @@ export function linkedSessions(
         const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
         return { ok: true, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
       } catch (err) {
-        return { ok: false, error: cause(m, err) }
+        return { ok: false, error: cause(err) }
       }
     },
 
@@ -786,7 +773,7 @@ export function linkedSessions(
             }
             return out.slice(0, limit)
           } catch (err) {
-            notSearched.push(`${m.name} (${cause(m, err)})`)
+            notSearched.push(`${m.name} (${cause(err)})`)
             return []
           }
         }),

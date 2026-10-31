@@ -7,7 +7,7 @@ import { isAlive, say } from './serve-util.mjs'
 import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
 import { hostLinkPublicKey } from './serve-keys.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 import { moveIntoSignIn } from './serve-handover.mjs'
@@ -35,16 +35,13 @@ export function serveFolder({ env, home, cliPath, platform = process.platform })
 export async function describe({ env, dataDir, state, entry, version, paired = null, keyPaired = null }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry)
-  // Whether the installed host proves it holds the token (#838): asked of the running one before its hello, and said in the line
-  const proof = hostProvesOf(entry)
-  const probe = await probeHost({ port, token: state.token, proofKey: state.proofKey, protocolVersion: installed, prove: proof })
+  const probe = await probeHost({ port, token: state.token, proofKey: state.proofKey, protocolVersion: installed })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
   const hostRunning = heldHere(probe, dataDir, undefined, state.port != null)
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
   return {
-    proof,
     port,
     ...(paired ? { token: paired.token, credential: paired.id } : {}),
     // A key pairing (#1711): the key the running host signs with and the entry it signs for, never a credential
@@ -150,7 +147,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT
-  const existing = await probeHost({ port: recorded, token: state.token, proofKey: state.proofKey, protocolVersion, prove: hostProvesOf(entry) })
+  const existing = await probeHost({ port: recorded, token: state.token, proofKey: state.proofKey, protocolVersion })
   // A host the hub's ssh started before anyone signed in moves into this sign-in, once idle (#1224, serve-handover.mjs)
   if (heldHere(existing, dataDir, undefined, state.port != null) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
     const pid = lockHolderPid(dataDir)

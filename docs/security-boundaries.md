@@ -1642,9 +1642,9 @@ A host started with `centralu serve` on another machine is reached by the app th
   the remote's token. So before the hello the hub asks the host to prove it holds the token (`prove`: an HMAC of a
   fresh nonce under the token, with a label no other derived secret uses, `transport/host-proof.ts`), and sends the
   hello only to a host that does. Something else on the port gets a nonce, never the token, and the link reports
-  itself down. The hub asks only when the connection line says the host can (`proof`, written by
-  `serve --connection` over SSH from the installed build, `hostProof` in `bundle-info.json`, never from what answers
-  on the port, which could otherwise make the line say no); a remote from before #838 has no `proof` and gets the
+  itself down. The hub asks only when the connection line says the host can (`proof`, which every `serve --connection`
+  from 0.1.0-beta.45 on writes, never taken from what answers on the port, which could otherwise make the line say
+  no); a remote from before #838 has no `proof` and gets the
   hello as before, so on such a remote this hole stays open until it is updated. A host that refuses the `prove`
   (a machine rolled back to such a build) is a refusal: the hub reads the line again rather than retrying.
 - **Residual: the proof under a stored verifier** (#1405 review, held for the owner). A hub that paired proves the
@@ -1657,12 +1657,12 @@ A host started with `centralu serve` on another machine is reached by the app th
   credential); until the owner decides, it stays a stated residual. Another account cannot take this path: it cannot
   read the 0600 file. The design that closes it (#1711, proposed): [plans/key-pairing.md](plans/key-pairing.md).
 - **The same on the linked machine.** `serve --connection`, `serve` and `serve --stop` ask the host on the recorded
-  port with the token, and another account there can hold that port while the host is down. When the installed
-  build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
+  port with the token, and another account there can hold that port while the host is down. They send `prove` first
+  and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
   Something on the port that does not prove is not this folder's host unless the folder's `host.lock` names a live
-  process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`): a host from before #838 still running
-  after an update, which then counts as running and is stopped by its pid. A lock a dead host left, whose pid another
-  process now has, or one without a start time (an older host, or Windows, which has no `ps`), does not count, so
+  process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`) and that `serve` started: a host still
+  on its old key after `--rotate-token`, which then counts as running and is stopped by its pid. A lock a dead host
+  left, whose pid another process now has, or one without a start time (Windows, which has no `ps`), does not count, so
   `--stop` never signals a stranger.
 - **A linked machine updated without a restart** runs an older host than the one installed: its line says `proof`
   (from the installed build), the host refuses the `prove`, and the link says so ("runs an older Centralu host than

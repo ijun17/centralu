@@ -550,11 +550,11 @@ export function removeServePid(dataDir, pid) {
 }
 
 /**
- * A probe that did not prove the token, while this data folder's `serve` is alive (`host.lock`): a host from before #838
- * still running after an update, or one still on its old key after `--rotate-token`. It is running, and is not sent the
- * token; a hub asking it for a proof is refused until it restarts. Without a live lock holder that `serve` started
- * (`startedByServe`), what answered is not ours: a live holder the app or the keeper started owns the folder, and
- * whatever sits on the recorded port (a hub's ssh forward, #1722) is not that holder.
+ * A probe that did not prove the token, while this data folder's `serve` is alive (`host.lock`): a host still on its old
+ * key after `--rotate-token`. It is running, and is not sent the token; a hub asking it for a proof is refused until it
+ * restarts. Without a live lock holder that `serve` started (`startedByServe`), what answered is not ours: a live holder
+ * the app or the keeper started owns the folder, and whatever sits on the recorded port (a hub's ssh forward, #1722) is
+ * not that holder.
  *
  * `portRecorded`: serve.json names the port the probe went to (`state.port != null`). A folder that has none was probed
  * on the default port, where whatever listens is as likely another host's (a hub's ssh forward to a linked machine's serve
@@ -568,15 +568,11 @@ export function heldHere(probe, dataDir, startOf = processStartTime, portRecorde
 
 /**
  * Whether the process `host.lock` names is a host `centralu serve` started (#1722): what lets the launcher signal it.
- * The lock says so itself (`by: 'serve'`, #1223); a lock that names another starter (`app`, `keeper`) is that one's. A
- * lock from before `by` is believed only when `serve.pid` names the same pid as the host its launcher started, the way
- * `stopServedHost` believes the launcher. A bare pid, or a lock nothing else vouches for, is no one's we know.
+ * The lock says so itself (`by: 'serve'`, #1223); a lock that names another starter (`app`, `keeper`), or none (a host
+ * started by hand), is not serve's.
  */
 export function startedByServe(dataDir) {
-  const holder = lockHolder(dataDir)
-  if (!holder) return false
-  if (holder.by) return holder.by === 'serve'
-  return readServePid(dataDir)?.hostPid === holder.pid
+  return lockHolder(dataDir)?.by === 'serve'
 }
 
 /** Who `by` in host.lock says started the host, as a phrase (#1223); an absent `by` is most likely the app */
@@ -598,7 +594,7 @@ export function foreignHolder(dataDir) {
  * Whether the process `host.lock` names is the one that wrote it (#838 review): alive, and started when the lock says
  * (`ps -o lstart`, as the host writes it, `instance-lock.ts`). A lock left by a host that died, whose pid another
  * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
- * start time (a host from before #184) or a system without `ps` (Windows) cannot be told apart, so it does not count.
+ * start time (its host found no `ps`) or a system without `ps` (Windows) cannot be told apart, so it does not count.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
   let holder
@@ -612,14 +608,12 @@ export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
 }
 
 /**
- * host.lock's `{ pid, started, by? }`; a bare pid (an older host) has no start time. `by` (#1223, additive) is who
- * started the host: `app`, `keeper` or `serve` (`instance-lock.ts`), absent when the host did not say
+ * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
+ * (`instance-lock.ts`), absent when the host did not say
  */
 function parseLockHolder(text) {
-  const t = text.trim()
-  if (/^\d+$/.test(t)) return Number(t) > 0 ? { pid: Number(t), started: null } : null
   try {
-    const v = JSON.parse(t)
+    const v = JSON.parse(text)
     if (!Number.isInteger(v?.pid) || v.pid <= 0) return null
     const by = v.by === 'app' || v.by === 'keeper' || v.by === 'serve' ? v.by : null
     return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(by ? { by } : {}) }

@@ -53,7 +53,6 @@ import {
   SERVE_PORT_TRIES,
   probeHost,
   askHostToStop,
-  hostProvesOf,
   heldHere,
   startedByServe,
   foreignHolder,
@@ -589,15 +588,8 @@ describe('the connection line', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
     // `takes`: the options an older serve refuses, so a hub (`from`) or the window (`window`) uses them only on one that says so (#1223)
     // `pair` (#1405): `--connection --pair` hands out a full credential of its own
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window', 'pair'] })
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, proof: true, takes: ['from', 'window', 'pair'] })
     expect(line).not.toContain('\n')
-  })
-
-  // Only a host that proved it holds the token is marked (#838); a line without it gets the hello as before
-  it('says proof only when the running host proved it', () => {
-    const base = { port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: true }
-    expect(JSON.parse(connectionLine({ ...base, proof: true }))).toMatchObject({ proof: true })
-    expect(JSON.parse(connectionLine({ ...base, proof: false }))).not.toHaveProperty('proof')
   })
 
   it('has a default port below the ephemeral ranges and the host’s view origin ports', () => {
@@ -1543,7 +1535,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
       },
     })
     await server.listen()
-    const existing = await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })
+    const existing = await probeHost({ port: state.port!, token: state.token, proofKey: state.proofKey, protocolVersion: PROTOCOL_VERSION })
     return { d, server, calls, told, existing }
   }
 
@@ -1587,7 +1579,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
       expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual(['host.stop ifIdle', 'host.stop ifIdle', 'host.stop ifIdle'])
       expect(h.calls).not.toContain('host.activity')
       expect(h.told).toEqual([{ state: 'waiting', since: expect.any(Number) }])
-      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(false)
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, proofKey: readServeState(h.d)!.proofKey, protocolVersion: PROTOCOL_VERSION })).running).toBe(false)
     } finally {
       await h.server.close()
     }
@@ -1612,7 +1604,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
       expect(moved).toBe(false)
       expect(h.told.map((t) => (t as { state: string }).state)).toEqual(['waiting', 'gave_up'])
       expect(h.calls.every((c) => c !== 'host.stop')).toBe(true)
-      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, proofKey: readServeState(h.d)!.proofKey, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
     } finally {
       await h.server.close()
     }
@@ -1794,7 +1786,7 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
       expect(w.calls).toEqual({ detach: 0, signIn: 0 })
       w.stdin.end()
       expect(await w.done).toBe(0)
-      expect((await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+      expect((await probeHost({ port: state.port!, token: state.token, proofKey: state.proofKey, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
     } finally {
       await server.close()
     }
@@ -2129,9 +2121,9 @@ describe('asking the host on the port without handing the token to anyone else (
   it('a program on the port gets a nonce, never the token, from the probe and from --stop', async () => {
     const s = await squatter()
     try {
-      const probe = await probeHost({ port: s.port, token: TOKEN, protocolVersion: PROTOCOL_VERSION, prove: true })
+      const probe = await probeHost({ port: s.port, token: TOKEN, protocolVersion: PROTOCOL_VERSION })
       expect(probe).toEqual({ running: false, unproven: true })
-      expect(await askHostToStop({ port: s.port, token: TOKEN, protocolVersion: PROTOCOL_VERSION, prove: true })).toMatchObject({ ok: false })
+      expect(await askHostToStop({ port: s.port, token: TOKEN, protocolVersion: PROTOCOL_VERSION })).toMatchObject({ ok: false })
       expect(s.got.join('\n')).not.toContain(TOKEN)
       expect(s.got.map((g) => JSON.parse(g).kind)).toEqual(['prove', 'prove'])
       // Not this folder's host: no live lock holder
@@ -2177,14 +2169,12 @@ describe('asking the host on the port without handing the token to anyone else (
    * another process holds the folder's lock. The lock holder is a separate child process, as the app's host is: a
    * launcher that signals it must not take the test down with it (#1721 review).
    */
-  function lockHolderProcess(dir: string, by?: 'app' | 'keeper' | 'serve', serveLauncher = false) {
+  function lockHolderProcess(dir: string, by?: 'app' | 'keeper' | 'serve') {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
     started.push(child)
     const pid = child.pid!
     const exited = new Promise<void>((r) => child.once('exit', () => r()))
     writeFileSync(join(dir, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at: Date.now(), ...(by ? { by } : {}) }))
-    // What an older launcher left: its pid, and the host it started (here the same process)
-    if (serveLauncher) writeFileSync(join(dir, SERVE_PID_FILE), JSON.stringify({ pid, hostPid: pid, port: null }))
     return { pid, exited, alive: () => child.exitCode === null && child.signalCode === null }
   }
 
@@ -2236,16 +2226,13 @@ describe('asking the host on the port without handing the token to anyone else (
   }, 30_000 * SLOW)
 
   /*
-   * What stays stoppable (#838): a host that cannot prove the key (from before proofs, or still on the key it had before
-   * --rotate-token) which serve started. The lock says so, or an older lock without it agrees with serve.pid.
+   * What stays stoppable (#838): a host that cannot prove the key (still on the key it had before --rotate-token) which
+   * serve started, as its lock says.
    */
-  it.skipIf(!POSIX).each([
-    ['a lock that says serve', { by: 'serve' as const, serveLauncher: false }],
-    ['an older lock that serve.pid vouches for', { by: undefined, serveLauncher: true }],
-  ])('a host that cannot prove the key is stopped by signal when serve started it: %s', async (_name, { by, serveLauncher }) => {
+  it.skipIf(!POSIX)('a host that cannot prove the key is stopped by signal when its lock says serve started it', async () => {
     const s = await squatter()
     const d = tempDir()
-    const holder = lockHolderProcess(d, by, serveLauncher)
+    const holder = lockHolderProcess(d, 'serve')
     try {
       ensureServeState(d)
       recordServePort(d, s.port)
@@ -2275,7 +2262,7 @@ describe('asking the host on the port without handing the token to anyone else (
     const server = new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '9.9.9' } })
     const port = await server.listen()
     try {
-      expect(await probeHost({ port, token: TOKEN, protocolVersion: PROTOCOL_VERSION, prove: true })).toEqual({ running: true, protocolVersion: PROTOCOL_VERSION, version: '9.9.9' })
+      expect(await probeHost({ port, token: TOKEN, protocolVersion: PROTOCOL_VERSION })).toEqual({ running: true, protocolVersion: PROTOCOL_VERSION, version: '9.9.9' })
     } finally {
       await server.close()
     }
@@ -2289,7 +2276,10 @@ describe('asking the host on the port without handing the token to anyone else (
   it('reads the host protocol a version_mismatch names in its data, in the probe as in --stop', async () => {
     const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
     await new Promise<void>((r) => wss.once('listening', () => r()))
-    wss.on('connection', (ws) => ws.on('message', () => {
+    // It proves it holds the token, then refuses the hello for its protocol
+    wss.on('connection', (ws) => ws.on('message', (d) => {
+      const f = JSON.parse(String(d)) as { kind: string; nonce?: string }
+      if (f.kind === 'prove') return ws.send(JSON.stringify({ kind: 'proof', nonce: f.nonce, mac: createHmac('sha256', TOKEN).update(`centralu host proof v1\0${f.nonce}`).digest('base64url') }))
       ws.send(JSON.stringify({ kind: 'res', id: null, ok: false, error: { code: 'version_mismatch', message: 'Update Centralu.', retryable: false, data: { protocolVersion: 7 } } }))
     }))
     const port = (wss.address() as { port: number }).port
@@ -2300,16 +2290,6 @@ describe('asking the host on the port without handing the token to anyone else (
       await new Promise<void>((r) => wss.close(() => r()))
     }
   })
-
-  it('takes proof from the installed build: a bundle that says hostProof, or the source', () => {
-    const d = tempDir()
-    expect(hostProvesOf(join(d, 'main.mjs'))).toBe(false)
-    writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1 }))
-    expect(hostProvesOf(join(d, 'main.mjs'))).toBe(false)
-    writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1 }))
-    expect(hostProvesOf(join(d, 'main.mjs'))).toBe(true)
-    expect(hostProvesOf(SOURCE_HOST)).toBe(true)
-  })
 })
 
 /*
@@ -2317,17 +2297,16 @@ describe('asking the host on the port without handing the token to anyone else (
  * folder's host, `--stop` would signal that stranger. Only the process that started when the lock says counts.
  */
 describe('the pid host.lock names', () => {
-  it('reads it in both forms a host writes, and nothing else', () => {
+  it('reads it as a host writes it, and nothing else', () => {
     const d = tempDir()
     expect(lockHolderPid(d)).toBeNull()
     const at = (text: string) => {
       writeFileSync(join(d, 'host.lock'), text)
       return lockHolderPid(d)
     }
-    expect(at('4242\n')).toBe(4242)
     expect(at(JSON.stringify({ pid: 4242, started: 'Thu Oct 16 10:00:00 2026' }))).toBe(4242)
     expect(at(JSON.stringify({ pid: 4242 }))).toBe(4242)
-    for (const bad of ['0', '{"pid":0}', '{"pid":-3}', '{"pid":"4242"}', '{"pid":4.5}', '"4242"', '4.0', 'null', 'not a lock', '']) expect(at(bad), bad).toBeNull()
+    for (const bad of ['0', '{"pid":0}', '{"pid":-3}', '{"pid":"4242"}', '{"pid":4.5}', '"4242"', '4242', '4.0', 'null', 'not a lock', '']) expect(at(bad), bad).toBeNull()
   })
 
   // So a serve refused on a folder says whose host holds it (#1223): what it says, never what it does not
@@ -2340,8 +2319,6 @@ describe('the pid host.lock names', () => {
     expect(at({ pid: 4242, started: null, by: 'app', at: 1 })).toEqual({ pid: 4242, started: null, by: 'app' })
     expect(at({ pid: 4242, started: null, by: 'serve', from: { hub: 'Mac' } })).toEqual({ pid: 4242, started: null, by: 'serve' })
     expect(at({ pid: 4242, started: null, by: 'robot' })).toEqual({ pid: 4242, started: null })
-    writeFileSync(join(d, 'host.lock'), '77')
-    expect(lockHolder(d)).toEqual({ pid: 77, started: null })
   })
 })
 
@@ -2354,7 +2331,7 @@ describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it 
     expect(started).toEqual(expect.any(String))
     lock(d, { pid: process.pid, started })
     expect(lockHolderIsAlive(d)).toBe(true)
-    // Alive, but nothing says serve started it (the app, a keeper, or an older host nothing vouches for): not serve's
+    // Alive, but nothing says serve started it (the app, a keeper, or a host started by hand): not serve's
     expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
     expect(foreignHolder(d)).toEqual({ pid: process.pid, started })
     lock(d, { pid: process.pid, started, by: 'app' })
@@ -2363,13 +2340,11 @@ describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it 
     lock(d, { pid: process.pid, started, by: 'serve' })
     expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
     expect(foreignHolder(d)).toBeNull()
-    // A lock from before 'by' is serve's when serve.pid names the same host, and only then
+    // A lock without 'by' is not serve's, whatever serve.pid names
     lock(d, { pid: process.pid, started })
-    writeFileSync(join(d, SERVE_PID_FILE), JSON.stringify({ pid: 1, hostPid: process.pid + 1, port: 1 }))
-    expect(startedByServe(d)).toBe(false)
     writeFileSync(join(d, SERVE_PID_FILE), JSON.stringify({ pid: 1, hostPid: process.pid, port: 1 }))
-    expect(startedByServe(d)).toBe(true)
-    expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    expect(startedByServe(d)).toBe(false)
+    lock(d, { pid: process.pid, started, by: 'serve' })
     // An answer on a port serve.json does not name (the default one) is not this folder's, lock holder or not
     expect(heldHere({ running: false, unproven: true }, d, undefined, false)).toBe(false)
     expect(heldHere({ running: true }, d, undefined, false)).toBe(true)
@@ -2377,8 +2352,8 @@ describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it 
     lock(d, { pid: process.pid, started: 'Thu Jan  1 00:00:00 1970' })
     expect(lockHolderIsAlive(d)).toBe(false)
     expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
-    // No start time (a host from before it was recorded): cannot be told apart, so not counted
-    lock(d, String(process.pid))
+    // No start time (its host found no `ps`): cannot be told apart, so not counted
+    lock(d, { pid: process.pid, started: null, by: 'serve' })
     expect(lockHolderIsAlive(d)).toBe(false)
     // A proven host is the host whatever the lock says
     expect(heldHere({ running: true }, d)).toBe(true)
