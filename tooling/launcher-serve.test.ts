@@ -3,7 +3,6 @@ import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_proces
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
-import { finished } from 'node:stream/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -119,8 +118,13 @@ describe('serve arguments', () => {
     expect(parseServeArgs(['--port=9001'])).toEqual({ mode: 'serve', port: 9001 })
   })
 
-  it.each([['0'], ['65536'], ['abc'], ['-1'], ['80.5']])('refuses the port %j', (raw) => {
-    expect(parseServeArgs(['--port', raw]).error).toMatch(/between 1 and 65535/)
+  it('takes 0 as any free port', () => {
+    expect(parseServeArgs(['--port', '0'])).toEqual({ mode: 'serve', port: 0 })
+    expect(parseServeArgs(['--detach', '--port=0'])).toEqual({ mode: 'detach', port: 0 })
+  })
+
+  it.each([['65536'], ['abc'], ['-1'], ['80.5']])('refuses the port %j', (raw) => {
+    expect(parseServeArgs(['--port', raw]).error).toMatch(/between 1 and 65535, or 0/)
   })
 
   it('refuses `--port` with nothing after it', () => {
@@ -758,35 +762,13 @@ function serve(dataDir: string, args: string[]) {
 }
 
 /**
- * A serve listening on a port of its own, with that port (#1788). `freePort()` closes its socket before serve binds, and a
- * test running in parallel can take the number in between; an explicit `--port` refuses a taken port. serve cannot pick one
- * itself (`--port` is 1 to 65535), so the start is tried again with another number, once, and only when serve said the
- * number was taken. `pick` is for the test that makes it taken.
+ * A serve on a free port the host picks itself (`--port 0`), with the port it reports in its `listening on` line (#1788).
+ * Nothing picks a number before serve binds one, so no other test can take it in between.
  */
-async function serveOnFreePort(dataDir: string, pick: () => Promise<number> = freePort) {
-  for (let attempt = 1; ; attempt++) {
-    const port = await pick()
-    const s = serve(dataDir, ['--port', String(port)])
-    try {
-      await s.until(/listening on 127\.0\.0\.1:\d+/)
-      return { ...s, port }
-    } catch (e) {
-      await finished(s.child.stderr!).catch(() => undefined)
-      if (attempt >= 2 || !s.out.stderr.includes(`Port ${port} is already in use`)) throw e
-    }
-  }
-}
-
-/**
- * `serve --detach` on a port of its own, tried again once like `serveOnFreePort` (#1788). A detached serve whose port was
- * taken answers `detach: { ok: false, reason: 'exited', message: '…Port N is already in use…' }` and exits 1.
- */
-async function detachOnFreePort(dataDir: string, pick: () => Promise<number> = freePort) {
-  for (let attempt = 1; ; attempt++) {
-    const port = await pick()
-    const r = await cli(dataDir, ['--detach', '--port', String(port)])
-    if (attempt >= 2 || !JSON.stringify(r.line).includes(`Port ${port} is already in use`)) return { ...r, port }
-  }
+async function serveOnAnyPort(dataDir: string) {
+  const s = serve(dataDir, ['--port', '0'])
+  await s.until(/listening on 127\.0\.0\.1:\d+/)
+  return { ...s, port: Number(/listening on 127\.0\.0\.1:(\d+)/.exec(s.out.stderr)![1]) }
 }
 
 /**
@@ -948,7 +930,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 
       // The data folder as an older build left it (#838): the host makes it its owner's only
       chmodSync(d, 0o755)
-      const { port, ...s } = await serveOnFreePort(d)
+      const { port, ...s } = await serveOnAnyPort(d)
       // Mode bits say nothing on Windows, where the host leaves them (`modesGuardFiles`)
       if (POSIX) expect(statSync(d).mode & 0o777).toBe(0o700)
 
@@ -1020,7 +1002,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'lists a credential used and withdrawn before any read as gone, and the ids used under hub labels, from a real host',
     async () => {
       const d = tempDir()
-      const { port, ...s } = await serveOnFreePort(d)
+      const { port, ...s } = await serveOnAnyPort(d)
       try {
         // Paired, used and withdrawn at once, by something of this user
         const x = (await cli(d, ['--connection', '--pair', 'x'])).line
@@ -1050,7 +1032,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'tells a linked hub of a full hello at once, and a restarted host reports it after a stop right behind it',
     async () => {
       const d = tempDir()
-      const { port, ...s } = await serveOnFreePort(d)
+      const { port, ...s } = await serveOnAnyPort(d)
       let s2: ReturnType<typeof serve> | null = null
       try {
         // A hub linked to the host: its open link is what the event goes over
@@ -1083,7 +1065,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         await s.exited
 
         // A host that starts again reports it at the next read, listed once
-        const { port: port2, ...started2 } = await serveOnFreePort(d)
+        const { port: port2, ...started2 } = await serveOnAnyPort(d)
         s2 = started2
         const r = (await askHost(port2, String(hub.token), 'host.credentials')) as Record<string, any>
         expect(r.credentials.filter((c: Record<string, unknown>) => c.id === x.credential)).toEqual([expect.objectContaining({ label: 'x', gone: true })])
@@ -1112,7 +1094,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 `
       })
       writeFileSync(join(d, 'serve-used.jsonl'), older.join(''))
-      const { port, ...s } = await serveOnFreePort(d)
+      const { port, ...s } = await serveOnAnyPort(d)
       let s2: ReturnType<typeof serve> | null = null
       try {
         const hub = (await cli(d, ['--connection', '--pair', 'hub:test-0123abcd'])).line
@@ -1129,7 +1111,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         if (POSIX) s.child.kill('SIGTERM')
         else await cli(d, ['--stop'])
         await s.exited
-        const { port: port2, ...started2 } = await serveOnFreePort(d)
+        const { port: port2, ...started2 } = await serveOnAnyPort(d)
         s2 = started2
         for (let read = 1; read <= 2; read++) {
           const r = (await askHost(port2, String(hub.token), 'host.credentials')) as Record<string, any>
@@ -1155,7 +1137,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'pairs a hub by key with a running host, lists the entry, and links again at once after --rotate-token',
     async () => {
       const d = tempDir()
-      const { port, ...s } = await serveOnFreePort(d)
+      const { port, ...s } = await serveOnAnyPort(d)
       // The key the host started with, which it signs with and hands out until it restarts
       const startKey = String(readServeState(d).key)
       try {
@@ -1200,7 +1182,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'passes Ctrl+C (SIGINT) to the host, which shuts down cleanly',
     async () => {
       const d = tempDir()
-      const s = await serveOnFreePort(d)
+      const s = await serveOnAnyPort(d)
       // At once, not after a pause: the host is still starting its services right after the ready
       // line, and a signal there used to end it by the kernel's default, skipping the shutdown
       s.child.kill('SIGINT')
@@ -1214,7 +1196,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     'takes the host down when the launcher itself is killed, instead of leaving it unsupervised',
     async () => {
       const d = tempDir()
-      const s = await serveOnFreePort(d)
+      const s = await serveOnAnyPort(d)
       const hostPid = (JSON.parse(readFileSync(join(d, 'host.lock'), 'utf8')) as { pid: number }).pid
       expect(hostPid).not.toBe(s.child.pid)
       s.child.kill('SIGKILL')
@@ -1244,7 +1226,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       const held = acquireInstanceLock(join(d, 'store.db'))
       expect(held.ok).toBe(true)
       try {
-        const s = serve(d, ['--port', String(await freePort())])
+        const s = serve(d, ['--port', '0'])
         expect(await s.exited).toBe(1)
         expect(s.out.stderr).toContain(`belongs to another Centralu host (pid ${process.pid})`)
       } finally {
@@ -1284,22 +1266,18 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000 * SLOW,
   )
-  it('starts again on another port when the one it picked was taken before serve could bind it (#1788)', async () => {
+  it('listens on a free port the host picks for `--port 0`, says which in its line, and keeps that one (never 0) for the next start (#1788)', async () => {
     const d = tempDir()
-    // Holds the number freePort() handed out, as a test running in parallel does between its close and serve's listen
-    const holder = createServer((socket) => socket.destroy())
-    await new Promise<void>((r) => holder.listen({ host: '127.0.0.1', port: 0 }, r))
-    const taken = (holder.address() as { port: number }).port
-    const picks = [taken]
+    const s = await serveOnAnyPort(d)
     try {
-      const s = await serveOnFreePort(d, async () => picks.shift() ?? (await freePort()))
-      expect(s.port).not.toBe(taken)
-      expect(picks).toEqual([])
+      expect(s.port).toBeGreaterThan(0)
+      expect(readServeState(d).port).toBe(s.port)
+      expect((await connection(d)).port).toBe(s.port)
+      expect(await hello(s.port, limitedOf(String(readServeState(d).key)))).toMatchObject({ kind: 'hello_ok' })
+    } finally {
       if (POSIX) s.child.kill('SIGTERM')
       else await cli(d, ['--stop'])
       await s.exited
-    } finally {
-      await new Promise((r) => holder.close(r))
     }
   }, 90_000 * SLOW)
 
@@ -2013,21 +1991,18 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
     }
   }
 
-  it('detaches again on another port when the one it picked was taken before the host could bind it (#1788)', async () => {
+  it('detaches on a free port the host picks for `--port 0`, and reports and keeps the one it got (#1788)', async () => {
     const d = tempDir()
-    const holder = createServer((socket) => socket.destroy())
-    await new Promise<void>((r) => holder.listen({ host: '127.0.0.1', port: 0 }, r))
-    const taken = (holder.address() as { port: number }).port
-    const picks = [taken]
     try {
       ensureServeState(d)
-      const r = await detachOnFreePort(d, async () => picks.shift() ?? (await freePort()))
-      expect(r.port).not.toBe(taken)
-      expect(picks).toEqual([])
-      expect(r.line).toMatchObject({ port: r.port, hostRunning: true, detach: { ok: true } })
+      const r = await cli(d, ['--detach', '--port', '0'])
+      expect(r.code, JSON.stringify(r.line)).toBe(0)
+      expect(r.line).toMatchObject({ hostRunning: true, detach: { ok: true, already: false } })
+      expect(r.line.port).toBeGreaterThan(0)
+      expect(readServeState(d).port).toBe(r.line.port)
+      expect((JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { port: number }).port).toBe(r.line.port)
       await cli(d, ['--stop'])
     } finally {
-      await new Promise((r) => holder.close(r))
       cleanup(d)
     }
   }, 180_000 * SLOW)
@@ -2038,10 +2013,9 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       const d = tempDir()
       try {
         ensureServeState(d)
-        const started = await detachOnFreePort(d)
-        const port = started.port
-        expect(started.code).toBe(0)
-        expect(started.line).toMatchObject({ v: 1, port, hostRunning: true, detach: { ok: true, how: POSIX ? 'setsid' : 'wmi', already: false } })
+        const started = await cli(d, ['--detach', '--port', '0'])
+        expect(started.code, JSON.stringify(started.line)).toBe(0)
+        expect(started.line).toMatchObject({ v: 1, port: expect.any(Number), hostRunning: true, detach: { ok: true, how: POSIX ? 'setsid' : 'wmi', already: false } })
         const pids = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
         expect(alive(pids.pid) && alive(pids.hostPid)).toBe(true)
 
@@ -2081,7 +2055,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       const d = tempDir()
       try {
         ensureServeState(d)
-        expect((await detachOnFreePort(d)).line).toMatchObject({ hostRunning: true })
+        expect((await cli(d, ['--detach', '--port', '0'])).line).toMatchObject({ hostRunning: true })
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
         expect(await connection(d)).not.toHaveProperty('stopped')
         expect((await cli(d, ['--detach'])).line).toMatchObject({ hostRunning: true })
@@ -2109,26 +2083,18 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       const d = tempDir()
       try {
         ensureServeState(d)
-        let session: ChildProcess
+        // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
+        const session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port 0; sleep 60`], {
+          cwd: ROOT,
+          env: cliEnv(d),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
+        })
+        started.push(session)
         let out = ''
-        for (let attempt = 1; ; attempt++) {
-          const port = await freePort()
-          // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
-          session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port ${port}; sleep 60`], {
-            cwd: ROOT,
-            env: cliEnv(d),
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: true,
-          })
-          started.push(session)
-          out = ''
-          session.stdout!.on('data', (b) => (out += String(b)))
-          const deadline = Date.now() + 60_000
-          while (!out.includes('"hostRunning":true') && !out.includes('"ok":false') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
-          // The number was taken between freePort() and the host's bind (#1788): once more with another
-          if (attempt >= 2 || !out.includes(`Port ${port} is already in use`)) break
-          process.kill(-session.pid!, 'SIGKILL')
-        }
+        session.stdout!.on('data', (b) => (out += String(b)))
+        const deadline = Date.now() + 60_000
+        while (!out.includes('"hostRunning":true') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
         expect(out).toContain('"detach":{"ok":true')
         /*
          * What lets the launcher and the host outlive the session is being outside its process group (#845). The test
@@ -2213,7 +2179,7 @@ describe('asking the host on the port without handing the token to anyone else (
     expect(held.ok).toBe(true)
     try {
       expect(readServeState(d)).toBeNull()
-      const run = serve(d, ['--port', String(await freePort())])
+      const run = serve(d, ['--port', '0'])
       expect(await run.exited).toBe(1)
       expect(run.out.stderr).not.toContain('is already running')
       expect(run.out.stderr).toContain(`belongs to another Centralu host (pid ${process.pid})`)
@@ -2272,10 +2238,9 @@ describe('asking the host on the port without handing the token to anyone else (
   it.skipIf(!POSIX).each([['app'], ['keeper']] as const)('a host that proves the key but is held by the %s is asked to stop and never signalled', async (by) => {
     const d = tempDir()
     ensureServeState(d)
-    recordServePort(d, await freePort())
     const holder = lockHolderProcess(d, by)
-    const server = new HostServer({ port: readServeState(d).port!, ...serveHostCredentials(d), onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
-    await server.listen()
+    const server = new HostServer({ port: 0, ...serveHostCredentials(d), onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+    recordServePort(d, await server.listen())
     const signals: Array<[number, string]> = []
     try {
       const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, platform: 'linux', timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
@@ -2310,7 +2275,7 @@ describe('asking the host on the port without handing the token to anyone else (
 
   it.skipIf(!POSIX)('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()
-    const run = await serveOnFreePort(d)
+    const run = await serveOnAnyPort(d)
     const hostPid = (JSON.parse(readFileSync(join(d, 'host.lock'), 'utf8')) as { pid: number }).pid
     // Prints no JSON line: not `cli`
     expect(spawnSync(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d) }).status).toBe(0)

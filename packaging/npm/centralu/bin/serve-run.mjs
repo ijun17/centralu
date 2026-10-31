@@ -199,17 +199,20 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
       }
     })
   }
-  if (child.pid) {
+  // `port` is 0 for `--port 0` until the host says which one it got
+  const writePid = (onPort) => {
     try {
-      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid: child.pid, port })}\n`)
+      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid: child.pid, port: onPort })}\n`)
     } catch (e) {
       say(`could not write ${SERVE_PID_FILE}: ${e.message}`)
     }
   }
+  if (child.pid) writePid(port)
   createInterface({ input: child.stdout }).on('line', (line) => {
     const p = readyPort(line)
     if (p === null || ready) return
     ready = true
+    if (child.pid && p !== port) writePid(p)
     try {
       recordServePort(dataDir, p, platform)
     } catch (e) {
