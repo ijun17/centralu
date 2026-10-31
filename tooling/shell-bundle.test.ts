@@ -126,7 +126,8 @@ describe("the shell's identity", () => {
         .map((l) => /^([\w-]+)\s*=/.exec(l)?.[1])
         .filter(Boolean)
     expect(names('dependencies]')).toEqual(['content-verify', 'centralu-keeper-core', 'serde_json'])
-    expect(names("target.'cfg(unix)'.dependencies]")).toEqual(['libc'])
+    // No runtime dependency of its own for unix any more: libc is a dev-dependency (the tests signal processes)
+    expect(names("target.'cfg(unix)'.dependencies]")).toEqual([])
   })
 
   it('is not built with every app build: not a default member of the workspace', () => {
