@@ -21,7 +21,7 @@ export function SleepSection(_props: { first: boolean }) {
   useEffect(() => {
     void load()
   }, [load])
-  // A host from before #568 does not know the setting: nothing to show
+  // Nothing to show until the host answers
   if (!policy) return null
   const value = policy.afterMinutes
   const choices = CHOICES.includes(value) ? CHOICES : [...CHOICES.slice(0, -1), value, null]

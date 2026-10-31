@@ -34,8 +34,6 @@ export const hostResults = {
   'machines.disconnect': MachineInfo,
   'machines.revokeCredential': MachineInfo,
   'machines.setAutoReconnect': MachineInfo,
-  'machines.setConnect': MachineInfo,
-  'machines.need': MachineInfo,
   'machines.acceptVersions': MachineInfo,
   'machines.install': MachineInstallResult,
   'machines.update': MachineInstallResult,

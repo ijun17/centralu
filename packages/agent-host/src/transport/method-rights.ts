@@ -230,7 +230,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'projects.setTrusted': 'asks',
   'projects.reorder': 'everyday',
   'projects.setCommands': 'asks',
-  'worktrees.createManager': 'everyday',
   'worktrees.setTrunk': 'everyday',
   'projects.setWorktreeSetup': 'asks',
   'projects.setAgentInstructions': 'asks',
@@ -325,8 +324,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
    */
   'machines.revokeCredential': 'everyday',
   'machines.setAutoReconnect': 'everyday',
-  'machines.setConnect': 'everyday',
-  'machines.need': 'everyday',
   'machines.acceptVersions': 'asks',
   'machines.install': 'asks',
   'machines.update': {

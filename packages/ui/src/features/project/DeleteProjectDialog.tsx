@@ -39,7 +39,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
   const [error, setError] = useState<string | null>(null)
   /*
    * What deleting may do to the folder, asked of the host once when the dialog opens (#1301): its real-path answer, where the
-   * list's mark goes by spelling. A host without the call (or one that does not answer) leaves the mark deciding.
+   * list's mark goes by spelling. A host that does not answer leaves the mark deciding.
    */
   const platform = usePlatform()
   const [outlook, setOutlook] = useState<DeleteOutlook | 'pending' | null>('pending')

@@ -58,7 +58,7 @@ export function ArchiveSection() {
    * kept app run or an app's runs (#378). One state, so a second "Delete for good…" closes the first
    */
   const [confirming, setConfirming] = useState<string | null>(null)
-  const [held, setHeld] = useState<{ sessions: SubagentStepsHeld[]; unreached?: { machineId: string; name: string }[] } | null | undefined>(null)
+  const [held, setHeld] = useState<{ sessions: SubagentStepsHeld[]; unreached?: { machineId: string; name: string }[] } | null>(null)
   const [heldError, setHeldError] = useState<string | null>(null)
 
   const loadHeld = useCallback(() => {
@@ -68,11 +68,7 @@ export function ArchiveSection() {
         setHeld(h)
         setHeldError(null)
       })
-      .catch((e: Error) => {
-        // A host before #418 has no such list: nothing to show, rather than a failure to read it
-        if (e.message.startsWith('Unknown method: subagents.usage')) setHeld(undefined)
-        else setHeldError(e.message)
-      })
+      .catch((e: Error) => setHeldError(e.message))
   }, [platform])
   const { reload } = list
   const load = useCallback(() => {
@@ -318,16 +314,14 @@ export function ArchiveSection() {
         </div>
       )}
 
-      {held !== undefined && (
-        <SubagentStepsHeldList
-          sessions={held?.sessions ?? null}
-          unreached={held?.unreached ?? []}
-          error={heldError}
-          onRetry={load}
-          row={(id) => ({ busy, error: errorOf(`held:${id}`) })}
-          onMove={(h) => void act(`held:${h.sessionId}`, () => trashSubagentSteps(h.sessionId))}
-        />
-      )}
+      <SubagentStepsHeldList
+        sessions={held?.sessions ?? null}
+        unreached={held?.unreached ?? []}
+        error={heldError}
+        onRetry={load}
+        row={(id) => ({ busy, error: errorOf(`held:${id}`) })}
+        onMove={(h) => void act(`held:${h.sessionId}`, () => trashSubagentSteps(h.sessionId))}
+      />
     </SettingsPage>
   )
 }

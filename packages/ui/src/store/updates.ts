@@ -84,7 +84,7 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
     try {
       set({ update: await platform.updates.setAutoApply(enabled) })
     } catch (e) {
-      // An older host does not know the setting; say so rather than leave the box ticked
+      // Say so rather than leave the box ticked
       set({ toast: `Could not save that: ${(e as Error).message}` })
     }
   },
@@ -163,7 +163,7 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
       // An event that arrived while the list was on its way is newer than the list: the events have kept it current
       if (get().hostRequestsHeard === heard) set({ hostRequests })
     } catch {
-      // An older host does not know them, and a host that did not answer is read again on the next reconnect
+      // A host that did not answer is read again on the next reconnect
     }
   },
 
@@ -186,7 +186,7 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
     try {
       set({ agentVersions: await platform.agents.versions(force) })
     } catch {
-      // An older host does not know it: the headers stay quiet rather than the screen breaking
+      // The headers stay quiet rather than the screen breaking
     }
   },
 

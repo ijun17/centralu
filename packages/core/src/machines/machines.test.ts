@@ -20,7 +20,6 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   install: null,
   operation: null,
   autoReconnect: true,
-  connect: 'at_start',
   otherCredentials: null,
   otherCredentialsMore: 0,
   ownCredentialGone: false,

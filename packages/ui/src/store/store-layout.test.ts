@@ -404,21 +404,21 @@ describe('project screen arrangement (#203)', () => {
     const b = await mock.projects.add('/tmp/arr-b')
     await useStore.getState().attach(mock)
 
-    useStore.getState().arrangeProject(a.id, { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] })
+    useStore.getState().arrangeProject(a.id, { panels: ['session:x', 'session:y'] })
     await tick()
-    expect(stored(mock)).toEqual({ [a.id]: { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+    expect(stored(mock)).toEqual({ [a.id]: { panels: ['session:x', 'session:y'] } })
     expect(stored(mock)?.[b.id]).toBeUndefined()
 
     useStore.setState({ projectPanels: {} })
     await useStore.getState().attach(mock)
-    expect(useStore.getState().projectPanels).toEqual({ [a.id]: { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+    expect(useStore.getState().projectPanels).toEqual({ [a.id]: { panels: ['session:x', 'session:y'] } })
   })
 
   it('no save made while restoring writes an empty arrangement over the stored one', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/arr-restore')
     mock.sessions.set('arr-r1', sessionInfo('arr-r1', { projectId: a.id }))
-    const saved = { [a.id]: { panels: ['session:arr-r1'], order: ['session:arr-r1'], hidden: [] } }
+    const saved = { [a.id]: { panels: ['session:arr-r1'] } }
     mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
     /*
      * Restoring the focused session used to save the snapshot midway, and a crash right after must not find the
@@ -440,94 +440,13 @@ describe('project screen arrangement (#203)', () => {
     expect((mock.workspaceSnapshot as { projectPanels?: unknown }).projectPanels).toEqual(saved)
   })
 
-  it('migrates arranged projects once from loaded catalogs and saves only after all workspace fields are restored', async () => {
-    const mock = new MockPlatform()
-    const arranged = await mock.projects.add('/tmp/arr-migrate')
-    const untouched = await mock.projects.add('/tmp/arr-untouched')
-    for (const id of ['first', 'hidden', 'last']) mock.sessions.set(id, sessionInfo(id, { projectId: arranged.id }))
-    mock.sessions.set('untouched', sessionInfo('untouched', { projectId: untouched.id }))
-    mock.setExternalApps([
-      { appId: 'slider', projectId: arranged.id } as never,
-      { appId: 'zebra', name: 'Zebra', projectId: arranged.id } as never,
-      { appId: 'alpha', name: 'Alpha', projectId: arranged.id } as never,
-    ])
-    const legacy = { order: ['app:slider', 'session:first', 'session:gone'], hidden: ['session:hidden'] }
-    mock.workspaceSnapshot = {
-      projectPanels: { [arranged.id]: legacy }, focusedSessionId: 'first',
-      foldedProjects: [untouched.id], panelOpen: false, introSeen: true,
-    } as never
-    await useStore.getState().attach(mock)
-    const migrated = { ...legacy, panels: ['app:slider', 'session:first', 'session:gone', 'session:last', 'app:alpha', 'app:zebra'] }
-    expect(useStore.getState().projectPanels).toEqual({ [arranged.id]: migrated })
-    useStore.setState({ view: 'focus', focusedProjectId: arranged.id, focusedSessionId: null })
-    expect(projectScreenSessions(useStore.getState())).toEqual(['first', 'last'])
-    expect(projectScreenAppKeys(useStore.getState())).toEqual([`${arranged.id}/slider`, `${arranged.id}/zebra`, `${arranged.id}/alpha`])
-    await tick()
-    expect(stored(mock)?.[arranged.id]).toEqual(migrated)
-    expect(mock.workspaceSnapshot).toMatchObject({
-      focusedSessionId: 'first', foldedProjects: [untouched.id], panelOpen: false, introSeen: true,
-    })
-    mock.sessions.set('new', sessionInfo('new', { projectId: arranged.id }))
-    await useStore.getState().attach(mock)
-    expect(useStore.getState().projectPanels[arranged.id]).toEqual(migrated)
-    useStore.setState({ focusedProjectId: untouched.id, focusedSessionId: null, view: 'focus' })
-    expect(projectScreenSessions(useStore.getState())).toEqual([])
-    expect(projectScreenAppKeys(useStore.getState())).toEqual([])
-  })
-
-  it.each(['empty', 'partial', 'failed'])(
-    'persists legacy app panels when the startup catalog is %s and draws them after discovery recovers',
-    async (catalog) => {
-      const mock = new MockPlatform()
-      const project = await mock.projects.add(`/tmp/arr-catalog-${catalog}`)
-      mock.sessions.set('kept', sessionInfo('kept', { projectId: project.id }))
-      const apps = ['offline', 'available', 'hidden'].map((appId) => ({ appId, projectId: project.id } as ExternalAppInfo))
-      mock.setExternalApps(catalog === 'partial' ? [apps[1]!] : [])
-      const list = mock.apps.list
-      if (catalog === 'failed') mock.apps.list = async () => { throw new Error('Discovery unavailable') }
-      const legacy = { order: ['app:offline', 'session:kept', 'app:available', 'app:hidden'], hidden: ['app:hidden'] }
-      mock.workspaceSnapshot = { projectPanels: { [project.id]: legacy } } as never
-
-      await useStore.getState().attach(mock)
-      await tick()
-      const migrated = { ...legacy, panels: ['app:offline', 'session:kept', 'app:available'] }
-      expect(stored(mock)?.[project.id]).toEqual(migrated)
-      useStore.setState({ view: 'focus', focusedProjectId: project.id, focusedSessionId: null })
-      expect(projectScreenAppKeys(useStore.getState())).toEqual(catalog === 'partial' ? [`${project.id}/available`] : [])
-
-      mock.apps.list = list
-      mock.setExternalApps(apps)
-      await useStore.getState().refreshExternalApps()
-      expect(projectScreenAppKeys(useStore.getState())).toEqual([`${project.id}/offline`, `${project.id}/available`])
-      expect(useStore.getState().projectPanels[project.id]).toEqual(migrated)
-      await useStore.getState().attach(mock)
-      expect(useStore.getState().projectPanels[project.id]).toEqual(migrated)
-    },
-  )
-
-  it('an empty-array legacy entry keeps the lone visible session, while a project without an entry starts empty', async () => {
-    const mock = new MockPlatform()
-    const arranged = await mock.projects.add('/tmp/arr-empty-entry')
-    const untouched = await mock.projects.add('/tmp/arr-no-entry')
-    mock.sessions.set('solo', sessionInfo('solo', { projectId: arranged.id }))
-    mock.sessions.set('other', sessionInfo('other', { projectId: untouched.id }))
-    mock.workspaceSnapshot = { projectPanels: { [arranged.id]: { order: [], hidden: [] } } } as never
-    await useStore.getState().attach(mock)
-    await tick()
-    expect(stored(mock)).toEqual({ [arranged.id]: { panels: ['session:solo'], order: [], hidden: [] } })
-    useStore.setState({ view: 'focus', focusedProjectId: arranged.id, focusedSessionId: null })
-    expect(projectScreenSessions(useStore.getState())).toEqual(['solo'])
-    useStore.setState({ focusedProjectId: untouched.id })
-    expect(projectScreenSessions(useStore.getState())).toEqual([])
-  })
-
   it.each(['reorder', 'add', 'remove'])(
     '%s edits retain unavailable app panels in the snapshot and draw them when discovery recovers',
     async (edit) => {
       const mock = new MockPlatform()
       const project = await mock.projects.add(`/tmp/arr-offline-edit-${edit}`)
       for (const id of ['a', 'b', 'c']) mock.sessions.set(id, sessionInfo(id, { projectId: project.id }))
-      const saved = { panels: ['session:a', 'app:offline', 'session:b'], order: ['session:a', 'app:offline', 'session:b'], hidden: [] }
+      const saved = { panels: ['session:a', 'app:offline', 'session:b'] }
       mock.workspaceSnapshot = { projectPanels: { [project.id]: saved } } as never
       await useStore.getState().attach(mock)
       const present = ['session:a', 'session:b', 'session:c']
@@ -537,7 +456,7 @@ describe('project screen arrangement (#203)', () => {
         : edit === 'add' ? ['session:a', 'app:offline', 'session:b', 'session:c'] : ['app:offline', 'session:b']
       useStore.getState().arrangeProject(project.id, next)
       await tick()
-      expect(stored(mock)?.[project.id]).toMatchObject({ panels: expected, order: expected })
+      expect(stored(mock)?.[project.id]).toEqual({ panels: expected })
       mock.setExternalApps([{ appId: 'offline', projectId: project.id } as ExternalAppInfo])
       await useStore.getState().refreshExternalApps()
       useStore.setState({ view: 'focus', focusedProjectId: project.id, focusedSessionId: null })
@@ -553,7 +472,7 @@ describe('project screen arrangement (#203)', () => {
     const project = await mock.projects.add('/tmp/arr-trash-signal')
     mock.sessions.set('kept', sessionInfo('kept', { projectId: project.id }))
     mock.sessions.set('deleted', sessionInfo('deleted', { projectId: project.id }))
-    useStore.getState().arrangeProject(project.id, { panels: ['session:kept', 'app:offline', 'session:deleted'], order: [], hidden: [] })
+    useStore.getState().arrangeProject(project.id, { panels: ['session:kept', 'app:offline', 'session:deleted'] })
     mock.workspaceSnapshot = { projectPanels: useStore.getState().projectPanels } as never
     await useStore.getState().attach(mock)
     mock.sessions.delete('deleted')
@@ -571,8 +490,8 @@ describe('project screen arrangement (#203)', () => {
     const a = await mock.projects.add('/tmp/arr-gone')
     const b = await mock.projects.add('/tmp/arr-stays')
     await useStore.getState().attach(mock)
-    useStore.getState().arrangeProject(a.id, { order: ['session:x'], hidden: [] })
-    useStore.getState().arrangeProject(b.id, { order: ['session:y'], hidden: [] })
+    useStore.getState().arrangeProject(a.id, { panels: ['session:x'] })
+    useStore.getState().arrangeProject(b.id, { panels: ['session:y'] })
 
     await useStore.getState().deleteProject(a.id, false)
     await tick()
@@ -589,7 +508,7 @@ describe('project screen arrangement (#203)', () => {
         s2: { ...sessionInfo('s2', { projectId: 'p1' }) } as never,
         s3: { ...sessionInfo('s3', { projectId: 'p2' }) } as never,
       },
-      projectPanels: { p1: { panels: ['session:s1'], order: ['session:s1'], hidden: ['session:s2'] } },
+      projectPanels: { p1: { panels: ['session:s1'] } },
       focusedProjectId: 'p1',
       focusedSessionId: null,
       view: 'focus',
@@ -642,22 +561,17 @@ describe('the workspace snapshot has a single writer (U7)', () => {
     expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
   })
 
-  /*
-   * The text size is a preference now (#312 step 5), not part of the snapshot: a snapshot from
-   * before carries it as a step index, and the platform moves it into the preferences once.
-   */
-  it('the text size is a preference: a stored size arrives with the preferences and is not written into the snapshot', async () => {
+  // The text size is a preference (#312 step 5), not part of the snapshot
+  it('the text size is a preference and is not written into the snapshot', async () => {
     const mock = new MockPlatform()
-    mock.workspaceSnapshot = { textScale: 3 }
     await useStore.getState().attach(mock)
-    expect(useStore.getState().prefs.textSize).toBe(1.1)
 
     await useStore.getState().setPrefs({ textSize: 1.2 })
     // Any number lands on the nearest of the five steps
     expect(useStore.getState().prefs.textSize).toBe(1.25)
     useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
-    expect(mock.workspaceSnapshot).not.toHaveProperty('textScale')
+    expect(mock.workspaceSnapshot).not.toHaveProperty('textSize')
   })
 
   /*
@@ -696,7 +610,7 @@ describe('the workspace snapshot has a single writer (U7)', () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s2', sessionInfo('si-s2'))
     // A snapshot from before this setting existed: it has layout, but no opinion on this
-    mock.workspaceSnapshot = { focusedSessionId: 'si-s2', panelOpen: true, panelTab: 'git' }
+    mock.workspaceSnapshot = { focusedSessionId: 'si-s2', panelOpen: true }
 
     // Simulates just opening the app — starts from the default (on)
     useStore.setState({ showIgnored: true })
@@ -762,7 +676,6 @@ describe('restoring the workspace saves nothing until it is done', () => {
       panelWidth: 300,
       sidebarWidth: 240,
       railWidth: 300,
-      textScale: 3,
       ...lateFields,
     } as never
 

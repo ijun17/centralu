@@ -661,15 +661,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * `projects.createWorktreeManager` (#76), kept in the protocol for an older window: the worktree manager was folded
-   * into ordinary sessions (#561 part 3), so there is no slot to make. A session starts worktree agents itself
-   * (start_agent), and the person makes a worktree session from the new-session window.
-   */
-  async createWorktreeManager(_projectId: string, _baseBranch: string): Promise<SessionInfo> {
-    throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
-  }
-
   /** `ProjectCreation.inspectFolder` (project-creation.ts): `projects.inspect` (#1220) */
   inspectFolder(...a: Parameters<ProjectCreation['inspectFolder']>): ReturnType<ProjectCreation['inspectFolder']> {
     return this.projectCreation.inspectFolder(...a)

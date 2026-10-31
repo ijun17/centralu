@@ -87,17 +87,6 @@ describe('the themes folder (#312)', () => {
     ])
   })
 
-  // The activity tokens left with the session orbit (#736): a file that still sets them did nothing wrong (#844), so they are skipped without a problem
-  it('skips the retired activity tokens without a problem and keeps the rest', async () => {
-    writeFileSync(
-      join(dir, 'old.json'),
-      JSON.stringify({ name: 'Old', base: 'dark', tokens: { ink: '#111', 'activity-1': '#2d6cf0', 'activity-5': '#4ad6d0' } }),
-    )
-    const [entry] = await files.list()
-    expect(entry).toMatchObject({ name: 'Old', tokens: { ink: '#111' }, broken: false })
-    expect(entry!.problems).toEqual([])
-  })
-
   it('announces a hand edit, once per burst of writes', async () => {
     const file = join(dir, 'mine.json')
     await writeUntilHeard(file, JSON.stringify({ name: 'Mine', base: 'dark', tokens: {} }))

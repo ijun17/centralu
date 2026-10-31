@@ -92,8 +92,7 @@ pull-request detection on every worktree session, and the project's trunk (`work
 the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The orchestrator gets no replacement for `propose_worktree_session`:
 making a branch and a folder in the person's repository now goes through a project session's consent card, and the
 orchestrator reaches that session with `send_to_session`. Existing data: store v48 gives a former manager's worktree
-sessions `askedBy` = their parent, so it owns them as the agents it started; `worktrees.createManager` is refused with
-the reason (the protocol keeps it for an older window), and the slot's column stays until a later contract step.
+sessions `askedBy` = their parent, so it owns them as the agents it started; the slot's column stays until a later contract step.
 
 The reader's read tools stay inside its project, and its tools object refuses changing
 settings outright, not only by name. Its agent tools follow §1.2.1, including auto's ownership opening. Its update tool requires consent outside auto (§4.5). It is never given to an agent
@@ -1821,7 +1820,7 @@ window's channel), grouped, and for each group one of three states.
 | `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
 | `projects.gitStatus`, `projects.origin`, `files.search` | Has it (#1219, fourth slice) | `project_git_status` (branch, changed files, origin) and `search_project_files` (by part of a name, as the composer's @ does): read only |
 | Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: both ways ask (taking trust away drops the project's own deny rules and hooks); trusting's card names the folder and each app with what it may ask for; both checked again after Allow |
-| Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person** | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `projects.delete`, `projects.reorder` | **Person** | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
@@ -1831,10 +1830,10 @@ window's channel), grouped, and for each group one of three states.
 | `apps.questions`, `apps.answerQuestion` | **Person** | A capability question a chain from a screen the person is looking at is waiting on: the answer is a trust decision (it is remembered for the app), and the orchestrator can already narrow one afterwards (`forget_app_answer`) |
 | The app builder's channel. `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Not an errand | How an app's screen talks to its building session. The orchestrator reaches that session as any other: `list_sessions`, `read_session`, `send_to_session` |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
-| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
+| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
 | `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.sshHosts`, `machines.activity` | Has it (#1219, fourth slice) | `disconnect_machine` acts at once (the row's button; connecting it again asks, #1341). `rollback_machine` and `uninstall_machine` each ask, in every preset, with a card naming the machine and what happens there (the versions, that the Centralu there stops, what is removed and what stays, and that a disconnected machine is connected for it). `machine_activity` and `list_ssh_hosts` read |
 | `machines.acceptVersions` | Not an errand | Since #689 two versions of one protocol connect by themselves (`mayConnect`), and for different protocols the call refuses, so there is nothing to accept; it is the window's answer to a prompt that no longer comes |
-| What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk`, `machines.need` | **Person** | It widens what code on another computer may do here (#550) |
+| What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk` | **Person** | It widens what code on another computer may do here (#550) |
 | Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
@@ -3700,10 +3699,7 @@ wait stands through those.
 Its sessions keep running there meanwhile; on the next connect the window re-reads that machine (`machine_resync`) and
 with it what they said. The row's Disconnect closes any link without unlinking the machine and tries none until Connect or
 the hub's next start, with the switch on or off. An install, update or autostart change on a disconnected machine connects
-it first, since it runs over the link's ssh, and leaves it up. `machines.need` is still accepted for one release and
-answers the row, so an older window does not fail, and `machines.setConnect` still sets the switch (`at_start` is on). A
-build from before it reads the column as the connect mode, so it connects a machine with the switch off only when something there
-needs it; an older window reads `disconnected` as `unreachable` and shows no setting.
+it first, since it runs over the link's ssh, and leaves it up.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with

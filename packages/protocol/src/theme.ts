@@ -132,22 +132,6 @@ export const THEME_TOKEN_BY_KEY: ReadonlyMap<string, ThemeTokenDef> = new Map(
   THEME_TOKENS.map((t) => [t.key, t]),
 )
 
-/**
- * Tokens a theme could set once and no longer can (#844). A file written before they left still names them, and the
- * person did nothing wrong, so the reader skips them without a problem line and the schema still accepts them (an
- * editor would otherwise mark a valid file red). A removed token is added here in the same change that removes it.
- *
- * - `activity-1` to `activity-5`: the working orbit's colours, gone with the orbit (#742)
- */
-export const RETIRED_THEME_TOKENS: readonly string[] = [
-  'activity-1',
-  'activity-2',
-  'activity-3',
-  'activity-4',
-  'activity-5',
-]
-const RETIRED_THEME_TOKEN_SET: ReadonlySet<string> = new Set(RETIRED_THEME_TOKENS)
-
 /** A theme file's id is its file name without `.json`: lowercase words and hyphens */
 export const ThemeId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/)
 
@@ -243,7 +227,6 @@ export function parseThemeFile(id: string, path: string, text: string): ThemeFil
     problems.push('"tokens" must be an object of token names to values.')
   } else {
     for (const [key, value] of Object.entries(rawTokens ?? {})) {
-      if (RETIRED_THEME_TOKEN_SET.has(key)) continue
       if (!THEME_TOKEN_BY_KEY.has(key)) problems.push(`Unknown token "${key}" is ignored.`)
       else if (typeof value !== 'string' || !value.trim() || value.length > 400)
         problems.push(`Token "${key}" needs a CSS value as a string.`)
@@ -287,16 +270,12 @@ export function themeFileJsonSchema(): Record<string, unknown> {
       tokens: {
         type: 'object',
         additionalProperties: false,
-        properties: Object.fromEntries([
-          ...THEME_TOKENS.map((t): [string, object] => [
+        properties: Object.fromEntries(
+          THEME_TOKENS.map((t): [string, object] => [
             t.key,
             { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` },
           ]),
-          ...RETIRED_THEME_TOKENS.map((key): [string, object] => [
-            key,
-            { type: 'string', description: 'Retired: Centralu no longer uses this token and ignores it.' },
-          ]),
-        ]),
+        ),
       },
     },
   }

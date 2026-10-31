@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences, textSizeFromLegacyStep } from './entities.js'
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from './entities.js'
 import {
-  RETIRED_THEME_TOKENS,
   THEME_TOKENS,
   formatThemeFile,
   parseThemeFile,
@@ -17,33 +16,12 @@ describe('the theme file format (#312)', () => {
     expect(committed).toEqual(themeFileJsonSchema())
   })
 
-  it('the schema lists exactly the tokens the reader accepts, then the retired ones it skips, and nothing else', () => {
+  it('the schema lists exactly the tokens the reader accepts, and nothing else', () => {
     const schema = themeFileJsonSchema() as {
       properties: { tokens: { properties: object; additionalProperties: boolean } }
     }
-    expect(Object.keys(schema.properties.tokens.properties)).toEqual([
-      ...THEME_TOKENS.map((t) => t.key),
-      ...RETIRED_THEME_TOKENS,
-    ])
+    expect(Object.keys(schema.properties.tokens.properties)).toEqual(THEME_TOKENS.map((t) => t.key))
     expect(schema.properties.tokens.additionalProperties).toBe(false)
-  })
-
-  it('a theme made before a token was retired reads cleanly: the retired names are skipped without a problem (#844)', () => {
-    const before742 = JSON.stringify({
-      name: 'Old',
-      base: 'dark',
-      tokens: { ink: '#eee', 'activity-1': '#f00', 'activity-5': '#00f' },
-    })
-    expect(parseThemeFile('old', '/old', before742)).toMatchObject({
-      tokens: { ink: '#eee' },
-      problems: [],
-      broken: false,
-    })
-    // A name that never was a token is still reported
-    expect(
-      parseThemeFile('odd', '/odd', '{"name":"O","base":"dark","tokens":{"activity-6":"#f00"}}').problems,
-    ).toEqual(['Unknown token "activity-6" is ignored.'])
-    for (const key of RETIRED_THEME_TOKENS) expect(THEME_TOKENS.some((t) => t.key === key)).toBe(false)
   })
 
   it('a file the app writes reads back the same, with $schema first', () => {
@@ -140,15 +118,5 @@ describe('screen preferences, field by field', () => {
       bodyFont: '',
     })
     expect(parseUiPreferences({ textSize: 0.9 }).textSize).toBe(0.925)
-  })
-
-  it('the old snapshot step maps onto the five sizes, clamped, and anything else is no size', () => {
-    expect(textSizeFromLegacyStep(0)).toBe(0.85)
-    expect(textSizeFromLegacyStep(2)).toBe(1)
-    expect(textSizeFromLegacyStep(4)).toBe(1.25)
-    expect(textSizeFromLegacyStep(99)).toBe(1.25)
-    expect(textSizeFromLegacyStep(-3)).toBe(0.85)
-    expect(textSizeFromLegacyStep('4')).toBe(null)
-    expect(textSizeFromLegacyStep(undefined)).toBe(null)
   })
 })

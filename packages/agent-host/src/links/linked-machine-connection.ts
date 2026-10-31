@@ -462,7 +462,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       handover: this.handover,
       autoReconnect: this.autoReconnect,
       updateWaits: true,
-      connect: this.autoReconnect ? 'at_start' : 'when_needed',
       ...this.otherCredentials(),
     }
   }

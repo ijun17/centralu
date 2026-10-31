@@ -94,7 +94,6 @@ export class MachinesMock {
         handover: null,
         autoReconnect: true,
         updateWaits: true,
-        connect: 'at_start',
         otherCredentials: null,
         otherCredentialsMore: 0,
         ownCredentialGone: false,
@@ -142,7 +141,7 @@ export class MachinesMock {
     revokeCredential: async (machineId: string, credentialId: string) =>
       this.machineRow(machineId, { otherCredentials: (this.machinesList.find((m) => m.id === machineId)?.otherCredentials ?? []).filter((c) => c.id !== credentialId) }),
     setAutoReconnect: async (machineId: string, autoReconnect: boolean) =>
-      this.machineRow(machineId, { autoReconnect, connect: autoReconnect ? 'at_start' : 'when_needed' }),
+      this.machineRow(machineId, { autoReconnect }),
     acceptVersions: async (machineId: string) => {
       const v = this.machinesList.find((m) => m.id === machineId)?.versions
       if (v && !v.compatible) throw mockError('The two sides speak different protocols; one of them has to be updated first')

@@ -145,28 +145,6 @@ export function typographyTests() {
     expect(await page.evaluate(() => (window as any).__atStart)).toEqual({ font: expect.stringMatching(/^"Inter",/), leading: '1.452', zoom: '1.1' })
   })
 
-  test('the text size moves out of an old workspace snapshot once, and stays where it is put after that', async ({ page }) => {
-    // A snapshot written before the text size was a preference: step 4 of 5 (125%)
-    await page.addInitScript(() => {
-      if (sessionStorage.getItem('seeded')) return
-      sessionStorage.setItem('seeded', '1')
-      localStorage.setItem('cc-mock-workspace', JSON.stringify({ textScale: 4 }))
-    })
-    await page.goto('/?mock=1')
-    await expect.poll(() => rootToken(page, '--text-zoom')).toBe('1.25')
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('cc-mock-prefs') ?? '{}').textSize)).toBe(1.25)
-    await openAppearance(page)
-    await expect(page.getByTestId('settings-scale-4')).toHaveAttribute('aria-checked', 'true')
-
-    await page.getByTestId('settings-scale-2').click()
-    await expect.poll(() => rootToken(page, '--text-zoom')).toBe('1')
-    await page.reload()
-    await expect(page.getByTestId('open-settings')).toBeVisible()
-    // Not moved again: the preference has its own value now
-    await expect.poll(() => rootToken(page, '--text-zoom')).toBe('1')
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('cc-mock-prefs') ?? '{}').textSize)).toBe(1)
-  })
-
   test('each text size button shows its own size, whichever size is on', async ({ page }) => {
     await openDemo(page)
     await openAppearance(page)
