@@ -305,10 +305,9 @@ function appApprovalDetail(server: string, message: unknown, meta: unknown): App
 export type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null; elicitation?: true }
 
 function requestOrigin(r: ServerRequest): OpenRequest {
-  const p = paramsOf(r, 'item/fileChange/requestApproval')
-  return {
-    serverId: r.id,
-    threadId: typeof p.threadId === 'string' ? p.threadId : null,
-    turnId: typeof p.turnId === 'string' ? p.turnId : null,
-  }
+  // One params object read as each request it serves, so a rename of threadId or turnId in any of them fails the build
+  const views = [paramsOf(r, 'item/fileChange/requestApproval'), paramsOf(r, 'item/commandExecution/requestApproval'), paramsOf(r, 'mcpServer/elicitation/request')]
+  const threadId = views.map((p) => p.threadId).find((v) => typeof v === 'string')
+  const turnId = views.map((p) => p.turnId).find((v) => typeof v === 'string')
+  return { serverId: r.id, threadId: typeof threadId === 'string' ? threadId : null, turnId: typeof turnId === 'string' ? turnId : null }
 }
