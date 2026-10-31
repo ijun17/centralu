@@ -109,7 +109,7 @@ tools agents use to record the owner's answers.
 The repository's contribution procedure, kept as code so every agent follows it the same way. The
 decisions are pure functions in `ci.mjs`; `github.mjs` reads GitHub; `ci-tools.mjs` puts them together.
 `project.json` `ci` names the workflows that hold the required checks, the issue listing known
-intermittent failures (#368), and how long a merge may wait.
+intermittent failures (#368).
 
 - **Green means every required check is reported and passed.** No checks reported, a required check
   not reported yet, or one still running is not green (on 2026-10-05 a script read "no checks yet"

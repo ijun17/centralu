@@ -560,7 +560,7 @@ function runtime(state: Record<string, unknown>) {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: gh.env({ PROJECT_BOARD_CI_POLL_MS: '250' }),
+    env: gh.env({}),
     // The product's probe and call limits: a shorter one only adds a way to fail under load (#368)
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })

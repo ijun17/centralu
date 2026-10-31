@@ -40,12 +40,10 @@ function screenOf(v) {
 }
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
 // CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
-// known intermittent failures, and how often a poll looks.
+// known intermittent failures.
 export const CI = {
   workflows: config.ci?.workflows ?? ['.github/workflows/build.yml'],
   knownFailures: config.ci?.knownFailuresIssue ?? null,
-  // PROJECT_BOARD_CI_POLL_MS: for the tests only, which cannot wait 30 s between polls
-  pollMs: Number(process.env.PROJECT_BOARD_CI_POLL_MS) || Number(config.ci?.pollSeconds ?? 30) * 1000,
   // Two tiers (2026-10-18): the name of the check that passes only on a full run (build.yml's `full
   // tier` job). Set, nothing lands on a run where it did not pass: the merge queue lands such a pull
   // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.

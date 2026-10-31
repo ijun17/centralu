@@ -177,12 +177,15 @@ ${note}` : summary
   const { permissions, defaultBranch } = await readRepo(repo)
   if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
 
-  const p = await readPr(repo, want.number)
-  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
+  let p = await readPr(repo, want.number)
+  let req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
   let checks = await evaluate(repo, p.headRefOid, req)
   let d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
   for (let n = 0; n < MERGEABLE_RETRIES && d.action === 'wait' && d.kind === 'mergeable'; n++) {
     await sleep(MERGEABLE_WAIT_MS)
+    const was = p.headRefOid
+    p = await readPr(repo, want.number)
+    if (p.headRefOid !== was) req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
     checks = await evaluate(repo, p.headRefOid, req)
     d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
   }
