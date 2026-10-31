@@ -1,5 +1,5 @@
-import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol/client'
+import type { AppErrorBundle, AppReach, Attachment, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -177,36 +177,31 @@ export class AppBuilderMock {
     /**
      * "Fix this" (M4 C-5). Like the real thing (builder-requests.ts): rejects with the same
      * wording, and builds the header with **the same function** (protocol's
-     * `builderRequestFrame`), from facts the mock knows — the app listing (name, stopped
+     * `builderRequestOf`), from facts the mock knows — the app listing (name, stopped
      * state), the instance (screen), the run history (the front of `appRuns`, as filled in by
      * a test). The message built that way stands as a human message in the builder session's
      * conversation.
      */
     askBuilder: async (req: BuilderAsk): Promise<{ sessionId: string }> => {
       this.builderAsks.push(structuredClone(req))
-      const text = req.text.trim()
-      if (!text && !req.attachments?.length) throw new Error('Write what to change, or attach a screenshot')
-      const info = this.registry.externalAppList.find((a) => a.appId === req.appId && a.projectId === req.projectId)
-      if (!info) throw new Error('This app no longer exists')
-      const builderId = this.registry.appBuilders.get(appKeyOf(req.projectId, req.appId))
-      if (!builderId || !this.store.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then ask again')
-      const facts: BuilderRequestFacts = {
-        app: { appId: info.appId, name: info.name ?? info.appId },
-        screen: null,
-        stopped: info.status === 'crashed' || info.status === 'failed' ? { status: info.status, reason: info.error } : null,
-        latestRun: null,
-      }
+      const key = appKeyOf(req.projectId, req.appId)
+      const builderId = this.registry.appBuilders.get(key)
+      let view: { uri: string } | null | undefined
       if (req.instanceId) {
         const inst = this.registry.pinnedInstances.get(req.instanceId)
-        if (!inst || inst.appId !== req.appId || inst.projectId !== req.projectId) {
-          throw new Error("That view is not open for this app. Reopen the app's view and ask again")
-        }
-        facts.screen = { tool: info.home ?? '(no home tool)', resourceUri: inst.uri }
+        view = inst && inst.appId === req.appId && inst.projectId === req.projectId ? { uri: inst.uri } : null
       }
-      const last = this.registry.appRuns.get(appKeyOf(req.projectId, req.appId))?.[0]
-      if (last && last.status !== 'ok') facts.latestRun = { tool: last.tool, callerKind: last.callerKind, status: last.status, error: last.error }
-      this.deliverToBuilder(builderId, builderRequestFrame(facts, text), req.attachments)
-      return { sessionId: builderId }
+      const built = builderRequestOf({
+        text: req.text,
+        hasAttachments: !!req.attachments?.length,
+        app: this.registry.externalAppList.find((a) => a.appId === req.appId && a.projectId === req.projectId),
+        builder: builderId && this.store.sessions.has(builderId) ? builderId : null,
+        view,
+        latestRun: this.registry.appRuns.get(key)?.[0],
+      })
+      if ('refusal' in built) throw new Error(built.refusal)
+      this.deliverToBuilder(built.builder, built.frame, req.attachments)
+      return { sessionId: built.builder }
     },
     /** Error bundles (M4 C-6) — a test fills `appErrors` (most recent first). A sent bundle carries `sentAt`, like the host */
     errors: async (appId: string, projectId: string | null, machine?: string): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {

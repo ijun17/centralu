@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, statSync } from 'node:fs'
+import { aliases } from './tooling/aliases.js'
 // Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
 import { SLOW } from './tooling/test-timing.js'
 
@@ -33,15 +34,7 @@ const listed = (inAppRuntime: boolean) => (LISTED ?? []).filter((f) => f.startsW
 
 export default defineConfig({
   resolve: {
-    alias: {
-      '@cc/protocol/client': r('./packages/protocol/src/client.ts'),
-      '@cc/protocol': r('./packages/protocol/src/index.ts'),
-      '@cc/core': r('./packages/core/src/index.ts'),
-      '@cc/platform/ports': r('./packages/platform/src/ports/index.ts'),
-      '@cc/platform/web': r('./packages/platform/src/web/index.ts'),
-      '@cc/platform/mock': r('./packages/platform/src/mock/index.ts'),
-      '@cc/ui': r('./packages/ui/src/index.ts'),
-    },
+    alias: aliases(),
   },
   test: {
     /*

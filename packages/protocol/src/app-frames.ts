@@ -112,6 +112,62 @@ export function builderRequestFrame(facts: BuilderRequestFacts, text: string): s
   return text ? `${head}\n${text}` : head
 }
 
+const CALLERS = ['view', 'session', 'app'] as const satisfies readonly BuilderRunFact['callerKind'][]
+const NOT_OK = ['running', 'error', 'cancelled', 'rejected'] as const satisfies readonly BuilderRunFact['status'][]
+const oneOf = <T extends string>(all: readonly T[], v: string): T | undefined => all.find((x) => x === v)
+
+/** What the header reads of an app's entry in the app list (`ExternalAppInfo`) */
+export type BuilderInputApp = { appId: string; name?: string | null; status: string; error?: string | null; home?: string | null }
+/** One entry of the app's run history, the way a store hands it back (as text) */
+export type BuilderInputRun = { tool: string; callerKind: string; status: string; error: string | null }
+
+/**
+ * Everything the "fix this" request (C-5) is decided from, read by the caller from its own records. The host and the mock
+ * each look these up their own way; what is made of them is one function, so both refuse with the same words and build
+ * the same header.
+ */
+export type BuilderRequestInput<B> = {
+  text: string
+  hasAttachments: boolean
+  /** The app's entry in the app list; undefined if it is gone */
+  app: BuilderInputApp | undefined
+  /** The app's builder session; null if it has none (handed back with the frame, whatever the caller calls it) */
+  builder: B | null
+  /** The fixed view the person asked from: undefined when none was named, null when it is not open for this app */
+  view: { uri: string } | null | undefined
+  /** The app's latest run, whatever it ended as */
+  latestRun: BuilderInputRun | undefined
+}
+
+/** The request as the builder session receives it, or the sentence the person is shown for why it cannot be sent */
+export function builderRequestOf<B>(ask: BuilderRequestInput<B>): { frame: string; builder: B } | { refusal: string } {
+  const text = ask.text.trim()
+  if (!text && !ask.hasAttachments) return { refusal: 'Write what to change, or attach a screenshot' }
+  const app = ask.app
+  if (!app) return { refusal: 'This app no longer exists' }
+  if (!ask.builder) return { refusal: 'This app has no builder session yet. Start one, then ask again' }
+  const facts: BuilderRequestFacts = {
+    app: { appId: app.appId, name: app.name ?? app.appId },
+    screen: null,
+    stopped: app.status === 'crashed' || app.status === 'failed' ? { status: app.status, reason: app.error ?? null } : null,
+    // Carried only if the latest run was not a success — a successful run is not evidence for "this does not work"
+    latestRun: notOk(ask.latestRun),
+  }
+  if (ask.view !== undefined) {
+    if (!ask.view) return { refusal: "That view is not open for this app. Reopen the app's view and ask again" }
+    // The fixed view is the one the home tool opened — a view not in a conversation does not use this line
+    facts.screen = { tool: app.home ?? '(no home tool)', resourceUri: ask.view.uri }
+  }
+  return { frame: builderRequestFrame(facts, text), builder: ask.builder }
+}
+
+/** One run record → a header fact. null if it succeeded or the shape is unrecognized */
+function notOk(run: BuilderInputRun | undefined): BuilderRunFact | null {
+  const callerKind = oneOf(CALLERS, run?.callerKind ?? '')
+  const status = oneOf(NOT_OK, run?.status ?? '')
+  return run && callerKind && status ? { tool: run.tool, callerKind, status, error: run.error } : null
+}
+
 /**
  * The one-line reason — only the first non-empty line. For most errors the first line is the
  * reason and the rest is the stack trace. The stack trace is not carried by the header; the
