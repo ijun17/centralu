@@ -7,8 +7,7 @@ import { Kbd, Tooltip } from '../../components/primitives.jsx'
 import { detailText } from './ApprovalCard.jsx'
 
 /**
- * An approval answered from a list row (#543, audit items 1 and 2): the waiting list's row and the sidebar's row of a
- * session that waits on an approval. Answering without opening the session is a shortcut past the card, so the row
+ * An approval answered from the waiting list's row (#543, audit items 1 and 2). Answering without opening the session is a shortcut past the card, so the row
  * keeps the card's promises:
  *
  * - **It says what is being approved, and nothing of it is hidden.** The verb and the command or path stand on the
@@ -28,14 +27,11 @@ import { detailText } from './ApprovalCard.jsx'
  */
 export function RowApproval({
   sessionId,
-  place,
   keys = false,
   settled,
   onOpen,
 }: {
   sessionId: string
-  /** Where the row stands: names its test ids and its layout */
-  place: 'inbox' | 'sidebar'
   /** The waiting list's cursor is on this row: its buttons print y and n, the keys that answer it */
   keys?: boolean
   /** From the list's own `useRowsSettled`, when its keys answer too (the waiting list); otherwise the row asks itself */
@@ -61,7 +57,7 @@ export function RowApproval({
   const answerable = view.inPlace && fits !== false
   const ready = (settled ?? settledHere) && !busy && fits === true
   const answer = (decision: 'allow' | 'deny') => void respond(sessionId, pending.requestId, decision)
-  const id = (part: string) => `${place}-${part}-${sessionId}`
+  const id = (part: string) => `inbox-${part}-${sessionId}`
   const why = !view.inPlace
     ? view.openWhy
     : 'The line is longer than the row: open the session to read it whole on its card'
@@ -69,19 +65,18 @@ export function RowApproval({
     'flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50'
 
   /*
-   * The waiting list is wide enough for the line and its buttons side by side; their slot has one width whether it
-   * holds Allow and Deny or Open, so the line's room, and so whether it fits, does not change with the answer. The
-   * sidebar is not wide enough (240 px by default): the line has the row's whole width, and the buttons wrap under it.
+   * The line and its buttons stand side by side; their slot has one width whether it holds Allow and Deny or Open, so
+   * the line's room, and so whether it fits, does not change with the answer.
    */
   return (
     <div
-      className={`flex min-w-0 items-center gap-x-1.5 ${place === 'inbox' ? 'pb-2 pl-[30px] pr-3' : 'flex-wrap gap-y-1 pb-1.5 pl-8 pr-3'}`}
+      className="flex min-w-0 items-center gap-x-1.5 pb-2 pl-[30px] pr-3"
       data-testid={id('approval')}
       data-request={pending.requestId}
       data-in-place={answerable || undefined}
     >
       <Tooltip
-        className={place === 'inbox' ? 'min-w-0 flex-1' : 'min-w-0 basis-full'}
+        className="min-w-0 flex-1"
         testId={id('approval-tip')}
         content={
           <span className="block max-h-72 overflow-hidden whitespace-pre-wrap break-words font-mono">
@@ -112,7 +107,7 @@ export function RowApproval({
         )}
       </Tooltip>
       <span
-        className={`flex shrink-0 items-center gap-1.5 ${place === 'inbox' ? 'w-[8.5rem] justify-end' : ''}`}
+        className="flex w-[8.5rem] shrink-0 items-center justify-end gap-1.5"
       >
         {answerable ? (
           <>
@@ -161,7 +156,7 @@ export function RowApproval({
 }
 
 /**
- * Whether an element shows its whole content, measured after layout and again when it is resized (the sidebar's width
+ * Whether an element shows its whole content, measured after layout and again when it is resized (the window's width
  * changes): null until measured, and when there is nothing to measure. `key` names what it shows.
  */
 function useFitsWhole(key: string): [(el: HTMLElement | null) => void, boolean | null] {
@@ -336,7 +331,7 @@ export const ROW_SETTLE_MS = 500
 
 /**
  * The rows as they stand, for `useRowsSettled`: every session in order, and the approval each one waits on. An
- * approval that comes or goes adds or removes a row's line in the sidebar and a row in the waiting list; a session
+ * approval that comes or goes adds or removes a row in the waiting list; a session
  * added or removed moves the rows below it. A state change that moves nothing (working, idle) is not in it.
  */
 export function rowsKey(sessions: Record<string, Pick<SessionSummary, 'id' | 'pendingApproval'>>): string {

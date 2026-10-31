@@ -249,7 +249,6 @@ export function Inbox() {
                 {it.state === 'waiting_approval' && !it.proposal && (
                   <RowApproval
                     sessionId={it.id}
-                    place="inbox"
                     keys={i === cursor}
                     settled={settled}
                     onOpen={() => {
