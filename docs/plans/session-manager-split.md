@@ -167,6 +167,16 @@ Each is a pure deletion or a pure move. Existing tests stay as they are. `tsc` p
 | 9 | **Processes** moved to `sessions/session-processes.ts` | `manager.ts`, new file | ~390 (moved) | the session core (#1654) PRs 6–9 |
 | 10 | **Host tenure** moved to `sessions/host-tenure.ts` | `manager.ts`, new file | ~315 (moved) | the session core (#1654) PRs 6–9; touches every module, so last |
 
+### 6.1a What landed
+
+Manager line counts are after each pull request.
+
+- **2, dead code and copies** (`manager.ts` 3,119 to 3,063): the re-export of the app-message types, `parts()`'s
+  `appAccess` and `untilHandedOver` (and their host types' members), three stale comments, `hasCompactTool` through
+  `canReadMail`, the two `stop()` pairs through `stopSelfCompaction()`, one `setting` and `notice` for both compaction
+  modules, `updateResumeDone` and `tellPersonOfInterruption` inlined, and `nameUnnamedWorktrees` (§7: old rows still
+  named "New session" stay so, by the owner's removal of old-version compatibility, #1143).
+
 ### 6.2 Work in flight
 
 - **The shared session core (#1654).** Its PRs 6–9 (PR 5 is in flight on its own branch) change `adapters/` and `adapters/core/` (the ledger, the decision

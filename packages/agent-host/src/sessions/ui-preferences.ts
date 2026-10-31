@@ -3,7 +3,6 @@ import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy, te
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { AppAccess } from './app-access.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
 
@@ -31,11 +30,7 @@ const COMPACT_BESIDE_FIELDS = ['idleShare', 'nudge', 'nudgeFirst', 'nudgeSecond'
  * What the screen preferences reach of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'store'> &
-  Pick<SessionTrashHost, 'appsHub'> & {
-    /** Another project's apps attached on demand (#371 part A); null exactly when `appsHub` is */
-    readonly appAccess: AppAccess | null
-  }
+export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'store'> & Pick<SessionTrashHost, 'appsHub'>
 
 /**
  * The screen's preferences (UiPreferences) and its workspace layout, kept in the store for every window: read as one
