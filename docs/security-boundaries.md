@@ -1522,7 +1522,7 @@ A host started with `centralu serve` on another machine is reached by the app th
     connect and every 30 seconds: a pairing there while the link is up shows within that. It is shown while connected,
     its labels cleaned to one line. A pairing under a label already there replaces that credential, as the hub's own
     re-pairing at each link does. Each entry keeps how it was asked for (`via`: `pair` for `--connection --pair`,
-    `window` for `--window`, `handover` for the launcher's own one-call credential), and a pairing is marked `replaced`
+    `window` for `--window`, `handover` for the launcher's own one-call credential, which a launcher from before #1711 made and a host since takes as limited only), and a pairing is marked `replaced`
     in the file and on the row ("which replaced an earlier one of that name") only when the entry it took the place of
     was asked for another way, or does not say (#1405 review): the window pairing at each start and a hub at each link
     are their own pairer again, and marking them made the flag mean nothing. So `--pair window` in the window's place,
@@ -1546,7 +1546,7 @@ A host started with `centralu serve` on another machine is reached by the app th
       `serve.json`, BEFORE the socket gets its rights, and tells the hubs linked to it at once with a
       `host_credential_used` event over their open links (the sockets in with a `hub:`-labelled credential; the event
       carries a `check` of a nonce of its own, so a hub knows its own credential from one that only reuses its id, and
-      never the verifier). A hub puts the credential on its row and starts a `host.credentials` read at once (a burst
+      never the verifier; a hub's key entry, #1711, has no secret to check and carries its public key instead, which a hub compares with its own, and a hub from before key pairing drops such an event and lists the use at its next read). A hub puts the credential on its row and starts a `host.credentials` read at once (a burst
       of events costs one read in flight and one waiting), whose answer then replaces it, provided that host's record
       holds the credential (`usedIds`; one that started again without it, because the file was removed or could not be
       written, leaves what the hub was told on the row). Until a read has answered, the hub cannot know whether the

@@ -1,0 +1,4 @@
+{
+  "bytes": 100,
+  "reason": "Key pairing, machine side (#1711): the shared protocol schemas gain optional fields a hub reads, a key entry's publicKey in host.credentials, in usedUnderHubLabels and in the host_credential_used event (whose nonce and check become optional, since a key entry has no secret to check). The app's JS was 1,926,320 B against a ceiling of 1,926,300 B after merging main; no UI code, no new dependency."
+}

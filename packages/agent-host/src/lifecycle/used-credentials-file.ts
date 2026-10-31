@@ -15,7 +15,7 @@ import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedReco
  * cannot read, and reads each line once: from where it stopped last time (`refresh`), whole lines only, at most
  * `READ_AT_MOST` bytes of new ones at a time. An older build does not know the file and leaves it alone, and this one
  * reads whatever lines it finds, so nothing here breaks the build that may still be serving during a host swap. The
- * file holds what `serve.json` already holds beside it (the verifier, never the credential), with the same rights.
+ * file holds what `serve.json` already holds beside it (the verifier, never the credential; for a hub's key entry the public key, #1711), with the same rights.
  *
  * Never throws: a record that cannot be written down (a full disk, a folder gone) is said on stderr and the hello goes
  * on. Refusing a hello for it would stop the person's own window and every agent's work for a disk error, which the
@@ -88,7 +88,7 @@ export class UsedCredentialsFile {
    * note of those it names again (written too), and drops those withdrawn a week ago (`UsedCredentials.settle`): from
    * memory now, and from the file, which is rewritten then
    */
-  settle(listed: readonly { id: string; verifier?: string }[], now: number = Date.now()): void {
+  settle(listed: readonly { id: string; verifier?: string; publicKey?: string }[], now: number = Date.now()): void {
     const { noted, restored, dropped } = this.used.settle(listed, now)
     if (noted.length + restored.length > 0) this.append([...noted, ...restored])
     if (dropped > 0) this.rewrite()

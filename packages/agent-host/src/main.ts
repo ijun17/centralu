@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, type FullCredential } from './lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
 import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-credentials-file.js'
 import { realOs } from './os/real.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
@@ -777,7 +777,7 @@ const router: Router = new Router({
       // What another host of this folder wrote since this one started (a swap's overlap, #1712)
       usedCredentialsFile?.refresh()
       // A record of a credential that serve.json no longer names is noted withdrawn, and dropped a week after (#1712)
-      const settle = (listed: readonly { id: string; verifier: string }[]) => (usedCredentialsFile ? usedCredentialsFile.settle(listed) : usedCredentials.settle(listed, Date.now()))
+      const settle = (listed: readonly { id: string; verifier?: string; publicKey?: string }[]) => (usedCredentialsFile ? usedCredentialsFile.settle(listed) : usedCredentials.settle(listed, Date.now()))
       return credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials, nonce, settle)
     },
     themes,
@@ -829,11 +829,11 @@ const elevation = detectToken().then((t) => {
   }
 })
 /**
- * A full credential is about to be let in (#1712): its first use on this host is written down in the file, then the
+ * A full credential, or a hub's key entry (#1711), is about to be let in (#1712): its first use on this host is written down in the file, then the
  * hubs linked to it are told at once, over their open links and without waiting for them. A hub whose link is down reads
  * it at its next `host.credentials` (the file is read back by a restarted host)
  */
-function onFullHello(c: FullCredential): void {
+function onFullHello(c: FullCredential | KeyCredential): void {
   const first = usedCredentials.saw(c)
   if (!first) return
   usedCredentialsFile?.add(first)
@@ -850,8 +850,10 @@ const server = new HostServer({
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
   ...(serveState
-    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential) => onFullHello(c) }
+    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential | KeyCredential) => onFullHello(c) }
     : {}),
+  // What a hub's key pairing signs as this host's address under a keeper: the front door's, not the inner port (#1711)
+  ...(launch.frontDoor !== undefined ? { frontDoor: launch.frontDoor } : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)

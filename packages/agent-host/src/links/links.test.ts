@@ -3977,6 +3977,46 @@ describe('machines.revokeCredential (#1405)', () => {
     await eventually(() => hub.links.list()[0]!.ownCredentialGone)
   })
 
+  /*
+   * #1717 recheck, F1: a key entry has no secret, so the host sends no `check` for it, and a hub took an entry with no
+   * check for one to compare by id alone. A key entry under this hub's own credential id was then taken for the hub's own
+   * and left off the row. An entry that carries a public key is never the verifier credential this hub holds under its id
+   */
+  describe('a hub’s key entry that has this hub’s credential id (#1717 recheck, F1)', () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const publicKey = 'K'.repeat(43)
+
+    it('is listed, live or used and gone, beside the hub’s own, which is still not listed', async () => {
+      const mine = verifierOf(TOKEN)
+      let gone = false
+      const remote = await remoteHost(0, new Store(), {
+        credentials: (nonce) => ({ credentials: [{ ...own, check: credentialCheck(mine, nonce!) }, { id: 'cccc3333', label, created: 9, replaced: false, publicKey, ...(gone ? { gone: true } : {}) }] }),
+      })
+      const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, hubsName: true }])
+      expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+      gone = true
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 9, replaced: false, gone: true, hubsName: true }])
+      expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    })
+
+    it('is listed as used and gone when only the host’s record of its use names it, under the hub’s label', async () => {
+      const mine = verifierOf(TOKEN)
+      const remote = await remoteHost(0, new Store(), {
+        credentials: (nonce) => ({
+          credentials: [{ ...own, check: credentialCheck(mine, nonce!) }],
+          usedUnderHubLabels: [
+            { id: 'cccc3333', label, created: 2, check: credentialCheck(mine, nonce!) },
+            { id: 'cccc3333', label, created: 3, publicKey },
+          ],
+        }),
+      })
+      const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', pairedAs: label, others: [] }), new Store(), true, { credentialsMs: 20 })
+      await expect.poll(() => hub.links.list()[0]!.otherCredentials, { timeout: 3000 * SLOW }).toEqual([{ id: 'cccc3333', label, created: 3, replaced: false, gone: true, hubsName: true }])
+      expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    })
+  })
+
   // Self-check: the read after a list with checks answers "unreadable", so no new list; the last one stands, and its checks were of the last nonce
   it("keeps taking its own credential for its own across a read that cannot be read there, though the list was checked under an earlier nonce", async () => {
     const mine = verifierOf(TOKEN)
