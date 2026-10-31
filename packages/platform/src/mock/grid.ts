@@ -37,7 +37,7 @@ export class GridMock {
       this.gridPanels.filter((p) =>
         p.kind === 'session' ? this.store.sessions.has(p.sessionId) : p.projectId === null || this.projectStore.list.some((x) => x.id === p.projectId),
       ),
-    // The host's rule (manager.setGridView): unknown sessions and an app of an unregistered project are left out, and a panel named twice keeps its first place
+    // The host's rule (SessionLayout.setGridView): unknown sessions and an app of an unregistered project are left out, and a panel named twice keeps its first place
     setGridView: async (panels: GridPanel[]) => {
       const seen = new Set<string>()
       this.gridPanels = panels.filter((p) => {

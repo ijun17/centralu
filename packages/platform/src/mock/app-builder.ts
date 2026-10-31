@@ -49,7 +49,7 @@ export class AppBuilderMock {
   readonly apps = {
     /**
      * A new app (M4 C-1). Like the real thing (`ExternalApps.createApp` →
-     * `SessionManager.createAppBuilder`): rejects using the same checks (protocol's
+     * `AppSessions.createAppBuilder`): rejects using the same checks (protocol's
      * `newAppIdProblem`, reserved ids, trust, an existing id) — the rejection wording is
      * exactly the host's, and a test checks that the window shows it as-is — then adds it to
      * the list, broadcasts, and creates the builder session. The app stays even if the session

@@ -566,7 +566,7 @@ describe('worktree sessions', () => {
     g(worked.worktree!.path, ['commit', '-qm', 'work'])
     g(repo, ['merge', '-q', '--no-ff', 'feat/done'])
 
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
 
     const after = new Map(wtMgr.listSessions().map((x) => [x.id, x]))
     expect(after.get(worked.id)?.worktreeMerged).toBe(true)
@@ -594,7 +594,7 @@ describe('worktree sessions', () => {
       return { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' }
     }
 
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
 
     // What was asked about is that branch — a PR for a different branch must not get attached to this
     // session.
@@ -616,14 +616,14 @@ describe('worktree sessions', () => {
     let state: 'open' | 'merged' = 'open'
     wtMgr.prLookup = async () => ({ number: 3, state, url: 'https://github.com/x/y/pull/3' })
 
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     let after = wtMgr.listSessions().find((x) => x.id === s.id)!
     expect(after.worktreePr?.state).toBe('open')
     // Open is not yet a conclusion — reading it as merged here would make a branch under review look "done."
     expect(after.worktreeMerged).toBe(false)
 
     state = 'merged'
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     after = wtMgr.listSessions().find((x) => x.id === s.id)!
     expect(after.worktreeMerged).toBe(true)
     // Only a state change becomes an event: one open + one merged — broadcasting the same answer on every
@@ -644,11 +644,11 @@ describe('worktree sessions', () => {
     wtMgr.prLookup = async (_cwd, branch) => {
       asked.push(branch)
       // The person drags the sidebar while the sweep waits on gh for the first session
-      if (asked.length === 1) wtMgr.reorderSessions(project.id, [b.id, a.id])
+      if (asked.length === 1) wtMgr.layout.reorderSessions(project.id, [b.id, a.id])
       return null
     }
 
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
 
     expect([...asked].sort()).toEqual(['feat/sweep-a', 'feat/sweep-b'])
   })
@@ -665,8 +665,8 @@ describe('worktree sessions', () => {
       calls++
       return null
     }
-    await wtMgr.refreshMergedWorktrees(project.id)
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     expect(calls).toBe(1)
 
     // The answer that gh itself does not exist (ENOENT) does not change for the life of the process — the
@@ -677,8 +677,8 @@ describe('worktree sessions', () => {
       enoentCalls++
       return 'unavailable'
     }
-    await wtMgr.refreshMergedWorktrees(project.id)
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     expect(enoentCalls).toBe(1)
   })
 
@@ -692,14 +692,14 @@ describe('worktree sessions', () => {
     })) as SessionInfo
     wtMgr.prPollMs = 0
     wtMgr.prLookup = async () => ({ number: 9, state: 'open', url: 'https://github.com/x/y/pull/9' })
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     expect(checked()).toEqual(expect.arrayContaining([gone.id, landed.id]))
 
     await wtRpc('agents.deleteSession', { sessionId: gone.id })
     expect(checked()).not.toContain(gone.id)
 
     wtMgr.prLookup = async () => ({ number: 9, state: 'merged', url: 'https://github.com/x/y/pull/9' })
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
     expect(wtMgr.listSessions().find((x) => x.id === landed.id)?.worktreeMerged).toBe(true)
     expect(checked()).not.toContain(landed.id)
   })
@@ -751,12 +751,12 @@ describe('worktree sessions', () => {
       expect(existsSync(s.worktree!.path)).toBe(false)
       expect(() => g(repo, ['rev-parse', '--verify', `refs/heads/${s.worktree!.branch}`])).toThrow()
       const { recovery, dir } = saved(s)
-      expect((await wtMgr.readTrashed(s.id, 100)).some((m) => typeof (m.payload as { text?: unknown }).text === 'string' && (m.payload as { text: string }).text.includes(worktreeRecoveryDir(s.id)))).toBe(true)
+      expect((await wtMgr.trash.readTrashed(s.id, 100)).some((m) => typeof (m.payload as { text?: unknown }).text === 'string' && (m.payload as { text: string }).text.includes(worktreeRecoveryDir(s.id)))).toBe(true)
       expect(readFileSync(join(dir, '0.patch'), 'utf8')).not.toContain('not kept')
       expect(readFileSync(join(dir, '0.staged.patch'), 'utf8')).toContain('staged version')
-      expect((await wtMgr.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
+      expect((await wtMgr.trash.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
 
-      const back = await wtMgr.restoreSession(s.id)
+      const back = await wtMgr.trash.restoreSession(s.id)
       expect(back.session.live).toBe(false)
       expect(readFileSync(join(s.worktree!.path, 'a.txt'), 'utf8')).toBe('working version\n')
       expect(g(s.worktree!.path, ['show', ':a.txt'])).toBe('staged version\n')
@@ -768,7 +768,7 @@ describe('worktree sessions', () => {
       // Restoring and deleting again keeps earlier recovery files until the final purge.
       expect((await remove(back.session, managerId)).isError).not.toBe(true)
       expect(existsSync(dir)).toBe(true)
-      expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
+      expect(await wtMgr.trash.emptyTrash()).toEqual({ purged: 1, failed: [] })
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
     }), 15_000 * SLOW)
 
@@ -786,7 +786,7 @@ describe('worktree sessions', () => {
       const clone = join(root, 'from-bundle')
       g(root, ['clone', '-q', '-c', 'core.autocrlf=false', join(dir, '0.bundle'), clone])
       expect(g(clone, ['rev-parse', 'HEAD']).trim()).toBe(tip)
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(g(s.worktree!.path, ['rev-parse', 'HEAD']).trim()).toBe(tip)
       expect(readFileSync(join(s.worktree!.path, 'work.txt'), 'utf8')).toBe('done\n')
     })
@@ -803,7 +803,7 @@ describe('worktree sessions', () => {
       const { recovery, dir } = saved(s)
       expect(recovery).toMatchObject({ changedFiles: 0, commits: 0 })
       expect(readdirSync(dir)).toEqual(['snapshot.json'])
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(existsSync(s.worktree!.path)).toBe(true)
     })
 
@@ -839,7 +839,7 @@ describe('worktree sessions', () => {
       const { dir } = saved(s)
       expect(readFileSync(join(dir, '1.patch'), 'utf8')).toContain('local files')
       expect(existsSync(join(dir, '1.bundle'))).toBe(true)
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(events.some((e) => e.type === 'notice' && e.sessionId === s.id && e.text.includes('Submodule recovery is manual'))).toBe(true)
     }, 15_000 * SLOW)
 
@@ -888,8 +888,8 @@ describe('worktree sessions', () => {
       g(repo, ['branch', 'feat/occupied', 'HEAD'])
       const before = g(repo, ['rev-parse', 'feat/occupied']).trim()
       const restore = vi.spyOn(store.trash, 'restoreSession').mockRejectedValueOnce(new Error('restore interrupted'))
-      await expect(wtMgr.restoreSession(s.id)).rejects.toThrow('restore interrupted')
-      const back = await wtMgr.restoreSession(s.id)
+      await expect(wtMgr.trash.restoreSession(s.id)).rejects.toThrow('restore interrupted')
+      const back = await wtMgr.trash.restoreSession(s.id)
       restore.mockRestore()
       expect(back.session.worktree!.branch).toBe(`recovered/${s.id}`)
       expect(g(repo, ['rev-parse', 'feat/occupied']).trim()).toBe(before)
@@ -904,13 +904,13 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).isError).not.toBe(true)
       const recoveryModule = await import('../dev-services/worktree-recovery.js')
       const cleanup = vi.spyOn(recoveryModule, 'stageWorktreeRecoveryRemoval').mockRejectedValueOnce(new Error('cannot remove recovery files'))
-      const result = await wtMgr.emptyTrash()
+      const result = await wtMgr.trash.emptyTrash()
       expect(result.purged).toBe(0)
       expect(result.failed[0]!.error).toContain('cannot remove recovery files')
       expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(saved(s).dir)).toBe(true)
       cleanup.mockRestore()
-      expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
+      expect(await wtMgr.trash.emptyTrash()).toEqual({ purged: 1, failed: [] })
     })
 
     it('keeps the recovery files and the session archive entry when the database step of a purge fails (#647)', async () => {
@@ -919,15 +919,15 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).isError).not.toBe(true)
       const { dir } = saved(s)
       const purge = vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
-      await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
+      await expect(wtMgr.trash.purgeSession(s.id)).rejects.toThrow('database locked')
       purge.mockRestore()
       expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(dir)).toBe(true)
-      expect((await wtMgr.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
-      const back = await wtMgr.restoreSession(s.id)
+      expect((await wtMgr.trash.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
+      const back = await wtMgr.trash.restoreSession(s.id)
       expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       expect((await remove(back.session, managerId)).isError).not.toBe(true)
-      expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
+      expect(await wtMgr.trash.emptyTrash()).toEqual({ purged: 1, failed: [] })
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
     })
 
@@ -989,7 +989,7 @@ describe('worktree sessions', () => {
       })
       const agent = remove(s, managerId)
       await vi.waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
-      await wtMgr.restoreSession(helper.id)
+      await wtMgr.trash.restoreSession(helper.id)
       await expect(wtMgr.send(helper.id, 'wake up in the folder')).rejects.toThrow('worktree is being removed')
       expect(wtMgr.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
       release()
@@ -1007,7 +1007,7 @@ describe('worktree sessions', () => {
       writeFileSync(join(s.worktree!.path, 'wip'), 'local\n')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       g(repo, ['branch', 'feat/mark-cleanup', 'main'])
-      const back = await wtMgr.restoreSession(s.id)
+      const back = await wtMgr.trash.restoreSession(s.id)
       expect(back.session.worktree!.branch).toBe(`recovered/${s.id}`)
       expect(g(repo, ['for-each-ref', '--format=%(refname)', 'refs/centralu/']).trim()).toBe(`refs/centralu/recovered/recovered/${s.id}`)
       expect((await remove(back.session, managerId)).isError).not.toBe(true)
@@ -1022,7 +1022,7 @@ describe('worktree sessions', () => {
       const trash = wtMgr.trashSession.bind(wtMgr)
       vi.spyOn(wtMgr, 'trashSession').mockImplementationOnce(async (...args) => {
         await trash(...args)
-        await wtMgr.restoreSession(helper.id)
+        await wtMgr.trash.restoreSession(helper.id)
       })
       const r = await remove(s, managerId)
       expect(r.isError).not.toBe(true)
@@ -1049,7 +1049,7 @@ describe('worktree sessions', () => {
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       spy.mockRestore()
       try {
-        const restoring = next.restoreSession(s.id)
+        const restoring = next.trash.restoreSession(s.id)
         await new Promise((resolve) => setTimeout(resolve, 50))
         release()
         const back = await restoring
@@ -1076,7 +1076,7 @@ describe('worktree sessions', () => {
         await vi.waitFor(() => expect(existsSync(`${worktreeRecoveryDir(gone.s.id)}.purging-2`)).toBe(false))
         await vi.waitFor(() => expect(existsSync(saved(kept.s).dir)).toBe(true))
         expect(existsSync(`${worktreeRecoveryDir(kept.s.id)}.purging-1`)).toBe(false)
-        const back = await next.restoreSession(kept.s.id)
+        const back = await next.trash.restoreSession(kept.s.id)
         expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('kept\n')
       } finally {
         await next.disposeAll()
@@ -1096,7 +1096,7 @@ describe('worktree sessions', () => {
       vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
+        await expect(wtMgr.trash.purgeSession(s.id)).rejects.toThrow('database locked')
         expect(log).toHaveBeenCalledWith(expect.stringContaining('could not be put back after a failed purge'))
       } finally {
         log.mockRestore()
@@ -1107,7 +1107,7 @@ describe('worktree sessions', () => {
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
         await vi.waitFor(() => expect(existsSync(saved(s).dir)).toBe(true))
-        const back = await next.restoreSession(s.id)
+        const back = await next.trash.restoreSession(s.id)
         expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       } finally {
         await next.disposeAll()
@@ -1163,7 +1163,7 @@ describe('worktree sessions', () => {
       const latin = Buffer.from([0x63, 0x61, 0x66, 0xe9, 10])
       writeFileSync(join(s.worktree!.path, 'latin.txt'), latin)
       expect((await remove(s, managerId)).isError).not.toBe(true)
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(readFileSync(path)).toEqual(working)
       expect(execFileSync('git', ['show', ':legacy.txt'], { cwd: s.worktree!.path })).toEqual(staged)
       expect(readFileSync(join(s.worktree!.path, 'latin.txt'))).toEqual(latin)
@@ -1176,7 +1176,7 @@ describe('worktree sessions', () => {
       writeFileSync(path, bytes)
       expect((await remove(s, managerId)).isError).not.toBe(true)
       expect(lstatSync(join(saved(s).dir, '0.patch')).size).toBeGreaterThan(32 * 1024 * 1024)
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(readFileSync(path).equals(bytes)).toBe(true)
     }, 30_000 * SLOW)
 
@@ -1307,7 +1307,7 @@ describe('worktree sessions', () => {
       const binary = Buffer.from([0, 255, 13, 10, 128, 10])
       writeFileSync(join(s.worktree!.path, 'binary.dat'), binary)
       expect((await remove(s, managerId)).isError).not.toBe(true)
-      await wtMgr.restoreSession(s.id)
+      await wtMgr.trash.restoreSession(s.id)
       expect(readFileSync(path)).toEqual(restoredWorking)
       expect(execFileSync('git', ['show', ':legacy.txt'], { cwd: s.worktree!.path })).toEqual(staged)
       expect(readFileSync(join(s.worktree!.path, 'latin.txt'))).toEqual(Buffer.from([0x63, 0x61, 0x66, 0xe9, 13, 10]))
@@ -1350,7 +1350,7 @@ describe('worktree sessions', () => {
    * happened to be, and its meaning quietly shifted.
    */
   it('a merge is still detected even when the root sits on another branch, as long as the trunk is fixed (#76)', async () => {
-    await wtMgr.setWorktreeTrunk(project.id, 'main')
+    await wtMgr.projectRegistry.setWorktreeTrunk(project.id, 'main')
     const worked = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/trunked',
     })) as SessionInfo
@@ -1365,7 +1365,7 @@ describe('worktree sessions', () => {
     // here.
     g(repo, ['checkout', '-q', '-b', 'somewhere-else', 'HEAD~1'])
 
-    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.merges.refreshMergedWorktrees(project.id)
 
     expect(wtMgr.listSessions().find((s) => s.id === worked.id)?.worktreeMerged).toBe(true)
   })
@@ -1382,7 +1382,7 @@ describe('worktree sessions', () => {
     writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
     writeFileSync(join(repo, '.DS_Store'), 'junk\n')
 
-    const entries = await wtMgr.gitIgnoredEntries(project.id)
+    const entries = await wtMgr.files.gitIgnoredEntries(project.id)
     const paths = entries.map((e) => e.path)
 
     expect(paths).toContain('node_modules/') // One line, not its individual files.

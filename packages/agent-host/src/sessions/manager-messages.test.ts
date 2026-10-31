@@ -513,7 +513,7 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
     }
     expect(leaks(await tools.listSessions())).toEqual([])
 
-    const record = await mgr.exportHandoffRecord(a.id, 'codex')
+    const record = await mgr.handoffNotes.exportHandoffRecord(a.id, 'codex')
     expect(record.text).toContain('npm run build') // the card is there…
     expect(leaks(record.text)).toEqual([]) // …and the record is not
     expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
@@ -630,7 +630,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     }
     expect(leaks(await tools.listSessions())).toEqual([])
 
-    const record = await mgr.exportHandoffRecord(a.id, 'codex')
+    const record = await mgr.handoffNotes.exportHandoffRecord(a.id, 'codex')
     expect(record.text).toContain('here is what I know.')
     expect(leaks(record.text)).toEqual([])
     expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
@@ -642,7 +642,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     h.finishTurn()
     for (const e of subagentWork(a.id)) h.emitEvent(e)
     await new Promise((r) => setTimeout(r, 0))
-    const note = (await mgr.exportHandoffNote(a.id, asked))?.text ?? ''
+    const note = (await mgr.handoffNotes.exportHandoffNote(a.id, asked))?.text ?? ''
     expect(note).toMatch(/NOTE: the boundaries test holds\.$/)
     expect(leaks(note)).toEqual([])
 

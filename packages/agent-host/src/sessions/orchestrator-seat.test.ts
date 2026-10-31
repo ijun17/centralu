@@ -422,7 +422,7 @@ describe('over the real manager', () => {
       const orch = await create()
       const a = await create()
       const tools = (mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch)
-      mgr.reorderSessions(p.id, [a, orch])
+      mgr.layout.reorderSessions(p.id, [a, orch])
       const b = await create()
       expect((await tools.listSessions()).map((s) => s.sessionId).sort()).toEqual([a, b].sort())
     } finally {

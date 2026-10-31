@@ -73,24 +73,24 @@ describe('a session\'s background tasks in the manager (#290)', () => {
   it('stops a task through the adapter only when it is listed as running and stoppable', async () => {
     const { mgr, session, handles, tasks } = await setup()
     tasks([agent('a'), agent('w', { stoppable: false })], [agent('x', { status: 'completed' })])
-    await mgr.stopBackgroundTask(session.id, 'a')
+    await mgr.sessionSettings.stopBackgroundTask(session.id, 'a')
     expect(handles[0]!.stopped).toEqual(['a'])
-    await expect(mgr.stopBackgroundTask(session.id, 'x')).rejects.toThrow(/no longer running/)
-    await expect(mgr.stopBackgroundTask(session.id, 'gone')).rejects.toThrow(/no longer running/)
-    await expect(mgr.stopBackgroundTask(session.id, 'w')).rejects.toThrow(/cannot be stopped/)
+    await expect(mgr.sessionSettings.stopBackgroundTask(session.id, 'x')).rejects.toThrow(/no longer running/)
+    await expect(mgr.sessionSettings.stopBackgroundTask(session.id, 'gone')).rejects.toThrow(/no longer running/)
+    await expect(mgr.sessionSettings.stopBackgroundTask(session.id, 'w')).rejects.toThrow(/cannot be stopped/)
     expect(handles[0]!.stopped).toEqual(['a'])
   })
 
   it('an adapter that cannot stop a task alone is refused rather than asked', async () => {
     const { mgr, session, tasks } = await setup({ stoppable: false })
     tasks([agent('a')])
-    await expect(mgr.stopBackgroundTask(session.id, 'a')).rejects.toThrow(/cannot be stopped/)
+    await expect(mgr.sessionSettings.stopBackgroundTask(session.id, 'a')).rejects.toThrow(/cannot be stopped/)
   })
 
   it('clearing takes the ended tasks off the list and keeps the running ones, and tells the screen', async () => {
     const { mgr, session, events, info, tasks } = await setup()
     tasks([agent('a')], [agent('x', { status: 'failed' })])
-    mgr.clearBackgroundTasks(session.id)
+    mgr.sessionSettings.clearBackgroundTasks(session.id)
     expect(info().backgroundTasks.map((t) => t.id)).toEqual(['a'])
     expect(events.at(-1)).toMatchObject({ type: 'background_tasks', live: [{ id: 'a' }], clearEnded: true })
   })

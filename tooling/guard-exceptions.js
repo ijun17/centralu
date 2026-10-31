@@ -42,7 +42,7 @@ export const EXCEPTIONS = {
   },
   'purge-callers': {
     'packages/agent-host/src/rpc.ts': {
-      counts: { 'mgr.emptyTrash': 1, 'mgr.purgeSession': 1 },
+      counts: { 'mgr.trash.emptyTrash': 1, 'mgr.trash.purgeSession': 1 },
       reason: 'The RPC handler: only the person deletes for good, and only through the RPC (#204)',
     },
     'packages/agent-host/src/sessions/app-sessions.ts': {
@@ -50,8 +50,8 @@ export const EXCEPTIONS = {
       reason: 'The one deletion the host makes itself (#378): a finished app-agent session, once its record is kept in the session archive. It reaches the purge only through agentRunEnded after a clean run (app-agents.test.ts holds when it does and when the session stays)',
     },
     'packages/agent-host/src/sessions/manager.ts': {
-      counts: { 'self.purgeSession': 1, 'this.trash.emptyTrash': 1, 'this.trash.purgeSession': 1 },
-      reason: "The manager hands app-sessions the same purge, and passes the two calls on to its session archive (session-trash.ts, #428); the same calls, not other callers",
+      counts: { 'self.trash.purgeSession': 1 },
+      reason: "The manager hands app-sessions the same purge from its session archive (session-trash.ts, #428); the same call, not another caller",
     },
     'packages/agent-host/src/sessions/session-trash.ts': {
       counts: { 'this.host.store.trash.purgeSession': 1, 'this.purgeSession': 1 },
@@ -60,12 +60,8 @@ export const EXCEPTIONS = {
   },
   'subagent-purge-callers': {
     'packages/agent-host/src/rpc.ts': {
-      counts: { 'mgr.purgeSubagentSteps': 1 },
+      counts: { 'mgr.trash.purgeSubagentSteps': 1 },
       reason: 'The RPC handler: only the person deletes subagent steps for good, and only through the RPC (#204)',
-    },
-    'packages/agent-host/src/sessions/manager.ts': {
-      counts: { 'this.trash.purgeSubagentSteps': 1 },
-      reason: 'Deleting all archived sessions purges their steps too; the manager passes the call on to the session archive',
     },
     'packages/agent-host/src/sessions/session-trash.ts': {
       counts: { 'this.host.store.subagentSteps.purge': 1 },

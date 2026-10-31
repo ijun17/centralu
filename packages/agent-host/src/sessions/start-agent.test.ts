@@ -232,7 +232,7 @@ describe('starting another agent in the same project', () => {
     expect(childrenOf(s)).toHaveLength(1)
     expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s)).toEqual([])
     // Nothing remembered: it is the trust, read at each call
-    expect(w.mgr.projectConsents()).toEqual([])
+    expect(w.mgr.consents.projectConsents()).toEqual([])
   })
 
   it('an edits session in a trusted project starts the child without a card, and the child is edits: the default reaches only the sessions a person starts (#1525)', async () => {
@@ -708,7 +708,7 @@ describe('starting another agent in the same project', () => {
       allowProject()
       const s = await session()
       w.adapters.get('codex')!.listModels = () => new Promise<ModelOption[]>(() => {})
-      vi.spyOn(w.mgr as unknown as { deliver: () => Promise<void> }, 'deliver').mockImplementation(() => new Promise<void>(() => {}))
+      vi.spyOn(w.mgr.events, 'deliver').mockImplementation(() => new Promise<void>(() => {}))
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       const p = w.mgr.startAgent(s, { task: 'slow hand-over', tool: 'codex', model: 'gpt-x', wait: false })
       await vi.advanceTimersByTimeAsync(START_AGENT_MODEL_CHECK_MS)
@@ -815,14 +815,14 @@ describe('starting another agent in the same project', () => {
     await w.until(() => !!agentCard(other))
     w.mgr.respondApproval(other, agentCard(other)!.requestId, 'always', 'project')
     expect(await third).toMatchObject({ ok: true })
-    expect(w.mgr.projectConsents()).toEqual([expect.objectContaining({ fromProjectId: w.caller.id, toProjectId: w.caller.id, kind: 'agents' })])
+    expect(w.mgr.consents.projectConsents()).toEqual([expect.objectContaining({ fromProjectId: w.caller.id, toProjectId: w.caller.id, kind: 'agents' })])
     const fresh = await session('safe')
     expect(await w.mgr.startAgent(fresh, { task: 'four', wait: false })).toMatchObject({ ok: true })
 
     // Four children run now, the ceiling: two of them finish, so the next start reaches the card
     for (const c of [...childrenOf(s), ...childrenOf(other)]) handleOf(c.id)!.answer('done')
     await new Promise((r) => setTimeout(r, 0))
-    w.mgr.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
     const fifth = w.mgr.startAgent(fresh, { task: 'five', wait: false })
     await w.until(() => !!agentCard(fresh))
     w.mgr.respondApproval(fresh, agentCard(fresh)!.requestId, 'deny')
@@ -1271,7 +1271,7 @@ describe('starting another agent in the same project', () => {
       expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
       expect(w.store.messages.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
       expect(w.events).toContainEqual({ type: 'session_deleted', sessionId: c })
-      await w.mgr.restoreSession(c)
+      await w.mgr.trash.restoreSession(c)
       expect(childrenOf(s).map((child) => child.id)).toContain(c)
     })
 
@@ -1443,7 +1443,7 @@ describe('starting another agent in the same project', () => {
       writeFileSync(join(a!, 'notes.md'), 'what it found')
       await w.mgr.trashSession(first)
       expect(existsSync(a!)).toBe(true)
-      await w.mgr.purgeSession(first)
+      await w.mgr.trash.purgeSession(first)
       expect(existsSync(a!)).toBe(false)
       expect(existsSync(b!)).toBe(true)
     })
@@ -1541,20 +1541,20 @@ describe('starting another agent in the same project', () => {
         repo()
         allowProject()
         const c = await doneChild('feat/made')
-        expect(await w.mgr.deleteHubChild(c.id, 'feat/other')).toEqual({
+        expect(await w.mgr.worktrees.deleteHubChild(c.id, 'feat/other')).toEqual({
           worktree: 'kept', path: c.worktree!.path, branch: 'feat/made', why: 'it is not the worktree Centralu made for an agent started on feat/other',
         })
         expect([existsSync(c.worktree!.path), trashed(c.id)]).toEqual([true, true])
         // The person's own worktree session, on the very branch asked for: not an agent's (#1161 review)
         const mine = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', worktree: true, worktreeBranch: 'feat/mine' })
-        expect(await w.mgr.deleteHubChild(mine.id, 'feat/mine')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('not the worktree Centralu made for an agent') })
+        expect(await w.mgr.worktrees.deleteHubChild(mine.id, 'feat/mine')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('not the worktree Centralu made for an agent') })
         expect(existsSync(mine.worktree!.path)).toBe(true)
         // A session in the project's own folder has no worktree to take
         const plain = await session()
-        expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
+        expect(await w.mgr.worktrees.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
         expect(existsSync(w.caller.path)).toBe(true)
         // Asked again, it is deleted already: said, not refused (#1161 review)
-        expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none', note: 'it had been deleted there already' })
+        expect(await w.mgr.worktrees.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none', note: 'it had been deleted there already' })
       })
 
       it('counts the commits of a checkout moved off the branch made for it', async () => {
@@ -1563,7 +1563,7 @@ describe('starting another agent in the same project', () => {
         const c = await doneChild('feat/moved')
         git(c.worktree!.path, 'checkout', '-q', '-b', 'feat/elsewhere')
         git(c.worktree!.path, 'commit', '-q', '--allow-empty', '-m', 'only on the other branch')
-        expect(await w.mgr.deleteHubChild(c.id, 'feat/moved')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('it has 1 commit that no remote and not the trunk has') })
+        expect(await w.mgr.worktrees.deleteHubChild(c.id, 'feat/moved')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('it has 1 commit that no remote and not the trunk has') })
         expect(existsSync(c.worktree!.path)).toBe(true)
       })
 
@@ -1573,7 +1573,7 @@ describe('starting another agent in the same project', () => {
         const c = await doneChild('feat/gone')
         git(c.worktree!.path, 'commit', '-q', '--allow-empty', '-m', 'kept work')
         rmSync(c.worktree!.path, { recursive: true, force: true })
-        expect(await w.mgr.deleteHubChild(c.id, 'feat/gone')).toMatchObject({
+        expect(await w.mgr.worktrees.deleteHubChild(c.id, 'feat/gone')).toMatchObject({
           worktree: 'removed', note: expect.stringContaining('Branch feat/gone was kept because it has 1 commit the trunk lacks'),
         })
         expect(trashed(c.id)).toBe(true)

@@ -143,7 +143,7 @@ describe('sharing an app (apps.setShared)', () => {
     const result = await mgr.runOrchestratorTool(s.id, 'attach_app', { app: 'beta/board' })
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('not trusted') })
     expect(card(s.id)).toBeUndefined()
-    expect(mgr.projectConsents()).toEqual([])
+    expect(mgr.consents.projectConsents()).toEqual([])
     // Nor is it run for that session, by any name
     expect((await rt.call({ projectId: beta, appId: 'board' }, 'peek', {}, { kind: 'session', sessionId: s.id })).status).toBe('rejected')
   })
@@ -154,7 +154,7 @@ describe('sharing an app (apps.setShared)', () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBeFalsy()
     await mgr.updateSettings(s.id, { permissionPreset: 'auto' })
-    mgr.revokeProjectConsent(alpha, beta, 'apps')
+    mgr.consents.revokeProjectConsent(alpha, beta, 'apps')
     expect(servers(claude.last())).toContain('app-board')
     expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)
     await mgr.updateSettings(s.id, { permissionPreset: 'normal' })

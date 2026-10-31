@@ -174,7 +174,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     await startChild(h, parent, 'long work')
-    const record = await h.mgr.exportHandoffRecord(parent, 'claude')
+    const record = await h.mgr.handoffNotes.exportHandoffRecord(parent, 'claude')
     await h.mgr.createSession({
       projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', initialPrompt: 'You are taking over. Read the note.',
       handoff: { from: 'Planner', note: record.text, fromSessionId: parent },

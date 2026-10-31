@@ -142,7 +142,7 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
   const developerInstructions = () => String(sent('thread/start').at(-1)!.params.developerInstructions ?? '')
 
   it('the orchestrator: its role, then the same instructions Claude gets from the server', async () => {
-    mgr.configureOrchestrator('codex')
+    mgr.orchestratorSlot.configureOrchestrator('codex')
     const o = await mgr.orchestrator()
     await mgr.resumeSession(o.id)
     const text = developerInstructions()

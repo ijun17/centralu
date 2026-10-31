@@ -176,6 +176,16 @@ Manager line counts are after each pull request.
   `canReadMail`, the two `stop()` pairs through `stopSelfCompaction()`, one `setting` and `notice` for both compaction
   modules, `updateResumeDone` and `tellPersonOfInterruption` inlined, and `nameUnnamedWorktrees` (§7: old rows still
   named "New session" stay so, by the owner's removal of old-version compatibility, #1143).
+- **3, the forwarding stubs** (`manager.ts` 3,063 to 2,713): 70 stubs, the rpc-only ones and, by decision D1, the ones
+  tests call, except the session's own verbs (`createSession`, `startAgent`, `agentSession`, `askProject`,
+  `orchestrator`, `runOrchestratorTool`, `updateSettings`, `rename`). The router, the other modules and the tests call the
+  module (`mgr.trash.restoreSession`); the module fields they need are public `readonly`. Still on the manager because
+  `main.ts`, `links/` or `adapters/` call them (those files are out of this round): `addProject`, `askFromMachine`,
+  `builderBusy`, `forgetWatchHolder`, `forwarding`, `hostReader`, `listProjects`, `loadMessages`, `mcpProposals`,
+  `observeLinked`, `remoteAgentParent`, `sendFromHub`, `setAgentInstructions`, `setUiPreferences`, `toolProfileOf`,
+  `trashSession`, `uiPreferences`, `useExternalApps`, `useLinkedApps`, `useLinkedSessions`, `useProjectsHome`, and the five
+  of PR 5 (`noteAgentMoved`, `noteAgentMoveFailed`, `sessionAppsHub`, `recordAppView`, `loadSubagentMessages`). So
+  "five stubs reach `main.ts`" in §2 was low: 21 more do.
 
 ### 6.2 Work in flight
 

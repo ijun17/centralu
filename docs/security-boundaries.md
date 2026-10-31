@@ -827,7 +827,7 @@ Rows that differ by session:
   and a mode written in the orchestrator's own folder does not count. The direction is decision 1's:
   the person's global choice applies to every session that runs under `normal`, and someone who wants
   a card from the orchestrator has `safe`.
-- **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
+- **An agent an app started** (`run_agent`, `AppSessions.runAppAgent`) is `safe` whatever the
   calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
 - **A session `ask_project` addresses** already exists and keeps its own preset, tool and project
   trust. The caller's `auto` skips host consent; it does not raise the target's permissions, which
@@ -2529,7 +2529,7 @@ the window asks the session's host for it (`messages.image`, [protocol.md](proto
 answer, as before.
 
 Since the file can be anywhere, the project root is not the boundary here. Three checks are, each on its own
-(`dev-services/message-image.ts`, `SessionManager.messageImage`):
+(`dev-services/message-image.ts`, `SessionRecord.messageImage`):
 
 - **Only a path this session's replies wrote.** The host looks for the path in the session's own stored replies
   (`assistant` `text` rows, its subagents' included) and in the reply still streaming. The person's messages, reasoning

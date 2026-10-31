@@ -72,7 +72,7 @@ describe('child sessions and the machine (#686)', () => {
     it('an agent an app asked for starts without it', async () => {
       const id = await new Promise<string>((resolve, reject) => {
         w.mgr
-          .runAppAgent(
+          .appSessions.runAppAgent(
             { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
             { signal: new AbortController().signal, progress: () => {}, onSession: resolve },
           )
@@ -195,7 +195,7 @@ describe('child sessions and the machine (#686)', () => {
       const progress: string[] = []
       let sessionId: string | undefined
       void w.mgr
-        .runAppAgent(
+        .appSessions.runAppAgent(
           { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
           { signal: new AbortController().signal, progress: (m) => progress.push(m), onSession: (id) => (sessionId = id) },
         )
@@ -213,7 +213,7 @@ describe('child sessions and the machine (#686)', () => {
       free = 1 * GB
       const ctl = new AbortController()
       let sessionId: string | undefined
-      const run = w.mgr.runAppAgent(
+      const run = w.mgr.appSessions.runAppAgent(
         { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
         { signal: ctl.signal, progress: () => {}, onSession: (id) => (sessionId = id) },
       )

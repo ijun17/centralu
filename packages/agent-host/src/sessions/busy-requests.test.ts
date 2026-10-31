@@ -230,7 +230,7 @@ describe('requests to a busy session (#677)', () => {
 
     it('is withdrawn when the person revokes the pair in Settings', async () => {
       const { target, asker } = await queuedAsk()
-      w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.mgr.consents.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
       expect(w.store.children.listQueuedRequests()).toEqual([])
       await turnEnds(target)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
@@ -332,7 +332,7 @@ describe('requests to a busy session (#677)', () => {
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
       await w.mgr.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
-      w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.mgr.consents.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
       // Kept, as auto's reach is
       expect(w.store.children.listQueuedRequests()).toHaveLength(1)
       return { target, asker }
@@ -562,7 +562,7 @@ describe('requests to a busy session (#677)', () => {
     it("withdraws a fork's card when the project loses trust, and makes no fork", async () => {
       const { a, b } = await busyChild('safe')
       // A safe requester with no remembered consent gets the card
-      w.mgr.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       void w.mgr.setProjectTrusted(w.caller.id, false)
@@ -574,7 +574,7 @@ describe('requests to a busy session (#677)', () => {
 
     it("refuses an approval of a fork's card that comes after the project's trust is gone", async () => {
       const { a, b } = await busyChild('safe')
-      w.mgr.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       // Taken away at the store, so only the read after the answer can see it

@@ -55,17 +55,17 @@ describe('approval rules persist (C-2)', () => {
     ask('req-1', command('npm test'))
     mgr.respondApproval(session.id, 'req-1', 'always', 'session', 'npm test')
     // id and createdAt are used by the settings screen to show when a rule was created, for deleting it (E-4)
-    expect(mgr.listApprovalRules()).toMatchObject([{ scope: 'session', matcher: 'npm test', decision: 'allow' }])
-    expect(mgr.listApprovalRules()[0]!.id).toBeGreaterThan(0)
+    expect(mgr.approvalRules.listApprovalRules()).toMatchObject([{ scope: 'session', matcher: 'npm test', decision: 'allow' }])
+    expect(mgr.approvalRules.listApprovalRules()[0]!.id).toBeGreaterThan(0)
     // Carries which session the rule belongs to — the settings screen labels each row with its owner (#183)
-    expect(mgr.listApprovalRules()[0]).toMatchObject({ sessionId: session.id, projectId: null })
+    expect(mgr.approvalRules.listApprovalRules()[0]).toMatchObject({ sessionId: session.id, projectId: null })
   })
 
   it('does not save it with no matcher (an empty rule is useless)', async () => {
     const { mgr, session, ask, command } = await setup()
     ask('req-1', command('npm test'))
     mgr.respondApproval(session.id, 'req-1', 'always', 'session')
-    expect(mgr.listApprovalRules()).toEqual([])
+    expect(mgr.approvalRules.listApprovalRules()).toEqual([])
   })
 
   // An edit with no path has no key to match (#428): a rule saved for "(no path)" would be listed and never apply
@@ -73,7 +73,7 @@ describe('approval rules persist (C-2)', () => {
     const { mgr, session, ask } = await setup()
     ask('req-1', { kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })
     mgr.respondApproval(session.id, 'req-1', 'always', 'session', NO_PATH)
-    expect(mgr.listApprovalRules()).toEqual([])
+    expect(mgr.approvalRules.listApprovalRules()).toEqual([])
   })
 
   /*
@@ -96,7 +96,7 @@ describe('approval rules persist (C-2)', () => {
     // An answer whose request id is not the card standing
     ask('req-x', command('ls'))
     mgr.respondApproval(session.id, 'req-other', 'always', 'project', 'ls')
-    expect(mgr.listApprovalRules()).toEqual([])
+    expect(mgr.approvalRules.listApprovalRules()).toEqual([])
     // The call itself is allowed, and the adapter is given no matcher to keep
     expect(f.given).toEqual([undefined, undefined, undefined, undefined, undefined])
   })
@@ -172,7 +172,7 @@ describe('approval rules persist (C-2)', () => {
       detail: { kind: 'command', command: 'git push', cwd: process.cwd() },
     })
     mgr.respondApproval(session.id, 'req-1', 'always', 'project', 'git push')
-    expect(mgr.listApprovalRules()).toMatchObject([{ scope: 'session', sessionId: session.id, projectId: null, matcher: 'git push' }])
+    expect(mgr.approvalRules.listApprovalRules()).toMatchObject([{ scope: 'session', sessionId: session.id, projectId: null, matcher: 'git push' }])
 
     // After a restart: the answering session keeps it, another session with no project does not get it
     const f2 = fake()
@@ -200,6 +200,6 @@ describe('approval rules persist (C-2)', () => {
     store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git status', decision: 'allow' })
     store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git * origin', decision: 'allow' })
     const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(fake())]]), () => {})
-    expect(mgr.listApprovalRules().map((r) => r.matcher).sort()).toEqual(['git * origin', 'git status'])
+    expect(mgr.approvalRules.listApprovalRules().map((r) => r.matcher).sort()).toEqual(['git * origin', 'git status'])
   })
 })

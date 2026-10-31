@@ -2015,7 +2015,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 
 ## 6. 사용량과 한도 (FR-9)
 
-**도구에게 묻는다. 도구의 파일을 읽지 않는다.** `agents.usage` → `SessionManager.usageFor(tool)`
+**도구에게 묻는다. 도구의 파일을 읽지 않는다.** `agents.usage` → `ToolQueries.usageFor(tool)`
 → 어댑터의 선택 메서드 `listUsage()`이고, 그 안에서 도구 자신의 API를 부른다 (한쪽은 Claude
 SDK, 다른 쪽은 `app-server`). 답하지 못하는 어댑터는 던지고, 매니저가 이유를 달아 degrade한다 —
 자신 있게 틀린 숫자를 보여주는 것보다 낫다.
