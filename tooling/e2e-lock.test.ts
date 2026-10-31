@@ -592,7 +592,7 @@ describe('the runners (real processes)', () => {
       // A lock whose holder is a process that has ended
       const dead = spawnSync(process.execPath, ['-e', '0']).pid
       write(holder(dead, 123 * HOUR, { at: 5_000, command: 'a run that was killed' }))
-      const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map(heldUntilGate).map(runner)
+      const runs = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => runner(heldUntilGate(id)))
       // The one that took the lock holds it until the other five have said they wait
       await eventually(() => runs.filter(isWaiting).length === 5 || undefined, 60_000)
       openGate()
