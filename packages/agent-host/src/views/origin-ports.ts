@@ -1,5 +1,6 @@
 import { createServer, type RequestListener, type Server } from 'node:http'
 import { randomInt } from 'node:crypto'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * Per-app origin ports (M4 B-3, spike S-1).
@@ -107,12 +108,7 @@ function readBook(raw: PortBook | null): PortBook {
  */
 export function parsePortBook(raw: string | null, say: (line: string) => void): PortBook | null {
   if (raw === null) return null
-  let v: unknown
-  try {
-    v = JSON.parse(raw)
-  } catch {
-    v = undefined
-  }
+  const v = tryParseJson(raw)
   if (v && typeof v === 'object' && !Array.isArray(v)) return v as PortBook
   const retired = [...new Set((raw.match(/\d+/g) ?? []).map(Number).filter(validPort))]
   say(

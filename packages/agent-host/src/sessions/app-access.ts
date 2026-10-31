@@ -2,7 +2,7 @@ import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
-import { withTimeout } from './with-timeout.js'
+import { withTimeout } from '../timing.js'
 import { listSetting } from '../dev-services/store/settings.js'
 
 /**

@@ -138,15 +138,6 @@ describe('apps on the grid (#288)', () => {
   const app = (projectId: string | null, appId: string) => ({ kind: 'app' as const, projectId, appId })
   const keys = () => useStore.getState().pinnedViews.map((p) => p.key)
 
-  it('a list of bare session ids from a host older than this build is read as session panels', async () => {
-    const mock = new MockPlatform()
-    mock.sessions.set('ga-old', sessionInfo('ga-old'))
-    // What `grid.get` answered before apps could stand on the grid
-    Object.assign(mock.agents, { grid: async () => ['ga-old'] })
-    await useStore.getState().attach(mock)
-    expect(useStore.getState().gridPanels).toEqual([sessionGridPanel('ga-old')])
-  })
-
   it('sessions, a project’s app and a user-folder app are saved in one order and come back from the host', async () => {
     const { mock, pid } = await live()
     const list = [app(null, 'notes'), sessionGridPanel('ga-s1'), app(pid, 'slider')]

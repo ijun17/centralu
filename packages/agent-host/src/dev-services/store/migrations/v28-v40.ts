@@ -1,6 +1,7 @@
 import { oneRow, pragmaNumber } from '../rows.js'
 import { INDEXED_KINDS, indexedText } from '../search-index.js'
-import { mb, VACUUM_FREE_BYTES } from '../vacuum.js'
+import { bytesText } from '../../../bytes-text.js'
+import { VACUUM_FREE_BYTES } from '../vacuum.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
 /** The migration steps v28 to v40, in order. The rule they follow is written above `migrationSteps` in `index.ts` */
@@ -456,7 +457,7 @@ export class StepsV28ToV40 extends MigrationRange {
     this.vacuumAfterStep(({ before, after, ms }) =>
       console.error(
         `[store] search index rebuilt without tool calls: dropped ${stale.n} rows, kept ${rows} (${t1 - t0}ms); ` +
-          `vacuumed ${mb(before)} -> ${mb(after)} (${ms}ms)`,
+          `vacuumed ${bytesText(before)} -> ${bytesText(after)} (${ms}ms)`,
       ),
     )
   }

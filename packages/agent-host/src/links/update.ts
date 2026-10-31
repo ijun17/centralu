@@ -2,6 +2,7 @@ import { isLocalBuildVersion } from '@cc/protocol'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
 import { lastLine, NOT_FOUND, remoteScript, shimNames, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
@@ -77,13 +78,9 @@ export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolea
   for (const line of stdout.split(/\r?\n/).reverse()) {
     const t = line.trim()
     if (!t.startsWith('{')) continue
-    try {
-      const o = JSON.parse(t) as { v?: unknown; stop?: { ok?: unknown; wasRunning?: unknown; message?: unknown } }
-      if (o.v === 1 && o.stop && typeof o.stop.ok === 'boolean') {
-        return { ok: o.stop.ok, wasRunning: o.stop.wasRunning === true, message: typeof o.stop.message === 'string' ? o.stop.message : null }
-      }
-    } catch {
-      // not the line
+    const o = tryParseJson(t) as { v?: unknown; stop?: { ok?: unknown; wasRunning?: unknown; message?: unknown } } | null | undefined
+    if (o?.v === 1 && o.stop && typeof o.stop.ok === 'boolean') {
+      return { ok: o.stop.ok, wasRunning: o.stop.wasRunning === true, message: typeof o.stop.message === 'string' ? o.stop.message : null }
     }
   }
   return null

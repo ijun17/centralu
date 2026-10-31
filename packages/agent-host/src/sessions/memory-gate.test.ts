@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { availableMemorySource } from '../os.js'
-import { gigabytes, MemoryGate, parseMemInfo, parseVmStat, readAvailableMemory } from './memory-gate.js'
+import { bytesText } from '../bytes-text.js'
+import { MemoryGate, parseMemInfo, parseVmStat, readAvailableMemory } from './memory-gate.js'
 
 /**
  * The start gate for new agent sessions (#686): how free plus reclaimable memory is read on each OS, and how starts
@@ -24,7 +25,7 @@ describe('reading free plus reclaimable memory', () => {
       '"Translation faults":                     9195707037.',
     ].join('\n')
     expect(parseVmStat(text)).toBe((5293 + 581232 + 11988) * 16384)
-    expect(gigabytes(parseVmStat(text)!)).toBe('9.1 GB')
+    expect(bytesText(parseVmStat(text)!)).toBe('9.1 GB')
     expect(parseVmStat('no header here')).toBeNull()
     expect(parseVmStat('Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: 10.')).toBeNull()
   })

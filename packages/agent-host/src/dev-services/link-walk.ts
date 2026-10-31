@@ -1,4 +1,4 @@
-import { errnoCode } from './errno.js'
+import { errnoCode } from '../os/errors.js'
 import { lstatSync, readdirSync, readlinkSync, type Dirent } from 'node:fs'
 import { lstat, readdir, readlink } from 'node:fs/promises'
 import { win32 } from 'node:path'

@@ -59,7 +59,6 @@ function machine(over: Partial<MachineInfo>): MachineInfo {
     autostart: null,
     elevated: null,
     autoReconnect: true,
-    connect: 'at_start',
     otherCredentials: null,
     ...over,
   } as MachineInfo
@@ -111,7 +110,7 @@ function fakeOps() {
     startHeldBack: () => heldBack,
     setAutoReconnect: (id, autoReconnect: boolean) => {
       calls.push(['setAutoReconnect', id, autoReconnect])
-      Object.assign(find(id), { autoReconnect, connect: autoReconnect ? 'at_start' : 'when_needed' })
+      Object.assign(find(id), { autoReconnect })
       return find(id)
     },
     install: async (id) => {
@@ -526,7 +525,7 @@ describe('undoing what the person did', () => {
 
   it('asks before it turns Auto reconnect back on, and leaves it off on Deny; turning it off, or on where it is on, asks nothing', async () => {
     const orc = await mgr.orchestrator()
-    ops.patch({ autoReconnect: false, connect: 'when_needed' })
+    ops.patch({ autoReconnect: false })
     const denied = await answered(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: true }, 'deny')
     expect(denied.question).toContain('Turn Auto reconnect back on for Laptop (me@laptop)? You turned it off.')
     expect(denied.r.isError).toBe(true)
@@ -543,7 +542,7 @@ describe('undoing what the person did', () => {
 
   it('asks before it reconnects a machine whose Auto reconnect the person turned off, and connects nothing on Deny', async () => {
     const orc = await mgr.orchestrator()
-    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out', autoReconnect: false, connect: 'when_needed' })
+    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out', autoReconnect: false })
     const denied = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
     expect(denied.question).toContain('Connect Laptop (me@laptop)? You turned its Auto reconnect off')
     expect(denied.r.isError).toBe(true)
@@ -556,7 +555,7 @@ describe('undoing what the person did', () => {
   it('answers that a machine is connected, with no card and nothing done, whatever its switch says', async () => {
     const orc = await mgr.orchestrator()
     for (const off of [false, true]) {
-      ops.patch({ status: 'connected', error: null, ...(off ? { autoReconnect: false, connect: 'when_needed' as const } : {}) })
+      ops.patch({ status: 'connected', error: null, ...(off ? { autoReconnect: false } : {}) })
       const r = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })
       expect(r.isError).toBeFalsy()
       expect(r.text).toContain('Laptop is already connected; nothing was done.')
@@ -671,12 +670,12 @@ describe('rollback_machine', () => {
   })
 
   it('says a machine that is down with Auto reconnect off is connected for it too (#1341), not only a disconnected one', async () => {
-    ops.patch({ status: 'unreachable', error: 'timed out', autoReconnect: false, connect: 'when_needed', install: installed })
+    ops.patch({ status: 'unreachable', error: 'timed out', autoReconnect: false, install: installed })
     const orc = await mgr.orchestrator()
     const { question } = await answered(orc.id, 'rollback_machine', { machine: 'laptop' }, 'deny')
     expect(question).toContain('"Laptop" is not connected and its Auto reconnect is off, so nothing here connects it by itself: this connects it for the change, and it stays connected afterwards.')
     // On, and down: it reconnects by itself, so the card has nothing to add
-    ops.patch({ autoReconnect: true, connect: 'at_start' })
+    ops.patch({ autoReconnect: true })
     const plain = await answered(orc.id, 'rollback_machine', { machine: 'laptop' }, 'deny')
     expect(plain.question).not.toContain('connects it for the change')
   })
@@ -698,7 +697,7 @@ describe('rollback_machine', () => {
     expect(disconnected.r.isError).toBe(true)
     expect(disconnected.r.text).toContain('was disconnected, or lost its connection with Auto reconnect off, while the card stood. This would connect it again, which the card did not say, so nothing was changed.')
     ops.patch({ status: 'connected' })
-    const lost = await answered(orc.id, 'rollback_machine', { machine: 'laptop' }, 'allow', async () => void ops.patch({ status: 'unreachable', autoReconnect: false, connect: 'when_needed' }))
+    const lost = await answered(orc.id, 'rollback_machine', { machine: 'laptop' }, 'allow', async () => void ops.patch({ status: 'unreachable', autoReconnect: false }))
     expect(lost.r.isError).toBe(true)
     expect(ops.changes()).toEqual([])
   })

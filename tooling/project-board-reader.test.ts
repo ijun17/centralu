@@ -411,10 +411,8 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
     for (const line of [
       'read_item — reads, app',
-      'decision_summaries — reads, app',
       'save_answer — changes, app',
-      'delete_answer — changes, app',
-      'list_owner_answers — reads, model',
+      'list_owner_answers — reads, model+app',
       'mark_answer_recorded — changes, model',
     ])
       expect(r.text).toContain(line)
@@ -505,7 +503,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
 
   it('lists what each decision asks, highest priority first, and whether it was answered after', async () => {
     runtime()
-    const r = await call('decision_summaries')
+    const r = await call('list_owner_answers', { view: 'summaries' })
     expect(r.data.ok).toBe(true)
     expect(r.text).toBe('2 items with Status Needs decision.')
     expect(r.data.items.map((i: { ref: string }) => i.ref)).toEqual(['#101', '#113'])
@@ -539,7 +537,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
 
     const read = await call('read_item', { item: 113 })
     expect(read.data.ownerAnswer).toMatchObject({ text: KOREAN, recordedAt: null })
-    const summaries = await call('decision_summaries')
+    const summaries = await call('list_owner_answers', { view: 'summaries' })
     const row = (n: number) => summaries.data.items.find((i: { number: number }) => i.number === n)
     expect(row(113).ownerAnswer).toMatchObject({ text: KOREAN, recordedAt: null })
     expect(row(101).ownerAnswer).toBeNull()
@@ -561,7 +559,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     expect(list.data.count).toBe(1)
     expect(list.data.summary).toMatch(/^1 owner answer not recorded yet\. For each: post the decision on its issue in English with comment/)
     expect(list.data.answers).toEqual([expect.stringMatching(new RegExp(`^#113 Narrow-window reading — answered, not recorded yet, saved \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC\\n  ${KOREAN}$`))])
-    const needs = await call('list_needs_decision', {}, agent)
+    const needs = await call('list_owner_answers', { view: 'items' }, agent)
     expect(needs.data.summary).toBe('Centralu: 2 items with Status Needs decision, 1 answered, not recorded yet (list_owner_answers).')
     expect(needs.data.items).toEqual(['#101 Worktree management — Needs decision · High · Host', '#113 Narrow-window reading — Needs decision · Medium · UI · answered, not recorded yet'])
   })
@@ -569,11 +567,11 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
   it('lets the owner delete an answer while it is not recorded', async () => {
     runtime()
     await call('save_answer', { item: 113, text: KOREAN })
-    const r = await call('delete_answer', { item: 113 })
+    const r = await call('save_answer', { item: 113, remove: true })
     expect(r.text).toBe('Deleted the answer on #113.')
     expect(r.data.answer).toBeNull()
     expect((await call('read_item', { item: 113 })).data.ownerAnswer).toBeNull()
-    expect((await call('delete_answer', { item: 113 })).text).toBe('Not deleted: #113: There is no saved answer for it.')
+    expect((await call('save_answer', { item: 113, remove: true })).text).toBe('Not deleted: #113: There is no saved answer for it.')
     expect((await call('list_owner_answers', {}, agent)).data.count).toBe(0)
   })
 
@@ -594,10 +592,10 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     expect(marked.text).toBe(`Marked the owner's answer on #113 recorded: ${url}`)
     expect((await call('list_owner_answers', {}, agent)).data.count).toBe(0)
     expect((await call('list_owner_answers', { all: true }, agent)).data.answers[0]).toMatch(/^#113 Narrow-window reading — recorded \d{4}-\d{2}-\d{2}: https:\/\/github\.com\/ijun17\/centralu\/issues\/113#issuecomment-9004\n/)
-    expect((await call('list_needs_decision', {}, agent)).data.items[1]).toBe('#113 Narrow-window reading — Needs decision · Medium · UI')
+    expect((await call('list_owner_answers', { view: 'items' }, agent)).data.items[1]).toBe('#113 Narrow-window reading — Needs decision · Medium · UI')
     expect((await call('read_item', { item: 113 })).data.ownerAnswer).toMatchObject({ text: KOREAN, recordedUrl: url })
     // Recorded is history: not deleted from the screen, and a new answer starts beside it
-    expect((await call('delete_answer', { item: 113 })).text).toBe('Not deleted: #113: Its answer is recorded on GitHub already; it is not deleted here.')
+    expect((await call('save_answer', { item: 113, remove: true })).text).toBe('Not deleted: #113: Its answer is recorded on GitHub already; it is not deleted here.')
     // Only the agent's English comment went to GitHub
     expect(posts().map((p) => JSON.parse(p.stdin!).body)).toEqual(['**Decision (owner, 2026-10-12):** A. Fold it into #406.'])
   })
@@ -630,7 +628,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     expect(posts()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/issues/113/comments', '--input', '-'], stdin: JSON.stringify({ body }) }])
     const after = await call('read_item', { item: 113 })
     expect(after.data.comments.map((c: { id: string }) => c.id)).toEqual(['IC_1', 'IC_2', 'IC_3', 'IC_new4'])
-    const summaries = await call('decision_summaries')
+    const summaries = await call('list_owner_answers', { view: 'summaries' })
     expect(summaries.data.items.find((i: { ref: string }) => i.ref === '#113').decision.answered).toBe('2026-10-12T10:00:04Z')
   })
 

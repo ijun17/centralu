@@ -267,8 +267,6 @@ export function sidebarDropTests(): void {
       // Remembered through the screen's own arrangement; the grid keeps its own list
       expect(await arrangement(page, pid)).toEqual({
         panels: [`session:${a}`, `session:${b}`, `session:${c}`],
-        order: [`session:${a}`, `session:${b}`, `session:${c}`],
-        hidden: [],
       })
       expect(await gridPanels(page)).toEqual([])
     })

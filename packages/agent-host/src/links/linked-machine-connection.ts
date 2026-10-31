@@ -427,6 +427,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The link has just connected, its hello and lists read; `LinkedMachine` looks at the versions then (#1508) */
   protected connectedNow(): void {}
 
+  /** The link has just been held at `versions_differ` (`check`); `LinkedMachine` looks at the versions then (#1143) */
+  protected heldNow(): void {}
+
   /** Whether the remote host continues the turns an update's stop cuts (#1618): its last hello said which it continues */
   continuesCutTurns(): boolean {
     return this.updateContinued !== null
@@ -462,7 +465,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       handover: this.handover,
       autoReconnect: this.autoReconnect,
       updateWaits: true,
-      connect: this.autoReconnect ? 'at_start' : 'when_needed',
       ...this.otherCredentials(),
     }
   }
@@ -711,8 +713,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /**
    * Tells the machine who this hub is and whether its sessions may ask this hub's projects (`host.hubOffer`), so the
    * machine knows the connection to call back on. Said off too, so a machine that heard "on" earlier in its own life
-   * stops offering this hub to its sessions. A machine from before the reverse direction answers "Unknown method": the
-   * row then says to update it there, while the switch is on
+   * stops offering this hub to its sessions. A machine that could not be told says so on the row, while the switch is on
    */
   protected async offerAsks(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
@@ -722,11 +723,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     try {
       await client.call('host.hubOffer', { hub: self, on })
     } catch (err) {
-      if (on) {
-        note = /Unknown method/i.test((err as Error).message)
-          ? `${this.name} runs a Centralu from before this: update it there before its sessions can ask this computer's projects`
-          : `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
-      }
+      if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
     const changed = note !== this.asksNote
@@ -1166,6 +1163,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       )
       // A later update on either side is noticed by asking again now and then (§4: the prompt comes again)
       this.retryLater(this.deps.versionsRetryMs ?? 60_000, 'reads')
+      this.heldNow()
     }
     return v
   }

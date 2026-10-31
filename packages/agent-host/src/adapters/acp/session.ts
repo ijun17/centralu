@@ -152,7 +152,7 @@ class AcpWire implements ToolWire {
   readonly label: string
   readonly install?: string
   /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
-  readonly turns = { midTurnInput: false, interruptEndsProcess: false, confirmsStop: true } as const
+  readonly turns = { interruptEndsProcess: false } as const
   readonly launch: ToolWire['launch']
   readonly rules = new AlwaysAllowRules()
   preset: PermissionPreset

@@ -425,7 +425,7 @@ describe('the shutdown promise (S-5)', () => {
 
       // Closes only stdin — fd 3 is left open on the host side
       child.stdin!.end()
-      await until(() => exited, (x) => x, 3_000)
+      await until(() => exited, (x) => x)
     } finally {
       closeBroker()
       fd3.destroy()

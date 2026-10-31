@@ -222,8 +222,7 @@ export function SessionSettings({
   // A preset the tool cannot keep stays in the menu, greyed, with the host's reason (`launchRefusal`)
   const presetRefusal = (p: PermissionPreset) => (caps ? launchRefusal(caps, toolLabel, { permissionPreset: p, projectTrusted: true }) : null)
   const [open, setOpen] = useState(false)
-  // Read when the menu opens and again when the setting or the model changes. A linked machine answers for itself; one from
-  // before the setting answers "Unknown method", which means it passes nothing
+  // Read when the menu opens and again when the setting or the model changes. A linked machine answers for itself
   const compact = useLoad(
     () => (open ? compactPlatform.agents.autoCompact(sessionId) : null),
     [compactPlatform, sessionId, open],
@@ -425,9 +424,7 @@ export function SessionSettings({
             <MenuSection label="Auto compact">
               <p data-testid="settings-auto-compact-note" className="px-2 pb-1 text-2xs leading-body text-ink-faint">
                 {compact.error !== null
-                  ? /^Unknown method/.test(compact.error)
-                    ? "This computer's Centralu predates the Auto compact setting, so the agent's own setting decides."
-                    : `Could not read where this session compacts (${compact.error}).`
+                  ? `Could not read where this session compacts (${compact.error}).`
                   : !compact.data?.controlled
                     ? "Centralu does not set this on the computer that runs it; the agent's own setting decides."
                     : compact.data.tokens === null

@@ -128,7 +128,7 @@ describe('sniffImage (#1464)', () => {
 describe('inline images (#843)', () => {
   it('holds an inline image to the same ceiling as one read from disk, with the same note', () => {
     const over = 'a'.repeat(Math.ceil(((IMAGE_MAX_BYTES + 1) * 4) / 3) + 4)
-    expect(inlineImageEvent('s1', 'image/png', over)).toMatchObject({ data: '', note: 'too large (8MB)' })
+    expect(inlineImageEvent('s1', 'image/png', over)).toMatchObject({ data: '', note: 'too large (8.0 MB)' })
     expect(inlineImageEvent('s1', '', 'aWJs')).toEqual({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs' })
   })
 

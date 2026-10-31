@@ -2,7 +2,7 @@ import { ORCHESTRATOR_CHANGE, errorMessage, type ExternalAppInfo } from '@cc/pro
 import type { AppUpkeepRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, onMachine, readProjects, shown, type Projects } from './app-lookup.js'
-import { plainQuoted } from './tool-answers.js'
+import { plainQuoted, plural } from './tool-answers.js'
 import { callWindow, type WindowRpc } from './window-rpc.js'
 
 export type { AppUpkeepRequest }
@@ -19,7 +19,6 @@ type Ref = { appId: string; projectId: string | null; machine?: string }
 const ROWS = 30
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /**
  * Text an app supplies (its error message, the last lines of its standard error, what it was called with), on one quoted

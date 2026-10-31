@@ -5,7 +5,7 @@ import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-line
 import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
-import { isObj } from '../json-value.js'
+import { asObj, isObj, tryParseJson } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -69,11 +69,8 @@ function assistantText(line: string): { text: string; cut: boolean } | null {
     if (!m) return null
     // A cut can end inside an escape (`\u00`): shorten it until it reads
     for (let end = m[1]!.length; end >= Math.max(0, m[1]!.length - 6); end--) {
-      try {
-        return { text: JSON.parse(`"${m[1]!.slice(0, end)}"`) as string, cut: true }
-      } catch {
-        // Not a whole escape yet
-      }
+      const text = tryParseJson(`"${m[1]!.slice(0, end)}"`) as string | undefined
+      if (text !== undefined) return { text, cut: true }
     }
     return null
   }
@@ -81,23 +78,15 @@ function assistantText(line: string): { text: string; cut: boolean } | null {
 
 /** Whether a line of a conversation is a tool call's (#1480): a machine from before `tools: "none"` still sends them */
 function isToolLine(line: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(line)
-    return isObj(parsed) && parsed.role === 'tool'
-  } catch {
-    return false
-  }
+  const parsed = tryParseJson(line)
+  return isObj(parsed) && parsed.role === 'tool'
 }
 
 /** Whether a machine answered a read from an offset as one: no line, or one line that says what it shows (`lineText`) */
 function offsetAnswered(lines: readonly string[]): boolean {
   if (lines.length === 0) return true
   if (lines.length > 1) return false
-  try {
-    return typeof (JSON.parse(lines[0]!) as { shown?: unknown }).shown === 'string'
-  } catch {
-    return false
-  }
+  return typeof asObj(tryParseJson(lines[0]!)).shown === 'string'
 }
 
 /** A machine's line of a conversation: kept when it is one line, as the machine's code makes it; quoted as one otherwise */

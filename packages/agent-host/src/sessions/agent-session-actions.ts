@@ -13,7 +13,7 @@ import { agentState, ownAgents } from './own-agents.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
-import { raceBound } from './with-timeout.js'
+import { raceBound } from '../timing.js'
 
 /**
  * What agent_session reaches of the rest of the delegation flow (`DelegationFlow`): the child's run and its wait, the

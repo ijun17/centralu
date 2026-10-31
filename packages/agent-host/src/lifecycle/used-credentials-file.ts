@@ -1,5 +1,5 @@
+import { errnoCode } from '../os/errors.js'
 import type { Os } from '../os/port.js'
-import { asObj } from '../json-value.js'
 import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedRecord } from './serve-credentials.js'
 
 /**
@@ -41,10 +41,7 @@ export const READ_AT_MOST = 1 << 20
 
 const NEWLINE = 0x0a
 
-const codeOf = (e: unknown): string => {
-  const c = asObj(e).code
-  return typeof c === 'string' ? c : 'error'
-}
+const codeOf = (e: unknown): string => errnoCode(e) ?? 'error'
 
 export class UsedCredentialsFile {
   /** Lines of the file this host has counted: those read, from the start of the file it reads now */
@@ -250,11 +247,15 @@ export class UsedCredentialsFile {
     const text = records.map(encodeUsedRecord).join('')
     try {
       const tmp = `${this.path}.${process.pid}.tmp`
-      this.os.files.writeFileSync(tmp, text, { mode: 0o600 })
       try {
+        this.os.files.writeFileSync(tmp, text, { mode: 0o600 })
         this.os.files.renameSync(tmp, this.path)
       } catch (e) {
-        this.os.files.rmSync(tmp, { force: true })
+        try {
+          this.os.files.rmSync(tmp, { force: true })
+        } catch {
+          // Held open by a scanner: the write's own error is the one to say
+        }
         throw e
       }
     } catch (e) {

@@ -31,12 +31,14 @@ export const trimmed = (v: unknown): string | undefined => (typeof v === 'string
 /** A finite number; undefined for anything else */
 export const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
-/** The value if it is a JSON object, or the object JSON text of one holds; empty for anything else (a tool call's arguments) */
-export const jsonObject = (v: unknown): Obj => {
-  if (typeof v !== 'string') return asObj(v)
+/** The JSON in `text`; undefined when it is not JSON (JSON has no undefined, so a parsed value never reads as a failure) */
+export const tryParseJson = (text: string): unknown => {
   try {
-    return jsonObject(JSON.parse(v) as unknown)
+    return JSON.parse(text) as unknown
   } catch {
-    return {}
+    return undefined
   }
 }
+
+/** The value if it is a JSON object, or the object JSON text of one holds; empty for anything else (a tool call's arguments) */
+export const jsonObject = (v: unknown): Obj => (typeof v === 'string' ? jsonObject(tryParseJson(v)) : asObj(v))

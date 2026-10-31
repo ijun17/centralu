@@ -51,16 +51,16 @@ export type KillablePty = {
 
 export type ProcRow = { pid: number; ppid: number; pgid: number }
 
-/** `ps -A -o pid=,ppid=,pgid=` output -> rows. A line that cannot be parsed is silently dropped */
-export function parsePs(out: string): ProcRow[] {
-  const rows: ProcRow[] = []
-  for (const line of out.split('\n')) {
+/** Lines of three whole numbers (`ps` and the Windows listing below print their rows so) -> the numbers. A line that cannot be parsed is silently dropped */
+function numberRows(out: string): [number, number, number][] {
+  return out.split(/\r?\n/).flatMap((line): [number, number, number][] => {
     const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
-    if (!m) continue
-    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]) })
-  }
-  return rows
+    return m ? [[Number(m[1]), Number(m[2]), Number(m[3])]] : []
+  })
 }
+
+/** `ps -A -o pid=,ppid=,pgid=` output -> rows */
+export const parsePs = (out: string): ProcRow[] => numberRows(out).map(([pid, ppid, pgid]) => ({ pid, ppid, pgid }))
 
 /** The groups pids belong to. Both shots use the same rule — our own group and init(1)/0 are never targets */
 function groupsOf(pids: Iterable<number>, pgidOf: ReadonlyMap<number, number>, self: number): number[] {
@@ -330,16 +330,8 @@ export function stopGroup(pgid: number, graceMs: number): void {
 /** One row of the Windows process table: the parent it was started by, and when it was created (ms since the epoch) */
 export type WinProcRow = { pid: number; ppid: number; created: number }
 
-/** `pid ppid createdMs` lines (the listing below) -> rows. A line that cannot be parsed is dropped */
-export function parseWinProcs(out: string): WinProcRow[] {
-  const rows: WinProcRow[] = []
-  for (const line of out.split(/\r?\n/)) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(line)
-    if (!m) continue
-    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: Number(m[3]) })
-  }
-  return rows
-}
+/** `pid ppid createdMs` lines (the listing below) -> rows */
+export const parseWinProcs = (out: string): WinProcRow[] => numberRows(out).map(([pid, ppid, created]) => ({ pid, ppid, created }))
 
 /** A process that has already ended: its pid, when we started it (taken just before the spawn) and when we saw it end */
 export type EndedRoot = { pid: number; spawnedAt: number; exitedAt: number }

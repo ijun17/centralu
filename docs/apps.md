@@ -1202,12 +1202,11 @@ says where it came from and offers "Review and enable…".
 the app folder, so the app's own code cannot write "confirmed" and an archive cannot arrive with
 it. It is bound to the folder's inode, so a different folder later created with the same id is not
 covered: it is still an import, unconfirmed until reviewed (#838), and removing the app forgets it. Bigint stat supplies the exact file id, persisted as the
-decimal string `inoExact`. The numeric `ino` remains `Number(fileId)` so older hosts retain their
-existing comparison during swaps and rollbacks; it can be removed only in a later release under
-the "add first, remove later" rule. The new host compares `inoExact` when present. Without it,
-legacy numeric ids below 2^53 still match exactly; unsafe numeric ids retain the import mark but
-are treated as unconfirmed. Lookups do not change stored records. Importing or confirming writes
-both fields, upgrading a legacy record to the current exact id when the person reviews it again.
+decimal string `inoExact`; every host a store is still shared with compares it first. A record
+from before it (#562) has only the numeric `ino`: legacy numeric ids below 2^53 still match exactly;
+unsafe numeric ids retain the import mark but are treated as unconfirmed. Lookups do not change
+stored records. Importing or confirming writes `inoExact` alone, upgrading a legacy record to the
+exact id when the person reviews it again.
 The mark records a hash of the manifest's `server` (command and arguments) and `uses`; the runtime
 compares it at every call, start and status. If either changes later (an editor, the builder, a
 restored version), the app is `unconfirmed` again ("Needs

@@ -122,6 +122,30 @@ describe('codex stop — must point at the running turn to work', () => {
     expect(interrupts()).toHaveLength(0)
   })
 
+  it('a turn that failed (turn/failed) is no longer the target: a Stop after it sends nothing', async () => {
+    const h = await session()
+    h.send('a task')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-7' } } })
+    state.handlers!.onNotification({ method: 'turn/failed', params: { threadId: 't1', turn: { id: 'turn-7' } } })
+
+    h.interrupt()
+    expect(interrupts()).toHaveLength(0)
+  })
+
+  it('an error of the thread’s own fails a tracked note still waiting, and stops its turn', async () => {
+    state.startTurnId = 'turn-3'
+    const h = await session()
+    let failed: Error | null = null
+    void h.sendTracked!('parent note').catch((e: Error) => (failed = e))
+    await tick()
+    await tick()
+    state.handlers!.onNotification({ method: 'error', params: { threadId: 't1', error: { message: 'thread broke' }, willRetry: false } })
+    await tick()
+    expect(failed).toMatchObject({ message: 'thread broke' })
+    expect(interrupts()[0]?.params).toEqual({ threadId: 't1', turnId: 'turn-3' })
+  })
+
   it('stays quiet when pressed on a session that has never sent anything', async () => {
     const h = await session()
     h.interrupt()

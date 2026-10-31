@@ -3,7 +3,7 @@ import type { AppsPort } from './apps.js'
 import type { FsPort } from './fs.js'
 import type { GitPort } from './git.js'
 import type { ApprovalRulesPort, SearchPort, TrashPort } from './history.js'
-import type { BackgroundPort, ProcessPort, RelaunchPort, UpdatePort } from './lifecycle.js'
+import type { BackgroundPort, DiagnosticsPort, ProcessPort, RelaunchPort, UpdatePort } from './lifecycle.js'
 import type { MachinesPort } from './machines.js'
 import type { MailPort } from './mail.js'
 import type { HostRequestsPort } from './host-requests.js'
@@ -59,10 +59,12 @@ export interface Platform {
   commands: CommandRunPort
   processes: ProcessPort
   machines: MachinesPort
-  /** The person's side of the mailbox (#1347); a host before it answers "Unknown method" */
+  /** The person's side of the mailbox (#1347) */
   mail: MailPort
   /** The calls of the limited credential waiting for the person (#1405) */
   requests: HostRequestsPort
+  /** What this window tells the host about its own failures (a crashed screen) */
+  diagnostics: DiagnosticsPort
   /** Present only where the host outlives the window (desktop, through the keeper — #280) */
   background?: BackgroundPort
   /** Present only in the desktop app with the keeper: relaunching into an installed update (#352) */

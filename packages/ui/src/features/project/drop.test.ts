@@ -66,22 +66,22 @@ describe('droppedPanelId', () => {
 })
 
 describe('droppedArrangement', () => {
-  const empty: ProjectArrangement = { panels: [], order: [], hidden: [a, b, c, app] }
-  const all: ProjectArrangement = { panels: present, order: present, hidden: [] }
+  const empty: ProjectArrangement = { panels: [] }
+  const all: ProjectArrangement = { panels: present }
   const shows = (next: ProjectArrangement | null) => arrangePanels(present, next ?? undefined)
 
   it('an absent panel dropped on an untouched screen is the only panel added', () => {
     const next = droppedArrangement(present, undefined, b, null, false)
     expect(shows(next)).toEqual([b])
-    expect(next?.hidden).toEqual([a, c, app])
+    expect(next).toEqual({ panels: [b] })
   })
 
   it('an absent panel dropped on the padding comes back at the end', () => {
-    expect(shows(droppedArrangement(present, { panels: [a, c, app], order: [a, c, app], hidden: [b] }, b, null, false))).toEqual([a, c, app, b])
+    expect(shows(droppedArrangement(present, { panels: [a, c, app] }, b, null, false))).toEqual([a, c, app, b])
   })
 
   it('an absent panel dropped on a panel stands before or after it', () => {
-    const saved = { panels: [a, b, c], order: [a, b, c], hidden: [app] }
+    const saved = { panels: [a, b, c] }
     expect(shows(droppedArrangement(present, saved, app, b, true))).toEqual([a, app, b, c])
     expect(shows(droppedArrangement(present, saved, app, b, false))).toEqual([a, b, app, c])
   })
@@ -98,13 +98,13 @@ describe('droppedArrangement', () => {
   })
 
   it('a sidebar reorder preserves an unavailable app between the visible slots', () => {
-    const next = droppedArrangement([a, b, c], { panels: [a, app, b], order: [a, app, b], hidden: [] }, b, a, true)
+    const next = droppedArrangement([a, b, c], { panels: [a, app, b] }, b, a, true)
     expect(next?.panels).toEqual([b, app, a])
     expect(arrangePanels([a, b, c, app], next ?? undefined)).toEqual([b, app, a])
   })
 
   it('a sidebar addition at a target preserves unavailable app slots', () => {
-    const next = droppedArrangement([a, b, c], { panels: [a, app, b], order: [a, app, b], hidden: [] }, c, a, true)
+    const next = droppedArrangement([a, b, c], { panels: [a, app, b] }, c, a, true)
     expect(next?.panels).toEqual([c, app, a, b])
     expect(arrangePanels([a, b, c, app], next ?? undefined)).toEqual([c, app, a, b])
   })
@@ -115,7 +115,7 @@ describe('droppedArrangement', () => {
   })
 
   it('an absent panel dropped on a panel that is gone comes back at the end', () => {
-    expect(shows(droppedArrangement(present, { panels: [b, c, app], order: [b, c, app], hidden: [a] }, a, 'session:gone', true))).toEqual([
+    expect(shows(droppedArrangement(present, { panels: [b, c, app] }, a, 'session:gone', true))).toEqual([
       b,
       c,
       app,

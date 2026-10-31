@@ -2,16 +2,12 @@
  * Project screens contain only panels the person adds, in their chosen order (#604).
  * Availability filters drawing: a trashed session cannot appear, and new sessions never
  * join it automatically. Session and app ids carry their kind to avoid collisions.
- * Legacy order/hidden fields remain readable by the previous build during an update.
  */
 import { isRecord } from '@cc/protocol/client'
 
 export type ProjectArrangement = {
-  /** Explicit ordered membership. Absent only in snapshots from the previous build. */
-  panels?: string[]
-  /** Compatibility projection for the previous build; remove in a later release. */
-  order: string[]
-  hidden: string[]
+  /** Explicit ordered membership */
+  panels: string[]
 }
 
 export const sessionPanelId = (sessionId: string): string => `session:${sessionId}`
@@ -31,28 +27,6 @@ export function arrangePanels(present: readonly string[], saved: ProjectArrangem
   return [...new Set(saved?.panels ?? [])].filter((id) => here.has(id))
 }
 
-/** Freeze a legacy arrangement once the initial session and app catalogs have loaded. */
-export function migrateArrangement(present: readonly string[], saved: ProjectArrangement): ProjectArrangement {
-  if (saved.panels !== undefined) return saved
-  const hidden = new Set(saved.hidden)
-  // Startup discovery can fail or omit offline machines: absence is not evidence of deletion.
-  // Any saved entry is arranged, even empty arrays left by showing a lone panel again.
-  const panels = [...new Set([...saved.order, ...present])].filter((id) => !hidden.has(id))
-  return { ...saved, panels }
-}
-
-/** Preserve legacy exclusions too: an older window may read the snapshot after discovery recovers. */
-function writeArrangement(
-  present: readonly string[],
-  saved: ProjectArrangement | undefined,
-  panels: string[],
-): ProjectArrangement {
-  const shown = new Set(panels)
-  const hidden = [...new Set([...(saved?.hidden ?? []), ...present, ...(saved?.panels ?? [])])]
-    .filter((id) => !shown.has(id))
-  return { panels, order: panels, hidden }
-}
-
 /** Reorder available slots while keeping unavailable ids in their saved slots. A reorder never drops saved membership. */
 export function withOrder(
   present: readonly string[],
@@ -66,7 +40,7 @@ export function withOrder(
   let at = 0
   const panels = previous.map((id) => (here.has(id) ? (ordered[at++] ?? id) : id))
   panels.push(...ordered.slice(at))
-  return writeArrangement(present, saved, panels)
+  return { panels }
 }
 
 /** Add at the end or remove only this id, even if other panels are temporarily unavailable. */
@@ -77,10 +51,10 @@ export function withPanel(
   add: boolean,
 ): ProjectArrangement {
   const previous = [...new Set(saved?.panels ?? [])]
-  if (add && !present.includes(id)) return writeArrangement(present, saved, previous)
+  if (add && !present.includes(id)) return { panels: previous }
   const panels = previous.filter((x) => x !== id)
   if (add) panels.push(id)
-  return writeArrangement(present, saved, panels)
+  return { panels }
 }
 
 /** Workspace snapshots are untyped JSON; a malformed list must not break restoration. */
@@ -89,12 +63,7 @@ export function sanitizeArrangements(raw: unknown): Record<string, ProjectArrang
   const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   const out: Record<string, ProjectArrangement> = {}
   for (const [projectId, value] of Object.entries(raw)) {
-    if (!isRecord(value)) continue
-    const v = value
-    out[projectId] = {
-      order: strings(v.order), hidden: strings(v.hidden),
-      ...(Object.hasOwn(v, 'panels') ? { panels: strings(v.panels) } : {}),
-    }
+    if (isRecord(value)) out[projectId] = { panels: strings(value.panels) }
   }
   return out
 }

@@ -1,3 +1,5 @@
+import { tryParseJson } from '../json-value.js'
+
 /**
  * What the host's launcher hands it in the environment (lessons ST16), read once and taken out.
  *
@@ -82,12 +84,7 @@ const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
 /** `CC_SERVE_FROM`, field by field; a field of the wrong shape is left out, never trusted */
 export function parseServeFrom(raw: string | undefined): ServeFrom | null {
   if (!raw) return null
-  let v: unknown
-  try {
-    v = JSON.parse(raw)
-  } catch {
-    return null
-  }
+  const v = tryParseJson(raw)
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
   const from: ServeFrom = {}
   if (typeof o.hub === 'string' && NAME_RE.test(o.hub)) from.hub = o.hub

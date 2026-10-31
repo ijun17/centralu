@@ -3,6 +3,7 @@ import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, Protoco
 import { proofNonce, provesCredential, provesToken } from '../transport/host-proof.js'
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
@@ -108,14 +109,6 @@ export const MAX_INCOMING_CALLS = 16
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 
-/** A frame's JSON, or null when it is not JSON */
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-}
 const DEFAULT_CALL_TIMEOUT_MS = 200_000
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -207,7 +200,7 @@ export class RemoteClient {
   private onProof(ws: WebSocket, raw: string): void {
     const nonce = this.proving!
     this.proving = null
-    const f = parseJson(raw) as { kind?: unknown; nonce?: unknown; mac?: unknown } | null
+    const f = tryParseJson(raw) as { kind?: unknown; nonce?: unknown; mac?: unknown } | null | undefined
     const proven = this.opts.credential ? provesCredential(verifierOf(this.opts.token), nonce, f?.mac) : provesToken(this.opts.token, nonce, f?.mac)
     if (f?.kind === 'proof' && f.nonce === nonce && proven) return this.sendHello(ws)
     // Something else holds the port (another account's program, #838): it never gets the token
@@ -299,12 +292,8 @@ export class RemoteClient {
   }
 
   private onFrame(raw: string): void {
-    let json: unknown
-    try {
-      json = JSON.parse(raw)
-    } catch {
-      return
-    }
+    const json = tryParseJson(raw)
+    if (json === undefined) return
     const parsed = parseServerFrame(json)
     if (!parsed.success) {
       // A failure answer the schema could not read still ends its call (the UI client's `salvage`, 2026-09-10)

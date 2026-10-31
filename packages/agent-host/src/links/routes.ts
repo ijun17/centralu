@@ -109,6 +109,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.send': session(),
   // Who the hub's own waits owe a report to: a linked session's is asked of the hub, not of its machine (#1377)
   'agents.reportOwed': HUB,
+  // The host the window talks to logs it: a crash in this window is that host's to know, not a linked machine's
+  'ui.reportCrash': HUB,
   'agents.respondApproval': session(),
   'agents.answerQuestion': session(),
   'agents.interrupt': session(),
@@ -163,7 +165,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.gitStatus': project(projectInfo),
   // A remote address, nothing of this machine's ids in it
   'projects.origin': project(),
-  'worktrees.createManager': project(sessionInfo),
   'worktrees.setTrunk': project(),
   'git.status': project(),
   'git.diff': project(),
@@ -343,8 +344,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.revokeCredential': HUB,
   'machines.disconnect': HUB,
   'machines.setAutoReconnect': HUB,
-  'machines.setConnect': HUB,
-  'machines.need': HUB,
   // Stopping a remote host is `centralu serve --stop` over ssh, never a call through the link
   'host.stop': HUB,
   // A sign-in's serve on this machine telling its own host about the hand-over (#1224); never through a link

@@ -1,5 +1,5 @@
 import type { AutoCompact, UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
@@ -61,30 +61,15 @@ export class UiPreferenceStore {
     const stored = this.storedUiPreferences()
     const prefs = parseUiPreferences(stored)
     /*
-     * The text size moved here from the workspace snapshot (#312 step 5), where the screen kept
-     * it as a step index. Moved once: the first read that finds no `textSize` in the record takes
-     * the snapshot's step and writes it into the record, and from then on the record has the
-     * field, so a snapshot an older window still writes never overrides a size chosen since.
-     */
-    // Not over a broken row (#384): it has no `textSize` either, and a read must not replace what it could not read
-    if (!('textSize' in stored) && !this.brokenRow()) {
-      const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
-      if (legacy !== null) {
-        prefs.textSize = legacy
-        this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
-      }
-    }
-    /*
-     * The notification switches moved here from the workspace snapshot (#1306), the same way and for the same reason as the
-     * text size: the first read that finds no `notifyPolicy` in the record takes the snapshot's (the defaults, when the
+     * The notification switches moved here from the workspace snapshot (#1306): the first read that finds no `notifyPolicy` in the record takes the snapshot's (the defaults, when the
      * window never saved one) and writes it, and from then on the record has the field, so a snapshot an older window still
      * writes never overrides a switch chosen since. The window keeps writing the snapshot too (an older build reads it); this
-     * record is the one read here. The row is read again for the write: the text size above may just have been added to it.
+     * record is the one read here.
      */
     if (!('notifyPolicy' in stored) && !this.brokenRow()) {
       const carried = readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
       prefs.notifyPolicy = carried
-      this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), notifyPolicy: carried }))
+      this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, notifyPolicy: carried }))
     }
     /*
      * "Allow auto from a linked computer" fails closed (#1273 review, owner decision 2026-10-19): its only job is to

@@ -224,16 +224,6 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(existsSync(data('autostart'))).toBe(true)
   }, 60_000 * SLOW)
 
-  /** Since #1224's review uninstall asks `--autostart remove`; a serve from before it is asked `off`, which removed the entry there */
-  it('removes the boot entry of a serve that predates --autostart remove through its off', async () => {
-    await installedAndRunning()
-    writeFileSync(data('autostart'), 'on')
-    rmSync(data('events'), { force: true })
-    expect(await uninstallRemote(control({ FAKE_NO_REMOVE: '1' }).c)).toEqual({ stopped: true })
-    expect(events()).toEqual(['stop 9.9.1', 'autostart off'])
-    expect(existsSync(data('autostart'))).toBe(false)
-  }, 60_000 * SLOW)
-
   it('uninstalls a version that predates --autostart: it cannot have written an entry from here', async () => {
     await installedAndRunning()
     const { c, seen } = control({ FAKE_NO_AUTOSTART: '1' })
