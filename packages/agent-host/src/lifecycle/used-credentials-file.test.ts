@@ -141,6 +141,31 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host(2).used.records().map((r) => r.id)).toEqual(['22222222', '33333333'])
   })
 
+  it.each([
+    ['', false],
+    [', and a scanner holds it so removing it fails too', true],
+  ])('a rewrite whose temp file could not be written (a full disk leaves it part written) says the write failed%s', (_why, held) => {
+    const f = folder()
+    const files = new Proxy(f.os.files, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target) as unknown
+        if (key === 'rmSync' && held) return () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) }
+        if (key !== 'writeFileSync') return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
+        return (path: string, data: string, options?: object) => {
+          if (!path.endsWith('.tmp')) return target.writeFileSync(path, data, options)
+          target.writeFileSync(path, data.slice(0, 5), options)
+          throw Object.assign(new Error('no space left'), { code: 'ENOSPC' })
+        }
+      },
+    })
+    const h = f.host(2, new Proxy(f.os, { get: (target, key) => (key === 'files' ? files : Reflect.get(target, key, target)) }))
+    for (const id of ['aaaaaaaa', 'bbbbbbbb', 'cccccccc', 'dddddddd', 'eeeeeeee', 'ffffffff', '11111111', '22222222', '33333333']) h.hello(c(id, 'x'))
+    expect(f.said.join()).toContain('could not be shortened (ENOSPC)')
+    // Held: the temp file cannot be removed and stays; otherwise it is gone
+    expect(f.os.files.readdirSync(f.os.paths.path.dirname(f.file)).filter((n) => n.endsWith('.tmp')).length).toBe(held ? 1 : 0)
+    expect(parseUsedRecords(f.os.files.readFileSync(f.file, 'utf8')).length).toBe(9)
+  })
+
   it('writes a first use without reading the file back, and counts its line where it stands (#1715 recheck: the read-back cost milliseconds on Windows)', () => {
     const f = folder()
     const { os, read } = counted(f.os)

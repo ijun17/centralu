@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, statSync, type BigIntStats } from 'node:fs'
 import { join } from 'node:path'
+import { errnoCode } from '../../os/errors.js'
 import type { AppManifest } from './manifest.js'
 import { isObj } from '../../json-value.js'
 import { PrivateJsonFile } from './private-json-file.js'
@@ -225,7 +226,7 @@ export class ImportBook {
     try {
       copy = newestCopy(this.dataRoot)
     } catch (e) {
-      this.doubtReason = `The data folder ${this.dataRoot} could not be listed (${errorCode(e)}), so whether this app was imported is not known. It stays off until that folder can be listed`
+      this.doubtReason = `The data folder ${this.dataRoot} could not be listed (${errnoCode(e) ?? 'unknown error'}), so whether this app was imported is not known. It stays off until that folder can be listed`
       this.retryLater()
       return
     }
@@ -242,7 +243,7 @@ export class ImportBook {
       const ids = Object.keys(held)
       console.error(`[apps] ${IMPORTS_FILE} was moved to ${copy}; ${ids.length} user-folder app(s) are held until each is reviewed and enabled${ids.length ? `: ${ids.join(', ')}` : ''}`)
     } catch (e) {
-      this.doubtReason = `${this.file.path} was moved to ${join(this.dataRoot, copy)}, and the apps it may have held could not be recorded (${errorCode(e)}), so whether this app was imported is not known. Review what it runs, then enable it`
+      this.doubtReason = `${this.file.path} was moved to ${join(this.dataRoot, copy)}, and the apps it may have held could not be recorded (${errnoCode(e) ?? 'unknown error'}), so whether this app was imported is not known. Review what it runs, then enable it`
       this.retryLater()
     }
   }
@@ -329,8 +330,4 @@ function stat(path: string): Pick<BigIntStats, 'ino' | 'mtimeNs' | 'size'> | nul
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
     return { ino: -1n, mtimeNs: BigInt(++unseen), size: -1n }
   }
-}
-
-function errorCode(e: unknown): string {
-  return (e as NodeJS.ErrnoException).code ?? (e as Error).message
 }
