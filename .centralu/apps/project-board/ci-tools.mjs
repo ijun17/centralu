@@ -178,14 +178,15 @@ ${note}` : summary
   if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
 
   let p = await readPr(repo, want.number)
-  let req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
+  const firstHead = p.headRefOid
+  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
   let checks = await evaluate(repo, p.headRefOid, req)
   let d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
   for (let n = 0; n < MERGEABLE_RETRIES && d.action === 'wait' && d.kind === 'mergeable'; n++) {
     await sleep(MERGEABLE_WAIT_MS)
-    const was = p.headRefOid
     p = await readPr(repo, want.number)
-    if (p.headRefOid !== was) req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
+    if (p.headRefOid !== firstHead)
+      return refused(`its head moved from ${short(firstHead)} to ${short(p.headRefOid)} meanwhile, so the checks read are not the ones that count. Call again.`, null, { kind: 'moved' })
     checks = await evaluate(repo, p.headRefOid, req)
     d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
   }

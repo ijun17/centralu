@@ -448,6 +448,7 @@ const step = (key) => { const seq = st[key]; const v = seq[0]; if (seq.length > 
 if (args[0] === 'pr' && args[1] === 'view') {
   const pr = { ...st.pr }
   if (st.heads) pr.headRefOid = step('heads')
+  if (st.mergeables) pr.mergeable = step('mergeables')
   if (st.merged) Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: 'abcdef1234567890' } })
   out(pr)
 } else if (args[0] === 'pr' && args[1] === 'merge') {
@@ -769,6 +770,21 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const refused = await call('merge_when_green', { pr: 77 })
     expect(refused.isError).toBe(true)
     expect(refused.text.split('\n')[0]).toBe('Not merged: GitHub refused the merge: Pull request is not mergeable: the base branch policy prohibits the merge.')
+  })
+
+  it('asks GitHub again while mergeable is unknown, and merges once it knows', async () => {
+    runtime(ghState({ mergeables: ['UNKNOWN', 'UNKNOWN', 'MERGEABLE'] }))
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.data.outcome).toBe('merged')
+    expect(merges()).toHaveLength(1)
+  })
+
+  it('refuses when the head moved while mergeable was unknown, and merges nothing', async () => {
+    runtime(ghState({ mergeables: ['UNKNOWN', 'MERGEABLE'], heads: ['c0ffee0000000000000000000000000000000000', 'beef000000000000000000000000000000000000'] }))
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe('Not merged: its head moved from c0ffee0 to beef000 meanwhile, so the checks read are not the ones that count. Call again.')
+    expect(merges()).toEqual([])
   })
 
   it("takes the caller's body, deletes the branch only when asked and never a fork's", async () => {
