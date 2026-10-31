@@ -20,7 +20,7 @@ import type { DrainOptions, MailService } from './service.js'
 export type ReceiverState =
   /** Not here: in the trash or deleted. Its mail waits, and goes with it if it is purged (§4.1) */
   | { kind: 'gone' }
-  /** In a turn (mail waits for its end, until in-turn delivery in slice 6), waiting on a card (mail never answers a card), or at its usage limit */
+  /** In a turn (mail waits for its end, until delivery by hooks in slice 6), waiting on a card (mail never answers a card), or at its usage limit */
   | { kind: 'busy'; why: 'turn' | 'card' | 'limited' }
   /**
    * At rest: idle or in error (woken the same way). `live` is whether its process runs; asleep, it is

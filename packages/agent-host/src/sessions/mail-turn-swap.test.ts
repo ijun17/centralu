@@ -176,6 +176,20 @@ describe('an owner the keeper handed over after a swap', () => {
     // The mailbox tells it; the relayed message that told a process of an earlier build is not sent
     await new Promise((r) => setTimeout(r, 30))
     expect(b.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toEqual([])
+    // ... and the mailbox does wake it with the report: the mail is handed to the adopted process
+    // (its own turn, which the swap kept, ends first: mail waits for a turn's end)
+    b.claude.handles.get(parent)!.answer('its own turn ends')
+    await until(() => b.mgr.mailSessions().receiver(parent).kind === 'ready')
+    const later = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => Date.now() + 300_000 })
+    const delivery = new MailDelivery(later, store.mail, b.mgr.mailSessions(), { now: () => Date.now() + 300_000, schedule: () => () => {} })
+    delivery.start()
+    try {
+      await delivery.process(b.mail.sessionAddress(parent))
+    } finally {
+      delivery.stop()
+    }
+    expect(store.mail.receiptsOf(reports()[0]!.id)[0]).toMatchObject({ attempts: 1 })
+    expect(b.claude.handles.get(parent)!.sent.some((t) => t.includes("Centralu's mail"))).toBe(true)
   })
 })
 
