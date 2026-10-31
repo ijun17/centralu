@@ -171,8 +171,6 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
   Pick<RoutedCardsHost, 'toolProfileOf'> & {
     /** Whether the session's seat has the mail tool: the mailbox can wake it (the receive rule) */
     canReadMail(sessionId: string): boolean
-    /** Whether the process running the session is known to have it too (not one kept from an earlier host): only how a report is told */
-    readsMail(sessionId: string): boolean
   } &
   Pick<RestartHost, 'inputsHeld'> &
   Pick<QueuedRequestsHost, 'projectRow'>
@@ -199,12 +197,11 @@ export class ChildReports {
     const seat = this.host.canReadMail(ownerId)
     /*
      * An owner that reads mail is told by the mail alone (§8.1, 3.9): at rest the mailbox wakes it; in a turn the mail waits for the turn's end
-     * (delivery's `busy`) and wakes it then. No relayed notice and nothing kept in memory (`held`) is its path. The one exception is a process
-     * kept from an earlier host, whose tools are the ones it started with and may not include mail: the relayed message tells it, and if that
-     * fails the mailbox wakes it when it can, which is the one report (a notice kept as well would be a second)
+     * (delivery's `busy`) and wakes it then. No relayed notice and nothing kept in memory (`held`) is its path, for a process kept from an
+     * earlier host as for any other: builds older than the minimum supported version are no longer kept compatible
      */
     const owner = this.host.meta.get(ownerId)
-    const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) ? 'in-turn' : 'wake'
+    const delivery = !seat ? 'old' : 'wake'
     try {
       return this.mailReport(ownerId, childId, {
         ...draft,

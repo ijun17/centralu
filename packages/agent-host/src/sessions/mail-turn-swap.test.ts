@@ -131,8 +131,8 @@ describe('a session the keeper handed over after a swap', () => {
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    // The process is one an earlier build started, so a report to its owner is told the relayed way; the receive rule is the seat's
-    expect(b.mgr.readsMail(child)).toBe(false)
+    // The process is one an earlier build started; the receive rule is the seat's, as for any other
+    expect(b.mgr.canReadMail(child)).toBe(true)
     const policy = mailRelations({
       session: (id) => b.mgr.sessionInfo(id),
       ...b.mgr.mailSeats(() => true),
@@ -155,6 +155,27 @@ describe('a session the keeper handed over after a swap', () => {
     expect(sent.some((t) => t.includes('also run the linter'))).toBe(true)
     expect(sent.some((t) => t.includes('and the formatter'))).toBe(true)
     expect(store.mail.receiptsOf(waiting.message.id)[0]).toMatchObject({ attempts: 1 })
+  })
+})
+
+describe('an owner the keeper handed over after a swap', () => {
+  it('hears of its child’s end by mail alone, like any other owner: no relayed message goes into its process', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    await a.mgr.detachAll()
+
+    const b = host(new Set([parent, child]))
+    await b.mgr.adoptKept([
+      { sessionId: parent, tool: 'claude', process: new FakeProcess() },
+      { sessionId: child, tool: 'claude', process: new FakeProcess() },
+    ])
+    await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
+    b.claude.handles.get(child)!.answer('all done')
+    const reports = () => store.mail.messagesAfter(store.mail.threadsOfParty(b.mail.sessionAddress(parent), 'owner')[0]!.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
+    await until(() => store.mail.threadsOfParty(b.mail.sessionAddress(parent), 'owner').length > 0 && reports().length === 1)
+    // The mailbox tells it; the relayed message that told a process of an earlier build is not sent
+    await new Promise((r) => setTimeout(r, 30))
+    expect(b.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toEqual([])
   })
 })
 
