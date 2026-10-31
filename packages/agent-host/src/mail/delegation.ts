@@ -203,17 +203,16 @@ export type ReportDraft = {
   archiving?: boolean
   /** The owner is in a turn now: a relayed notice joins it and starts none */
   ownerInTurn?: boolean
-  /** How the owner is told: by the mailbox (`wake`), by the relayed message to a process that may lack the mail tool (`in-turn`), or by the old relayed message (it cannot read mail, `old`) */
+  /** How the owner is told: by the mailbox (`wake`), or by the old relayed message (it cannot read mail, `old`) */
   delivery: ReportDelivery
 }
 
 /**
  * `wake`: the owner reads mail, so the mailbox tells it: at rest it is woken, in a turn the mail waits for the turn's end (3.9; hooks in
- * slice 6 will bring it into the turn). `in-turn`: it reads mail, but its process may not have the tool (kept from an earlier host): the relayed
- * message goes in as it always did, and if that fails the mailbox wakes it when it can. `old`: its seat cannot read mail (a coordinator, a builder,
+ * slice 6 will bring it into the turn), a process kept from an earlier host included. `old`: its seat cannot read mail (a coordinator, a builder,
  * an app's agent), so the old way tells, and holds the notice if it cannot be delivered
  */
-export type ReportDelivery = 'wake' | 'in-turn' | 'old'
+export type ReportDelivery = 'wake' | 'old'
 
 /**
  * What the mailbox did with a draft: `mailed`, the report is in the thread and the mailbox tells the owner; `closed`, the session itself
@@ -301,6 +300,6 @@ export function reportRecorder(
     if (posted.message.wake === 'no' && draft.delivery !== 'wake' && !draft.ownerInTurn) return 'closed'
     if (draft.delivery === 'wake') return 'mailed'
     const messageId = posted.message.id
-    return { keep: draft.delivery === 'old', settle: () => mail.reportTold(thread.id, owner, messageId) }
+    return { keep: true, settle: () => mail.reportTold(thread.id, owner, messageId) }
   }
 }
