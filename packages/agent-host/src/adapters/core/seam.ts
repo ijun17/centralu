@@ -67,18 +67,14 @@ export interface ToolWire {
   /** How to install the tool, said when a new process finds it gone (`toolNotInstalled`) */
   readonly install?: string
   readonly turns: {
-    /** false: an input sent while a turn runs waits for its end (ACP, `agy`); true: it goes to the tool at once */
-    readonly midTurnInput: boolean
     /** A Stop ends the process (`agy`: SIGINT, through `SessionProcess.interrupt`); the next input starts a new one on the same conversation */
     readonly interruptEndsProcess: boolean
-    /** The tool ends the turn after a Stop, so the confirmation timer applies (§2.4; Codex: false until §9.2's change) */
-    readonly confirmsStop: boolean
   }
   /** The process to start for this conversation, asked again for every new process (§5.1) */
   readonly launch: ToolLaunch
   /** Opens or resumes the conversation on a started process; the id it answers is the conversation's (null: said later) */
   open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }>
-  /** Writes one input; the turn ends through `turn.end` */
+  /** Writes one input, sent once the turn before it has ended; the turn it starts ends through `turn.end` */
   startTurn(input: TurnInput, turn: RunningTurn): void
   /** The tool's own Stop (ACP: `session/cancel`). A tool whose Stop ends the process has none: the core signals it */
   interrupt?(): void
