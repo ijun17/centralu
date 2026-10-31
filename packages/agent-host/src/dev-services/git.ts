@@ -262,10 +262,15 @@ export async function gitDiff(
 export async function gitLogPath(cwd: string, rel = '', limit = 20): Promise<{ repo: boolean; commits: GitCommit[] }> {
   if (!(await isRepo(cwd))) return { repo: false, commits: [] }
   const SEP = '\x1f'
-  let stdout: string
+  let path: string[]
   try {
     // An empty `rel` is the whole repository: a root app's folder is its project (#1141)
-    const path = rel === '' ? [] : ['--', assertLexicalGitPath(cwd, rel)]
+    path = rel === '' ? [] : ['--', assertLexicalGitPath(cwd, rel)]
+  } catch {
+    return { repo: true, commits: [] } // a folder outside the repository has no history here
+  }
+  let stdout: string
+  try {
     /*
      * The order is pinned so that **a child always comes before its parent.**
      *
