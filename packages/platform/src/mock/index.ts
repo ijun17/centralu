@@ -1,6 +1,6 @@
 import { defaultCapabilities } from '../capabilities.js'
 import { changedFileCount, type NormalizedEvent } from '@cc/protocol/client'
-import type { AgentPort, Platform } from '../ports/index.js'
+import type { AgentPort, DiagnosticsPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
 import { AppBuilderMock } from './app-builder.js'
 import { AppImportsMock } from './app-imports.js'
@@ -125,6 +125,9 @@ export class MockPlatform implements Platform {
   readonly themes = this.themesMock.themes
   readonly updates = this.updatesMock.updates
   readonly requests = this.hostRequestsMock.requests
+  /** For tests: the crashes this window reported to the host, in order */
+  readonly crashReports: { message: string; stack: string; componentStack: string; version?: string }[] = []
+  readonly diagnostics: DiagnosticsPort = { reportCrash: async (r) => void this.crashReports.push(r) }
   readonly relaunch = this.keeperMock.relaunch
   readonly background = this.keeperMock.background
   readonly processes = this.keeperMock.processes

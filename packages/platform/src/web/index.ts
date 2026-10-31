@@ -766,6 +766,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       answerApply: (a) => rpc.call('updates.answerApply', a),
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
+    diagnostics: { reportCrash: (r) => rpc.call('ui.reportCrash', r).then(() => undefined) },
     requests: {
       list: () => rpc.call('requests.list', {}),
       answer: (requestId, decision) => rpc.call('requests.answer', { requestId, decision }),

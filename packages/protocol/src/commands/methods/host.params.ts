@@ -66,6 +66,18 @@ export const hostParams = {
     error: z.string().optional(),
   }),
   /**
+   * A window's screen crashed and its error boundary caught it: the host writes it to its log (stderr), because the
+   * window's own console is lost on a reload. The host cuts each field and limits how many lines it writes, so a crash
+   * that repeats does not flood the log. Additive
+   */
+  'ui.reportCrash': z.object({
+    message: z.string().max(20_000),
+    stack: z.string().max(20_000).default(''),
+    componentStack: z.string().max(20_000).default(''),
+    /** The build the window runs, to tell windows of a mixed host swap apart */
+    version: z.string().max(100).optional(),
+  }),
+  /**
    * The host requests waiting for the person (#1405, `HostRequest`), oldest first: what a window shows after it
    * connects or reconnects, since a `host_request` event it missed is not sent again. Additive
    */
