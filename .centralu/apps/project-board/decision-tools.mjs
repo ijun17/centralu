@@ -142,7 +142,7 @@ const VIEW_OF = { all: 'answers', area: 'items', detail: 'items', refresh: 'summ
 const VIEWS = { answers: listOwnerAnswers, items: needsDecision, summaries: decisionSummaries }
 function listed(args) {
   const view = args.view ?? 'answers'
-  const stray = Object.keys(VIEW_OF).filter((k) => args[k] !== undefined && VIEW_OF[k] !== view)
+  const stray = Object.keys(VIEW_OF).filter((k) => args[k] !== undefined && args[k] !== false && VIEW_OF[k] !== view)
   if (stray.length) throw new GitHubError('input', `Not listed: ${stray.map((k) => `${k} is for view "${VIEW_OF[k]}"`).join(', ')}, not for view "${view}".`)
   return VIEWS[view](args)
 }
@@ -176,7 +176,7 @@ export const tools = {
         view: z.enum(['answers', 'items', 'summaries']).optional().describe('Default "answers"'),
         all: z.boolean().optional().describe('answers: also the answers already recorded; default false'),
         area: z.string().optional().describe('items: only this Area, for example "UI"'),
-        detail: detailInput,
+        detail: detailInput.describe('items: "full" adds type, state, URL and ids'),
         refresh: refreshInput.describe('summaries: skip the short cache and ask GitHub now'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },

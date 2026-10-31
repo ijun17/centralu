@@ -4,7 +4,7 @@
 //
 // One item is one pull request, or a stack: `pr` is its top and `lowers` the pull requests under it,
 // which land with it as one squash commit through the top (retargeted to the default branch first)
-// and are then closed with "Landed in #N". The rules it carries are those of a merge by hand: maintain or
+// and are then closed with "Landed in #N". The rules it carries are the repository's merge rules: maintain or
 // admin only, never a draft, never anything not green, squash with --match-head-commit, the subject
 // "Title (#N)" within 72 characters, no attribution lines, never force anything.
 //
@@ -464,7 +464,7 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
         `${n} passed the quick tier of CI, and ${landsFrom(landTier)}, but its batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
       )
     if (!canBatch) {
-      const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off'
+      const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release branch'
       // A branch of this repository: the queue starts the full tier on it itself, once per head (#1509 item 4), as the
       // reason below would have a session do by hand. A fork's branch is not run here: its code is not trusted with this
       // repository's runners and secrets
