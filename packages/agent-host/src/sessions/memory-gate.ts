@@ -87,11 +87,6 @@ export async function readAvailableMemory(deps: MemoryReadDeps = {}): Promise<nu
 /** A reading below the floor: what was available, and what is needed */
 export type MemoryShortfall = { available: number; floor: number }
 
-/** "1.4 GB": a byte count as the person and the model read it */
-export function gigabytes(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-}
-
 export type MemoryWaitOutcome = 'ready' | 'timeout' | 'aborted'
 
 type Waiter = { resolve: (o: MemoryWaitOutcome) => void; deadline: number; signal?: AbortSignal; onAbort?: () => void }
