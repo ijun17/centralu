@@ -5,8 +5,8 @@
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, heldChildren, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
-import { attachClient, BIN, bundleInfo, check, HOST_SRC, hostClient, hostsFor, log, newData, ready, started, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
+import { alive, heldChildren, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { attachClient, BIN, bundleInfo, check, HOST_SRC, hostsFor, log, newData, ready, started, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
 
 /** Resolves once every process holding the other end of `stream` has closed it */
 function released(stream) {

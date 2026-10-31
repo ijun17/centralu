@@ -1,6 +1,6 @@
 /**
  * Ending everything a keeper integration script started, pass or fail, and saying what went wrong;
- * and talking to a keeper's sockets and waiting on processes, the same way in every script.
+ * and talking to a keeper's sockets and a host's WebSocket and waiting on processes, the same way in every script.
  * Shared by `keeper-integration.mjs`, `keeper-children-integration.mjs`,
  * `keeper-handoff-integration.mjs` and `keeper-content-integration.mts`, which run in CI as well as
  * by hand (the `keeper` job in `.github/workflows/build.yml`).
@@ -190,5 +190,73 @@ export function printLogTails(dirs, log, lines = 40) {
       log(`\n--- last ${tail.length} lines of ${file}`)
       for (const l of tail) log(`  | ${l}`)
     }
+  }
+}
+
+/**
+ * A WebSocket client of a host (through the keeper's front door, or a host's own port), with its `hello_ok` and a promise
+ * for its close. Calls reject with the host's own error message, so a drain's cut can be read back; a host that goes away
+ * fails the calls in flight rather than leaving the script waiting on them.
+ */
+export async function hostClient(port, token, helloMs = 8000) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const pending = new Map()
+  const events = []
+  const frames = []
+  let closed = false
+  let next = 1
+  let onClose
+  const closedAt = new Promise((r) => (onClose = r))
+  const hello = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('no hello_ok')), helloMs)
+    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 }))
+    ws.onmessage = (e) => {
+      const f = JSON.parse(String(e.data))
+      if (f.kind === 'hello_ok') {
+        clearTimeout(timer)
+        resolve(f)
+      } else if (f.kind === 'res' && pending.has(f.id)) {
+        const p = pending.get(f.id)
+        pending.delete(f.id)
+        f.ok ? p.resolve(f.result) : p.reject(Object.assign(new Error(f.error?.message ?? 'rpc failed'), { retryable: f.error?.retryable }))
+      } else if (f.kind === 'event') events.push(f.event)
+      else if (f.kind === 'term') frames.push(f)
+    }
+    ws.onerror = () => {
+      clearTimeout(timer)
+      reject(new Error('websocket error'))
+    }
+  })
+  ws.onclose = () => {
+    closed = true
+    for (const p of pending.values()) p.reject(new Error('the host closed the connection'))
+    pending.clear()
+    onClose(Date.now())
+  }
+  return {
+    hello,
+    events,
+    frames,
+    closedAt,
+    get closed() {
+      return closed
+    },
+    open: () => ws.readyState === WebSocket.OPEN,
+    screen: (terminalId) => frames.filter((f) => f.terminalId === terminalId).map((f) => f.data).join(''),
+    call: (method, params, ms = 20_000) =>
+      new Promise((resolve, reject) => {
+        const id = String(next++)
+        const timer = setTimeout(() => {
+          pending.delete(id)
+          reject(new Error(`${method} timed out`))
+        }, ms)
+        pending.set(id, {
+          resolve: (v) => (clearTimeout(timer), resolve(v)),
+          reject: (e) => (clearTimeout(timer), reject(e)),
+        })
+        if (ws.readyState !== WebSocket.OPEN) return pending.get(id).reject(new Error('the host is gone'))
+        ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
+      }),
+    close: () => ws.close(),
   }
 }
