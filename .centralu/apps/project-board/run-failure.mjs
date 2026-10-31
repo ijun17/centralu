@@ -27,6 +27,7 @@ const SETUP_STEP = [
   /^Initialize containers$/i,
   /^Run actions\/(?:checkout|setup-[\w-]+|cache|download-artifact)@/i,
   /^Run pnpm\/action-setup@/i,
+  /^Run \.\/\.github\/actions\/setup$/i, // build.yml's composite of the pnpm and Node setup: GitHub lists it as one step
   /^Run (?:dtolnay\/rust-toolchain|swatinem\/rust-cache)@/i,
   /^(?:Install|Set up) .*\b(?:WebKit|Chromium|Firefox|browsers?|Playwright|system dependencies)\b/i,
 ]
