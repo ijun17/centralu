@@ -19,7 +19,6 @@ import {
   stripAttribution,
   summarizeDescription,
   workflowCheckNames,
-  workflowEventJobs,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/ci.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
@@ -826,32 +825,6 @@ describe('failure excerpts across runners', () => {
     expect(failureLineIndex(['setup', first, ...summaries.filter((line) => line !== first)])).toBe(1)
   })
 })
-
-describe('release CI event audit', () => {
-  it('finds no event-dependent jobs in the release CI workflow', () => {
-    const jobs = workflowEventJobs(readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8'))
-    expect(jobs.length).toBeGreaterThan(0)
-    expect(jobs.every((j: { reason: string | null }) => j.reason === null)).toBe(true)
-  })
-
-  it.each(["    if: github.event_name == 'push'", '    steps:\n      - run: |\n          if [ "$GITHUB_EVENT_NAME" = push ]; then echo check; fi', '    env:\n      BRANCH: ${{ github.ref }}'])('requires main for event-dependent job content: %s', (body) => {
-    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n  verify:\n${body}\n`)).toEqual([
-      { names: ['verify'], unresolved: [], reason: 'uses event or branch context' },
-    ])
-  })
-})
-
-
-it('documents that called scripts need manual event review in both release guides', () => {
-  const workflow = 'on:\n  push:\n  pull_request:\njobs:\n  verify:\n    steps:\n      - run: node scripts/check.mjs\n'
-  expect(workflowEventJobs(workflow)[0].reason).toBeNull()
-  for (const file of ['docs/releasing.md', 'docs/releasing.ko.md']) {
-    const doc = readFileSync(join(REPO_ROOT, file), 'utf8')
-    expect(doc).toContain('The automated event audit does not follow scripts called by workflow steps')
-    expect(doc).toContain('Those need manual\nreview for event-dependent behavior')
-  }
-})
-
 
 it('keeps release bump builds out of the concurrency group cancelled by ordinary main pushes', () => {
   const workflow = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')

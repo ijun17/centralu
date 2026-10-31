@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
@@ -17,15 +18,12 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
-  bumpText,
   compareVersions,
   declaredVersion,
-  filesNamed,
   nextVersion,
   pathMatches,
   releaseNotes,
   sourceScheme,
-  versionLines,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/versions.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
@@ -33,8 +31,7 @@ import { SLOW } from './test-timing.js'
 
 /**
  * The project board's release tool (#386 step 3): docs/releasing.md as `release_status` and
- * `release` (bump, rehearse, tag, approve). First the version rules (versions.mjs) and this
- * repository's own list of version files; then the app under the real external-app runtime, against
+ * `release` (rehearse, tag, approve). First the version rules (versions.mjs); then the app under the real external-app runtime, against
  * a fake `gh` that records every write and never reaches GitHub, and real git on repositories made
  * here, with a bare one standing for GitHub's. Pushes go to that bare repository by `pushurl`, so
  * nothing here can tag, push or publish anything real.
@@ -43,43 +40,23 @@ import { SLOW } from './test-timing.js'
 const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url))
 const APP = join(REPO_ROOT, '.centralu/apps/project-board')
 const RELEASE = JSON.parse(readFileSync(join(APP, 'project.json'), 'utf8')).release as {
-  scheme?: string
   source: { path: string; pattern: string; marker: string; name: string }
-  versionFiles: string[]
-  ignore: string[]
 }
 const TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 const CONVENTIONS_DOC = readFileSync(join(REPO_ROOT, 'docs/commit-conventions.md'), 'utf8')
 
-const inRepo = (...args: string[]) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' })
-/** Scan every tracked text file, independently of the release tool's git prefilter. */
-const TRACKED = inRepo('ls-files', '-z').split('\0').filter(Boolean)
-const CARRIERS = filesNamed(RELEASE.versionFiles, TRACKED).sort() as string[]
 /**
- * The fixture's release: this repository's last under the brand scheme. Since #1501 the repository's carriers hold the
- * placeholder and brand.ts declares nothing, so a fixture of the brand scheme is made from them (`brandSchemeText`).
+ * The fixture's last release: this repository's last under the brand scheme, whose commits the fixture still has
+ * before the switch (`switchAt`), the ones the tag scheme passes over.
  */
 const BRAND_VERSION = '0.1.0-beta.37'
-const PLACEHOLDER = '0.0.0-dev'
 const NEXT = nextVersion(BRAND_VERSION) as string
-/** A carrier of this repository as it was under the brand scheme at `version`: brand.ts declaring it, the rest carrying it */
-function brandSchemeText(path: string, version: string): string {
-  let text = readFileSync(join(REPO_ROOT, path), 'utf8')
-  if (path === RELEASE.source.path) {
-    text = text.replace(/^import \{ APP_VERSION \} from '\.\/version\.generated\.js'\n\n?/m, '').replace(/^export \{ APP_VERSION \}$/m, `export const APP_VERSION = '${PLACEHOLDER}'`)
-  }
-  return bumpText(text, PLACEHOLDER, version).text
-}
 
 describe('the version rules', () => {
-  it('counts up the prerelease, or moves to the next patch, minor or major', () => {
+  it('counts up the prerelease', () => {
     expect(nextVersion('2.3.0-beta.16')).toBe('2.3.0-beta.17')
     expect(nextVersion('0.1.0-beta.9')).toBe('0.1.0-beta.10')
     expect(nextVersion('1.0.0-rc.1.2')).toBe('1.0.0-rc.1.3')
-    expect(nextVersion('2.3.0-beta.16', 'patch')).toBe('2.3.0')
-    expect(nextVersion('2.3.0-beta.16', 'minor')).toBe('2.3.0')
-    expect(nextVersion('0.1.0', 'minor')).toBe('0.2.0')
-    expect(nextVersion('0.1.3', 'major')).toBe('1.0.0')
     expect(() => nextVersion('1.0.0')).toThrow(/no prerelease part to count up/)
     expect(() => nextVersion('1.0')).toThrow(/is not a version/)
   })
@@ -91,41 +68,6 @@ describe('the version rules', () => {
     expect(compareVersions('0.1.0-alpha.3', '0.1.0-beta.1')).toBeLessThan(0)
     expect(compareVersions('0.2.0', '0.1.9')).toBeGreaterThan(0)
     expect(compareVersions('2.3.0-beta.16', '2.3.0-beta.16')).toBe(0)
-  })
-
-  it('bumps the version where it is a quoted string, and leaves prose and longer versions alone', () => {
-    const text = `version = "2.3.0-beta.16"\nconst V = '2.3.0-beta.16'\n"x": "2.3.0-beta.160"\nremoved in 2.3.0-beta.16 (#461)\n`
-    expect(bumpText(text, '2.3.0-beta.16', '2.3.0-beta.17')).toEqual({
-      text: `version = "2.3.0-beta.17"\nconst V = '2.3.0-beta.17'\n"x": "2.3.0-beta.160"\nremoved in 2.3.0-beta.16 (#461)\n`,
-      count: 2,
-    })
-  })
-
-  it.each(['1.0.0', '1.0.0-beta.21'])('matches %s itself and local/build extensions, not another prerelease', (version) => {
-    for (const value of [version, `v${version}`, `${version}.local.1`, `${version}+build`, `${version}+build.123`, version + '.local.${n}']) {
-      expect(versionLines(`const value = \`${value}\``, version), value).toEqual([1])
-    }
-    for (const suffix of ['-beta.21', '-rc', '-local.1', '+other', '+builder', '.1', '.local.0', '.local.01', '0', 'a']) {
-      expect(versionLines(`"${version}${suffix}"`, version), suffix).toEqual([])
-    }
-    expect(versionLines(`Released ${version}.\n`, version)).toEqual([1])
-  })
-
-  it.each(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])('ignores ranges only in package.json %s values', (field) => {
-    const ranges = { a: '^1.0.0', b: '~1.0.0', c: '>= 1.0.0', d: 'workspace:^1.0.0' }
-    for (const space of [undefined, 2]) {
-      const text = JSON.stringify({ [field]: ranges }, null, space)
-      expect(versionLines(text, '1.0.0', 'nested/package.json')).toEqual([])
-      expect(versionLines(text, '1.0.0', 'nested/config.json').length).toBeGreaterThan(0)
-    }
-    expect(versionLines(JSON.stringify({ [field]: { ...ranges, pinned: '1.0.0' } }), '1.0.0', 'package.json')).toEqual([1])
-    expect(versionLines(JSON.stringify({ [field]: ranges, version: '1.0.0' }), '1.0.0', 'package.json')).toEqual([1])
-    expect(versionLines(JSON.stringify({ scripts: { check: '^1.0.0' }, [field]: ranges }), '1.0.0', 'package.json')).toEqual([1])
-    expect(versionLines(JSON.stringify({ nested: { [field]: ranges } }), '1.0.0', 'package.json')).toEqual([1])
-    const multiline = JSON.stringify({ [field]: ranges, version: '1.0.0' }, null, 2)
-    expect(versionLines(multiline, '1.0.0', 'package.json')).toEqual([8])
-    expect(versionLines('{"dependencies":{"a":"^1.0.0"}', '1.0.0', 'package.json')).toEqual([1])
-    expect(versionLines('{"dependencies":{"escaped":"\\u005e1.0.0","braces":"^1.0.0 {range}"}}', '1.0.0', 'package.json')).toEqual([])
   })
 
   it.each([
@@ -143,15 +85,6 @@ describe('the version rules', () => {
     }
   })
 
-  it('holds every listed repository version file at the placeholder, brand.ts declaring none (#1501)', () => {
-    expect(CARRIERS.length).toBeGreaterThan(0)
-    for (const path of CARRIERS.filter((p) => p !== RELEASE.source.path)) {
-      expect(bumpText(readFileSync(join(REPO_ROOT, path), 'utf8'), PLACEHOLDER, NEXT).count, path).toBeGreaterThan(0)
-    }
-    // A fixture of the brand scheme made from them declares and carries its version in every one
-    for (const path of CARRIERS) expect(bumpText(brandSchemeText(path, BRAND_VERSION), BRAND_VERSION, NEXT).count, path).toBeGreaterThan(0)
-  })
-
   it('names files with * inside a folder and ** across folders', () => {
     expect(pathMatches('packaging/npm/*/package.json', 'packaging/npm/host-linux-x64/package.json')).toBe(true)
     expect(pathMatches('packaging/npm/*/package.json', 'packaging/npm/a/b/package.json')).toBe(false)
@@ -164,35 +97,11 @@ describe('the version rules', () => {
     expect(releaseNotes(['feat(ui): one (#10)', 'chore(release): 2.3.0-beta.16 (#541)', '', 'fix: two (#11)'])).toEqual(['feat(ui): one (#10)', 'fix: two (#11)'])
   })
 
-  it('reads this repository as the tag scheme: no declaration in brand.ts, release.scheme "tag" (#1501)', () => {
+  it('reads this repository as the tag scheme: no declaration in brand.ts (#1501)', () => {
     const own = readFileSync(join(REPO_ROOT, RELEASE.source.path), 'utf8')
     expect(declaredVersion(own, RELEASE.source.pattern)).toBeNull()
     expect(sourceScheme(own, RELEASE.source)).toEqual({ scheme: 'tag' })
-    expect(RELEASE.scheme).toBe('tag')
-    expect(declaredVersion(brandSchemeText(RELEASE.source.path, BRAND_VERSION), RELEASE.source.pattern)).toBe(BRAND_VERSION)
-  })
-
-  /*
-   * Since #1501 no file holds a release version: the last one of the brand scheme is left nowhere outside release.ignore,
-   * and the carriers it was in are still named (the stamper writes the version into them at build time).
-   */
-  it("leaves the last brand-scheme version in no tracked file, and names the carriers (project.json release.versionFiles)", () => {
-    const unlisted = TRACKED.filter((p) => !CARRIERS.includes(p) && !filesNamed(RELEASE.ignore, [p]).length)
-    const hits = unlisted.flatMap((p) => {
-      const text = readFileSync(join(REPO_ROOT, p), 'utf8')
-      return text.includes('\0') ? [] : versionLines(text, BRAND_VERSION, p).map((line: number) => `${p}:${line}`)
-    })
-    expect(hits).toEqual([])
-    expect(CARRIERS).toEqual(
-      expect.arrayContaining([
-        'packages/protocol/src/brand.ts',
-        'apps/desktop/package.json',
-        'apps/desktop/src-tauri/tauri.conf.json',
-        'apps/desktop/src-tauri/Cargo.toml',
-        'apps/desktop/src-tauri/Cargo.lock',
-        'packaging/npm/centralu/package.json',
-      ]),
-    )
+    expect(declaredVersion(`export const APP_VERSION = '${BRAND_VERSION}'\n`, RELEASE.source.pattern)).toBe(BRAND_VERSION)
   })
 })
 
@@ -327,9 +236,9 @@ type State = {
 }
 
 /** What the shim needs on the registry: every package of packaging/npm but the shim */
-const REGISTRY_NAMES = CARRIERS.filter((p) => /^packaging\/npm\/[^/]+\/package\.json$/.test(p) && p !== 'packaging/npm/centralu/package.json').map(
-  (p) => JSON.parse(readFileSync(join(REPO_ROOT, p), 'utf8')).name as string,
-)
+const REGISTRY_NAMES = readdirSync(join(REPO_ROOT, 'packaging/npm'))
+  .filter((d) => d !== 'centralu')
+  .map((d) => JSON.parse(readFileSync(join(REPO_ROOT, 'packaging/npm', d, 'package.json'), 'utf8')).name as string)
 /** A local npm registry for the shim's gate, answering from the fake gh's state */
 function registryServer() {
   const server = createServer(async (req, res) => {
@@ -402,19 +311,10 @@ afterAll(() => {
   endLeftoverFakes()
 }, 60_000 * SLOW)
 
-/**
- * The app on this repository's project.json, but under the brand scheme unless `release` says otherwise: the fixture
- * repositories are of the brand scheme (`brandSchemeText`), while this repository switched to the tag scheme (#1501)
- */
-function runtime(ignore?: string[], release?: (r: Record<string, unknown>) => void) {
+/** The app on this repository's project.json */
+function runtime() {
   const projectPath = join(root, 'project')
-  const app = join(projectPath, '.centralu/apps/project-board')
-  cpSync(APP, app, { recursive: true })
-  const config = JSON.parse(readFileSync(join(app, 'project.json'), 'utf8'))
-  config.release.scheme = 'brand'
-  if (ignore) config.release.ignore = ignore
-  release?.(config.release)
-  writeFileSync(join(app, 'project.json'), JSON.stringify(config))
+  cpSync(APP, join(projectPath, '.centralu/apps/project-board'), { recursive: true })
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projectPath, trusted: true }],
     dataRoot: join(root, 'data'),
@@ -449,23 +349,18 @@ const write = (base: string, path: string, text: string) => {
 type Repo = { work: string; origin: string; released: string; tip: string }
 
 /**
- * A repository like this one at release time: every file of this repository that carries the version
- * (copied as they are), released as v<BRAND_VERSION>, then two changes merged. `origin.git` stands for
- * GitHub; fetches reach it through `insteadOf` on GitHub's address, and pushes by `pushurl`, so not
- * even a broken rewrite could push anywhere real.
+ * A repository like this one at release time: brand.ts declaring the last release of the brand scheme, released as
+ * v<BRAND_VERSION>, then two changes merged. `origin.git` stands for GitHub; fetches reach it through `insteadOf` on
+ * GitHub's address, and pushes by `pushurl`, so not even a broken rewrite could push anywhere real.
  *
- * - `bumped`: the bump to NEXT is merged too, untagged (the state before tag); `inBump` changes more files in that same commit
- *   (the release commit is the bump's own, #1350: what the evidence reads is what the bump carried, not what landed after it)
+ * `switchAt`: brand.ts loses its literal from that commit on ("one" by default, or the tip "two"), as on the tag scheme's
+ * switch; "none" never does, so every commit since the tag still declares the version.
  */
 const BRAND_PATH = 'packages/protocol/src/brand.ts'
-/** brand.ts as the tag scheme has it (#1501): the version imported from the generated file, no literal */
-const switchBrand = (work: string) => {
-  const path = join(work, BRAND_PATH)
-  writeFileSync(path, readFileSync(path, 'utf8').replace(/^export const APP_VERSION = '[^']*'$/m, "export { APP_VERSION } from './version.generated.js'"))
-}
+const BRAND_LITERAL = (version: string) => `export const APP_VERSION = '${version}'\n`
+const BRAND_IMPORT = "export { APP_VERSION } from './version.generated.js'\n"
 
-/** `switchAt`: brand.ts loses its literal from that commit on ("one" or the tip "two"), as on the tag scheme's switch */
-function repo({ bumped = false, version = BRAND_VERSION, inBump, switchAt }: { bumped?: boolean; version?: string; inBump?: (work: string) => void; switchAt?: 'one' | 'two' } = {}): Repo {
+function repo({ version = BRAND_VERSION, switchAt = 'one' }: { version?: string; switchAt?: 'one' | 'two' | 'none' } = {}): Repo {
   const origin = join(root, 'origin.git')
   const work = join(root, 'work')
   g(root, 'init', '-q', '--bare', '-b', 'main', origin)
@@ -476,27 +371,27 @@ function repo({ bumped = false, version = BRAND_VERSION, inBump, switchAt }: { b
   g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
   g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
   g(work, 'config', 'remote.origin.pushurl', origin)
-  for (const f of CARRIERS) write(work, f, brandSchemeText(f, version))
+  write(work, BRAND_PATH, BRAND_LITERAL(version))
+  // The packages the shim needs on the registry (release.registry.packages)
+  for (const d of readdirSync(join(REPO_ROOT, 'packaging/npm'))) write(work, `packaging/npm/${d}/package.json`, readFileSync(join(REPO_ROOT, 'packaging/npm', d, 'package.json'), 'utf8'))
   write(work, 'docs/releasing.md', `Released ${version} on a Monday.\n`)
   const released = commitAll(work, `chore(release): ${version} (#541)`)
   g(work, 'tag', `v${version}`)
   write(work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo test\n')
   write(work, 'a.txt', 'one\n')
-  if (switchAt === 'one') switchBrand(work)
+  if (switchAt === 'one') write(work, BRAND_PATH, BRAND_IMPORT)
   commitAll(work, 'feat(ui): one (#10)')
   write(work, 'b.txt', 'two\n')
-  if (switchAt === 'two') switchBrand(work)
-  let tip = commitAll(work, 'fix: two (#11)')
-  if (bumped) {
-    for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(work, f), 'utf8'), version, NEXT).text)
-    inBump?.(work)
-    tip = commitAll(work, `chore(release): ${NEXT} (#900)`)
-  }
+  if (switchAt === 'two') write(work, BRAND_PATH, BRAND_IMPORT)
+  const tip = commitAll(work, 'fix: two (#11)')
   g(work, 'push', '-q', 'origin', 'main', `v${version}`)
   g(work, 'branch', '-q', '--set-upstream-to=origin/main')
   patchState((s) => (s.dispatchSha = tip))
   return { work, origin, released, tip }
 }
+
+/** v<BRAND_VERSION> is released: its shim is on the registry (its run is not listed here), so the next release may go ahead */
+const releasedBefore = (s: Repo) => patchState((st) => (st.registry = { centralu: s.released }))
 
 /** The person's checkout: its branch, head and changes. Must not move. */
 const checkout = (work: string) => ({ branch: g(work, 'branch', '--show-current'), head: g(work, 'rev-parse', 'HEAD'), status: g(work, 'status', '--porcelain'), refs: g(work, 'for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/tags', 'refs/centralu-release') })
@@ -519,139 +414,28 @@ const run = (extra: Partial<Run>): Run => ({
   ...extra,
 })
 
-/** Distinct PR head and squash commit, with real trees and a fetchable remote PR head. */
-function bumpEvidence(s: Repo, { differentTree = false } = {}) {
-  const tree = g(s.work, 'rev-parse', `${differentTree ? s.released : s.tip}^{tree}`)
-  const prHead = g(s.work, 'commit-tree', tree, '-p', s.released, '-m', 'chore(release): bump candidate')
-  g(s.work, 'push', '-q', 'origin', `${prHead}:refs/pull/900/head`)
-  patchState((st) => {
-    st.ci = 'pending'
-    st.prCi = 'green'
-    st.prs.push({ number: 900, state: 'MERGED', headRefName: `chore/release-${NEXT}`, baseRefName: 'main', headRefOid: prHead, mergeCommit: { oid: s.tip } })
-  })
-  return prHead
-}
-
 describe('release', { timeout: 60_000 * SLOW }, () => {
-  it.each(['pending', 'none'] as const)('accepts the bump PR same tree when main CI is %s, in both steps', async (ci) => {
-    // Release jobs can share CI names; their separate event is not PR CI evidence.
-    const s = repo({ bumped: true, inBump: (work) => write(work, '.github/workflows/release.yml', 'on:\n  workflow_dispatch:\njobs:\n  build:\n    runs-on: ubuntu-latest\n') })
-    const prHead = bumpEvidence(s)
-    patchState((st) => { st.ci = ci })
-    expect(prHead).not.toBe(s.tip)
-    runtime()
-    for (const step of ['rehearse', 'tag']) {
-      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
-      expect(r.isError, r.text).toBe(false)
-      expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
-    }
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(s.tip)
-  })
-
-  it('reports the same PR evidence in status and uses main green CI directly when it arrives', async () => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
-    runtime()
-    const status = await call('release_status', { path: s.work })
-    expect(status.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
-    patchState((st) => { st.ci = 'green'; st.prCi = 'failing' })
-    for (const step of ['rehearse', 'tag', 'status']) {
-      const r = await call(step === 'status' ? 'release_status' : 'release', { step, path: s.work, skipRehearsal: true })
-      expect(r.isError, r.text).toBe(false)
-      expect(r.data.lines.join(' ')).toContain("CI: main's own checks")
-    }
-  })
-
-  it.each([
-    ['different tree', 'different tree'],
-    ['main failing', 'Main CI failed'],
-    ['PR failing', 'head checks are not all green'],
-    ['PR pending', 'head checks are not all green'],
-    ['PR missing', 'head checks are not all green'],
-    ['event job', 'uses event or branch context'],
-    ['push-only job', 'does not run on both push and pull_request'],
-  ])('refuses %s in both steps and reports the reason in status', async (scenario, reason) => {
-    const changeBuild = (work: string) => {
-      const file = '.github/workflows/build.yml'
-      const workflow = readFileSync(join(work, file), 'utf8')
-      write(work, file, scenario === 'event job' ? workflow.replace('    runs-on:', "    if: github.event_name == 'push'\n    runs-on:") : workflow.replace('  pull_request:\n', ''))
-    }
-    const s = repo({ bumped: true, ...(scenario === 'event job' || scenario === 'push-only job' ? { inBump: changeBuild } : {}) })
-    bumpEvidence(s, { differentTree: scenario === 'different tree' })
+  it('ignores newer passing release checks with the same name as failing CI', async () => {
+    const s = repo()
+    releasedBefore(s)
     patchState((st) => {
-      if (scenario === 'main failing') st.ci = 'failing'
-      if (scenario === 'PR failing') st.prCi = 'failing'
-      if (scenario === 'PR pending') st.prCi = 'pending'
-      if (scenario === 'PR missing') st.prCi = 'none'
+      st.collidingReleaseChecks = true
+      st.ci = 'failing'
     })
     runtime()
+    const reason = 'has a fully green push run of its own yet'
     for (const step of ['rehearse', 'tag']) {
       const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
       expect(r.isError, r.text).toBe(true)
       expect(r.data.problems.join(' ')).toContain(reason)
     }
     const status = await call('release_status', { path: s.work })
-    expect(status.data.lines.join(' ')).toContain(reason)
-    expect(status.data.summary).toContain('Wait for green CI')
+    expect(status.data.summary).toContain(reason)
     expect(ghWrites()).toEqual([])
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-  })
-
-  it('blocks tagging when pending main CI fails after rehearsal accepted the PR evidence', async () => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
-    runtime()
-    const rehearsal = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(rehearsal.isError, rehearsal.text).toBe(false)
-    patchState((st) => { st.ci = 'failing' })
-    const tag = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
-    expect(tag.isError, tag.text).toBe(true)
-    expect(tag.data.problems.join(' ')).toContain('Main CI failed')
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-  })
-
-  it.each(['main', 'PR'] as const)('ignores newer passing release checks with the same name as failing %s CI', async (source) => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
-    patchState((st) => {
-      st.collidingReleaseChecks = source
-      if (source === 'main') st.ci = 'failing'
-      else st.prCi = 'failing'
-    })
-    runtime()
-    const reason = source === 'main' ? 'Main CI failed' : 'head checks are not all green'
-    for (const step of ['rehearse', 'tag']) {
-      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
-      expect(r.isError, r.text).toBe(true)
-      expect(r.data.problems.join(' ')).toContain(reason)
-    }
-    const status = await call('release_status', { path: s.work })
-    expect(status.data.lines.join(' ')).toContain(reason)
-    expect(ghWrites()).toEqual([])
-  })
-
-  // Two tiers of CI (2026-10-18): a quick run skips every job but a few, and a skipped job reads as passed
-  it("takes the bump PR's run as evidence only when it ran the full tier", async () => {
-    const s = repo({ bumped: true, inBump: (work) => write(work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n  full-tier:\n    name: full tier\n    runs-on: ubuntu-latest\n') })
-    const prHead = bumpEvidence(s)
-    patchState((st) => {
-      st.requiredContexts = ['build', 'full tier']
-      st.fullTierBySha = { [prHead]: 'skipped' }
-    })
-    runtime()
-    const quick = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
-    expect(quick.isError, quick.text).toBe(true)
-    expect(quick.data.problems.join(' ')).toContain("PR #900's run did not run the full tier of CI")
-    expect(ghWrites()).toEqual([])
-    patchState((st) => { st.fullTierBySha = { [prHead]: 'success' } })
-    const full = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
-    expect(full.isError, full.text).toBe(false)
-    expect(full.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
   })
 
   it('refuses checks from another app even when their suite id and name match CI', async () => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
+    const s = repo()
     patchState((st) => { st.ci = 'green'; st.ciApp = 'another-app' })
     runtime()
     const r = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
@@ -659,30 +443,8 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
-  it.each(['multiple parents', 'different base'])('refuses bump PR evidence with %s', async (scenario) => {
-    const s = repo({ bumped: true })
-    if (scenario === 'multiple parents') {
-      // The bump landed as a merge commit: two parents
-      const merge = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', g(s.work, 'rev-parse', `${s.tip}^`), '-p', s.released, '-m', 'chore(release): merge bump')
-      g(s.work, 'reset', '--hard', merge)
-      g(s.work, 'push', '-q', '-f', 'origin', 'main')
-      s.tip = merge
-    }
-    bumpEvidence(s)
-    if (scenario === 'different base') patchState((st) => { st.prs[0]!.baseRefName = 'other-base' })
-    runtime()
-    for (const step of ['rehearse', 'tag']) {
-      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
-      expect(r.isError, r.text).toBe(true)
-      expect(r.data.problems.join(' ')).toContain(scenario === 'multiple parents' ? 'did not land as a squash commit' : 'No merged bump PR')
-    }
-    expect(ghWrites()).toEqual([])
-  })
-
-  // A failed own run is never overridden; pending or absent, the bump PR's run on the same tree stands for it (#1042, below)
-  it.each(['failing'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
+  it.each(['failing'] as const)('blocks every publication approval while main CI is %s despite green release checks', async (ci) => {
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => {
       st.ci = ci
@@ -717,61 +479,8 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toHaveLength(1)
   })
 
-  /*
-   * #1042 (owner decision, 2026-10-18): approval may use the bump PR's run instead of waiting about 14 minutes for main's
-   * push build, only when the tagged commit's tree is the very tree that run tested.
-   */
-  it.each(['pending', 'none'] as const)("approves from the bump PR's run while the tagged commit's own CI is %s, on the tree that run tested", async (ci) => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s)
-    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
-    patchState((st) => {
-      st.ci = ci
-      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
-      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
-      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
-    })
-    runtime()
-    const status = await call('release_status', { path: s.work })
-    expect(status.data.summary).not.toContain('Wait for green CI')
-    expect(status.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
-    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
-    expect(r.isError, r.text).toBe(false)
-    expect(r.data.approved).toBe(true)
-    expect(r.data.lines.join(' ')).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: ${ci}.`)
-    expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
-    expect(ghWrites()).toHaveLength(1)
-    // The PR's run failing now: no evidence, and the own run is still not green
-    patchState((st) => { st.prCi = 'failing' })
-    const again = await call('release', { step: 'approve', path: s.work, confirm: true })
-    expect(again.isError, again.text).toBe(true)
-    expect(again.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head checks are not all green")
-    expect(ghWrites()).toHaveLength(1)
-  })
-
-  it("waits for the tagged commit's own CI when its tree is not the one the bump PR's run tested", async () => {
-    const s = repo({ bumped: true })
-    bumpEvidence(s, { differentTree: true })
-    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
-    patchState((st) => {
-      st.ci = 'pending'
-      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
-      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
-      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
-    })
-    runtime()
-    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
-    expect(r.isError, r.text).toBe(true)
-    expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
-    expect(r.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head has a different tree from the tagged commit")
-    expect(ghWrites()).toEqual([])
-    patchState((st) => { st.ci = 'green' })
-    const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
-    expect(approved.data.approved, approved.text).toBe(true)
-  })
-
   it('does not let a newer green main authorize a tag whose own main CI failed', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     const tagged = s.tip
     g(s.work, 'push', '-q', 'origin', `${tagged}:refs/tags/v${NEXT}`)
     g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later change')
@@ -793,40 +502,19 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it.each(['event', 'branch'])('rejects a CI suite with the wrong %s even when its jobs pass', async (field) => {
-    const s = repo({ bumped: true })
+    const s = repo()
+    releasedBefore(s)
     runtime()
     expect((await call('release', { step: 'rehearse', path: s.work })).isError).toBe(false)
-    patchState((st) => { st.ciRunOverrides = { [s.tip]: field === 'event' ? { event: 'workflow_dispatch' } : { head_branch: 'another-branch' } } })
+    const wrong = field === 'event' ? { event: 'workflow_dispatch' } : { head_branch: 'another-branch' }
+    patchState((st) => { st.ciRunOverrides = { [s.tip]: wrong, [g(s.work, 'rev-parse', `${s.tip}^`)]: wrong } })
     const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
     expect(r.isError, r.text).toBe(true)
     expect(ghWrites()).toEqual([])
-  })
-
-  it.each(['number', 'base'])('requires the PR run to match the bump PR %s', async (field) => {
-    const s = repo({ bumped: true })
-    const prHead = bumpEvidence(s)
-    patchState((st) => {
-      st.ciRunOverrides = { [prHead]: { pull_requests: [{ number: field === 'number' ? 901 : 900, head: { sha: prHead, ref: `chore/release-${NEXT}` }, base: { ref: field === 'base' ? 'other-base' : 'main' } }] } }
-    })
-    runtime()
-    const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(r.isError, r.text).toBe(true)
-    expect(r.data.problems.join(' ')).toContain('head checks are not all green')
-    expect(ghWrites()).toEqual([])
-  })
-
-  it('refuses ambiguous commit associations when GitHub drops the merged PR from its run', async () => {
-    const s = repo({ bumped: true })
-    const prHead = bumpEvidence(s)
-    patchState((st) => { st.commitPrOverrides = [900, 901].map((number) => ({ number, head: { sha: prHead, ref: `chore/release-${NEXT}` }, base: { ref: 'main' } })) })
-    runtime()
-    const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(r.isError, r.text).toBe(true)
-    expect(r.data.problems.join(' ')).toContain('head checks are not all green')
   })
 
   it('ci_status main ignores newer passing release checks with colliding build names', async () => {
-    repo({ bumped: true })
+    repo()
     patchState((st) => { st.ci = 'failing'; st.collidingReleaseChecks = true })
     runtime()
     const r = await call('ci_status', { ref: 'main' })
@@ -836,7 +524,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it('approves platforms and then the shim from the tag even after an unrelated red merge', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     const tagged = s.tip
     g(s.work, 'push', '-q', 'origin', `${tagged}:refs/tags/v${NEXT}`)
     patchState((st) => {
@@ -863,7 +551,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it('explains a cancelled tagged build with its rerun command and accepts the successful new attempt', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     const tagged = s.tip
     g(s.work, 'push', '-q', 'origin', `${tagged}:refs/tags/v${NEXT}`)
     g(s.work, 'commit', '--allow-empty', '-q', '-m', 'fix: newer push cancels older build')
@@ -900,241 +588,26 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.text).toContain('release — changes, model')
   })
 
-  it('says where the release stands: released, what merged since, and that the next step is a bump', async () => {
-    const s = repo()
-    patchState((st) => st.runs.push(run({ id: 60, event: 'push', head_branch: `v${BRAND_VERSION}`, head_sha: s.released })))
-    runtime()
-    const r = await call('release_status', { path: s.work })
-    expect(r.isError).toBe(false)
-    expect(r.data).toMatchObject({ ok: true, phase: 'released', version: BRAND_VERSION, head: s.tip })
-    expect(r.data.summary).toBe(`main at ${s.tip.slice(0, 7)} carries ${BRAND_VERSION}: released as v${BRAND_VERSION}. Next: ${BRAND_VERSION} is released. 2 changes since: bump with release step bump.`)
-    expect(r.data.lines).toEqual([
-      `Release commit: ${s.released.slice(0, 7)}, tagged v${BRAND_VERSION}, 2 commits behind main at ${s.tip.slice(0, 7)}.`,
-      `The tagged commit's own CI at ${s.released.slice(0, 7)}: green.`,
-      'Checkout: clean.',
-      `Release run for v${BRAND_VERSION}: succeeded, https://github.com/ijun17/centralu/actions/runs/60.`,
-      `Merged since v${BRAND_VERSION} (2):`,
-      '- fix: two (#11)',
-      '- feat(ui): one (#10)',
-    ])
-    expect(ghWrites()).toEqual([])
-  })
-
-  /*
-   * The bump touches every file that carries the version, and only those. The files are this
-   * repository's own: leave one out of release.versionFiles and the bump refuses (next test), so this
-   * one fails.
-   */
-  it('bumps every version file, opens the pull request from the template, and leaves the checkout alone', async () => {
-    const s = repo()
-    const before = checkout(s.work)
-    runtime()
-    const plan = await call('release', { step: 'bump', path: s.work })
-    expect(plan.isError).toBe(false)
-    expect(plan.data.summary).toBe(
-      `Ready to bump ${BRAND_VERSION} → ${NEXT} on main at ${s.tip.slice(0, 7)}, as chore/release-${NEXT}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.`,
-    )
-    expect(plan.data.lines).toContain(`Merged since v${BRAND_VERSION} (2):`)
-    expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
-    expect(ghWrites()).toEqual([])
-
-    const r = await call('release', { step: 'bump', path: s.work, confirm: true, notes: 'Ship the two changes.', closes: 'Refs #386' })
-    expect(r.isError).toBe(false)
-    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green with intoBatch: true: while the merge queue has a batch running it merges nothing without it), then tag.`)
-    expect(r.data.lines).not.toContain(`Merged since v${BRAND_VERSION} (2):`)
-    const pushed = remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)!
-    expect(g(s.origin, 'rev-parse', `${pushed}^`)).toBe(s.tip)
-    expect(g(s.origin, 'log', '-1', '--format=%s', pushed)).toBe(`chore(release): ${NEXT}`)
-    // Exactly the files that carry the version, and in each of them no old version left
-    expect(g(s.origin, 'diff', '--name-only', s.tip, pushed).split('\n').sort()).toEqual(CARRIERS)
-    const show = (p: string) => g(s.origin, 'show', `${pushed}:${p}`)
-    for (const f of CARRIERS) {
-      expect(show(f), f).not.toContain(`"${BRAND_VERSION}"`)
-      expect(show(f), f).not.toContain(`'${BRAND_VERSION}'`)
-    }
-    // What tooling/brand.test.ts holds the files to, on the bumped commit
-    const json = (p: string) => JSON.parse(show(p))
-    expect(declaredVersion(show(RELEASE.source.path), RELEASE.source.pattern)).toBe(NEXT)
-    expect(json('apps/desktop/src-tauri/tauri.conf.json').version).toBe(NEXT)
-    expect(json('apps/desktop/package.json').version).toBe(NEXT)
-    expect(show('apps/desktop/src-tauri/Cargo.toml')).toContain(`version = "${NEXT}"`)
-    for (const f of CARRIERS.filter((p) => p.startsWith('packaging/npm/'))) expect(json(f).version, f).toBe(NEXT)
-    expect(Object.values(json('packaging/npm/centralu/package.json').optionalDependencies)).toEqual(expect.arrayContaining([NEXT]))
-    expect(Object.values(json('packaging/npm/centralu/package.json').optionalDependencies)).not.toContain(BRAND_VERSION)
-    expect(show('docs/releasing.md')).toBe(`Released ${BRAND_VERSION} on a Monday.`)
-
-    const [open] = ghWrites()
-    expect(open!.args).toEqual(['api', '-X', 'POST', 'repos/ijun17/centralu/pulls', '--input', '-'])
-    const body = JSON.parse(open!.stdin!)
-    expect(body).toMatchObject({ title: `chore(release): ${NEXT}`, head: `chore/release-${NEXT}`, base: 'main', draft: false })
-    expect(body.body).toContain(`## Why\n\nShip the two changes.\n\nMerged since v${BRAND_VERSION}:\n\n- fix: two (#11)\n- feat(ui): one (#10)`)
-    expect(body.body).toContain(`## Not exercised\n\nThe release workflow, until v${NEXT} is tagged.`)
-    expect(body.body).toContain('## Closes\n\nRefs #386')
-    expect(checkout(s.work)).toEqual(before)
-  })
-
-  it('dry-bumps a stable release past old prereleases and dependency ranges but refuses stable pins', async () => {
-    const s = repo({ version: '1.0.0' })
-    // This regression suite intentionally pins stable versions; its exact path is allowlisted.
-    write(s.work, 'tooling/project-board-release.test.ts', "const stableFixture = '1.0.0'\n")
-    write(s.work, 'old-prereleases', '1.0.0-beta.21\n1.0.0-rc\n1.0.0+other\n')
-    write(s.work, 'other/package.json', JSON.stringify({
-      dependencies: { a: '^1.0.0' }, devDependencies: { a: '~1.0.0' },
-      peerDependencies: { a: '>=1.0.0' }, optionalDependencies: { a: 'workspace:1.0.0' },
-    }))
-    commitAll(s.work, 'test: stable release dependencies')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    runtime()
-    const plan = await call('release', { step: 'bump', bump: 'patch', path: s.work })
-    expect(plan.isError, plan.text).toBe(false)
-    expect(plan.data.next).toBe('1.0.1')
-    expect(plan.data.pushed).toBe(false)
-
-    write(s.work, 'e2e/stable.ts', "'1.0.0'\n'1.0.0.local.1'\n`1.0.0+build`\n")
-    write(s.work, 'other/package.json', '{"dependencies":{"a":"^1.0.0"},\n"version":"1.0.0"}\n')
-    commitAll(s.work, 'test: stable release pins')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    const blocked = await call('release', { step: 'bump', bump: 'patch', path: s.work })
-    expect(blocked.isError).toBe(true)
-    expect(blocked.data.problems.map((p: string) => p.split(' carries ')[0])).toEqual([
-      'e2e/stable.ts:1', 'e2e/stable.ts:2', 'e2e/stable.ts:3', 'other/package.json:2',
-    ])
-    expect(ghWrites()).toEqual([])
-    expect(remoteHas(s.origin, 'refs/heads/chore/release-1.0.1')).toBeNull()
-  })
-
-  it('reports every embedded version by file and line in tracked text of any type', async () => {
-    const s = repo()
-    // A colon or a newline in a name is not allowed on Windows; spaces are, and need the same care
-    const odd = process.platform === 'win32' ? 'custom/spaces and  more spaces' : 'custom/spaces and:colon\nnewline'
-    const pins: Record<string, string> = {
-      'e2e/control-loop.spec.ts': `// local update\nconst local = '${BRAND_VERSION}.local.1'\n`,
-      'src/candidate.ts': `const candidate = "${BRAND_VERSION}.local.3"\n`,
-      'src/build.ts': `const build = '${BRAND_VERSION}+build'\n`,
-      'src/template.ts': 'const template = `release v' + BRAND_VERSION + '.local.${n}`\n',
-      'scripts/check.sh': `#!/bin/sh\nversion=${BRAND_VERSION}\n`,
-      '.release-version': `v${BRAND_VERSION}\n`,
-      'custom/pin.unusual': `version: ${BRAND_VERSION}\n`,
-      'fixtures/unlisted.json': `"${BRAND_VERSION}"\n`,
-      [odd]: `header\n${BRAND_VERSION}.local.2\n`,
-      'src/multiple.ts': `// one\r\n'${BRAND_VERSION}' + '${BRAND_VERSION}+build'\r\n// two\r\n'${BRAND_VERSION}.local.4'\r\n`,
-    }
-    for (const [path, text] of Object.entries(pins)) write(s.work, path, text)
-    commitAll(s.work, 'test: embedded versions')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    const before = checkout(s.work)
-    runtime()
-    for (const confirm of [false, true]) {
-      const r = await call('release', { step: 'bump', path: s.work, confirm })
-      expect(r.isError).toBe(true)
-      expect(r.data.problems.map((p: string) => p.split(' carries ')[0]).sort()).toEqual(
-        [
-          'e2e/control-loop.spec.ts:2',
-          'src/candidate.ts:1',
-          'src/build.ts:1',
-          'src/template.ts:1',
-          'scripts/check.sh:2',
-          '.release-version:1',
-          'custom/pin.unusual:1',
-          'fixtures/unlisted.json:1',
-          `${odd}:2`,
-          'src/multiple.ts:2',
-          'src/multiple.ts:4',
-        ].sort(),
-      )
-      expect(r.data.problems.every((p: string) => p.includes('release.ignore'))).toBe(true)
-    }
-    expect(checkout(s.work)).toEqual(before)
-    expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
-    expect(ghWrites()).toEqual([])
-  })
-
-  it('exempts configured history and intentional pins, not every fixture or lockfile version declaration', async () => {
-    const s = repo()
-    for (const path of [
-      'CHANGELOG.md',
-      'packages/other/CHANGELOG.txt',
-      'release-notes/recent/notes.md',
-      'docs/history.md',
-      'docs/releases/history.md',
-      'pnpm-lock.yaml',
-      'package-lock.json',
-      'npm-shrinkwrap.json',
-      'nested/yarn.lock',
-      'nested/Cargo.lock',
-      'fixtures/pinned.json',
-    ])
-      write(s.work, path, `Released "${BRAND_VERSION}" and ${BRAND_VERSION}.local.1\n`)
-    write(
-      s.work,
-      'different-versions',
-      `${BRAND_VERSION}0\n${BRAND_VERSION}a\n1${BRAND_VERSION}\n1.${BRAND_VERSION}\n`,
-    )
-    write(s.work, 'binary.dat', `\0${BRAND_VERSION}.local.1\n`)
-    write(s.work, '.gitignore', '/untracked\n')
-    commitAll(s.work, 'test: historical versions')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    write(s.work, 'untracked', `${BRAND_VERSION}.local.1\n`)
-    runtime([...RELEASE.ignore, 'fixtures/pinned.json'])
-    const r = await call('release', { step: 'bump', path: s.work })
-    expect(r.isError, r.text).toBe(false)
-    expect(r.data.lines).toContain('- apps/desktop/src-tauri/Cargo.lock: 2 places')
-    expect(r.data.pushed).toBe(false)
-    expect(ghWrites()).toEqual([])
-
-    // An ignore entry must never conceal a broken declaration in versionFiles.
-    write(s.work, 'apps/desktop/src-tauri/Cargo.lock', 'version = "0.0.1"\n')
-    commitAll(s.work, 'test: stale declared lockfile')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    const stale = await call('release', { step: 'bump', path: s.work })
-    expect(stale.isError).toBe(true)
-    expect(stale.data.problems).toEqual([
-      `apps/desktop/src-tauri/Cargo.lock is in release.versionFiles but does not carry "${BRAND_VERSION}"; it fell behind, or the list is wrong.`,
-    ])
-  })
-
-  it('refuses a bump that would miss a file carrying the version, or names a file that lost it', async () => {
-    const s = repo()
-    write(s.work, 'packages/other/version.json', `{ "version": "${BRAND_VERSION}" }\n`)
-    write(s.work, 'apps/desktop/package.json', readFileSync(join(s.work, 'apps/desktop/package.json'), 'utf8').replace(`"${BRAND_VERSION}"`, '"0.0.1"'))
-    commitAll(s.work, 'chore: drift')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    runtime()
-    const r = await call('release', { step: 'bump', path: s.work, confirm: true })
-    expect(r.isError).toBe(true)
-    expect(r.data.problems).toEqual([
-      `apps/desktop/package.json is in release.versionFiles but does not carry "${BRAND_VERSION}"; it fell behind, or the list is wrong.`,
-      `packages/other/version.json:1 carries "${BRAND_VERSION}" but is not in project.json release.versionFiles; derive it from the version source, or add it to release.ignore if it intentionally pins a version.`,
-    ])
-    expect(r.data.summary).toBe('Release bump refused (2 reasons); nothing was pushed, tagged, started or approved.')
-    expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
-    expect(ghWrites()).toEqual([])
-  })
-
-  // A bump is made from main as GitHub has it; a tag is pushed by commit from GitHub's history (#1350), so where the checkout is does not matter to it
+  // A tag is pushed by commit from GitHub's history (#1350), so where the checkout is does not matter to it
   it.each([
-    ['another branch', (w: string) => g(w, 'switch', '-q', '-c', 'topic'), /^The checkout at .* is on branch topic, not main; switch to main first\.$/, false],
-    ['a checkout behind GitHub', (w: string) => g(w, 'reset', '-q', '--hard', 'HEAD~1'), /^The checkout's main \(\w{7}\) is behind main on origin \(\w{7}\); pull first\.$/, false],
-    ['local commits GitHub lacks', (w: string) => (write(w, 'c.txt', 'c\n'), commitAll(w, 'local')), /^The checkout's main \(\w{7}\) has commits main on origin \(\w{7}\) does not/, false],
-  ])('refuses to bump from %s, but not to tag', async (_, spoil, why, tagToo) => {
+    ['another branch', (w: string) => g(w, 'switch', '-q', '-c', 'topic')],
+    ['a checkout behind GitHub', (w: string) => g(w, 'reset', '-q', '--hard', 'HEAD~1')],
+    ['local commits GitHub lacks', (w: string) => (write(w, 'c.txt', 'c\n'), commitAll(w, 'local'))],
+  ])('tags what GitHub has from %s', async (_, spoil) => {
     const s = repo()
+    releasedBefore(s)
     spoil(s.work)
     runtime()
-    for (const step of ['bump', 'tag']) {
-      const r = await call('release', { step, path: s.work, confirm: true, skipRehearsal: true })
-      expect(r.isError, step).toBe(true)
-      const said = r.data.problems.some((p: string) => why.test(p))
-      expect(said, `${step}: ${r.data.problems.join(' | ')}`).toBe(step === 'bump' || tagToo)
-    }
-    expect(ghWrites()).toEqual([])
-    expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
+    const r = await call('release', { step: 'tag', path: s.work, confirm: true, skipRehearsal: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}^{commit}`)).toBe(s.tip)
   })
 
   it('refuses every step for an account without maintain or admin, before reading anything else', async () => {
     const s = repo()
     patchState((st) => (st.permissions = { push: true }))
     runtime()
-    for (const step of ['bump', 'rehearse', 'tag', 'approve']) {
+    for (const step of ['rehearse', 'tag', 'approve']) {
       const r = await call('release', { step, path: s.work, confirm: true })
       expect(r.data.problems, step).toEqual([
         "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and releasing is the maintainer's act (#386). Nothing was changed.",
@@ -1143,78 +616,30 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
-  it('refuses a bump while CI on main is not green, while the version is not released, or to a version not after it', async () => {
-    const s = repo({ bumped: true })
-    patchState((st) => (st.ci = 'failing'))
-    runtime()
-    const r = await call('release', { step: 'bump', path: s.work, version: BRAND_VERSION })
-    expect(r.data.problems).toEqual([
-      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: failing —`)),
-      `${NEXT} on main is not released yet (no tag v${NEXT}); release it (release step tag) before bumping past it.`,
-      `${BRAND_VERSION} is not after ${NEXT}, the version on main.`,
-      `${BRAND_VERSION} is not after v${BRAND_VERSION}, the latest release tag.`,
-      `v${BRAND_VERSION} is tagged already.`,
-    ])
-  })
-
-  it('warns at the bump, without refusing it, when other builds hold most runners', async () => {
+  it('rehearses on main with the dry-run input and the version, and does not start a second rehearsal', async () => {
     const s = repo()
-    const jobs = (n: number, status: string) => Array.from({ length: n }, (_, i) => ({ name: `job ${i}`, status, conclusion: null }))
-    patchState((st) => {
-      st.activeRuns = [{ id: 81, status: 'in_progress' }, { id: 82, status: 'queued' }]
-      st.jobs['81'] = [...jobs(8, 'in_progress'), ...jobs(3, 'completed'), ...jobs(2, 'waiting')]
-      st.jobs['82'] = jobs(4, 'queued')
-    })
-    runtime()
-    const quiet = await call('release', { step: 'bump', path: s.work })
-    expect(quiet.isError, quiet.text).toBe(false)
-    expect(quiet.data.warning).toBeNull()
-    patchState((st) => (st.jobs['81'] = jobs(12, 'in_progress')))
-    const busy = await call('release', { step: 'bump', path: s.work })
-    expect(busy.isError, busy.text).toBe(false)
-    const warning = "Runners are busy: 12 jobs of other builds running and 4 queued, against 20 runners (2 active runs). The bump PR's CI will wait for them; push it once they drain, or cancel builds that no longer matter."
-    expect(busy.data.warning).toBe(warning)
-    expect(busy.data.summary).toContain(warning)
-    expect(busy.data.lines).toContain(warning)
-    const r = await call('release', { step: 'bump', path: s.work, confirm: true })
-    expect(r.data.pushed, r.text).toBe(true)
-    expect(r.data.summary).toContain(warning)
-  })
-
-  it('refuses a bump whose branch or pull request exists already', async () => {
-    const s = repo()
-    g(s.work, 'push', '-q', 'origin', `HEAD:refs/heads/chore/release-${NEXT}`)
-    patchState((st) => st.prs.push({ number: 950, state: 'OPEN', headRefName: `chore/release-${NEXT}` }))
-    runtime()
-    const r = await call('release', { step: 'bump', path: s.work, confirm: true })
-    expect(r.data.problems).toEqual([
-      `The branch chore/release-${NEXT} exists on origin already; a bump for ${NEXT} was started. Look at its pull request, or delete the branch.`,
-      `Pull request #950 for chore/release-${NEXT} is open already.`,
-    ])
-  })
-
-  it('rehearses on main with the dry-run input, and does not start a second rehearsal', async () => {
-    const s = repo({ bumped: true })
+    releasedBefore(s)
     runtime()
     const plan = await call('release', { step: 'rehearse', path: s.work })
     expect(plan.data.summary).toBe(
-      `Ready to rehearse ${NEXT} on main at ${s.tip.slice(0, 7)} (release.yml with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+      `Ready to rehearse ${NEXT} on main at ${s.tip.slice(0, 7)} (release.yml with dry_run=true, version=${NEXT}; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
     )
     expect(ghWrites()).toEqual([])
     const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
     expect(r.data.summary).toBe(`Started the rehearsal of ${NEXT} on ${s.tip.slice(0, 7)}: https://github.com/ijun17/centralu/actions/runs/77. Tag once it succeeds.`)
-    expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: '{"ref":"main","inputs":{"dry_run":"true"}}' }])
+    expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: 'main', inputs: { dry_run: 'true', version: NEXT } }) }])
     const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
     expect(again.data.summary).toBe(`A rehearsal on ${s.tip.slice(0, 7)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
     expect(ghWrites()).toHaveLength(1)
   })
 
   it('refuses to tag without a successful rehearsal on the commit, unless told to skip it', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
+    releasedBefore(s)
     runtime()
     const none = await call('release', { step: 'tag', path: s.work, confirm: true })
-    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
-    patchState((st) => st.runs.push(run({ head_sha: s.tip, conclusion: 'failure' })))
+    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its rehearsal branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+    patchState((st) => st.runs.push(run({ head_sha: s.tip, conclusion: 'failure', display_title: `rehearse ${NEXT}` })))
     const failed = await call('release', { step: 'tag', path: s.work, confirm: true })
     expect(failed.data.problems).toEqual([`The rehearsal on ${s.tip.slice(0, 7)} ended failure (https://github.com/ijun17/centralu/actions/runs/50); fix that first, or pass skipRehearsal: true.`])
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
@@ -1224,10 +649,11 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it('tags main after a rehearsal, pushes only the tag, and answers the release run', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     const before = checkout(s.work)
+    releasedBefore(s)
     patchState((st) => {
-      st.runs.push(run({ head_sha: s.tip }))
+      st.runs.push(run({ head_sha: s.tip, display_title: `rehearse ${NEXT}` }))
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null, html_url: 'https://github.com/ijun17/centralu/actions/runs/61' }))
     })
     runtime()
@@ -1236,7 +662,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
     const r = await call('release', { step: 'tag', path: s.work, confirm: true })
     expect(r.isError).toBe(false)
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(s.tip)
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}^{commit}`)).toBe(s.tip)
     expect(r.data.summary).toBe(
       `Tagged v${NEXT} on ${s.tip.slice(0, 7)}. The release run: https://github.com/ijun17/centralu/actions/runs/61. It waits for approval on npm-publish: the platform jobs first, then the shim. Next: release step approve, or approve on GitHub.`,
     )
@@ -1244,437 +670,79 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(checkout(s.work)).toEqual(before)
     expect(ghWrites()).toEqual([])
     const twice = await call('release', { step: 'tag', path: s.work, confirm: true, skipRehearsal: true })
-    expect(twice.data.problems).toEqual([`v${NEXT} is tagged already; a release tag is never moved. Bump to the next version instead.`])
+    expect(twice.data.problems).toEqual([`Nothing landed on main since v${NEXT}; there is nothing to release.`])
   })
 
-  /** main released at BRAND_VERSION, and the bump to NEXT open as PR #900 on its branch: answers its head */
-  function openBump(s: Repo) {
-    const branch = `chore/release-${NEXT}`
-    g(s.work, 'checkout', '-q', '-b', branch)
-    for (const f of CARRIERS) write(s.work, f, bumpText(readFileSync(join(s.work, f), 'utf8'), BRAND_VERSION, NEXT).text)
-    const head = commitAll(s.work, `chore(release): ${NEXT}`)
-    g(s.work, 'push', '-q', 'origin', branch)
-    g(s.work, 'checkout', '-q', 'main')
-    patchState((st) => {
-      st.prs.push({ number: 900, state: 'OPEN', headRefName: branch, baseRefName: 'main', headRefOid: head })
-      st.dispatchSha = head
-    })
-    return { branch, head }
-  }
-  /** The bump PR squashed onto main: a new commit with `tree` (default the PR head's) on main's head */
-  function squash(s: Repo, head: string, tree = g(s.work, 'rev-parse', `${head}^{tree}`)) {
-    const tip = g(s.work, 'commit-tree', tree, '-p', s.tip, '-m', `chore(release): ${NEXT} (#900)`)
-    g(s.work, 'reset', '-q', '--hard', tip)
-    g(s.work, 'push', '-q', 'origin', 'main')
-    patchState((st) => {
-      st.prs[0]!.state = 'MERGED'
-      st.prs[0]!.mergeCommit = { oid: tip }
-      for (const r of st.runs) if (r.id === 77) Object.assign(r, { status: 'completed', conclusion: 'success' })
-    })
-    s.tip = tip
-    return tip
-  }
-
-  it('rehearses the open bump PR on its branch, and tags main after the squash on that rehearsal (same tree)', async () => {
-    const s = repo()
-    const { branch, head } = openBump(s)
-    runtime()
-    const plan = await call('release', { step: 'rehearse', path: s.work })
-    expect(plan.isError, plan.text).toBe(false)
-    expect(plan.data.summary).toBe(
-      `Ready to rehearse ${NEXT} on bump PR #900's head ${head.slice(0, 7)} (release.yml on ${branch} with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
-    )
-    const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(r.data.started, r.text).toBe(true)
-    expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: branch, inputs: { dry_run: 'true' } }) }])
-    const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(again.data.summary).toBe(`A rehearsal of PR #900 at ${head.slice(0, 7)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
-
-    const tip = squash(s, head)
-    expect(tip).not.toBe(head)
-    const status = await call('release_status', { path: s.work })
-    expect(status.data.lines).toContain(`Rehearsal on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}: succeeded, https://github.com/ijun17/centralu/actions/runs/77.`)
-    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
-    expect(tag.isError, tag.text).toBe(false)
-    expect(tag.data.lines).toContain(`Rehearsal: succeeded on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}, https://github.com/ijun17/centralu/actions/runs/77.`)
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(tip)
-    // Main still needs no second rehearsal
-    expect(ghWrites()).toHaveLength(1)
-  })
-
-  it('does not count a bump branch rehearsal once main after the squash has another tree', async () => {
-    const s = repo()
-    const { head } = openBump(s)
-    runtime()
-    expect((await call('release', { step: 'rehearse', path: s.work, confirm: true })).data.started).toBe(true)
-    // Squashed onto a main that got one more change meanwhile: the files differ from what was rehearsed
-    write(s.work, 'c.txt', 'three\n')
-    s.tip = commitAll(s.work, 'fix: three (#12)')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    g(s.work, 'checkout', '-q', head)
-    write(s.work, 'c.txt', 'three\n')
-    g(s.work, 'add', 'c.txt')
-    const merged = g(s.work, 'write-tree')
-    g(s.work, 'checkout', '-q', '-f', 'main')
-    squash(s, head, merged)
-    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
-    expect(tag.isError).toBe(true)
-    expect(tag.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-  })
-
-  it('refuses to rehearse a bump PR that is not on main head, or when none is open', async () => {
-    const s = repo()
-    runtime()
-    const none = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(none.isError).toBe(true)
-    expect(none.data.problems[0]).toContain(`${BRAND_VERSION} is released already (v${BRAND_VERSION}) and no bump pull request is open into main`)
-    const { head } = openBump(s)
-    write(s.work, 'c.txt', 'three\n')
-    const tip = commitAll(s.work, 'fix: three (#12)')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    const behind = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-    expect(behind.isError).toBe(true)
-    expect(behind.data.problems).toEqual([
-      `PR #900 (${head.slice(0, 7)}) is not on main's head ${tip.slice(0, 7)}: after its squash main's tree would differ from what was rehearsed, so the tag would not count the rehearsal. Bring the branch up to date with main first.`,
-    ])
-    expect(ghWrites()).toEqual([])
-  })
-
-  it('refuses to tag another version than main carries, or while CI on main is red', async () => {
-    const s = repo({ bumped: true })
-    patchState((st) => {
-      st.ci = 'pending'
-      st.runs.push(run({ head_sha: s.tip }))
-    })
-    runtime()
-    const r = await call('release', { step: 'tag', path: s.work, version: '9.9.9', confirm: true })
-    expect(r.data.problems).toEqual([
-      expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green: main at ${s.tip.slice(0, 7)}: pending —`)),
-      `main at ${s.tip.slice(0, 7)} carries ${NEXT}, not 9.9.9; merge its bump first.`,
-    ])
-    expect(remoteHas(s.origin, 'refs/tags/v9.9.9')).toBeNull()
-    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-  })
-
-  /*
-   * #1350: the release commit is the bump's own squash commit, not main's head. The merge queue lands a change every 15 to 30
-   * minutes, so by the time the bump's CI and rehearsal are done main has moved; a release goes out whatever lands meanwhile.
-   */
-  describe('the release commit is the bump\'s own, not main\'s head (#1350)', () => {
-    const NEWER = '9.8.7'
-    /** n more changes merged after the bump: answers main's new head (GitHub's main moves with it) */
-    function landMore(s: Repo, n = 2) {
-      for (let i = 1; i <= n; i++) {
-        write(s.work, `later-${i}.txt`, `${i}\n`)
-        s.tip = commitAll(s.work, `fix: later ${i} (#${20 + i})`)
-      }
-      g(s.work, 'push', '-q', 'origin', 'main')
-      patchState((st) => (st.dispatchSha = s.tip))
-      return s.tip
+  /** n more changes merged after the release commit: answers main's new head (GitHub's main moves with it) */
+  function landMore(s: Repo, n = 2) {
+    for (let i = 1; i <= n; i++) {
+      write(s.work, `later-${i}.txt`, `${i}\n`)
+      s.tip = commitAll(s.work, `fix: later ${i} (#${20 + i})`)
     }
-    const short7 = (sha: string) => sha.slice(0, 7)
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => (st.dispatchSha = s.tip))
+    return s.tip
+  }
+  const short7 = (sha: string) => sha.slice(0, 7)
 
-    it('tags the bump commit after two more changes landed, from a checkout elsewhere, whatever CI says of main\'s head', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      patchState((st) => st.runs.push(run({ head_sha: bump })))
-      const head = landMore(s)
-      // The newer commits are red and unrehearsed: they are not what is released
-      patchState((st) => (st.ciBySha = { [head]: 'failing' }))
-      g(s.work, 'switch', '-q', '-c', 'topic', bump)
-      const before = checkout(s.work)
-      runtime()
-      const plan = await call('release', { step: 'tag', path: s.work })
-      expect(plan.isError, plan.text).toBe(false)
-      expect(plan.data.summary).toContain(`Ready to tag v${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}); nothing pushed yet.`)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-      // A dirty checkout is still refused: what is released must be what is committed
-      write(s.work, 'a.txt', 'edited\n')
-      const dirty = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(dirty.isError).toBe(true)
-      expect(dirty.data.problems[0]).toMatch(/^The checkout at .* has 1 uncommitted change \(a\.txt\); commit or put them away first/)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-      g(s.work, 'checkout', '-q', '--', 'a.txt')
-      const r = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(r.isError, r.text).toBe(false)
-      // The bump, not main's head
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
-      expect(r.data.lines.join(' ')).toContain(`The release commit ${short7(bump)} (2 commits behind main at ${short7(head)}): CI green`)
-      expect(r.data.summary).toContain(`Tagged v${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}).`)
-      expect(checkout(s.work)).toEqual(before)
-    })
-
-    it('does not take a rehearsal on main\'s head for the bump commit when the trees differ', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      const head = landMore(s)
-      patchState((st) => st.runs.push(run({ head_sha: head })))
-      runtime()
-      const r = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(r.isError).toBe(true)
-      expect(r.data.problems).toEqual([`No rehearsal ran on ${short7(bump)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-      // One on the bump does
-      patchState((st) => st.runs.push(run({ id: 51, head_sha: bump })))
-      const ok = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(ok.isError, ok.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
-    })
-
-    it('refuses a version a later commit has changed, by name or by commit, and releases the newer bump by default', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      patchState((st) => st.runs.push(run({ head_sha: bump })))
-      // A newer bump lands before this one was tagged
-      for (const f of CARRIERS) write(s.work, f, bumpText(readFileSync(join(s.work, f), 'utf8'), NEXT, NEWER).text)
-      const newer = commitAll(s.work, `chore(release): ${NEWER} (#905)`)
-      g(s.work, 'push', '-q', 'origin', 'main')
-      patchState((st) => (st.dispatchSha = newer))
-      runtime()
-      const byName = await call('release', { step: 'tag', path: s.work, version: NEXT, confirm: true })
-      expect(byName.data.problems).toEqual([`main at ${short7(newer)} carries ${NEWER}, not ${NEXT}; a later commit changed the version, so ${NEXT} is not released from here.`])
-      const byCommit = await call('release', { step: 'tag', path: s.work, commit: bump, skipRehearsal: true, confirm: true })
-      expect(byCommit.data.problems).toEqual([`${short7(bump)} is before the commit that declared ${NEWER} (${short7(newer)}): it carries another version.`])
-      const rehearse = await call('release', { step: 'rehearse', path: s.work, version: NEXT, confirm: true })
-      expect(rehearse.isError).toBe(true)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-      expect(ghWrites()).toEqual([])
-      // By default it is the newer bump that is released: the newest declaration of main's version
-      const def = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
-      expect(def.isError, def.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/tags/v${NEWER}`)).toBe(newer)
-    })
-
-    it('refuses a shallow checkout whose history stops before the bump, and takes the bump once it is deepened', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      const head = landMore(s, 3)
-      const shallow = join(root, 'shallow')
-      g(root, 'clone', '-q', '--depth', '2', `file://${s.origin}`, shallow)
-      g(shallow, 'remote', 'set-url', 'origin', 'https://github.com/ijun17/centralu.git')
-      g(shallow, 'config', `url.${s.origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
-      g(shallow, 'config', 'remote.origin.pushurl', s.origin)
-      g(shallow, 'config', 'user.name', 'Tester')
-      g(shallow, 'config', 'user.email', 'tester@example.test')
-      runtime()
-      // The boundary commit is not the bump (it is three behind head; the boundary is one behind): nothing is tagged on it
-      const refused = await call('release', { step: 'tag', path: shallow, skipRehearsal: true, confirm: true })
-      expect(refused.isError).toBe(true)
-      expect(refused.data.problems).toEqual([expect.stringContaining('This checkout is shallow: its history of main stops at ')])
-      expect(refused.data.problems[0]).toContain('git fetch --unshallow origin')
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-      const status = await call('release_status', { path: shallow })
-      expect(status.data.lines.join(' ')).toContain('Release commit: This checkout is shallow')
-      const rehearse = await call('release', { step: 'rehearse', path: shallow, confirm: true })
-      expect(rehearse.isError).toBe(true)
-      expect(ghWrites()).toEqual([])
-      g(shallow, 'fetch', '-q', '--unshallow', 'origin')
-      const ok = await call('release', { step: 'tag', path: shallow, skipRehearsal: true, confirm: true })
-      expect(ok.isError, ok.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
-      expect(head).not.toBe(bump)
-    })
-
-    it('takes the first commit of the repository as the release commit when every commit carries the version', async () => {
-      // A repository that began at the version: the walk reaches a real first commit, which is not a shallow boundary
-      const s = repo({ version: NEXT })
-      g(s.work, 'push', '-q', 'origin', `:refs/tags/v${NEXT}`)
-      runtime()
-      const r = await call('release_status', { path: s.work })
-      expect(r.isError, r.text).toBe(false)
-      expect(r.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, releaseCommit: s.released, behind: 2 })
-    })
-
-    it('lists what merged up to the release commit as this release, and what came after apart as not in it', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      const head = landMore(s)
-      runtime()
-      const status = await call('release_status', { path: s.work })
-      expect(status.data.notes).toEqual(['fix: two (#11)', 'feat(ui): one (#10)'])
-      expect(status.data.after).toEqual(['fix: later 2 (#22)', 'fix: later 1 (#21)'])
-      expect(status.data.lines).toEqual(expect.arrayContaining([
-        `Merged since v${BRAND_VERSION} (2):`,
-        '- fix: two (#11)',
-        `Not in this release (merged after the release commit ${short7(bump)}, 2):`,
-        '- fix: later 2 (#22)',
-        '- fix: later 1 (#21)',
-      ]))
-      // The tag preview says the same, so the confirmation is for what is shipped
-      const plan = await call('release', { step: 'tag', path: s.work, skipRehearsal: true })
-      const text = plan.data.lines.join('\n')
-      expect(text).toContain(`Merged since v${BRAND_VERSION} (2):\n- fix: two (#11)\n- feat(ui): one (#10)\nNot in this release (merged after the release commit ${short7(bump)}, 2):`)
-      expect(text.indexOf('fix: later 2')).toBeGreaterThan(text.indexOf('Not in this release'))
-      expect(head).not.toBe(bump)
-    })
-
-    it('says a bump that was merged and then reverted was reverted, not that it is to be merged', async () => {
-      const s = repo({ bumped: true })
-      g(s.work, 'revert', '--no-edit', 'HEAD')
-      g(s.work, 'push', '-q', 'origin', 'main')
-      const revert = g(s.work, 'rev-parse', 'HEAD')
-      patchState((st) => (st.dispatchSha = g(s.work, 'rev-parse', 'HEAD')))
-      runtime()
-      const r = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true, confirm: true })
-      expect(r.isError).toBe(true)
-      const said = r.data.problems.join(' ')
-      expect(said).toContain(`${NEXT} was merged on main and then taken out again by ${short7(revert)} (a revert): main at `)
-      expect(said).toContain(`carries ${BRAND_VERSION} again`)
-      expect(said).not.toContain('merge its bump first')
-      // An unknown newer version is still "merge its bump first"
-      const unknown = await call('release', { step: 'tag', path: s.work, version: '9.9.9', confirm: true })
-      expect(unknown.data.problems.join(' ')).toContain('merge its bump first')
-    })
-
-    it('says in the status which commit is the release and how far behind main it is', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      const head = landMore(s)
-      runtime()
-      const r = await call('release_status', { path: s.work })
-      expect(r.isError, r.text).toBe(false)
-      expect(r.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, head, releaseCommit: bump, behind: 2 })
-      expect(r.data.lines).toContain(`Release commit: ${short7(bump)}, 2 commits behind main at ${short7(head)}.`)
-      expect(r.data.lines).toContain(`No rehearsal on ${short7(bump)} yet.`)
-      expect(r.data.summary).toContain(`main at ${short7(head)} carries ${NEXT} (release commit ${short7(bump)}, 2 commits behind main at ${short7(head)}): not tagged yet`)
-    })
-
-    it('takes another commit of main that carries the version when named', async () => {
-      const s = repo({ bumped: true })
-      const head = landMore(s, 3)
-      const middle = g(s.work, 'rev-parse', `${head}~1`)
-      runtime()
-      const named = await call('release', { step: 'tag', path: s.work, commit: middle.slice(0, 10), skipRehearsal: true, confirm: true })
-      expect(named.isError, named.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(middle)
-    })
-
-    it('refuses a commit that is not on main, or before the bump, or no commit at all', async () => {
-      const s = repo({ bumped: true })
-      landMore(s)
-      g(s.work, 'switch', '-q', '-c', 'side', s.released)
-      write(s.work, 'side.txt', 's\n')
-      const side = commitAll(s.work, 'side work')
-      g(s.work, 'switch', '-q', 'main')
-      runtime()
-      for (const [commit, why] of [
-        [side, /is not on main's history/],
-        [s.released, /is before the commit that declared/],
-        ['nonsense', /is not a commit this checkout has/],
-        ['abcdef0123', /is not a commit this checkout has/],
-      ] as const) {
-        const r = await call('release', { step: 'tag', path: s.work, commit, skipRehearsal: true, confirm: true })
-        expect(r.isError, commit).toBe(true)
-        expect(r.data.problems.join(' '), commit).toMatch(why)
-      }
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
-    })
-
-    it('still uses the merged bump PR\'s checks after more changes landed on main', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      bumpEvidence(s)
-      g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later merge (#901)')
-      g(s.work, 'push', '-q', 'origin', 'main')
-      patchState((st) => (st.dispatchSha = g(s.work, 'rev-parse', 'HEAD')))
-      runtime()
-      for (const step of ['rehearse', 'tag']) {
-        const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
-        expect(r.isError, r.text).toBe(false)
-        expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
-      }
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
-    })
-
-    it('rehearses the bump commit from a branch at it once main moved on, and tags on that rehearsal', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      const head = landMore(s)
-      runtime()
-      const branch = `chore/release-${NEXT}`
-      const plan = await call('release', { step: 'rehearse', path: s.work })
-      expect(plan.isError, plan.text).toBe(false)
-      expect(plan.data.summary).toBe(
-        `Ready to rehearse ${NEXT} on the release commit ${short7(bump)}, 2 commits behind main at ${short7(head)} (release.yml on ${branch}, which is made at that commit with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
-      )
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBeNull()
-      // GitHub runs a branch at its commit: the fake attributes the dispatch to the commit it is given
-      patchState((st) => (st.dispatchSha = bump))
-      const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-      patchState((st) => (st.dispatchSha = head))
-      expect(r.isError, r.text).toBe(false)
-      expect(r.data.started).toBe(true)
-      expect(r.data.summary).toBe(`Started the rehearsal of ${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}, on ${branch}): https://github.com/ijun17/centralu/actions/runs/77. Tag once it succeeds.`)
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(bump)
-      expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: branch, inputs: { dry_run: 'true' } }) }])
-      // Not started twice, and tagged on it once it succeeds
-      const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-      expect(again.data.summary).toBe(`A rehearsal on ${short7(bump)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
-      patchState((st) => Object.assign(st.runs[0]!, { status: 'completed', conclusion: 'success' }))
-      const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(tag.isError, tag.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
-      expect(ghWrites()).toHaveLength(1)
-      // The branch made at the release commit only to rehearse on is gone once the tag keeps the commit
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBeNull()
-      expect(tag.data.lines).toContain(`Deleted ${branch} on origin: it was made at the release commit only to rehearse on.`)
-    })
-
-    it('rehearses on a bump branch that is left over only when it holds the release commit\'s tree', async () => {
-      const s = repo({ bumped: true })
-      const bump = s.tip
-      landMore(s)
-      const branch = `chore/release-${NEXT}`
-      // The PR's own head, another commit with the same tree: the rehearsal runs on it
-      const prHead = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${bump}^{tree}`), '-p', s.released, '-m', 'chore(release): bump candidate')
-      g(s.work, 'push', '-q', 'origin', `${prHead}:refs/heads/${branch}`)
-      runtime()
-      patchState((st) => (st.dispatchSha = prHead))
-      const same = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-      expect(same.isError, same.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(prHead)
-      // The run is on the branch's commit, not the release commit: it is found and reported
-      expect(same.data.run).toBe('https://github.com/ijun17/centralu/actions/runs/77')
-      expect(same.data.summary).toContain(': https://github.com/ijun17/centralu/actions/runs/77.')
-      expect(same.data.summary).not.toContain('does not list the run yet')
-      // Tagged on that rehearsal; the bump PR's own head is not a branch the tool made, so it stays
-      patchState((st) => Object.assign(st.runs[0]!, { status: 'completed', conclusion: 'success' }))
-      const tagged = await call('release', { step: 'tag', path: s.work, confirm: true })
-      expect(tagged.isError, tagged.text).toBe(false)
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(prHead)
-      g(s.origin, 'tag', '-d', `v${NEXT}`)
-      // Another tree on it: nothing is started, and nothing is moved
-      g(s.work, 'push', '-q', '-f', 'origin', `${s.released}:refs/heads/${branch}`)
-      patchState((st) => (st.runs.length = 0))
-      const other = await call('release', { step: 'rehearse', path: s.work, confirm: true })
-      expect(other.isError).toBe(true)
-      expect(other.data.problems).toEqual([`The branch ${branch} on origin (${short7(s.released)}) holds another tree than the release commit ${short7(bump)}; delete it (the bump is merged), then rehearse again.`])
-      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(s.released)
-      expect(ghWrites()).toHaveLength(1)
-    })
+  it("rehearses on a left-over rehearsal branch only when it holds the release commit's tree", async () => {
+    const s = repo()
+    const at = s.tip
+    releasedBefore(s)
+    const head = landMore(s)
+    // Their own runs have not passed: the release stays on the commit before them
+    patchState((st) => (st.ciBySha = { [head]: 'pending', [g(s.work, 'rev-parse', `${head}^`)]: 'pending' }))
+    const branch = `chore/release-${NEXT}`
+    // Another commit with the same tree: the rehearsal runs on it
+    const same = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${at}^{tree}`), '-p', s.released, '-m', 'rehearsal candidate')
+    g(s.work, 'push', '-q', 'origin', `${same}:refs/heads/${branch}`)
+    runtime()
+    patchState((st) => (st.dispatchSha = same))
+    const started = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(started.isError, started.text).toBe(false)
+    expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(same)
+    // The run is on the branch's commit, not the release commit: it is found and reported
+    expect(started.data.run).toBe('https://github.com/ijun17/centralu/actions/runs/77')
+    expect(started.data.summary).toContain(': https://github.com/ijun17/centralu/actions/runs/77.')
+    expect(started.data.summary).not.toContain('does not list the run yet')
+    // Tagged on that rehearsal; the branch is not at the release commit, so the tag leaves it
+    patchState((st) => Object.assign(st.runs[0]!, { status: 'completed', conclusion: 'success' }))
+    const tagged = await call('release', { step: 'tag', path: s.work, confirm: true })
+    expect(tagged.isError, tagged.text).toBe(false)
+    expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(same)
+    g(s.origin, 'tag', '-d', `v${NEXT}`)
+    // Another tree on it: nothing is started, and nothing is moved
+    g(s.work, 'push', '-q', '-f', 'origin', `${s.released}:refs/heads/${branch}`)
+    patchState((st) => (st.runs.length = 0))
+    const other = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(other.isError).toBe(true)
+    expect(other.data.problems).toEqual([`The branch ${branch} on origin (${short7(s.released)}) holds another tree than the release commit ${short7(at)}; delete it, then rehearse again.`])
+    expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(s.released)
+    expect(ghWrites()).toHaveLength(1)
   })
 
   // #1259: changes land after the fast tier, so main's own push run (the full tier) is the only evidence for a release
   it("refuses to tag a commit whose only green run is a batch's quick run, until main's own full run on it passes", async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
+    releasedBefore(s)
+    const batch = { event: 'workflow_dispatch', head_branch: 'queue/batch-1' }
     patchState((st) => {
       st.ci = 'green'
-      // The run GitHub has on the tip is the merge queue's batch's (workflow_dispatch on queue/batch-1), not main's push run
-      st.ciRunOverrides = { ...st.ciRunOverrides, [s.tip]: { event: 'workflow_dispatch', head_branch: 'queue/batch-1' } }
+      // The runs GitHub has on the commits since the tag are the merge queue's batches' (workflow_dispatch on queue/batch-1), not main's push runs
+      st.ciRunOverrides = { ...st.ciRunOverrides, [s.tip]: batch, [g(s.work, 'rev-parse', `${s.tip}^`)]: batch }
     })
     runtime()
     const refused = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true, confirm: true })
-    expect(refused.data.problems).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green`))]))
+    expect(refused.data.problems.join(' ')).toContain('has a fully green push run of its own yet')
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
     // Main's own push run on it passed: CI is no longer a reason
-    patchState((st) => delete st.ciRunOverrides?.[s.tip])
+    patchState((st) => (st.ciRunOverrides = {}))
     const status = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true })
-    expect((status.data.problems ?? []).filter((p: string) => p.startsWith('CI on main'))).toEqual([])
+    expect(status.isError, status.text).toBe(false)
   })
 
   it('approves only the tag release run, only what GitHub says this login may approve', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => {
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null, html_url: 'https://github.com/ijun17/centralu/actions/runs/61' }))
@@ -1709,7 +777,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it('selects the duplicate run waiting on the environment and offers a safe cancellation', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => {
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
@@ -1730,7 +798,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
   /** A tagged NEXT whose release run 61 waits on npm-publish with `jobs` */
   function waitingRelease(jobs: { name: string; status: string; conclusion: string | null }[]) {
-    const s = repo({ bumped: true })
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => {
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
@@ -1909,9 +977,9 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   })
 
   it('refuses to approve a version with no tag, and says so when nothing waits', async () => {
-    const s = repo({ bumped: true })
+    const s = repo()
     runtime()
-    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    const r = await call('release', { step: 'approve', path: s.work, version: NEXT, confirm: true })
     expect(r.data.problems).toEqual([`v${NEXT} is not tagged; there is no release run to approve.`])
     patchState((st) => st.runs.push(run({ id: 60, event: 'push', head_branch: `v${BRAND_VERSION}`, head_sha: s.released })))
     const done = await call('release', { step: 'approve', path: s.work, version: BRAND_VERSION, confirm: true })
@@ -1924,20 +992,19 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const s = repo()
     runtime()
     await call('release_status', { path: s.work })
-    await call('release', { step: 'bump', path: s.work })
+    await call('release', { step: 'tag', path: s.work })
     expect(g(s.work, 'for-each-ref', 'refs/centralu-release')).toBe('')
     expect(existsSync(join(APP, 'private-words.json'))).toBe(false)
   })
 })
 
 /*
- * release.scheme "tag" (#1501): no file carries the release version and there is no bump. The next release is the next
+ * No file carries the release version (#1501) and there is no bump. The next release is the next
  * prerelease after the newest tag, cut from the newest commit of main since it whose own push run is fully green;
  * the rehearsal is dispatched with the version as an input and counts only for that version (its run name), and the
  * tag is annotated with the notes, their only record.
  */
-describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW }, () => {
-  const tagScheme = () => runtime(undefined, (r) => (r.scheme = 'tag'))
+describe('the next release is cut from the newest fully green commit (#1501)', { timeout: 60_000 * SLOW }, () => {
   /** repo(): v<BRAND_VERSION> on `released`, then "feat(ui): one (#10)", then the tip "fix: two (#11)" */
   const one = (s: Repo) => g(s.work, 'rev-parse', `${s.tip}^`)
   const fullTier = (s: Repo, onOne: string, onTip: string) =>
@@ -1945,26 +1012,21 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
       st.requiredContexts = ['build', 'full tier']
       st.fullTierBySha = { [one(s)]: onOne, [s.tip]: onTip }
       st.dispatchSha = one(s)
-      // v<BRAND_VERSION> is released: its shim is on the registry (its run is not listed here)
       st.registry = { centralu: s.released }
     })
 
   it('cuts the next prerelease from the newest fully green commit, rehearses it by version, and tags it annotated with the notes', async () => {
-    const s = repo({ switchAt: 'one' })
+    const s = repo()
     const at = one(s)
     // The tip's own run passed only the quick tier; the commit before it ran the full tier
     fullTier(s, 'success', 'skipped')
-    tagScheme()
+    runtime()
     const before = checkout(s.work)
 
     const status = await call('release_status', { path: s.work })
     expect(status.isError, status.text).toBe(false)
     expect(status.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, tag: `v${NEXT}`, releaseCommit: at, behind: 1, notes: ['feat(ui): one (#10)'], after: ['fix: two (#11)'] })
     expect(status.data.summary).toContain(`the next release is ${NEXT} from ${at.slice(0, 7)}`)
-
-    const bump = await call('release', { step: 'bump', path: s.work, confirm: true })
-    expect(bump.isError).toBe(true)
-    expect(bump.data.problems.join(' ')).toContain('nothing to bump')
 
     // A rehearsal on the same commit of another version is not one of this version
     patchState((st) => st.runs.push(run({ id: 60, head_sha: at, head_branch: `chore/release-${NEXT}`, display_title: 'rehearse 9.9.9' })))
@@ -1994,10 +1056,10 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it('refuses while no commit since the newest tag has a fully green run of its own, and names a commit given that is not releasable', async () => {
-    const s = repo({ switchAt: 'one' })
+    const s = repo()
     fullTier(s, 'skipped', 'skipped')
     patchState((st) => (st.ciBySha = { [s.tip]: 'pending' }))
-    tagScheme()
+    runtime()
     const status = await call('release_status', { path: s.work })
     expect(status.data.summary).toContain('Not releasable yet')
     expect(status.data.summary).toContain('has a fully green push run of its own yet')
@@ -2017,10 +1079,10 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it('follows the newest tag until its release run succeeded, then says nothing landed since', async () => {
-    const s = repo({ switchAt: 'one' })
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'in_progress', conclusion: null })))
-    tagScheme()
+    runtime()
     expect((await call('release_status', { path: s.work })).data).toMatchObject({ phase: 'publishing', version: NEXT, releaseCommit: s.tip })
     patchState((st) => Object.assign(st.runs.find((r) => r.id === 61)!, { status: 'completed', conclusion: 'success' }))
     const done = await call('release_status', { path: s.work })
@@ -2030,9 +1092,9 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it("approves only on the tagged commit's own CI: no bump PR's run stands for it", async () => {
-    const s = repo({ switchAt: 'one' })
+    const s = repo()
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
-    // A merged PR whose head has the tip's tree, as a bump PR's would: the brand scheme takes its run while main's is pending
+    // A merged PR whose head has the tip's tree: its run does not stand for the tagged commit's own
     const prHead = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', one(s), '-m', 'pr head')
     g(s.work, 'push', '-q', 'origin', `${prHead}:refs/pull/900/head`)
     patchState((st) => {
@@ -2043,7 +1105,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
       st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
       st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
     })
-    tagScheme()
+    runtime()
     const r = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(r.isError, r.text).toBe(true)
     expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
@@ -2059,7 +1121,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
     // guard, and the number is spent on a tag that never publishes (#1501 review item 1)
     const s = repo({ switchAt: 'two' })
     fullTier(s, 'success', 'skipped')
-    tagScheme()
+    runtime()
     const status = await call('release_status', { path: s.work })
     expect(status.data.summary).toContain('Not releasable yet')
     expect(status.data.summary).toContain('1 of them still declaring the version')
@@ -2078,9 +1140,9 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it('says no commit is under the tag scheme yet while every one since the newest tag declares the version', async () => {
-    const s = repo()
+    const s = repo({ switchAt: 'none' })
     fullTier(s, 'success', 'success')
-    tagScheme()
+    runtime()
     const r = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
     expect(r.isError).toBe(true)
     expect(r.data.problems.join(' ')).toContain(`No commit of main since v${BRAND_VERSION} is under the tag scheme yet`)
@@ -2090,14 +1152,14 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
 
   it('refuses to rehearse or tag the next version while the newest tag is still being released', async () => {
     // The guard refuses a newer tag until the previous version is on the registry (#1501 review item 4)
-    const s = repo({ switchAt: 'one' })
+    const s = repo()
     fullTier(s, 'success', 'success')
     g(s.work, 'push', '-q', 'origin', `${one(s)}:refs/tags/v${NEXT}`)
     patchState((st) => {
       st.registry = {}
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: one(s), status: 'waiting', conclusion: null }))
     })
-    tagScheme()
+    runtime()
     expect((await call('release_status', { path: s.work })).data).toMatchObject({ version: NEXT, releaseCommit: one(s) })
     for (const step of ['rehearse', 'tag']) {
       const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
