@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
-import { fakeClaudeSdk, type CanUseTool } from './claude-sdk-fake.test-helpers.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
@@ -11,15 +10,26 @@ import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
  * outside the folder and the places that decide what runs still ask; `normal` and `safe` ask for all of them. The SDK is
  * a fake and `canUseTool` is called directly, as in read-grants.test.ts.
  */
+type CanUseTool = (name: string, input: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{ behavior: string }>
 const sdk = vi.hoisted(() => ({ canUseTool: null as CanUseTool | null, modes: [] as unknown[] }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => ({
   // The settings engine is the SDK's own: the ask rules are read the way the CLI reads them
   ...(await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>()),
-  ...fakeClaudeSdk((options) => {
+  query: ({ options }: { options: { canUseTool?: CanUseTool; permissionMode?: unknown } }) => {
     sdk.canUseTool = options.canUseTool ?? null
     sdk.modes.push(options.permissionMode)
-  }),
+    return {
+      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
+      async *[Symbol.asyncIterator]() {
+        await new Promise(() => {})
+      },
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
 }))
 
 const { ClaudeAdapter } = await import('./index.js')

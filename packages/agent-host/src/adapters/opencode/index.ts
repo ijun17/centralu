@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
-import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
+import type { AcpProfile } from '../acp/profile.js'
 import type { DetectResult } from '../contract.js'
 import { readOpenCodeConfigs } from './config-files.js'
 import { presetEnv } from './config.js'
@@ -21,7 +21,24 @@ const exec = promisify(execFile)
  * the turn's end instead (`midTurnInput: false`, the core's queue).
  */
 const CAPABILITIES: AdapterCapabilities = {
-  ...ACP_CAPABILITIES,
+  approvals: true,
+  contextUsage: 'exact',
+  resume: true,
+  autoTitle: true,
+  attachments: [],
+  verbosities: [],
+  exclusiveWriter: false,
+  backgroundTasks: false,
+  midTurnInput: false,
+  gatesSteps: false,
+  toolDeferral: false,
+  instructionChannel: 'server',
+  processModel: 'per-session',
+  builtInSubagents: false,
+  peerMessaging: false,
+  sleep: false,
+  keepsRepoFilesOut: false,
+  roleText: false,
 }
 
 const DESCRIPTOR: ToolDescriptor = {

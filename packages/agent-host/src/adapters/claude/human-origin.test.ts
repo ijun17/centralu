@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fakeClaudeSdkWire } from './claude-sdk-fake.test-helpers.js'
 
 /**
  * What the Claude adapter writes to the CLI's stdin for an input: the SDK says an absent `origin` is unattributed and
@@ -8,7 +7,21 @@ import { fakeClaudeSdkWire } from './claude-sdk-fake.test-helpers.js'
  */
 const wire = vi.hoisted(() => ({ messages: [] as Record<string, unknown>[] }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => fakeClaudeSdkWire(wire.messages))
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: ({ prompt }: { prompt: AsyncIterable<Record<string, unknown>> }) => {
+    void (async () => {
+      for await (const u of prompt) wire.messages.push(u)
+    })()
+    return {
+      // A stream that never yields: the test reads only what the adapter writes
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<unknown>>(() => {}) }),
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [{ name: 'goal' }],
+      getContextUsage: async () => undefined,
+    }
+  },
+}))
 
 const { ClaudeAdapter } = await import('./index.js')
 const tick = () => new Promise((r) => setTimeout(r, 10))

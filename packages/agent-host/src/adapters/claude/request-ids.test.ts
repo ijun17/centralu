@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { fakeClaudeSdk, type CanUseTool } from './claude-sdk-fake.test-helpers.js'
 import { settledNow } from '../approval-outcome.test-helpers.js'
 
 /**
@@ -9,13 +8,24 @@ import { settledNow } from '../approval-outcome.test-helpers.js'
  * `req-1`: an Allow from a row drawn from the first landed on the second, a command nobody had read. Each handle now
  * tags its ids, so the old id is refused as gone. The SDK is a fake; `canUseTool` is called directly.
  */
+type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string }>
 const sdk = vi.hoisted(() => ({ canUseTool: null as CanUseTool | null }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () =>
-  fakeClaudeSdk((options) => {
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: ({ options }: { options: { canUseTool?: CanUseTool } }) => {
     sdk.canUseTool = options.canUseTool ?? null
-  }),
-)
+    return {
+      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
+      async *[Symbol.asyncIterator]() {
+        await new Promise(() => {})
+      },
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
+}))
 
 const { ClaudeAdapter } = await import('./index.js')
 

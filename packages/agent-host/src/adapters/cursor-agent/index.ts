@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
-import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
+import type { AcpProfile } from '../acp/profile.js'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
@@ -22,9 +22,25 @@ const exec = promisify(execFile)
  * agent yet.
  */
 const CAPABILITIES: AdapterCapabilities = {
-  ...ACP_CAPABILITIES,
+  approvals: true,
   contextUsage: 'none',
+  resume: true,
+  autoTitle: true,
+  attachments: [],
+  verbosities: [],
+  exclusiveWriter: false,
+  backgroundTasks: false,
+  midTurnInput: false,
+  gatesSteps: false,
+  toolDeferral: false,
+  instructionChannel: 'server',
+  processModel: 'per-session',
+  builtInSubagents: false,
+  peerMessaging: false,
+  sleep: false,
   presets: ['auto'],
+  keepsRepoFilesOut: false,
+  roleText: false,
 }
 
 const DESCRIPTOR: ToolDescriptor = {

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { fakeClaudeSdk, type QueryOptions } from './claude-sdk-fake.test-helpers.js'
 
 /**
  * An answered choice goes back as the SDK's own answer, not as a denial (2026-09-30).
@@ -13,13 +12,25 @@ import { fakeClaudeSdk, type QueryOptions } from './claude-sdk-fake.test-helpers
  *
  * The SDK is swapped for a fake, and the callback the adapter passed is called directly.
  */
-const sdk = vi.hoisted(() => ({ options: null as null | QueryOptions }))
+type Decision = { behavior: string; message?: string; updatedInput?: Record<string, unknown> }
+type CanUseTool = (name: string, input: Record<string, unknown>, opts?: { toolUseID?: string; signal?: AbortSignal }) => Promise<Decision>
+const sdk = vi.hoisted(() => ({ options: null as null | { canUseTool?: CanUseTool } }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () =>
-  fakeClaudeSdk((options) => {
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: ({ options }: { options: { canUseTool?: CanUseTool } }) => {
     sdk.options = options
-  }),
-)
+    return {
+      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
+      async *[Symbol.asyncIterator]() {
+        await new Promise(() => {})
+      },
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
+}))
 
 const { ClaudeAdapter } = await import('./index.js')
 

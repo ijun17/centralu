@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { fakeClaudeSdk, type CanUseTool } from './claude-sdk-fake.test-helpers.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
@@ -9,13 +8,24 @@ import { answerOrCard } from '../approval-outcome.test-helpers.js'
  * edits by the key `Edit:file_edit`, so it asked again every time the same file was edited again.
  * Here the SDK is swapped for a fake and the `canUseTool` the adapter passed is called directly.
  */
+type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string }>
 const sdk = vi.hoisted(() => ({ canUseTool: null as CanUseTool | null }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () =>
-  fakeClaudeSdk((options) => {
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: ({ options }: { options: { canUseTool?: CanUseTool } }) => {
     sdk.canUseTool = options.canUseTool ?? null
-  }),
-)
+    return {
+      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
+      async *[Symbol.asyncIterator]() {
+        await new Promise(() => {})
+      },
+      interrupt: async () => {},
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
+}))
 
 const { ClaudeAdapter } = await import('./index.js')
 
