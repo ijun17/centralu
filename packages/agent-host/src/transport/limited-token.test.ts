@@ -4,7 +4,7 @@ import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { CREDENTIAL_FILE_UNREADABLE, HostServer, type RpcContext } from './server.js'
 import { credentialProof, hostProof, proofNonce, provesCredential } from './host-proof.js'
-import { LAST_READ_KEPT_MS, readCredentialFile, UsedCredentials, usedEvent, verifierOf, type FullCredential } from '../lifecycle/serve-credentials.js'
+import { LAST_READ_KEPT_MS, readCredentialFile, UsedCredentials, usedEvent, verifierOf, type FullCredential, type KeyCredential } from '../lifecycle/serve-credentials.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
@@ -562,7 +562,7 @@ afterEach(() => {
 })
 
 /** A host as main.ts wires one: each first full hello is recorded (`written`), then told to the hubs */
-async function reportHost(o: { record?: (c: FullCredential) => void } = {}) {
+async function reportHost(o: { record?: (c: FullCredential | KeyCredential) => void } = {}) {
   const file = JSON.stringify({ v: 2, key: REPORT_KEY, port: null, full: [reportEntry('aaaaaaaa', 'hub:test-0123abcd', REPORT_HUB), reportEntry('bbbbbbbb', 'agent-script', REPORT_OTHER), reportEntry('cccccccc', 'window', REPORT_WINDOW)] })
   const used = new UsedCredentials()
   const written: string[] = []

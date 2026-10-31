@@ -937,4 +937,20 @@ describe('serve --revoke over ssh (#1405)', () => {
     expect(credentialsOf(many)).toHaveLength(40)
     expect(credentialsOf({ not: 'a list' })).toBeNull()
   })
+
+  // #1717 recheck, F1: a key entry (one with a public key) has no check; it is never the verifier credential the hub holds under its id
+  it('reads an entry with a public key as never the hub’s own verifier credential, whatever else it carries, in a connection line or a host.credentials answer alike', () => {
+    const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
+    const publicKey = 'K'.repeat(43)
+    const entries = [
+      { id: 'abcd1234', label: 'hub:x', created: 5, publicKey },
+      { id: 'abcd1235', label: 'hub:x', created: 5, publicKey, check: 'c'.repeat(43) },
+      { id: 'abcd1236', label: 'hub:x', created: 5, check: 'c'.repeat(43) },
+      { id: 'abcd1237', label: 'hub:x', created: 5 },
+    ]
+    const listed = credentialsOf(entries)!
+    expect(listed.map((c) => [c.own, c.check])).toEqual([[false, undefined], [false, undefined], [undefined, 'c'.repeat(43)], [undefined, undefined]])
+    expect(JSON.stringify(listed)).not.toContain(publicKey)
+    expect(parseConnectionLine(JSON.stringify({ ...base, others: entries })).others).toEqual(listed)
+  })
 })

@@ -1,5 +1,5 @@
 /** The keys and the signed transcript of key pairing (#1711, docs/plans/key-pairing.md §4.1 and §4.3, slice 2) */
-import { createHmac, createPublicKey, generateKeyPairSync, randomBytes, verify } from 'node:crypto'
+import { createHmac, createPublicKey, generateKeyPairSync, randomBytes, verify, type KeyObject } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES } from '@cc/protocol'
 import {
@@ -109,14 +109,24 @@ const FORGED = Buffer.concat([encodePoint(1n, false), Buffer.alloc(32)])
 
 /**
  * Whether this Node's own `crypto.verify` takes the forged signature under the identity key. It does on Node 22.23.4 (every
- * message) and does not on Node 24.22.1, whose OpenSSL refuses a small-order key itself (measured, #1714). The repository
+ * message), on Node 22.14.0 and on Node 25.9.0, and does not on Node 24.22.1 or 26.13.0, which refuse a small-order key
+ * themselves (measured, #1714). The repository
  * allows Node 22.14 and up and the remote host runs the pinned Node 24, so the module's own check stays and is tested on
  * every Node; only the assertions about the plain hazard need a Node that has it.
  */
-const RAW_VERIFY_TAKES_SMALL_ORDER = Array.from({ length: 16 }, (_, i) => verify(null, Buffer.from(`probe ${i}`), SPKI(encodePoint(1n, false)), FORGED)).some(Boolean)
+const RAW_VERIFY_TAKES_SMALL_ORDER = rawVerifyTakesSmallOrder()
+
+/** The probe, in a `try`: a Node that throws on importing a small-order key has no hazard, and the file still loads (#1714 recheck) */
+function rawVerifyTakesSmallOrder(): boolean {
+  try {
+    return Array.from({ length: 16 }, (_, i) => verify(null, Buffer.from(`probe ${i}`), SPKI(encodePoint(1n, false)), FORGED)).some(Boolean)
+  } catch {
+    return false
+  }
+}
 const HAZARD_NOTE = RAW_VERIFY_TAKES_SMALL_ORDER
   ? 'this Node has it'
-  : `skipped: Node ${process.version} refuses a small-order key in crypto.verify itself, as Node 24.22.1 does; Node 22 has the hazard (doc §4.1)`
+  : `skipped: Node ${process.version} refuses a small-order key in crypto.verify itself, as Node 24.22.1 does; Node 22 and 25 have the hazard (doc §4.1)`
 
 /** The pinned vector's inputs (slice 2): any other implementation of §4.3 is checked against the same */
 const VECTOR = {
@@ -442,6 +452,22 @@ describe('the transcript binds every field (§4.3)', () => {
     expect(LinkPublicKey.is(VECTOR.hubKey)).toBe(false)
   })
 
+  it('takes no instance made around parse: the constructor, Reflect.construct or a subclass (#1714 recheck)', () => {
+    const real = key(VECTOR.hubKey)
+    const Ctor = LinkPublicKey as unknown as new (text: string, raw: Buffer, key: KeyObject) => LinkPublicKey
+    const made = new Ctor(real.text, real.raw, real.key)
+    const reflected = Reflect.construct(Ctor, [real.text, real.raw, real.key])
+    class Sub extends Ctor {}
+    const sub = new Sub(real.text, real.raw, real.key)
+    for (const k of [made, reflected, sub]) {
+      expect(LinkPublicKey.is(k)).toBe(false)
+      expect(verifyLink('hub', k, t(), VECTOR.hubSig)).toBe(false)
+    }
+    // And a parsed key's fields stay as parsed
+    expect(Object.isFrozen(real)).toBe(true)
+    expect(() => Object.assign(real, { key: SPKI(encodePoint(1n, false)) })).toThrow()
+  })
+
   it('encodes a string field as ASCII and refuses another character, which one byte per character would fold onto a character below 0x80', () => {
     // U+0100 has the low byte 0, so as one byte per character it would equal the string NUL
     expect(() => encodeFields(['\u0100'])).toThrow()
@@ -482,8 +508,8 @@ describe('the address each side signs (§4.3)', () => {
 
   it('under a keeper: the front door, exactly ws://127.0.0.1:<port>', () => {
     expect(linkAddressOfDoor('ws://127.0.0.1:4100')).toBe('127.0.0.1:4100')
-    for (const door of ['ws://127.0.0.1:04100', 'ws://127.0.0.1:4100/', 'wss://127.0.0.1:4100', 'ws://localhost:4100', 'ws://127.0.0.1', 'ws://127.0.0.1:0', 'ws://127.0.0.1:65536', 'http://127.0.0.1:4100', ' ws://127.0.0.1:4100', undefined]) {
-      expect(linkAddressOfDoor(door), String(door)).toBeNull()
+    for (const door of ['ws://127.0.0.1:04100', 'ws://127.0.0.1:4100/', 'wss://127.0.0.1:4100', 'ws://localhost:4100', 'ws://127.0.0.1', 'ws://127.0.0.1:0', 'ws://127.0.0.1:65536', 'http://127.0.0.1:4100', ' ws://127.0.0.1:4100', undefined, 4100, null, {}]) {
+      expect(linkAddressOfDoor(door), JSON.stringify(door)).toBeNull()
     }
   })
 

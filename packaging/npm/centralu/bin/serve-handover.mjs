@@ -5,7 +5,7 @@
  */
 import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid, pairServe, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials, takesVerifiers } from './serve-host.mjs'
+import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
 import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
 
@@ -140,17 +140,13 @@ export async function moveIntoSignIn({
   const protocolVersion = existing.protocolVersion ?? protocolVersionOf(entry) ?? 0
   const own = ownCredentials(state, entry)
   /*
-   * `host.handover` is a hub's call (#1405, `link`): said with a full credential made for this one call and withdrawn
-   * right after, never kept. An older installed host knows only the token kept for it
+   * `host.handover` takes everyday rights (#1711, docs/plans/key-pairing.md §4.4): said with the credentials this
+   * launcher holds for its own host (the limited credential, after a proof under the key), and no credential is made for
+   * it. Before, a full one made for this call went to whatever answered that proof, which a reader of serve.json can. A
+   * host from #1405 to key pairing refuses it (`link`): no note on the row while this waits, and the move goes on. An
+   * older installed host knows only the token kept for it (`ownCredentials`)
    */
-  const sayHandover = async (h) => {
-    const made = takesVerifiers(entry) ? pairServe(dataDir, 'handover', platform, Date.now(), 'handover') : null
-    try {
-      return await askHostRpc({ port, token: made?.token ?? own.token, proofKey: own.proofKey, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
-    } finally {
-      if (made) revokeServe(dataDir, made.id, platform)
-    }
-  }
+  const sayHandover = (h) => askHostRpc({ port, ...own, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
   const report = (handover) => (tell ?? sayHandover)(handover)
   const pid = lockHolderPid(dataDir)
   say(`the host running for ${dataDir}${pid ? ` (pid ${pid})` : ''} runs in a network logon (started over ssh), where Git cannot use the credentials saved in Windows; moving it into this Windows sign-in once nothing runs there`)

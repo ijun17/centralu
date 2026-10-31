@@ -4,10 +4,11 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, ownCredentials } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, probeKeyProof, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, takesKeyHellos, ownCredentials } from './serve-host.mjs'
+import { hostLinkPublicKey } from './serve-keys.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 import { moveIntoSignIn } from './serve-handover.mjs'
 
@@ -31,7 +32,7 @@ export function serveFolder({ env, home, cliPath, platform = process.platform })
  * `others` names the full credentials the folder holds besides the one just paired, never their values, each marked
  * `replaced` when its pairing took the place of an earlier one of its label.
  */
-export async function describe({ env, dataDir, state, entry, version, paired = null }) {
+export async function describe({ env, dataDir, state, entry, version, paired = null, keyPaired = null }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry)
   // Whether the installed host proves it holds the token (#838): asked of the running one before its hello, and said in the line
@@ -48,8 +49,17 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
     proof,
     port,
     ...(paired ? { token: paired.token, ...(paired.id ? { credential: paired.id } : {}) } : {}),
+    // A key pairing (#1711): the key the running host signs with and the entry it signs for, never a credential
+    ...(keyPaired ? { hostKey: keyPaired.hostKey, keyId: keyPaired.keyId } : {}),
     ...(verifiers ? { limited: state.token } : {}),
-    others: state.full.filter((e) => e.id !== paired?.id).map(({ id, label, created, replaced }) => ({ id, label, created, ...(replaced ? { replaced: true } : {}) })),
+    /*
+     * The hubs' key entries are listed too, with their public keys (#1711, §4.4), which a hub compares with its own; the
+     * one this line pairs is left out, as the full credential just paired is
+     */
+    others: [
+      ...state.full.filter((e) => e.id !== paired?.id).map(({ id, label, created, replaced }) => ({ id, label, created, ...(replaced ? { replaced: true } : {}) })),
+      ...(state.keys ?? []).filter((k) => k.id !== keyPaired?.keyId).map(({ id, label, created, replaced, publicKey }) => ({ id, label, created, publicKey, ...(replaced ? { replaced: true } : {}) })),
+    ],
     version: (probe.running ? probe.version : undefined) ?? version,
     protocolVersion,
     dataDir,
@@ -64,12 +74,28 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
  * `centralu serve --connection`. stdout carries exactly one line, the JSON; everything else goes to
  * stderr. Exit 1 when there is no host to describe.
  */
-export async function printConnection({ env, home, entry, version, cliPath, pair = null }) {
+export async function printConnection({ env, home, entry, version, cliPath, pair = null, pairKey = null, keyPaired = false, probeKey = probeKeyProof }) {
   const folder = serveFolder({ env, home, cliPath })
   const { dataDir } = folder
   let { state } = folder
   // `--pair <label>` (#1405): a full credential for whoever asked, printed once and written down as its verifier only
   let paired = null
+  // `--pair-key <label> <key>` (#1711): a key pairing when the host that will check it signs; else a verifier pairing as `--pair`
+  let keyLine = null
+  if (pairKey !== null) {
+    const made = pairKeyServe(dataDir, pairKey.label, pairKey.publicKey)
+    state = made.state
+    const hostKey = await signingHostKey({ dataDir, state, entry, keyId: made.entry.id, hubKey: pairKey.publicKey, probeKey })
+    if (hostKey) {
+      keyLine = { hostKey, keyId: made.entry.id }
+      // The hub paired by key here before (§4.2): its verifier entry under the label is no longer its own, and goes now
+      if (keyPaired) state = dropVerifierUnder(dataDir, pairKey.label)
+      say(`paired the key of ${JSON.stringify(pairKey.label)} (${made.entry.id}); serve --revoke ${made.entry.id} withdraws it`)
+    } else {
+      // The key entry stays: it is public, and a host that signs uses it once one runs here
+      pair = pairKey.label
+    }
+  }
   if (pair !== null) {
     if (takesVerifiers(entry)) {
       const made = pairServe(dataDir, pair)
@@ -80,13 +106,35 @@ export async function printConnection({ env, home, entry, version, cliPath, pair
       paired = { token: legacyHostTokenOf(dataDir), id: null }
     }
   }
-  const d = await describe({ env, dataDir, state, entry, version, paired })
+  const d = await describe({ env, dataDir, state, entry, version, paired, keyPaired: keyLine })
   if (!d) {
     say(`cannot read the protocol version of the host at ${entry}`)
     return 1
   }
   process.stdout.write(`${connectionLine(d)}\n`)
   return 0
+}
+
+/**
+ * The key the host that checks a key hello signs with (#1711, docs/plans/key-pairing.md §4.2), or null when a key
+ * pairing cannot be made now and the line pairs by verifier:
+ *
+ * - the running host signs a `prove` for the entry: the key it signs with, which after `--rotate-token` is still its old
+ *   one until it restarts;
+ * - nothing listens on the port (the connection refused), nothing holds the data folder (`host.lock`: no keeper's host,
+ *   no host starting) and the installed host takes key hellos: the key derived from serve.json's `key`, which the host
+ *   started next is handed;
+ * - otherwise (a host that does not sign, no answer in time, a proof that does not verify, a holder of the folder):
+ *   null. A slow old host never gets a key line, and no line reports a key the running host does not sign with.
+ */
+async function signingHostKey({ dataDir, state, entry, keyId, hubKey, probeKey }) {
+  const port = state.port ?? DEFAULT_SERVE_PORT
+  const probe = await probeKey({ port, keyId, hubKey })
+  if (probe.outcome === 'signed') return probe.hostKey
+  if (probe.outcome !== 'none' || !takesKeyHellos(entry)) return null
+  const holder = lockHolder(dataDir)
+  if (holder && isAlive(holder.pid)) return null
+  return hostLinkPublicKey(state.key)
 }
 
 /**

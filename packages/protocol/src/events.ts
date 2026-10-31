@@ -941,7 +941,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * `serve.json`), sent at once to the hubs linked to it, so a use withdrawn before their next `host.credentials` read
    * still shows on the machine's row. The host has kept the record in a file of its own before the socket got its
    * rights. `nonce` and `check` let a hub tell its own credential from one that only reuses its id
-   * (`credentialCheck(verifier, nonce)`, never the verifier). A hub that does not know this event drops it. Additive
+   * (`credentialCheck(verifier, nonce)`, never the verifier). A key entry (#1711) carries its `publicKey` instead, which a
+   * hub compares with its own; an older hub that finds no `check` drops the event (the next `host.credentials` read lists
+   * the use). A hub that does not know this event drops it. Additive
    */
   z.object({
     ...appScoped,
@@ -951,8 +953,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
       label: z.string().max(80),
       created: z.number(),
       replaced: z.boolean().catch(false).default(false),
-      nonce: z.string().min(8).max(64),
-      check: z.string().max(64),
+      /* A verifier credential: a `nonce` of the host's and the `check` of it. A key entry (#1711) has neither: it carries its `publicKey`, which is not secret */
+      nonce: z.string().min(8).max(64).optional(),
+      check: z.string().max(64).optional(),
+      publicKey: z.string().max(64).optional(),
     }),
   }),
   /**
