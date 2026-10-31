@@ -1,12 +1,7 @@
 import type { ReactNode } from 'react'
 import { Pill } from '../../components/Pill.jsx'
 
-/**
- * The shell of every card that waits on the person (owner, 2026-10-18): the conversation's 14px corner, a white border
- * all round as the inbox capsule's for an approval (white is what waits on the person), the kind as a capsule with a
- * line of what it is beside it, and the answers on a plain footer (`WaitFooter`) below a hairline. The approvals
- * (ApprovalCard), the agent's questions (QuestionCard) and a program's call (HostRequestCards) are all drawn in it.
- */
+/** The shell of every card that waits on the person (owner, 2026-10-18): white border, kind capsule, answers on a footer */
 export function WaitCard({
   pill = 'Awaiting approval',
   subtitle,
@@ -20,9 +15,7 @@ export function WaitCard({
   subtitle: ReactNode
   subtitleTestId?: string
   testId?: string
-  /** `data-kind`: which sort of approval this is */
   kind?: string
-  /** `data-keys`: whether the card's answer keys are shown for the composer or for a bare card */
   keys?: 'composer' | 'bare'
   children: ReactNode
 }) {
@@ -46,7 +39,7 @@ export function WaitCard({
   )
 }
 
-/** The row of answers at the foot of a `WaitCard`. A question's is a little wider apart and its hairline a little stronger */
+/** The answers at the foot of a `WaitCard`; a question's is spaced and ruled a little wider */
 export function WaitFooter({ question = false, children }: { question?: boolean; children: ReactNode }) {
   return (
     <div

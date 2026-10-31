@@ -23,14 +23,14 @@ describe('what a session’s subagent steps take', () => {
     expect(stepsTake({ runs: 2, steps: 20689, bytes: 46 * 1024 * 1024 })).toMatch(/^2 runs · 20\.7k steps · 46(\.0)? MB$/)
   })
 
-  it('lists each session largest first in the conversation’s card shape, each with a button to move them', () => {
+  it('lists each session largest first in a Settings card, each with a button to move them', () => {
     const html = renderToStaticMarkup(
       <SubagentStepsHeldList sessions={[held('small', 100), held('big', 9000, { project: null })]} error={null} onRetry={noop} row={idle} onMove={noop} />,
     )
     expect(testIds(html).filter((id) => id.startsWith('subagent-steps-held-'))).toEqual([
       'subagent-steps-held-list', 'subagent-steps-held-big', 'subagent-steps-held-small',
     ])
-    expect(html).toMatch(/class="[^"]*rounded-bubble[^"]*" data-testid="subagent-steps-held-list"/)
+    expect(html).toMatch(/class="[^"]*rounded-lg[^"]*" data-testid="subagent-steps-held-list"/)
     expect(html).toMatch(/<button[^>]*data-testid="subagent-steps-move-big"/)
     expect(text(html)).toContain('Session big No project Archive 2 runs · 1.2k steps')
   })

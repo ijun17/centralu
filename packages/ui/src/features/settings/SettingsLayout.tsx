@@ -74,7 +74,7 @@ export function SettingsCard({
   testId,
   ...rest
 }: {
-  as?: 'div' | 'li'
+  as?: 'div' | 'li' | 'ul'
   children: ReactNode
   className?: string
   testId?: string

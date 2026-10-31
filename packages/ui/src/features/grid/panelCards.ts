@@ -99,17 +99,11 @@ export function panelClass(dragged: boolean): string {
   }`
 }
 
-/**
- * The drag state of a screen of panels, the same on the grid and the project screen (#53): the panel being dragged and
- * the side of the panel the pointer is over. The preview order is derived from the two, never stored, so cancelling a
- * drag is only clearing them. Carries `usePanelCards`, since every change of either must snapshot the scroll first.
- */
+/** The drag state both screens share (#53). The preview is derived from `dragging` and `over`, so cancelling is clearing them */
 export function usePanelDrag() {
   const cards = usePanelCards()
   const { snapshotScroll } = cards
-  /** Which side of which panel the pointer is on — the preview order derives from this */
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
-  /** The panel being dragged. The original is dimmed to show "this is what is moving" */
   const [dragging, setDragging] = useState<string | null>(null)
 
   /*
@@ -127,12 +121,9 @@ export function usePanelDrag() {
     ...cards,
     dragging,
     setDragging,
-    /** Clears the target only: a sidebar row dropped on the screen */
     clearOver: () => setOver(null),
-    /** The order the screen shows while a panel is dragged, or null when nothing is */
     previewOf: (visible: readonly string[]): string[] | null =>
       dragging && over ? moveTo(visible, dragging, over.id, over.before) : null,
-    /** The value for the panel's `data-drop`: where the dragged thing lands relative to it */
     dropMark: (id: string) => (over?.id === id ? (over.before ? 'before' : 'after') : undefined),
     /** The pointer is over panel `id`: aim at its half. Over the dragged panel itself the last target is kept, or the preview flickers */
     aim: (id: string, e: DragEvent<HTMLElement>) => {
@@ -143,7 +134,6 @@ export function usePanelDrag() {
       snapshotScroll()
       setOver({ id, before })
     },
-    /** A drop, or the end of a drag: nothing is dragged or aimed at any more */
     clearDrag: () => {
       setOver(null)
       setDragging(null)
