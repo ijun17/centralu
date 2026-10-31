@@ -944,7 +944,7 @@ above it is there; any other error, or a missing parent (a volume not mounted), 
 worktree folder" and nothing is removed. The note says git's entry was pruned only when `git worktree list` no
 longer shows it. The answer carries a `note` saying so in one line. A merge run as `gh pr merge --delete-branch` beside a
 worktree removes that folder this way (gh deletes the local branch, so it removes the worktree that holds it),
-which is why the project board's `merge_when_green` deletes the branch on GitHub only. The session never
+which is why the project board's merge queue deletes the branch on GitHub only. The session never
 becomes a same-folder deletion: it keeps its worktree metadata. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
 successful disposal of the idle CLI before snapshotting. It is also refused while any other session has its
 folder inside the worktree (#647), asleep or not: a helper the child started without a worktree of its own

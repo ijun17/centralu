@@ -1,22 +1,20 @@
-// CI: ci_status, merge_when_green, mark_ready and read_failed_job.
-import { centralu, z } from './runtime/centralu-app-runtime.mjs'
-import { mergeWarning } from './batch.mjs'
-import { readQueue, queueRef } from './queue-driver.mjs'
+// CI: ci_status, mark_ready and read_failed_job.
+import { z } from './runtime/centralu-app-runtime.mjs'
 import { detailInput, itemOf, itemRef, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
-import { canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, NO_PERMISSION, squashMessage, workflowCheckNames } from './ci.mjs'
+import { cleanLog, clip, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, workflowCheckNames } from './ci.mjs'
 import { CI, config } from './config.mjs'
-import { deleteBranch, FATAL, GitHubError, markReady, mergePr, postComment, readChecks, readIssueText, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
+import { FATAL, GitHubError, markReady, postComment, readChecks, readIssueText, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { answer, asError, linesAnswer, reason } from './reply.mjs'
 import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
-import { short, sleep } from './util.mjs'
+import { short } from './util.mjs'
 import { now as clock } from './clock.mjs'
 
-// --- CI: ci_status and merge_when_green -------------------------------------------------------------
+// --- CI: ci_status -------------------------------------------------------------
 // The decisions are pure functions in ci.mjs; this part reads GitHub, asks them, and says the answer
-// in a few lines. The rule both tools keep (#386): green means every required check is reported and
+// in a few lines. The rule these tools keep (#386): green means every required check is reported and
 // passed. No checks reported, or any still running, is not green.
 
 const MAX_LOGS = 4
@@ -148,84 +146,6 @@ export function progress(ctx, n, message) {
   void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, progress: n, message } }).catch(() => {})
 }
 
-// GitHub works out whether a PR can be merged when asked, within seconds: a few short retries first.
-const MERGEABLE_RETRIES = 3
-const MERGEABLE_WAIT_MS = 2_000
-
-async function mergeWhenGreen({ pr, body, deleteBranch: del = false, intoBatch = false, detail = 'compact' }) {
-  const want = itemOf(pr)
-  const repo = want.repo
-  const what = `PR ${want.ref}`
-  // A merge outside the queue moves the default branch under a batch it is running (#1548): said in the answer. Read fresh
-  // each time, since a batch may start or end meanwhile; a queue file that does not read is no reason to refuse
-  const queueNote = (p) => {
-    try {
-      return mergeWarning(readQueue(centralu.dataDir), { repo, pr: want.number, baseRefName: p.baseRefName, defaultBranch, ref: queueRef })
-    } catch {
-      return null
-    }
-  }
-  const noted = (summary, p) => {
-    const note = queueNote(p)
-    return note ? `${summary}
-${note}` : summary
-  }
-  const refused = (reason, ci, extra = {}) =>
-    ci ? ciAnswer(`Not merged: ${reason}`, ci, { outcome: 'refused', merged: false, ...extra }, { isError: true }) : asError(answer(`Not merged: ${reason}`, { outcome: 'refused', merged: false, ...extra }))
-
-  // Who is asking comes first: a contributor's agent gets no further (#386, merge policy).
-  const { permissions, defaultBranch } = await readRepo(repo)
-  if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
-
-  let p = await readPr(repo, want.number)
-  const firstHead = p.headRefOid
-  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
-  let checks = await evaluate(repo, p.headRefOid, req)
-  let d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
-  for (let n = 0; n < MERGEABLE_RETRIES && d.action === 'wait' && d.kind === 'mergeable'; n++) {
-    await sleep(MERGEABLE_WAIT_MS)
-    p = await readPr(repo, want.number)
-    if (p.headRefOid !== firstHead)
-      return refused(`its head moved from ${short(firstHead)} to ${short(p.headRefOid)} meanwhile, so the checks read are not the ones that count. Call again.`, null, { kind: 'moved' })
-    checks = await evaluate(repo, p.headRefOid, req)
-    d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
-  }
-  if (d.action === 'refuse') {
-    const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
-    return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
-  }
-  const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-  if (d.action === 'wait') return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later (queue_merge merges once green).`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
-  // Said before it happens, not after (the review of #1563): a merge here moves the default branch under a batch that is running
-  const note = queueNote(p)
-  if (note && !intoBatch)
-    return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict }, { isError: true })
-  return doMerge(repo, what, p, body, del, ci, note)
-}
-
-async function doMerge(repo, what, p, body, del, ci, note = null) {
-  const msg = squashMessage({ number: p.number, title: p.title, body, description: p.body })
-  const why = await mergePr(repo, p.number, p.headRefOid, msg.subject, msg.body)
-  if (why) return ciAnswer(`Not merged: GitHub refused the merge: ${why}`, ci, { outcome: 'refused', merged: false, kind: 'github' }, { isError: true })
-  let commit = null
-  try {
-    commit = (await readPr(repo, p.number)).mergeCommit?.oid ?? null
-  } catch {
-    // merged either way; the commit id is a nicety
-  }
-  const extra = []
-  if (del) {
-    if (p.isCrossRepository) extra.push(`Branch ${p.headRefName} not deleted: it is in a fork.`)
-    else {
-      const e = await deleteBranch(repo, p.headRefName)
-      extra.push(e ? `Branch ${p.headRefName} not deleted: ${e}` : `Deleted branch ${p.headRefName}.`)
-    }
-  }
-  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}${note ? `
-${note}` : ''}`
-  return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
-}
-
 /**
  * The end of a contributor's flow (#386, merge policy): merging is the maintainer's act, so a
  * contributor's agent marks the pull request ready for review instead, once nothing required has
@@ -262,7 +182,7 @@ async function markReadyForReview({ pr, note, detail = 'compact' }) {
   }
   const state = p.isDraft ? `Marked ${what} ready for review` : `${what} was ready for review already`
   const later = checks.verdict === 'green' ? '' : ` CI is ${checks.verdict}, not green yet; it goes on meanwhile.`
-  const summary = `${state}${comment ? ', and left the note' : ''}.${later} The maintainer merges it (merge_when_green or queue_merge).`
+  const summary = `${state}${comment ? ', and left the note' : ''}.${later} The maintainer merges it (queue_merge).`
   return ciAnswer(summary, ci, { ready: true, marked: p.isDraft === true, verdict: checks.verdict, ...(comment ? { comment: comment.url } : {}) })
 }
 
@@ -311,7 +231,7 @@ export const tools = {
     config: {
       title: 'Mark a pull request ready for review',
       description:
-        "Instead of gh pr ready: the end of a contributor's flow, since merging is the maintainer's (merge_when_green and queue_merge refuse without maintain or admin). Marks a draft ready for review unless a required check failed (then it names the failure, like ci_status); pending checks do not stop it. With note, leaves a comment for the maintainer (English, no private word, no attribution line), ending with the CI line.",
+        "Instead of gh pr ready: the end of a contributor's flow, since merging is the maintainer's (queue_merge refuses without maintain or admin). Marks a draft ready for review unless a required check failed (then it names the failure, like ci_status); pending checks do not stop it. With note, leaves a comment for the maintainer (English, no private word, no attribution line), ending with the CI line.",
       inputSchema: z.object({
         pr: itemRef.describe(`The pull request: ${REF_HELP}`),
         note: z.string().max(4000).optional().describe('A comment for the maintainer: what to look at, what was not exercised'),
@@ -321,23 +241,5 @@ export const tools = {
       _meta: { 'centralu/risk': 'routine', ui: { visibility: ['model'] } },
     },
     handler: answering(serially(markReadyForReview), 'Not marked ready: '),
-  },
-
-  merge_when_green: {
-    config: {
-      title: 'Merge a pull request once CI is green',
-      description:
-        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once (queue_merge merges once green). When the merge queue has a batch running on the same branch, it merges nothing and says so first, because merging here moves main under the batch (it stops before it lands and is built again); queue_merge avoids that, and intoBatch: true merges anyway.',
-      inputSchema: z.object({
-        pr: itemRef.describe(`The pull request: ${REF_HELP}`),
-        body: z.string().optional().describe('The squash commit body; default a summary of the PR description'),
-        deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s, never a local branch: a Centralu worktree may hold it); default false'),
-        intoBatch: z.boolean().optional().describe('Merge although the merge queue has a batch running on the same branch, which this stops and builds again; default false: the call answers "Not merged" and says so first'),
-        detail: detailInput.describe('"full" lists passed and non-required checks too'),
-      }),
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-      _meta: { ui: { visibility: ['model'] } },
-    },
-    handler: answering(mergeWhenGreen, 'Not merged: '),
   },
 }

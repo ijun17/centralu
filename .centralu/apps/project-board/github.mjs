@@ -292,7 +292,7 @@ export function resolveOption(field, value) {
 
 export const sameRepo = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
 
-// --- CI and merging (ci_status, merge_when_green) --------------------------------------------------
+// --- CI and merging (ci_status, the queue) --------------------------------------------------
 // The same gh, through its REST side (`gh api repos/…`) and `gh pr`, always with `-R` or a full
 // path, so nothing depends on the folder gh runs in. The merge also runs from the temp folder, so gh
 // can never touch the person's checkout.
