@@ -1756,12 +1756,9 @@ host. It changes where a client connects, not what it must prove:
 - **The token is the keeper's**, 16 random bytes from `/dev/urandom`, one per keeper lifetime. It reaches clients
   only through the user-only control socket, and hosts as the first line on their stdin (#538, owner decision
   2026-10-18): `{"token":…}`, with `CC_HOST_TOKEN_ON_STDIN=1` telling the host to read it there
-  (`lifecycle/handed-token.ts`) before the control lines that follow. Not in their environment (below). The one
-  exception is a host from before #538, whose `bundle-info.json` does not say `tokenOnStdin`: it reads only
-  `CC_HOST_TOKEN`, so the keeper still hands it the token there and says so in `keeper.log`
-  (`server/host.rs`, `prepare_host`); that happens only when the keeper starts an older build than its own (a
-  rollback, or a switch to an older window's build). It is never written to `keeper.json`, `keeper.log` or
-  `host.log`.
+  (`lifecycle/handed-token.ts`) before the control lines that follow. Not in their environment (below), for every
+  host from 0.1.0-beta.45 on reads it there (`server/host.rs`, `prepare_host`, #1143). It is never written to
+  `keeper.json`, `keeper.log` or `host.log`.
 - **Deleting it hides it from children only, not from other processes of the same user.** Measured on macOS 27.0.1
   (build 26A434, 2026-10-11): a node process started with `CC_PROBE_SECRET=<marker>` deleted it from `process.env`
   at once and set another variable afterwards. From a separate process of the same user, started with an empty
