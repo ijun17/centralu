@@ -54,12 +54,12 @@ A stub exists only so a caller can write `mgr.x()` instead of `mgr.<module>.x()`
 read, and every new method of a module adds five lines here. The rule from here on: **a caller calls the module that
 does the work.** The manager makes such a module a public `readonly` field, and the stub goes.
 
-Who calls the 116 stubs:
+Who calls the 116 stubs (lines here and in §6 count the blank line after each stub, so the 467 of §1.2 are 583):
 
 | Callers | Stubs | Lines | What deleting it touches |
 |---|---|---|---|
 | `rpc.ts` only, or the manager itself; no test | 50 | ~250 | `manager.ts`, `rpc.ts` |
-| `main.ts`, a script or a structural type, no test | 5 | ~25 | also `main.ts` (`noteAgentMoved`, `noteAgentMoveFailed` through `AgentVersionService`; `sessionAppsHub`, `recordAppView` through `attachInlineViews`; `loadSubagentMessages` from `scripts/probe-subagent-record.mts`) |
+| `main.ts`, a script or a structural type, no test | 5 | ~25 | also `main.ts` (`noteAgentMoved`, `noteAgentMoveFailed` through `AgentVersionService`; `sessionAppsHub`, `recordAppView` through `attachInlineViews`; `loadSubagentMessages` from `packages/agent-host/scripts/probe-subagent-record.mts`) |
 | A test calls it, or reaches it by cast | 61 | ~308 | the tests (decision D1) |
 
 The 50 by module: `ProjectFiles` 17 (git panel B-1, file tree and viewer C-1, file operations #19), `SessionTrash` 7,
@@ -78,7 +78,7 @@ its callers") and `sessions/start-agent-flow.ts` 16. The rule applies to them to
 
 ## 3. `parts()` and `seat()` (437 lines)
 
-`parts()` is one object of getters and forwards that every moved-out module gets as its host. Of its 108
+`parts()` is one object of getters and forwards that every moved-out module gets as its host. Of its about 110
 `(...a) => self.<x>(...a)` entries, 42 forward to a module `parts()` already exposes by a getter (`queue` 8, `reports` 7,
 `delegationFlow` 6, `cards` 3, `hostCards` 3, `appSessions` 3, and 12 more), and 40 forward to a manager method, many of
 them stubs. `seat()` repeats 21 entries of `parts()`.
@@ -90,7 +90,10 @@ them stubs. `seat()` repeats 21 entries of `parts()`.
   `host.busyAnswer()`: about 56 lines, but each module's host type and any test that builds a fake host change. That is
   done module by module, and only where no test builds the host by hand.
 
-## 4. The logic (1,274 lines), grouped by the state it shares
+## 4. The logic, grouped by the state it shares
+
+A group counts its members with logic (1,274 lines in §1.2), its one-call methods (122) and the fields it owns, so the
+groups add up to more than either row of §1.2.
 
 | Group | Members | Lines | Owns | Reads of the shared state |
 |---|---|---|---|---|
@@ -111,11 +114,12 @@ Duplication and dead code found by reading this logic (a second model's audit, e
 
 - **Dead, about 20 lines:** `parts()`'s `get appAccess` and `UiPreferenceStoreHost.appAccess` (nothing reads them);
   `parts()`'s `untilHandedOver` (`AskProjectHost` picks it, `ask-project-flow.ts` never calls it); the re-export of
-  `AppMessageSource`, `AppMessageVia`, `AppViewPlace` (imported from `app-messages.js` everywhere); three stale comment
-  blocks (lines 175–180, a copy of `stampExternalSynced`'s doc; 2909–2916, a doc of a method that is gone; 554).
+  `AppMessageSource`, `AppMessageVia`, `AppViewPlace` (imported from `app-messages.js` everywhere); three stale comments
+  (lines 175–180, a fragment of a doc whose full text is `stampExternalSynced`'s in `external-conversations.ts`;
+  2909–2916, a doc of a method that is gone; 554, about a cleanup store step v55 now does).
 - **The same code twice, about 15 lines:** `hasCompactTool` in the constructor and `canReadMail`; the
-  `selfCompaction`/`contextNudges` lambdas in the constructor; the two `stop()` calls in `disposeAll` and `detachAll`
-  that `stopSelfCompaction` already makes; `tellPersonOfInterruption` and `updateResumeDone`, one-line helpers inlined
+  `selfCompaction`/`contextNudges` lambdas in the constructor; the two `stop()` calls in `disposeAll` and `detachAll`,
+  which become a call to `stopSelfCompaction()` (the same two calls); `tellPersonOfInterruption` and `updateResumeDone`, one-line helpers inlined
   at their callers.
 - **Checked and not duplicates:** `worktreeStatus` and `worktree-sessions.ts` (different fallback); `searchMessages`
   and `orchestrator-seat.ts` (a window of 60 against 160); the withdraw tests in `deleteProject` and
@@ -156,7 +160,7 @@ Each is a pure deletion or a pure move. Existing tests stay as they are. `tsc` p
 | 2 | **Dead code and copies** of §4 | `manager.ts`, `ui-preferences.ts`, `ask-project-flow.ts` | ~35 | nothing |
 | 3 | **The other rpc-only stubs** (33: trash, project registry, layout, preferences, record, tool queries, app sessions, approval rules, host cards, project creation, tool registry, `markRead`, `onEvent`), with the `parts()`/`seat()` entries that called them | `manager.ts`, `rpc.ts` | ~165 | nothing |
 | 4 | **`seat()` on `parts()`** | `manager.ts` | ~29 | nothing |
-| 5 | **The stubs `main.ts` reaches** (5, §2) | `manager.ts`, `main.ts`, `agent-versions.ts`, `inline-views.ts` | ~25 | key pairing (#1711) edits `main.ts`: after its slices land |
+| 5 | **The stubs `main.ts` reaches** (5, §2): `main.ts` passes the module instead of the manager to `AgentVersionService` (`sessions: mgr`) and `attachInlineViews` | `manager.ts`, `main.ts`, `agent-versions.ts`, `inline-views.ts`, the probe script | ~25 | key pairing (#1711) edits `main.ts`: after its slices land |
 | 6 | **The mailbox's view of sessions** moved to `sessions/mail-sessions.ts` | `manager.ts`, new file | ~170 (moved) | nothing in flight |
 | 7 | **Turn inputs** moved to `sessions/turn-inputs.ts` | `manager.ts`, new file | ~210 (moved) | nothing in flight |
 | 8 | **`parts()` forwards to exposed modules**, module by module where no test builds the host | `manager.ts`, the modules | ~56 | depends on the module |
@@ -165,7 +169,7 @@ Each is a pure deletion or a pure move. Existing tests stay as they are. `tsc` p
 
 ### 6.2 Work in flight
 
-- **The shared session core (#1654).** Its PRs 5–9 change `adapters/` and `adapters/core/` (the ledger, the decision
+- **The shared session core (#1654).** Its PRs 6–9 (PR 5 is in flight on its own branch) change `adapters/` and `adapters/core/` (the ledger, the decision
   order, events). The manager's process code (`switchTool`, `restartSession`, `sleepSession`, `handleSink`) and host
   tenure (`adoptKept`, the swap and dispose paths) read what those PRs reshape: `SessionHandle`, the sink, adopting a
   kept process. PRs 9 and 10 here wait for them. PRs 1–8 do not touch `adapters/`.
@@ -194,5 +198,5 @@ enough once the stubs are gone.
 
 | # | Question | Default taken until decided | Why |
 |---|---|---|---|
-| D1 | The 60 stubs a test calls: keep them, or one pull request that rewrites the tests' calls (`mgr.restoreSession(` to `mgr.trash.restoreSession(`) with no assertion changed? | Keep the session's own verbs (`createSession`, `send`, `startAgent`, `agentSession`, `askProject`, `orchestrator`, `runOrchestratorTool`, `updateSettings`, `rename`); the rest stay until decided | The verbs are the session API the tests read as a contract. The other 53 (trash, preferences, consents, linked host, orchestrator slot, handoff notes, …; about 270 lines) are not, but rewriting them changes test files, which this round's rule keeps unchanged |
+| D1 | The 61 stubs a test reaches: keep them, or one pull request that rewrites the tests' calls (`mgr.restoreSession(` to `mgr.trash.restoreSession(`) with no assertion changed? | Keep the 8 that are the session's own verbs (`createSession`, `startAgent`, `agentSession`, `askProject`, `orchestrator`, `runOrchestratorTool`, `updateSettings`, `rename`); the rest stay until decided | The verbs are the session API the tests read as a contract. The other 53 (trash, preferences, consents, linked host, orchestrator slot, handoff notes, …; about 270 lines) are not, but rewriting them changes test files, which this round's rule keeps unchanged |
 | D2 | The moves of §4 (PRs 6, 7, 9, 10) add about 20–40 lines each. Do them, or stop after the deletions? | Do the deletions first; decide on the moves when PR 5 has landed | The moves serve merge conflicts and reader load, not size. Whether they are still needed can be read from how often stacks conflict on `manager.ts` once it is about 400 lines shorter |
