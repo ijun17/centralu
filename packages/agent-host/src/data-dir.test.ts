@@ -1,72 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, realpathSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, privateDataFolderFor } from './data-dir.js'
 
-/**
- * This function moves **the folder holding the user's conversation history**.
- * So what is being tested is less "does it move" than **"in which cases does it leave things
- * alone."**
- */
 let root = ''
-const seed = (dir: string, body: string) => {
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'store.db'), body)
-}
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cc-datadir-'))
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
-
-describe('data folder move', () => {
-  it('moves everything whole (content unchanged) when only the old folder exists', () => {
-    const from = join(root, '.control-center') // legacy-name
-    const to = join(root, '.centralu')
-    seed(from, 'real conversation history')
-    writeFileSync(join(from, 'store.db-wal'), 'the WAL too')
-
-    expect(migrateLegacyDataDir(from, to)).toBe(true)
-
-    expect(existsSync(from)).toBe(false)
-    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('real conversation history')
-    // Leaving the WAL behind would lose tens of megabytes of recent conversation — the reason the
-    // whole folder is moved
-    expect(readFileSync(join(to, 'store.db-wal'), 'utf8')).toBe('the WAL too')
-  })
-
-  it('does **nothing** when the new folder already exists', () => {
-    const from = join(root, '.control-center') // legacy-name
-    const to = join(root, '.centralu')
-    seed(from, 'old record')
-    seed(to, 'new record')
-
-    expect(migrateLegacyDataDir(from, to)).toBe(false)
-
-    // Merging the two is not ours to decide — we do not know which one is the real one. Both are left in place
-    expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('new record')
-    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('old record')
-  })
-
-  it('silently does nothing when the old folder does not exist (a fresh install)', () => {
-    expect(migrateLegacyDataDir(join(root, '.control-center'), join(root, '.centralu'))).toBe(false) // legacy-name
-    expect(existsSync(join(root, '.centralu'))).toBe(false)
-  })
-
-  it('does not damage the old folder when the move fails', () => {
-    const from = join(root, '.control-center') // legacy-name
-    seed(from, 'record that must survive')
-    // A destination that cannot be moved to (the parent is a file, so the directory cannot be created)
-    const blocker = join(root, 'blocker')
-    writeFileSync(blocker, 'x')
-
-    expect(migrateLegacyDataDir(from, join(blocker, 'nested', '.centralu'))).toBe(false)
-
-    // If it failed, the original must be left untouched — no state is created where only half of it remains
-    expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('record that must survive')
-  })
-})
 
 /*
  * The data folder was 0755 with store.db and host.log 0644 (#838): on a machine with other accounts, any of them could
@@ -139,17 +82,14 @@ describe('which folder is the data folder to make private', () => {
 })
 
 describe('which data folder the host uses (#973)', () => {
-  it('uses CC_DATA_DIR when it is set, in development too, and moves no legacy folder into it', () => {
-    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x' }, '/home/me')).toEqual({ dir: '/tmp/x', legacy: null })
-    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x', CC_DEV: '1' }, '/home/me')).toEqual({ dir: '/tmp/x', legacy: null })
+  it('uses CC_DATA_DIR when it is set, in development too', () => {
+    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x' }, '/home/me')).toBe('/tmp/x')
+    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x', CC_DEV: '1' }, '/home/me')).toBe('/tmp/x')
   })
 
-  it('falls back to the home folder, dev apart from the packaged app, with the legacy folder to move', () => {
-    expect(chooseDataDir({}, '/home/me')).toEqual({ dir: join('/home/me', '.centralu'), legacy: join('/home/me', '.control-center') }) // legacy-name
-    expect(chooseDataDir({ CC_DEV: '1', CC_DATA_DIR: '' }, '/home/me')).toEqual({
-      dir: join('/home/me', '.centralu-dev'),
-      legacy: join('/home/me', '.control-center-dev'), // legacy-name
-    })
+  it('falls back to the home folder, dev apart from the packaged app', () => {
+    expect(chooseDataDir({}, '/home/me')).toBe(join('/home/me', '.centralu'))
+    expect(chooseDataDir({ CC_DEV: '1', CC_DATA_DIR: '' }, '/home/me')).toBe(join('/home/me', '.centralu-dev'))
   })
 })
 

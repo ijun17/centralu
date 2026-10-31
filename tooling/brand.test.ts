@@ -3,9 +3,6 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { APP_ID, APP_NAME, APP_SLUG, APP_VERSION } from '../packages/protocol/src/brand.js'
 
-/** The marker put on a line that deliberately knows the old name — this file skips that line. */
-const LEGACY_MARK = 'legacy-name'
-
 /**
  * The naming contract.
  *
@@ -156,10 +153,6 @@ describe('the name is decided in one place', () => {
      * The most common failure in a rename is "missing a few spots", and the spots that get
      * missed tend to sit for a long time in places nobody looks, like comments and test
      * titles. This looks at every tracked file at once.
-     *
-     * The data folder (`.control-center`) is the exception — renaming it would make the
-     * person's entire conversation history disappear, so the old name is kept there **on
-     * purpose** (see DATA_DIR in brand.ts).
      */
     const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).trim().split('\n')
     const offenders: string[] = []
@@ -175,18 +168,6 @@ describe('the name is decided in one place', () => {
         .split('\n')
         .map((line, i) => ({ line, i: i + 1 }))
         .filter(({ line }) => /control[ _-]?center/i.test(line))
-        /*
-         * Exceptions are **not grown into a list.**
-         *
-         * The data folder, a DB table and the repository folder used to be written here as
-         * exceptions. A list like that only ever grows, and a grown list eventually makes a
-         * check that "looks for the old name" toothless. So both of those were removed by
-         * migration instead (the folder by rename, the table by ALTER TABLE), and what
-         * remains — code that has to know the old name **in order to carry out** the rename
-         * — has the `legacy-name` marker put on that line. The exception is written at the
-         * site, not in the test.
-         */
-        .filter(({ line }) => !line.includes(LEGACY_MARK))
         // The repository folder name is the person's own local directory (it appears as a
         // path in the documentation's structure diagram).
         .filter(({ line }) => line.trim() !== 'control-center/')

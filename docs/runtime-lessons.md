@@ -83,15 +83,10 @@ Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table` (the plan's d
 flag into `CC_DEV` in the host's environment is **UNGUARDED**.
 Platforms: all.
 
-**ST4. The legacy data folder moves before anything creates the new one.**
+**ST4. The legacy data folder moved before anything created the new one.** Retired (#1143): the move is gone, and a
+pre-rename folder is left where it is.
 Happened: on the first move, the one line explaining it went to a stderr nobody reads, and anything that created
 `~/.centralu` first (a log, a socket) made the move impossible (6e0af69d).
-Rule: `prepare_default_dir` runs before `create_dir_all(data)`, before `keeper.log` or a socket; the move is a rename,
-only when the old folder exists and the new one does not, and a failed move leaves the old folder intact.
-Guard: `keeper/keeper/mod.rs` `the_legacy_folder_is_moved_before_the_new_one_exists`;
-`host/data-dir.test.ts` "moves everything whole (content unchanged) when only the old folder exists";
-`host/data-dir.test.ts` "does not damage the old folder when the move fails". The call order in `sidecar/link.rs` is
-**UNGUARDED**.
 Platforms: all.
 
 **ST5. The keeper is its own executable and links nothing graphical.**
@@ -1868,7 +1863,6 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | # | Rule | Module | Platforms | Plan step |
 |---|---|---|---|---|
 | 1 | ST3: the dev flag becomes `CC_DEV` in the host's environment | `window/sidecar/launch.rs` | all | 7 |
-| 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar/link.rs` | all | 7 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
 | 5 | ST13: no console window (CREATE_NO_WINDOW, not `detached`; `windowsHide` is guarded) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
 | 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |

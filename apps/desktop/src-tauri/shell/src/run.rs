@@ -83,8 +83,7 @@ pub fn log(data: &Path, msg: &str) {
 }
 
 pub fn run(a: &Args, env: &Env) -> Result<Started, Refusal> {
-    // The window owns the data folder: it creates it, moves a pre-rename one first
-    // (keeper::prepare_default_dir) and reads this start's status from it. A shell that created it
+    // The window owns the data folder: it creates it and reads this start's status from it. A shell that created it
     // would have to know those rules too, in bytes that cannot change without a new shell version;
     // a shell that is asked to use a folder that is not there refuses instead.
     if !fs::metadata(&a.data_dir).map(|m| m.is_dir()).unwrap_or(false) {

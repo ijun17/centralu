@@ -41,7 +41,7 @@ agent-host/src/
 ├─ timing.ts            # 한도가 있는 기다림(withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit). 타이머마다 지우고 unref한다
 ├─ tool-launch.ts       # 찾은 도구를 띄우는 방법 (Windows .cmd shim, 절대 경로)
 ├─ os.ts                # OS마다 다른 것을 이름으로 묻는 곳 (architecture.ko.md §2)
-├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
+├─ data-dir.ts          # 데이터 폴더 위치 판정
 ├─ idle.ts              # "사람이 잃을 것이 돌고 있는가"에 대한 유일한 규칙 (#352)
 ├─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용". update-apply.ts: 에이전트의 적용 (#665)
 ├─ agent-versions.ts    # 새로 설치된 에이전트 CLI로 세션 옮기기 (#297). 버전은 cli-version.ts가 찾는다
@@ -1119,10 +1119,6 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 | `{"op":"upgrade","exe":…,"source":…}` | 창만 보낼 수 있다(#1405). 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4). 검증된 콘텐츠에서 돌면 `exe`가 든 번들의 콘텐츠를 검증한 사본 안의 키퍼에게 넘긴다 |
 | `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
-
-**옛 폴더.** 기본 데이터 폴더를 무엇이 만들기 전에, 앱과 키퍼가 이름을 바꾸기 전의 폴더를 `data-dir.ts`와
-같은 규칙으로 새 이름으로 옮긴다: 새 폴더가 있으면 호스트는 옛 폴더를 건드리지 않으므로, `keeper.log`나 소켓 때문에
-`~/.centralu`를 먼저 만들면 데이터가 옛 자리에 남는다.
 
 **데이터 폴더 하나에 키퍼 하나.** `<data>/keeper.lock`에 `flock`, 키퍼가 어떻게 끝나든 OS가 푼다. 앞선 키퍼가
 소켓에서 답하면 두 번째 키퍼는 코드 3으로 끝나고 호스트를 띄우지 않는다. 앞선 키퍼가 잠금을 쥐었는데 답하지

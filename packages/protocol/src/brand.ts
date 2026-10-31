@@ -61,12 +61,3 @@ export const PROJECTS_DIR = APP_NAME
 
 /** The data folder for a host started in dev mode — kept separate so it does not mix with the packaged app. */
 export const DATA_DIR_DEV = '.centralu-dev'
-
-/**
- * The folder name from before the rename.
- *
- * **Cannot be deleted.** It holds the user's conversation history, and if the new folder does
- * not exist yet, this is the only copy. The host migrates it once, before opening the database
- * (`packages/agent-host/src/main.ts`).
- */
-export const DATA_DIR_LEGACY = { prod: '.control-center', dev: '.control-center-dev' } as const // legacy-name

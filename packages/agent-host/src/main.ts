@@ -10,7 +10,7 @@ import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_AP
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
-import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
 import { recordViewHandover, restoreViewHandover } from './view-handover.js'
@@ -177,16 +177,10 @@ const httpSecret = keeperToken ? deriveHttpSecret(keeperToken) : randomBytes(32)
  * would leave two hosts holding the same store.db, each keeping a different session list.
  * Since starting dev with the packaged app still running is natural during development, they are
  * kept entirely separate.
- *
- * The move of a legacy folder happens here, but **announcing it is deferred** until the log is on:
- * said earlier, the line went to the parent's stderr instead of the file, and on the very first move
- * `host.log` had nothing in it, though this is the one line that explains why the folder disappeared.
  */
 start.at('data folder')
-let movedNote: string | null = null
 function defaultDbPath(): string {
-  const { dir, legacy } = chooseDataDir()
-  movedNote = legacy && migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
+  const dir = chooseDataDir()
   mkdirSync(dir, { recursive: true })
   // Pins attachments, the orchestrator home, and worktrees to all live under here (dev and prod diverge)
   process.env.CC_DATA_DIR = dir
@@ -210,8 +204,6 @@ const madePrivate = privateFolder ? keepDataFolderPrivate(privateFolder) : []
 start.at('log')
 const stopLog = dbPath === ':memory:' ? () => {} : teeStderrToFile(hostLogPath(dirname(dbPath)))
 if (dbPath !== ':memory:') console.error(startupBanner({ build: BUILD, db: dbPath, pid: process.pid }))
-// Right after the banner: which start did the move has to be readable in the same spot
-if (movedNote) console.error(movedNote)
 if (madePrivate.length > 0) console.error(`[agent-host] data folder made private: ${madePrivate.join(', ')}`)
 
 /*

@@ -41,7 +41,7 @@ agent-host/src/
 ├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ os.ts                # what differs between OSes, asked by name (architecture.md §2)
-├─ data-dir.ts          # locating and migrating the data directory
+├─ data-dir.ts          # locating the data directory
 ├─ idle.ts              # the one rule for "is anything running a person would lose" (#352)
 ├─ updates.ts           # update checks, installing, "apply automatically when idle"; update-apply.ts: an agent's apply (#665)
 ├─ agent-versions.ts    # moving sessions to a newly installed agent CLI (#297); cli-version.ts finds the version
@@ -2330,10 +2330,6 @@ swap's phases follow each other at once (standby, then draining), and a window t
 was never told of the earlier (#368). Before, pushes were blocking writes under the keeper's state lock,
 so a window that stopped reading held every push, request and host status for up to 5 s at each change. A keeper
 handoff lets every writer send what it queued, then stops them before the windows' sockets change hands.
-
-**The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
-pre-rename folder to the new name by the same rule as `data-dir.ts`: the host leaves a legacy folder alone once
-the new one exists, so creating `~/.centralu` first (for `keeper.log` or the socket) would strand the data.
 
 **One keeper per data folder.** `flock` on `<data>/keeper.lock`, released by the OS however the keeper ends.
 A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
