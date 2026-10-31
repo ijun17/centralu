@@ -35,6 +35,8 @@ pnpm measure:tools       # what Centralu's MCP tools cost (#513): dry by default
 pnpm remote-dev <machine> --ref <commit> --repo <path there>  # a dev build of the host on a linked machine (#1036)
 ```
 
+The smokes that start a host share `host-client.mjs`: `startHost` and `connect`, or `openHost` for both, give the handshake, `hello`, RPC calls and the event log. It is plain JavaScript because the `.mjs` smokes run under bare `node`; `host-client.d.mts` types it for the `.mts` ones. The keeper integration scripts have their own, `hostClient` in `scripts/keeper-test-processes.mjs`.
+
 `remote-dev.mts` builds the host on a linked machine from one commit of a working copy there and swaps to it
 (docs/plans/remote-hub.md §10.11); Settings → Machines' "Roll back" returns to the release. It spends nothing.
 

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- the smoke test reads the host's raw frames directly */
 /**
  * #371 part A end to end: **does a real session find a shared app in another project, use one of
  * its tools, detach it, and is the tool then gone?**
@@ -18,14 +17,12 @@
  * TOOL=codex runs the session on Codex: its thread keeps the servers it started with, so the app's
  * tools arrive the turn after attach_app, and the script says "Go on." once, as the person would.)
  */
-import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WebSocket } from 'ws'
+import { openHost, type Json } from './host-client.mjs'
 
-const TOKEN = 'app-access-smoke'
 const root = mkdtempSync(join(tmpdir(), 'cc-app-access-smoke-'))
 const FIXTURE = fileURLToPath(new URL('../src/apps/external/test-fixtures/app.mjs', import.meta.url))
 
@@ -53,65 +50,17 @@ const TRIALS = Number(process.env.TRIALS ?? 1)
 const TOOL = (process.env.TOOL ?? 'claude') as 'claude' | 'codex'
 const log = (...a: unknown[]) => console.log('[app-access]', ...a)
 
-const host = spawn('node', ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--memory'], {
-  stdio: ['ignore', 'pipe', 'inherit'],
-  env: { ...process.env, CC_DATA_DIR: join(root, 'data') },
-})
-const port: number = await new Promise((res, rej) => {
-  const t = setTimeout(() => rej(new Error('host startup timeout')), 20000)
-  host.stdout!.on('data', (d) => {
-    for (const line of String(d).split('\n')) {
-      try {
-        const j = JSON.parse(line)
-        if (j.ready) { clearTimeout(t); res(j.port) }
-      } catch { /* log line */ }
-    }
-  })
-})
-
-const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-let n = 1
-type Json = Record<string, any>
-const pending = new Map<string, { r: (v: Json) => void; j: (e: Error) => void }>()
-const events: Json[] = []
 const cards: string[] = []
-ws.on('message', (raw: unknown) => {
-  const f = JSON.parse(String(raw))
-  if (f.kind === 'res') {
-    const p = pending.get(f.id)
-    if (p) { pending.delete(f.id); if (f.ok) p.r(f.result); else p.j(new Error(f.error?.message)) }
-  } else if (f.kind === 'event') {
-    events.push(f.event)
+const { host, ws, call: rpc, turn } = await openHost({
+  env: { CC_DATA_DIR: join(root, 'data') },
+  onEvent: (e) => {
     // The person's answer to the consent card: always, for this pair
-    if (f.event.type === 'approval_request' && f.event.detail?.kind === 'project_access') {
-      cards.push(`${f.event.detail.from.name} → ${f.event.detail.to.name}: ${f.event.detail.text}`)
-      void rpc('agents.respondApproval', { sessionId: f.event.sessionId, requestId: f.event.requestId, decision: 'always' })
+    if (e.type === 'approval_request' && e.detail?.kind === 'project_access') {
+      cards.push(`${e.detail.from.name} → ${e.detail.to.name}: ${e.detail.text}`)
+      void rpc('agents.respondApproval', { sessionId: e.sessionId, requestId: e.requestId, decision: 'always' })
     }
-  }
+  },
 })
-const rpc = (m: string, params: unknown): Promise<Json> => {
-  const id = String(n++)
-  ws.send(JSON.stringify({ kind: 'rpc', id, method: m, params }))
-  return new Promise((r, j) => {
-    pending.set(id, { r, j })
-    setTimeout(() => pending.has(id) && (pending.delete(id), j(new Error(m + ' timeout'))), 240000)
-  })
-}
-await new Promise<void>((r) => ws.on('open', () => r()))
-ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
-await new Promise((r) => setTimeout(r, 300))
-
-async function turn(sessionId: string, text: string): Promise<Json[]> {
-  const mark = events.length
-  await rpc('agents.send', { sessionId, text })
-  await new Promise<void>((resolve) => {
-    const t = setInterval(() => {
-      if (events.slice(mark).some((e) => e.sessionId === sessionId && e.type === 'turn_complete')) { clearInterval(t); resolve() }
-    }, 500)
-    setTimeout(() => { clearInterval(t); resolve() }, 180000)
-  })
-  return events.slice(mark).filter((e) => e.sessionId === sessionId)
-}
 
 /** Registers a fresh pair of trusted projects and shares the counter app — the consent card is asked anew for each pair */
 async function pair() {

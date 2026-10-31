@@ -10,13 +10,12 @@
  * policy)
  * Run with: node packages/agent-host/scripts/smoke-codex.mjs
  */
-import { spawn, execSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 
-const TOKEN = 'smoke-codex'
 const DB = join(mkdtempSync(join(tmpdir(), 'cc-codex-')), 'store.db')
 const CWD = mkdtempSync(join(tmpdir(), 'cc-codex-cwd-'))
 const log = (...a) => console.log('[codex]', ...a)
@@ -27,72 +26,10 @@ const check = (ok, label, extra = '') => {
   if (!ok) failures++
 }
 
-function startHost() {
-  const host = spawn(
-    'node',
-    ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--db', DB],
-    { stdio: ['ignore', 'pipe', 'inherit'] },
-  )
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('host startup timeout')), 20000)
-    host.stdout.on('data', (d) => {
-      for (const line of String(d).split('\n')) {
-        if (!line.trim()) continue
-        try {
-          const j = JSON.parse(line)
-          if (j.ready) { clearTimeout(t); resolve({ host, port: j.port }) }
-        } catch { /* log line */ }
-      }
-    })
-  })
-}
-
-function connect(port) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  const events = []
-  let id = 0
-  let helloOk = () => {}
-  ws.on('message', (raw) => {
-    const m = JSON.parse(String(raw))
-    if (m.kind === 'res') {
-      const p = pending.get(m.id)
-      if (!p) return
-      pending.delete(m.id)
-      m.ok ? p.resolve(m.result) : p.reject(new Error(m.error?.message ?? 'rpc failure'))
-    } else if (m.kind === 'event') events.push(m.event)
-    else if (m.kind === 'hello_ok') helloOk()
-  })
-  const ready = new Promise((resolve) => {
-    helloOk = resolve
-    ws.once('open', () => ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 })))
-  })
-  const call = (method, params) =>
-    new Promise((resolve, reject) => {
-      const rid = String(++id)
-      pending.set(rid, { resolve, reject })
-      ws.send(JSON.stringify({ kind: 'rpc', id: rid, method, params }))
-      setTimeout(() => pending.has(rid) && reject(new Error(`${method} timeout`)), 180000)
-    })
-  return { ws, call, events, ready }
-}
-
-const waitFor = (events, pred, ms = 180000, what = 'event') =>
-  new Promise((resolve, reject) => {
-    const t0 = Date.now()
-    const t = setInterval(() => {
-      const hit = events.find(pred)
-      if (hit) { clearInterval(t); resolve(hit) }
-      else if (Date.now() - t0 > ms) { clearInterval(t); reject(new Error(`${what} wait timeout`)) }
-    }, 200)
-  })
-
 const textOf = (events) => events.filter((e) => e.type === 'message_delta').map((e) => e.text).join('')
 
 // ── First run: approval round trip (S9) ──────────────────────────────────────────────
-const first = await startHost()
-const c1 = connect(first.port)
-await c1.ready
+const c1 = await openHost({ db: DB })
 
 const detected = await c1.call('agents.detect', {})
 const codexInfo = detected.find((d) => d.tool === 'codex')
@@ -105,13 +42,13 @@ const session = await c1.call('agents.createSession', {
 })
 check(!!session.externalId, 'thread id captured immediately on creation', session.externalId ?? 'none')
 
-const approval = await waitFor(c1.events, (e) => e.type === 'approval_request', 180000, 'approval request')
+const approval = await c1.next((e) => e.type === 'approval_request', 'approval request', 180000)
 check(true, 'S9 approval request received (session-level override of the global never)', approval.detail.kind)
 
 await c1.call('agents.respondApproval', {
   sessionId: session.id, requestId: approval.requestId, decision: 'allow',
 })
-await waitFor(c1.events, (e) => e.type === 'turn_complete', 180000, 'turn complete')
+await c1.next((e) => e.type === 'turn_complete', 'turn complete', 180000)
 check(existsSync(join(CWD, 'codex-ok.txt')), 'S9 file actually created after approval')
 
 // FR-18 is satisfied by naming the session from its first prompt. Codex's thread/name/updated is
@@ -127,25 +64,23 @@ check(!!ctx, 'token/context gauge event received', ctx?.type)
 
 // ── Second run: resume after restart (S10) ────────────────────────────────────────
 c1.ws.close()
-first.host.kill('SIGTERM')
-await new Promise((r) => first.host.once('exit', r))
+c1.host.kill('SIGTERM')
+await new Promise((r) => c1.host.once('exit', r))
 
-const second = await startHost()
-const c2 = connect(second.port)
-await c2.ready
+const c2 = await openHost({ db: DB })
 const res = await c2.call('agents.resumeSession', { sessionId: session.id })
 check(res.resumed === true, 'S10 resume succeeded', res.reason ?? '')
 
 if (res.resumed) {
   await c2.call('agents.send', { sessionId: session.id, text: 'What was the codeword? Reply with only that word.' })
-  await waitFor(c2.events, (e) => e.type === 'turn_complete', 180000, 'turn after resume')
+  await c2.next((e) => e.type === 'turn_complete', 'turn after resume', 180000)
   const answer = textOf(c2.events).trim()
   check(/MELON/i.test(answer), 'S10 resumed session remembers earlier context', answer.slice(0, 40))
 }
 
 // ── Third run: zombie check (S11) ─────────────────────────────────────────────
 c2.ws.close()
-second.host.kill('SIGKILL')
+c2.host.kill('SIGKILL')
 await new Promise((r) => setTimeout(r, 3000))
 let leftover = ''
 try {

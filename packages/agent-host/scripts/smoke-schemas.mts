@@ -7,72 +7,19 @@
  *
  * Run with: pnpm smoke:schemas
  */
-import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 
-const TOKEN = 'schema-token'
 const cwd = mkdtempSync(join(tmpdir(), 'cc-schema-'))
 // Has to be an actual repository to genuinely exercise a source-control lookup
 execSync('git init -q && git commit -q --allow-empty -m init', { cwd })
 writeFileSync(join(cwd, 'a.txt'), 'hello\n')
 
-const host = spawn(
-  'node',
-  ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--memory'],
-  { stdio: ['ignore', 'pipe', 'inherit'] },
-)
-
-const port: number = await new Promise((resolve, reject) => {
-  const t = setTimeout(() => reject(new Error('host startup timeout')), 20000)
-  host.stdout!.on('data', (d) => {
-    for (const line of String(d).split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const j = JSON.parse(line)
-        if (j.ready) {
-          clearTimeout(t)
-          resolve(j.port)
-        }
-      } catch {
-        /* ignore log lines */
-      }
-    }
-  })
-})
-
-const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-let nextId = 1
-const pending = new Map<string, { res: (v: unknown) => void; rej: (e: Error) => void }>()
-
-ws.on('message', (raw: unknown) => {
-  const f = JSON.parse(String(raw))
-  if (f.kind === 'res') {
-    const p = pending.get(f.id)
-    if (p) {
-      pending.delete(f.id)
-      if (f.ok) p.res(f.result)
-      else p.rej(new Error(f.error?.message ?? 'rpc error'))
-    }
-  }
-})
-
-const rpc = (method: string, params: unknown): Promise<unknown> => {
-  const id = String(nextId++)
-  ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-  return new Promise((res, rej) => {
-    pending.set(id, { res, rej })
-    setTimeout(() => pending.has(id) && (pending.delete(id), rej(new Error(method + ' timeout'))), 30000)
-  })
-}
-
-await new Promise<void>((r) => ws.on('open', () => r()))
-ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
-await new Promise((r) => setTimeout(r, 300))
+const { host, ws, call: rpc } = await openHost({ timeoutMs: 30000 })
 
 // ── First create what checking needs ────────────────────────────────
 const project = (await rpc('projects.add', { path: cwd })) as { id: string }

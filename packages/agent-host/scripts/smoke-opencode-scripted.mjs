@@ -9,15 +9,13 @@
  * It stops only the hosts it started and their `opencode acp`. Run with:
  * node packages/agent-host/scripts/smoke-opencode-scripted.mjs [case names...]
  */
-import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 import { agentProcesses, processes } from './smoke-processes.mjs'
 
-const TOKEN = 'smoke-opencode-scripted'
 const TOOL = 'opencode'
 /** A turn that has not ended by then waits on something nobody answers (an ask inside a subagent, #1565 case E) */
 const BOUND = 90_000
@@ -134,55 +132,6 @@ function acpPidsOf(hostPid) {
   return [...ours].filter((pid) => alive.has(pid))
 }
 
-function startHost(env, db) {
-  const host = spawn(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--db', db], { stdio: ['ignore', 'pipe', 'inherit'], env })
-  hosts.push(host)
-  return new Promise((resolve, reject) => {
-    host.on('exit', (code) => reject(new Error(`host exited before ready (${code})`)))
-    host.stdout.on('data', (d) => {
-      for (const line of String(d).split('\n')) {
-        try {
-          const j = JSON.parse(line)
-          if (j.ready) resolve({ host, port: j.port })
-        } catch {
-          /* a log line */
-        }
-      }
-    })
-  })
-}
-
-function connect(port) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  const events = []
-  const listeners = []
-  let id = 0
-  let helloOk = () => {}
-  ws.on('message', (raw) => {
-    const m = JSON.parse(String(raw))
-    if (m.kind === 'res') {
-      const p = pending.get(m.id)
-      pending.delete(m.id)
-      if (p) m.ok ? p.resolve(m.result) : p.reject(new Error(m.error?.message ?? 'rpc failure'))
-    } else if (m.kind === 'event') {
-      events.push(m.event)
-      for (const l of listeners) l(m.event)
-    } else if (m.kind === 'hello_ok') helloOk()
-  })
-  const ready = new Promise((resolve) => {
-    helloOk = resolve
-    ws.once('open', () => ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 })))
-  })
-  const call = (method, params) =>
-    new Promise((resolve, reject) => {
-      const rid = String(++id)
-      pending.set(rid, { resolve, reject })
-      ws.send(JSON.stringify({ kind: 'rpc', id: rid, method, params }))
-    })
-  return { ws, call, events, ready, on: (l) => listeners.push(l) }
-}
-
 /** Which scripted tool a card is for, read from what it names */
 const toolOfCard = (card) => {
   const said = JSON.stringify(card.detail ?? card)
@@ -213,18 +162,18 @@ async function run(c) {
   // Nothing of the person's: no settings of theirs (a temporary HOME and XDG folders, no managed folder, none of the
   // settings OpenCode reads from the environment) and no data folder of Centralu's
   const env = { ...process.env, ...xdg, HOME: home, USERPROFILE: home, CC_DATA_DIR: join(root, 'data'), OPENCODE_TEST_MANAGED_CONFIG_DIR: join(root, 'managed') }
-  for (const k of ['OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_PERMISSION']) delete env[k]
+  for (const k of ['OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_PERMISSION']) env[k] = undefined
   mkdirSync(env.CC_DATA_DIR, { recursive: true })
 
-  const { host, port } = await startHost(env, join(env.CC_DATA_DIR, 'store.db'))
-  const client = connect(port)
-  await client.ready
-  const project = await client.call('projects.add', { path: cwd })
-  await client.call('projects.setTrusted', { projectId: project.id, trusted: true })
-  const cards = []
   let sessionId = null
   let seen = () => {}
   // Events that come before createSession answers wait in `client.events` and are read once the session's id is known
+  const client = await openHost({ db: join(env.CC_DATA_DIR, 'store.db'), env, onEvent: (e) => sessionId && seen(e) })
+  const { host } = client
+  hosts.push(host)
+  const project = await client.call('projects.add', { path: cwd })
+  await client.call('projects.setTrusted', { projectId: project.id, trusted: true })
+  const cards = []
   const turnEnd = new Promise((resolve) => {
     seen = (e) => {
       if (e.sessionId !== sessionId) return
@@ -235,7 +184,6 @@ async function run(c) {
     }
     setTimeout(() => resolve('no end'), BOUND)
   })
-  client.on((e) => sessionId && seen(e))
   const session = await client.call('agents.createSession', { projectId: project.id, cwd, tool: TOOL, permissionPreset: c.preset, initialPrompt: 'go' })
   sessionId = session.id
   for (const e of [...client.events]) seen(e)
