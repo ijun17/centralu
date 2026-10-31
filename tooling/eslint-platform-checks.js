@@ -5,7 +5,7 @@
  * (`PLATFORM_MODULES` in tooling/os-layer.js, docs/architecture.md §2). Anywhere else, a check on the
  * OS is reported: reading `process.platform` (or `os.platform()`, `os.type()`), and comparing
  * anything with an OS name (`=== 'win32'`, `case 'darwin':`). Code that needs a difference asks the
- * platform module a question named for what differs (`hasProcessGroups()`, `locksRunningPrograms()`),
+ * platform module a question named for what differs (`hasProcessGroups()`, `traitsFor().locksRunningPrograms`),
  * so each OS's answer is written once.
  *
  * Tests are not checked: skipping a case on an OS is what they are for.

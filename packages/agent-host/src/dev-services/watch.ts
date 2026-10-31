@@ -1,7 +1,7 @@
 import { lstatSync, watch, type FSWatcher } from 'node:fs'
 import { resolve } from 'node:path'
 import { wireJoin, wireParent } from '@cc/protocol'
-import { locksWatchedFolders } from '../os.js'
+import { traitsFor } from '../os.js'
 import { safeJoin } from './fs.js'
 import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
@@ -67,7 +67,7 @@ export class DirWatchers {
      * folders here. Windows watches a tree natively (one handle, no walk), so the reason for not watching recursively
      * elsewhere (above) does not apply there.
      */
-    private oneTree = locksWatchedFolders(),
+    private oneTree = traitsFor().locksWatchedFolders,
   ) {}
 
   /**

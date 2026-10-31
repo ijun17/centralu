@@ -918,7 +918,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       const port = await freePort()
       const s = serve(d, ['--port', String(port)])
       await s.until(/listening on 127\.0\.0\.1:\d+/)
-      // Mode bits say nothing on Windows, where the host leaves them (`modesGuardFiles`)
+      // Mode bits say nothing on Windows, where the host leaves them (`traitsFor().modesGuardFiles`)
       if (POSIX) expect(statSync(d).mode & 0o777).toBe(0o700)
 
       const info = await connection(d)
