@@ -13,14 +13,12 @@
  * are this run's. It counts and stops only the agent processes its own hosts started. Run with:
  * node packages/agent-host/scripts/smoke-opencode.mjs
  */
-import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 import { agentProcesses, processes } from './smoke-processes.mjs'
 
-const TOKEN = 'smoke-opencode'
 const DATA = mkdtempSync(join(tmpdir(), 'cc-opencode-data-'))
 const DB = join(DATA, 'store.db')
 const TRUSTED = realpathSync(mkdtempSync(join(tmpdir(), 'cc-opencode-cwd-')))
@@ -53,64 +51,16 @@ process.on('exit', () => {
   }
 })
 
-function startHost() {
-  const host = spawn(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--db', DB], {
-    stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, ...XDG, CC_DATA_DIR: DATA },
-  })
-  hosts.push(host)
-  return new Promise((resolve, reject) => {
-    host.on('exit', (code) => reject(new Error(`host exited before ready (${code})`)))
-    host.stdout.on('data', (d) => {
-      for (const line of String(d).split('\n')) {
-        try {
-          const j = JSON.parse(line)
-          if (j.ready) resolve({ host, port: j.port })
-        } catch {
-          /* a log line */
-        }
-      }
-    })
-  })
-}
-
-function connect(port) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  const events = []
-  const waiters = []
-  let id = 0
-  let helloOk = () => {}
-  ws.on('message', (raw) => {
-    const m = JSON.parse(String(raw))
-    if (m.kind === 'res') {
-      const p = pending.get(m.id)
-      pending.delete(m.id)
-      if (p) m.ok ? p.resolve(m.result) : p.reject(new Error(m.error?.message ?? 'rpc failure'))
-    } else if (m.kind === 'event') {
-      events.push(m.event)
-      for (const w of [...waiters]) if (w.pred(m.event)) waiters.splice(waiters.indexOf(w), 1) && w.resolve(m.event)
-    } else if (m.kind === 'hello_ok') helloOk()
-  })
-  const ready = new Promise((resolve) => {
-    helloOk = resolve
-    ws.once('open', () => ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 })))
-  })
-  const call = (method, params) =>
-    new Promise((resolve, reject) => {
-      const rid = String(++id)
-      pending.set(rid, { resolve, reject })
-      ws.send(JSON.stringify({ kind: 'rpc', id: rid, method, params }))
-    })
+async function open() {
+  const c = await openHost({ db: DB, env: { ...XDG, CC_DATA_DIR: DATA } })
+  hosts.push(c.host)
   // Resolved by the event itself; the bound only ends a run whose CLI stopped answering, with what OpenCode logged
-  const next = (pred, what, ms = 300_000) =>
-    new Promise((resolve, reject) => {
-      const seen = events.find(pred)
-      if (seen) return resolve(seen)
-      const timer = setTimeout(() => reject(new Error(`no ${what} in ${ms} ms${openCodeError()}`)), ms)
-      waiters.push({ pred, resolve: (e) => (clearTimeout(timer), resolve(e)) })
+  const next = c.next
+  c.next = (pred, what, ms = 300_000, from) =>
+    next(pred, what, ms, from).catch((e) => {
+      throw new Error(e.message + openCodeError())
     })
-  return { ws, call, events, ready, next }
+  return c
 }
 
 const textOf = (events, sessionId) => events.filter((e) => e.sessionId === sessionId && e.type === 'message_delta').map((e) => e.text).join('')
@@ -144,9 +94,7 @@ function acpPidsOf(hostPid) {
   return [...ours].filter((pid) => alive.has(pid))
 }
 
-const first = await startHost()
-const c1 = connect(first.port)
-await c1.ready
+const c1 = await open()
 
 const detected = await c1.call('agents.detect', {})
 const tool = detected.find((d) => d.name === TOOL)
@@ -155,7 +103,7 @@ check(!!tool && tool.installed, 'O1 OpenCode detected and installed', tool?.deta
 const untrusted = await c1.call('projects.add', { path: UNTRUSTED })
 const refusedTrust = await c1.call('agents.createSession', { projectId: untrusted.id, cwd: UNTRUSTED, tool: TOOL }).then(() => null, (e) => e.message)
 check(/trusted projects/.test(refusedTrust ?? ''), 'O2 an untrusted project is refused with the reason', refusedTrust ?? 'it started')
-check(acpPidsOf(first.host.pid).length === 0, 'O2 no agent process was started for a refused launch')
+check(acpPidsOf(c1.host.pid).length === 0, 'O2 no agent process was started for a refused launch')
 
 const project = await c1.call('projects.add', { path: TRUSTED })
 await c1.call('projects.setTrusted', { projectId: project.id, trusted: true })
@@ -173,25 +121,23 @@ await c1.next((e) => e.sessionId === session.id && e.type === 'turn_complete', '
 const result = c1.events.find((e) => e.sessionId === session.id && e.type === 'tool_result' && /smoke-opencode-1/.test(e.output ?? e.summary ?? ''))
 check(!!result && result.ok, 'O3 the command ran and its output reads back ok', result ? `ok=${result.ok}` : 'no result with its output')
 check(c1.events.some((e) => e.sessionId === session.id && e.type === 'context_update'), 'O3 the context share is read (usage_update)')
-check(acpPidsOf(first.host.pid).length === 1, 'O3 one agent process for the session')
+check(acpPidsOf(c1.host.pid).length === 1, 'O3 one agent process for the session')
 
-first.host.kill('SIGTERM')
-await new Promise((r) => first.host.once('exit', r))
-check(acpPidsOf(first.host.pid).length === 0, 'O4 a host that stops ends its agent process')
+c1.host.kill('SIGTERM')
+await new Promise((r) => c1.host.once('exit', r))
+check(acpPidsOf(c1.host.pid).length === 0, 'O4 a host that stops ends its agent process')
 
-const second = await startHost()
-const c2 = connect(second.port)
-await c2.ready
+const c2 = await open()
 await c2.call('agents.resumeSession', { sessionId: session.id }).catch(() => null)
 await c2.call('agents.send', { sessionId: session.id, text: 'What was the code word? Reply with that word only.' })
 await c2.next((e) => e.sessionId === session.id && e.type === 'turn_complete', 'resumed turn end')
 check(/heron/i.test(textOf(c2.events, session.id)), 'O4 the reopened conversation remembers it', textOf(c2.events, session.id).slice(0, 80))
 
-acpPidsOf(second.host.pid)
-second.host.kill('SIGKILL')
-await new Promise((r) => second.host.once('exit', r))
+acpPidsOf(c2.host.pid)
+c2.host.kill('SIGKILL')
+await new Promise((r) => c2.host.once('exit', r))
 const left = []
-for (let i = 0; i < 20 && (left.length = 0, left.push(...acpPidsOf(second.host.pid)), left.length); i++) await new Promise((r) => setTimeout(r, 500))
+for (let i = 0; i < 20 && (left.length = 0, left.push(...acpPidsOf(c2.host.pid)), left.length); i++) await new Promise((r) => setTimeout(r, 500))
 check(left.length === 0, 'O5 killing the host leaves no agent process of this run behind', left.join(',') || 'none')
 for (const pid of left) {
   try {

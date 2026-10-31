@@ -16,83 +16,39 @@
  *
  * Run with: CHILD=codex node --import tsx packages/agent-host/scripts/smoke-start-agent.mts
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 
 const CHILD = (process.env.CHILD ?? 'codex') as 'claude' | 'codex'
 // WORKTREE=1 (#561 part 2): the project is a git repository and the child works in a new worktree of it
 const WORKTREE = process.env.WORKTREE === '1'
-const TOKEN = randomBytes(16).toString('hex')
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-start-')))
 const website = join(root, 'website')
 for (const d of [website, join(root, 'data')]) mkdirSync(d, { recursive: true })
 const log = (...a: unknown[]) => console.log('[start]', ...a)
 
-const host = spawn('node', ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--db', join(root, 'store.db')], {
-  stdio: ['ignore', 'pipe', 'inherit'],
-  env: { ...process.env, CC_DATA_DIR: join(root, 'data') },
-})
-const port: number = await new Promise((res, rej) => {
-  const t = setTimeout(() => rej(new Error('host startup timeout')), 30000)
-  host.stdout!.on('data', (d) => {
-    for (const line of String(d).split('\n')) {
-      try {
-        const j = JSON.parse(line)
-        if (j.ready) {
-          clearTimeout(t)
-          res(j.port)
-        }
-      } catch {
-        /* a log line */
-      }
-    }
-  })
-})
-
-const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-let n = 1
-const pending = new Map<string, { r: (v: any) => void; j: (e: Error) => void }>()
-const events: any[] = []
-const rpc = (m: string, params: unknown): Promise<any> => {
-  const id = String(n++)
-  ws.send(JSON.stringify({ kind: 'rpc', id, method: m, params }))
-  return new Promise((r, j) => pending.set(id, { r, j }))
-}
 let parentId = ''
 let child: any = null
 const cards: { sessionId: string; detail: any }[] = []
-ws.on('message', (raw: unknown) => {
-  const f = JSON.parse(String(raw))
-  if (f.kind === 'res') {
-    const p = pending.get(f.id)
-    if (p) {
-      pending.delete(f.id)
-      if (f.ok) p.r(f.result)
-      else p.j(new Error(f.error?.message))
+const { host, ws, events, call: rpc, next } = await openHost({
+  db: join(root, 'store.db'),
+  env: { CC_DATA_DIR: join(root, 'data') },
+  onEvent: (e) => {
+    if (e.type === 'session_created' && e.session?.askedBy) {
+      child = e.session
+      log('child opened:', e.session.name, `(${e.session.tool}, ${e.session.model ?? 'default model'}, ${e.session.permissionPreset})`)
     }
-    return
-  }
-  if (f.kind !== 'event') return
-  const e = f.event
-  events.push(e)
-  if (e.type === 'session_created' && e.session?.askedBy) {
-    child = e.session
-    log('child opened:', e.session.name, `(${e.session.tool}, ${e.session.model ?? 'default model'}, ${e.session.permissionPreset})`)
-  }
-  if (e.type === 'approval_request') {
-    cards.push({ sessionId: e.sessionId, detail: e.detail })
-    log(`card in ${e.sessionId === parentId ? 'parent' : e.sessionId === child?.id ? 'child' : e.sessionId}: ${e.detail.kind} → allow`)
-    void rpc('agents.respondApproval', { sessionId: e.sessionId, requestId: e.requestId, decision: 'allow' }).catch((err) => log('answer failed:', err.message))
-  }
-  if (e.type === 'tool_call' && e.sessionId === parentId) log('parent tool:', e.summary.tool, '·', String(e.summary.title).slice(0, 100))
+    if (e.type === 'approval_request') {
+      cards.push({ sessionId: e.sessionId, detail: e.detail })
+      log(`card in ${e.sessionId === parentId ? 'parent' : e.sessionId === child?.id ? 'child' : e.sessionId}: ${e.detail.kind} → allow`)
+      void rpc('agents.respondApproval', { sessionId: e.sessionId, requestId: e.requestId, decision: 'allow' }).catch((err) => log('answer failed:', err.message))
+    }
+    if (e.type === 'tool_call' && e.sessionId === parentId) log('parent tool:', e.summary.tool, '·', String(e.summary.title).slice(0, 100))
+  },
 })
-await new Promise<void>((r) => ws.on('open', () => r()))
-ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
-await new Promise((r) => setTimeout(r, 300))
 
 if (WORKTREE) {
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: website })
@@ -118,19 +74,7 @@ await rpc('agents.send', {
     `Use start_agent to have ${toolName} (tool "${CHILD}") write a file out/secret.txt${WORKTREE ? ' in a new worktree (worktree: true)' : ' in this folder'} containing a random 6-digit number of its own choosing. ` +
     'Tell it not to put the number in its answer, only the absolute path of the file. Then read that file yourself and tell me the number.',
 })
-const ended = await new Promise<boolean>((resolve) => {
-  const t = setInterval(() => {
-    const mine = events.slice(mark).filter((e) => e.sessionId === parentId)
-    if (mine.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
-      clearInterval(t)
-      resolve(true)
-    }
-  }, 500)
-  setTimeout(() => {
-    clearInterval(t)
-    resolve(false)
-  }, 600_000)
-})
+const ended = await next((e) => e.sessionId === parentId && (e.type === 'turn_complete' || e.type === 'error'), 'parent turn end', 600_000, mark).then(() => true, () => false)
 const answer = events
   .slice(mark)
   .filter((e) => e.sessionId === parentId && e.type === 'message_delta')

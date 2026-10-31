@@ -5,79 +5,29 @@
  * works in the actual code).
  * Run with: node packages/agent-host/scripts/smoke.mjs
  */
-import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 
-const TOKEN = 'smoke-token'
 const cwd = mkdtempSync(join(tmpdir(), 'cc-smoke-'))
 const log = (...a) => console.log('[smoke]', ...a)
 
-const host = spawn(
-  'node',
-  ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--memory'],
-  { stdio: ['ignore', 'pipe', 'inherit'] },
-)
-
-const port = await new Promise((resolve, reject) => {
-  const t = setTimeout(() => reject(new Error('host startup timeout')), 20000)
-  host.stdout.on('data', (d) => {
-    for (const line of String(d).split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const j = JSON.parse(line)
-        if (j.ready) { clearTimeout(t); resolve(j.port) }
-      } catch { /* ignore log lines */ }
-    }
-  })
-})
-log('host started, port =', port)
-
-const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-const events = []
-let nextId = 1
-const pending = new Map()
-
-ws.on('message', (raw) => {
-  const f = JSON.parse(String(raw))
-  if (f.kind === 'res') {
-    const p = pending.get(f.id)
-    if (p) { pending.delete(f.id); f.ok ? p.res(f.result) : p.rej(new Error(f.error.message)) }
-  } else if (f.kind === 'event') {
-    events.push(f.event)
-    const e = f.event
+const client = await openHost({
+  timeoutMs: 180000,
+  onEvent: (e) => {
     if (e.type === 'approval_request') log('approval request received:', JSON.stringify(e.detail).slice(0, 100))
     if (e.type === 'tool_call') log('tool call:', e.summary.title)
     if (e.type === 'turn_complete') log('turn complete')
-  }
+  },
 })
-
-const rpc = (method, params) => {
-  const id = String(nextId++)
-  ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-  return new Promise((res, rej) => {
-    pending.set(id, { res, rej })
-    setTimeout(() => pending.has(id) && (pending.delete(id), rej(new Error(method + ' timeout'))), 180000)
-  })
-}
-const waitFor = async (pred, ms, what) => {
-  const t0 = Date.now()
-  while (!pred()) {
-    if (Date.now() - t0 > ms) throw new Error(`wait failed: ${what}`)
-    await new Promise((r) => setTimeout(r, 100))
-  }
-}
+const { events, ws, host, call: rpc } = client
+log('host started, port =', client.port)
 
 const fail = (m) => { console.error('❌', m); cleanup(1) }
 const cleanup = (code) => { try { ws.close() } catch {} ; host.kill(); process.exit(code) }
 
 try {
-  await new Promise((r) => ws.on('open', r))
-  ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
-  await new Promise((r) => setTimeout(r, 200))
-
   const project = await rpc('projects.add', { path: cwd })
   log('project registered:', project.name)
 
@@ -98,7 +48,7 @@ try {
     text: `Use the Write tool to create the file ${target} with the exact content: OK. Do not read any other file. Then stop.`,
   })
 
-  await waitFor(() => events.some((e) => e.type === 'approval_request'), 120000, 'approval request')
+  await client.next((e) => e.type === 'approval_request', 'approval request', 120000)
   const req = events.find((e) => e.type === 'approval_request')
   log('approval detail normalization check: kind =', req.detail.kind)
   if (!['file_edit', 'command', 'other'].includes(req.detail.kind)) fail(`unknown detail kind: ${req.detail.kind}`)
@@ -107,7 +57,7 @@ try {
   await rpc('agents.respondApproval', { sessionId: session.id, requestId: req.requestId, decision: 'allow' })
   log('approval sent')
 
-  await waitFor(() => events.some((e) => e.type === 'turn_complete'), 120000, 'turn complete')
+  await client.next((e) => e.type === 'turn_complete', 'turn complete', 120000)
 
   const types = new Set(events.map((e) => e.type))
   log('collected event types:', [...types].join(', '))

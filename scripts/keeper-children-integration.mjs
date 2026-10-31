@@ -30,7 +30,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
@@ -83,56 +83,6 @@ function attachClient(sock) {
   const child = spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
   started.add(child.pid)
   return child
-}
-
-/** A WebSocket client of the host: RPC calls, and every event and terminal frame it is sent */
-async function hostClient(port, token) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  const events = []
-  const frames = []
-  let next = 1
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('no hello_ok')), 8000)
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 }))
-    ws.onmessage = (e) => {
-      const f = JSON.parse(String(e.data))
-      if (f.kind === 'hello_ok') {
-        clearTimeout(timer)
-        resolve()
-      } else if (f.kind === 'res' && pending.has(f.id)) {
-        const p = pending.get(f.id)
-        pending.delete(f.id)
-        f.ok ? p.resolve(f.result) : p.reject(new Error(f.error?.message ?? 'rpc failed'))
-      } else if (f.kind === 'event') events.push(f.event)
-      else if (f.kind === 'term') frames.push(f)
-    }
-    ws.onerror = () => reject(new Error('websocket error'))
-  })
-  ws.onclose = () => {
-    for (const p of pending.values()) p.reject(new Error('the host closed the connection'))
-    pending.clear()
-  }
-  return {
-    events,
-    frames,
-    screen: (terminalId) => frames.filter((f) => f.terminalId === terminalId).map((f) => f.data).join(''),
-    call: (method, params, timeoutMs = 20_000) =>
-      new Promise((resolve, reject) => {
-        const id = String(next++)
-        const timer = setTimeout(() => {
-          pending.delete(id)
-          reject(new Error(`${method} timed out`))
-        }, timeoutMs)
-        pending.set(id, {
-          resolve: (v) => (clearTimeout(timer), resolve(v)),
-          reject: (e) => (clearTimeout(timer), reject(e)),
-        })
-        if (ws.readyState !== WebSocket.OPEN) return pending.get(id).reject(new Error('the host is gone'))
-        ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-      }),
-    close: () => ws.close(),
-  }
 }
 
 /** The host ready under a new pid, or undefined: at once if the keeper has given up on it */

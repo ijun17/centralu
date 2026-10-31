@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- the smoke test reads the host's raw frames directly */
 /**
  * FR-11 end-to-end smoke test: **does a real Claude orchestrator actually assign work to another
  * session?**
@@ -8,59 +7,16 @@
  *
  * Run with: pnpm smoke:orchestrator
  */
-import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WebSocket } from 'ws'
+import { openHost } from './host-client.mjs'
 
-const TOKEN = 'orc-smoke'
 const cwd = mkdtempSync(join(tmpdir(), 'cc-orc-'))
 writeFileSync(join(cwd, 'README.md'), '# Target project\n')
 const log = (...a: unknown[]) => console.log('[orc]', ...a)
 
-const host = spawn(
-  'node',
-  ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--memory'],
-  { stdio: ['ignore', 'pipe', 'inherit'] },
-)
-const port: number = await new Promise((res, rej) => {
-  const t = setTimeout(() => rej(new Error('host startup timeout')), 20000)
-  host.stdout!.on('data', (d) => {
-    for (const line of String(d).split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const j = JSON.parse(line)
-        if (j.ready) { clearTimeout(t); res(j.port) }
-      } catch { /* log line */ }
-    }
-  })
-})
-
-const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-let n = 1
-type Json = Record<string, any>
-const pending = new Map<string, { r: (v: Json) => void; j: (e: Error) => void }>()
-const events: Json[] = []
-ws.on('message', (raw: unknown) => {
-  const f = JSON.parse(String(raw))
-  if (f.kind === 'res') {
-    const p = pending.get(f.id)
-    if (p) { pending.delete(f.id); if (f.ok) p.r(f.result); else p.j(new Error(f.error?.message)) }
-  } else if (f.kind === 'event') events.push(f.event)
-})
-const rpc = (m: string, params: unknown): Promise<Json> => {
-  const id = String(n++)
-  ws.send(JSON.stringify({ kind: 'rpc', id, method: m, params }))
-  return new Promise((r, j) => {
-    pending.set(id, { r, j })
-    setTimeout(() => pending.has(id) && (pending.delete(id), j(new Error(m + ' timeout'))), 240000)
-  })
-}
-
-await new Promise<void>((r) => ws.on('open', () => r()))
-ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
-await new Promise((r) => setTimeout(r, 300))
+const { host, ws, events, call: rpc, next } = await openHost()
 
 // One session to receive the work — given a clear name so it can be found by name
 const project = await rpc('projects.add', { path: cwd })
@@ -102,14 +58,7 @@ log('orchestrator:', orc.id, '· projectId =', JSON.stringify(orc.projectId))
   // right below match that Korean vocabulary for the same reason — translating only this prompt
   // would stop measuring whether the role actually got injected.
   await rpc('agents.send', { sessionId: orc.id, text: '너는 무엇이고, 어떤 도구를 갖고 있어? 두 줄로.' })
-  await new Promise<void>((resolve) => {
-    const t = setInterval(() => {
-      if (events.slice(mark).some((e) => e.sessionId === orc.id && e.type === 'turn_complete')) {
-        clearInterval(t); resolve()
-      }
-    }, 500)
-    setTimeout(() => { clearInterval(t); resolve() }, 120000)
-  })
+  await next((e) => e.sessionId === orc.id && e.type === 'turn_complete', 'turn end', 120000, mark).catch(() => {})
   const who = events.slice(mark).filter((e) => e.sessionId === orc.id && e.type === 'message_delta').map((e) => e.text).join('')
   console.log('\n── Self-introduction ──\n' + who.trim().slice(0, 400) + '\n')
   // '오케스트레이터' (orchestrator) and '손이 없' (has no hands) are the words ORCHESTRATOR_ROLE
@@ -134,15 +83,7 @@ await rpc('agents.send', {
 })
 
 // Wait until the orchestrator's turn finishes
-await new Promise<void>((resolve) => {
-  const t = setInterval(() => {
-    if (events.slice(before).some((e) => e.sessionId === orc.id && e.type === 'turn_complete')) {
-      clearInterval(t)
-      resolve()
-    }
-  }, 500)
-  setTimeout(() => { clearInterval(t); resolve() }, 240000)
-})
+await next((e) => e.sessionId === orc.id && e.type === 'turn_complete', 'turn end', 240000, before).catch(() => {})
 
 const mine = events.slice(before)
 const toolCalls = mine.filter((e) => e.sessionId === orc.id && e.type === 'tool_call').map((e) => e.summary.tool)
@@ -173,21 +114,13 @@ console.log(`  target session actually moved ${workerGotWork ? '✅' : '❌'}`)
 /*
  * Does the report come back — the other half of "one window."
  * A notification must reach the orchestrator's window once the worker finishes.
+ *
+ * The report is a **user message injected into the orchestrator** (not something the model
+ * said). This used to be checked in message_delta, but that only happened to catch what the
+ * orchestrator said after reading the report, so it broke as soon as the wording changed. Now
+ * user_message is checked directly instead.
  */
-const reported = await new Promise<boolean>((resolve) => {
-  const t = setInterval(() => {
-    /*
-     * The report is a **user message injected into the orchestrator** (not something the model
-     * said). This used to be checked in message_delta, but that only happened to catch what the
-     * orchestrator said after reading the report, so it broke as soon as the wording changed. Now
-     * user_message is checked directly instead.
-     */
-    if (events.some((e) => e.sessionId === orc.id && e.type === 'user_message' && String(e.text).includes('[Centralu]'))) {
-      clearInterval(t); resolve(true)
-    }
-  }, 500)
-  setTimeout(() => { clearInterval(t); resolve(false) }, 120000)
-})
+const reported = await next((e) => e.sessionId === orc.id && e.type === 'user_message' && String(e.text).includes('[Centralu]'), 'report', 120000).then(() => true, () => false)
 console.log(`  report comes back once the work finishes ${reported ? '✅' : '❌'}`)
 
 ws.close()

@@ -6,73 +6,17 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { attachClient, bundleInfo, check, HOST_SRC, hostsFor, log, newData, ready, started, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
 
 // ── Step 3: the front door and the blue-green swap ─────────────────────────────────────────────
-
-/**
- * A WebSocket client through the front door, with its hello_ok and a promise for its close. Calls
- * reject with the host's own error message, so a drain's cut can be read back.
- */
-async function frontClient(port, token, timeoutMs = 8000) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  let next = 1
-  let onClose
-  const closed = new Promise((r) => (onClose = r))
-  const hello = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('no hello_ok')), timeoutMs)
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 }))
-    ws.onmessage = (e) => {
-      const f = JSON.parse(String(e.data))
-      if (f.kind === 'hello_ok') {
-        clearTimeout(timer)
-        resolve(f)
-      } else if (f.kind === 'res' && pending.has(f.id)) {
-        const p = pending.get(f.id)
-        pending.delete(f.id)
-        f.ok ? p.resolve(f.result) : p.reject(Object.assign(new Error(f.error?.message ?? 'rpc failed'), { retryable: f.error?.retryable }))
-      }
-    }
-    ws.onerror = () => {
-      clearTimeout(timer)
-      reject(new Error('websocket error'))
-    }
-  })
-  ws.onclose = () => {
-    for (const p of pending.values()) p.reject(new Error('the host closed the connection'))
-    pending.clear()
-    onClose(Date.now())
-  }
-  return {
-    hello,
-    closed,
-    open: () => ws.readyState === WebSocket.OPEN,
-    call: (method, params, ms = 15_000) =>
-      new Promise((resolve, reject) => {
-        const id = String(next++)
-        const timer = setTimeout(() => {
-          pending.delete(id)
-          reject(new Error(`${method} timed out`))
-        }, ms)
-        pending.set(id, {
-          resolve: (v) => (clearTimeout(timer), resolve(v)),
-          reject: (e) => (clearTimeout(timer), reject(e)),
-        })
-        if (ws.readyState !== WebSocket.OPEN) return pending.get(id).reject(new Error('the host is gone'))
-        ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-      }),
-    close: () => ws.close(),
-  }
-}
 
 /** Reconnects to the front door until a host greets, the way the UI's rpc-client does */
 async function reconnect(port, token, limitMs = 40_000) {
   const end = Date.now() + limitMs
   for (;;) {
     try {
-      return await frontClient(port, token, 15_000)
+      return await hostClient(port, token, 15_000)
     } catch (e) {
       if (Date.now() > end) throw e
       await sleep(200)
@@ -182,7 +126,7 @@ async function scenarioSwap() {
 
   const project = mkdtempSync('/tmp/ck-proj-')
   tempDirs.push(project)
-  const c1 = await frontClient(port, token)
+  const c1 = await hostClient(port, token)
   const p = await c1.call('projects.add', { path: project })
   const copyA = view.source.copyDir
   const bridge = startBridge(copyA, door, token)
@@ -193,7 +137,7 @@ async function scenarioSwap() {
   const src2 = makeBuild('swapcommit2')
   const sw = await request(sock, { op: 'switch', source: { commit: 'swapcommit2', hostDir: src2, bundlePath: '/tmp/Other.app' } })
   check(sw.ok, 'switch is accepted')
-  const closedAt = await Promise.race([c1.closed, sleep(30_000).then(() => null)])
+  const closedAt = await Promise.race([c1.closedAt, sleep(30_000).then(() => null)])
   check(closedAt, 'the swap closes the connection through the front door')
   const c2 = await reconnect(port, token)
   const reconnectMs = Date.now() - (closedAt ?? Date.now())
@@ -226,7 +170,7 @@ async function scenarioSwap() {
 
   // A broken build: it fails its start check, and the running host never notices
   log('\na swap to a broken build')
-  const c3 = await frontClient(port, token)
+  const c3 = await hostClient(port, token)
   const hostBefore = after.hostPid
   const broken = makeBuild('brokencommit', "console.log('this build is broken: it cannot even start'); process.exit(1)\n")
   await request(sock, { op: 'switch', source: { commit: 'brokencommit', hostDir: broken } })
@@ -321,7 +265,7 @@ async function scenarioDrainCutsSlowCall() {
   if (!check(view, 'the keeper brings the host up')) return
   const app = attachClient(sock, { commit: 'x' })
   await app.first()
-  const c = await frontClient(view.status.port, view.status.token)
+  const c = await hostClient(view.status.port, view.status.token)
   const apps = await c.call('apps.list', {})
   if (!check(apps.some((a) => a.appId === 'slowapp'), 'the slow app is installed', JSON.stringify(apps.map((a) => a.appId)))) return
   const t0 = Date.now()

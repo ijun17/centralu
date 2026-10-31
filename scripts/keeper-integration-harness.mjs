@@ -151,51 +151,6 @@ const keyOf = (commit, builtAt) =>
 
 const ready = (v) => v?.status?.state === 'ready'
 
-/** A WebSocket client of the host that can make RPC calls */
-async function hostClient(port, token) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map()
-  let next = 1
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('no hello_ok')), 8000)
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 }))
-    ws.onmessage = (e) => {
-      const f = JSON.parse(String(e.data))
-      if (f.kind === 'hello_ok') {
-        clearTimeout(timer)
-        resolve()
-      } else if (f.kind === 'res' && pending.has(f.id)) {
-        const p = pending.get(f.id)
-        pending.delete(f.id)
-        f.ok ? p.resolve(f.result) : p.reject(new Error(f.error?.message ?? 'rpc failed'))
-      }
-    }
-    ws.onerror = () => reject(new Error('websocket error'))
-  })
-  // A host that goes away must fail the calls in flight, or the script would hang on them
-  ws.onclose = () => {
-    for (const p of pending.values()) p.reject(new Error('the host closed the connection'))
-    pending.clear()
-  }
-  return {
-    call: (method, params) =>
-      new Promise((resolve, reject) => {
-        const id = String(next++)
-        const timer = setTimeout(() => {
-          pending.delete(id)
-          reject(new Error(`${method} timed out`))
-        }, 15_000)
-        pending.set(id, {
-          resolve: (v) => (clearTimeout(timer), resolve(v)),
-          reject: (e) => (clearTimeout(timer), reject(e)),
-        })
-        if (ws.readyState !== WebSocket.OPEN) return pending.get(id).reject(new Error('the host is gone'))
-        ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-      }),
-    close: () => ws.close(),
-  }
-}
-
 const cleanup = once((threw) => {
   // A scenario that threw rather than failed a check left its folder's logs worth reading too
   if (threw && currentData) failedDirs.add(currentData)
@@ -210,4 +165,4 @@ function countFailure() {
   failures++
 }
 
-export { ROOT, TARGET, BIN, HOST_SRC, FAKE_BUNDLE, started, tempDirs, failures, log, check, hostsFor, startKeeper, attachClient, helloOk, newData, bundleInfo, keyOf, ready, hostClient, cleanup, countFailure }
+export { ROOT, TARGET, BIN, HOST_SRC, FAKE_BUNDLE, started, tempDirs, failures, log, check, hostsFor, startKeeper, attachClient, helloOk, newData, bundleInfo, keyOf, ready, cleanup, countFailure }
