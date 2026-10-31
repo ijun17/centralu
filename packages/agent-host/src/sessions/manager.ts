@@ -172,6 +172,11 @@ type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
 
+/** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
+function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
+  return Object.getPrototypeOf(o) === proto
+}
+
 /**
  * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host.md §2), so all state
  * tracking and storage happens here.
@@ -2308,38 +2313,17 @@ export class SessionManager {
    * `meta`; it sorts it in place since #1143).
    */
   private seat(): OrchestratorSeatHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    // What `parts()` already says (its getters still run when read through the prototype) plus what only the tools need
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getter below reads this manager's field when used
     const self = this
-    return (this.seatHost ??= {
-      get store() {
-        return self.store
-      },
-      get meta() {
-        return self.meta
-      },
-      get children() {
-        return self.children
-      },
+    const own: Pick<OrchestratorSeatHost, 'linkedReader' | 'proposals'> & Omit<OrchestratorSeatHost, keyof ManagerParts> = {
       get proposals() {
         return self.orchestratorSlot.proposals
       },
       linkedReader: () => this.linkedReader,
       linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
-      emit: (e) => this.emit(e),
-      updateCentraluAsked: (sessionId, action, signal) => this.updatesAsked.updateCentraluAsked(sessionId, action, signal),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
-      createSession: (params) => this.createSession(params),
-      firstTool: (preferred) => this.toolRegistry.firstTool(preferred),
-      rename: (sessionId, name) => this.rename(sessionId, name),
-      send: (sessionId, text, attachments, from) => this.send(sessionId, text, attachments, from),
-      routedCards: (sessionId, callerId) => this.cards.routedCards(sessionId, callerId),
-      answerRoutedCard: (callerId, sessionId, card, text) => this.cards.answerRoutedCard(callerId, sessionId, card, text),
-      busyForCaller: (callerId, sessionId) => this.queue.busyForCaller(callerId, sessionId),
-      busyAnswer: (callerId, target, from) => this.queue.busyAnswer(callerId, target, from),
-      busyChoices: (callerId, target, from) => this.queue.busyChoices(callerId, target, from),
-      enqueue: (callerId, target, via, text) => this.queue.enqueue(callerId, target, via, text),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
-      autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
       createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
       askAppProject: (sessionId, spec, signal) => this.projectCreation.askAppProject(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),
@@ -2352,16 +2336,17 @@ export class SessionManager {
       trustRequest: (sessionId, req, signal) => this.trustFlow.run(sessionId, req, signal),
       appUpkeepRequest: (sessionId, req, signal) => this.appUpkeepFlow.run(sessionId, req, signal),
       housekeepingRequest: (sessionId, req) => this.housekeepingFlow.run(sessionId, req),
-      startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
-      agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
-      listAgents: (callerId) => this.delegationFlow.listAgents(callerId),
       handoff: (callerId, target, opts, signal) => this.handoffFlow.handoff(callerId, target, opts, signal),
       handoffWait: (callerId, handle, signal) => this.handoffFlow.wait(callerId, handle, signal),
       usageHistory: (p) => this.usageHistory(p),
-      builderRefOf: (m) => this.appSessions.builderRefOf(m),
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
-    })
+    }
+    // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
+    const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()
+    Object.setPrototypeOf(own, parts)
+    if (!stands(own, parts)) throw new Error('The orchestrator seat could not be set on the module parts')
+    return (this.seatHost ??= own)
   }
 
   /** The processes this host took over from an earlier one: they were started with the tools that host gave them, which may not include mail */

@@ -186,9 +186,11 @@ Manager line counts are after each pull request.
   `trashSession`, `uiPreferences`, `useExternalApps`, `useLinkedApps`, `useLinkedSessions`, `useProjectsHome`, and the five
   of PR 5 (`noteAgentMoved`, `noteAgentMoveFailed`, `sessionAppsHub`, `recordAppView`, `loadSubagentMessages`). So
   "five stubs reach `main.ts`" in §2 was low: 21 more do.
-
-### 6.2 Work in flight
-
+- **4, `seat()` on `parts()`** (`manager.ts` 2,713 to 2,698): the 20 entries `seat()` repeated are gone; it is its own entries
+  standing on the `parts()` object as prototype, typed so a missing one does not compile. `proposals` and `linkedReader`
+  stay its own (the seat reads them with a wider type than `parts()` gives). A prototype, not `Object.assign`, which would
+  read the `proposals` getter once and keep the value; the small `stands` guard says the type without an assertion
+  (the assertion ceiling only goes down).
 - **The shared session core (#1654).** Its PRs 6–9 (PR 5 is in flight on its own branch) change `adapters/` and `adapters/core/` (the ledger, the decision
   order, events). The manager's process code (`switchTool`, `restartSession`, `sleepSession`, `handleSink`) and host
   tenure (`adoptKept`, the swap and dispose paths) read what those PRs reshape: `SessionHandle`, the sink, adopting a
