@@ -62,7 +62,7 @@ describe('which checks a workflow requires', () => {
     // tests' two shards beside `windows tests` (#1035), and the fail fast that cancels a manual run after verify (#1222)
     expect([...w.names].sort()).toEqual([
       'changes',
-      'content verify (macos-14)',
+      'content verify (macos-15)',
       'content verify (ubuntu-24.04)',
       'darwin-arm64',
       'e2e (chromium 1/5)',

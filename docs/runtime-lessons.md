@@ -1349,6 +1349,8 @@ Rule: rename the filled copy into place first, then `fchmod` it 0555 through a d
 list the top folder again and refuse anything unexpected.
 Guard: `verify/copy.rs` `a_filled_copy_is_placed_and_then_made_read_only_in_any_parent`; `verify/copy.rs`
 `something_added_to_the_top_folder_before_it_is_read_only_is_refused`.
+Since 2026-11-02 these guards run in CI only on macOS 15 (GitHub retired the macOS 14 images), where the macOS 14
+behavior may not reproduce, so they no longer prove this rule: a change to the copy needs a run on a macOS 14 machine.
 Platforms: macOS.
 
 **FI9. The downgrade floor rises only after a keeper served.**
@@ -1830,7 +1832,9 @@ table and ends every descendant and group of each recorded pid; the installed ap
 names (#349, AGENTS.md).
 
 **TE4. The oldest supported OS is the one that fails.** #445 merged with CI red and failed only on macOS 14 (FI8). Do
-not merge on red; keep the oldest supported macOS in CI.
+not merge on red; keep the oldest supported macOS in CI. Since 2026-11-02, when GitHub retired the macOS 14
+images, CI's oldest macOS is 15: the behavior FI8 describes is no longer run by any job, so a change near it needs a
+manual run on a macOS 14 machine.
 
 **TE5. Wall-clock waits fail under load.** #368 collects them; Windows needed 3× limits, a process stops answering
 `kill(pid, 0)` before it releases its working directory, and probes outlive the host and write into the workspace

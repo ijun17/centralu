@@ -50,6 +50,7 @@
       "resources/host/**/*"
     ],
     "macOS": {
+      "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
     }
   }

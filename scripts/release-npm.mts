@@ -41,6 +41,8 @@ import { resolveAppVersion } from './app-version.mjs'
 import { holdStamp } from './stamp-version.mjs'
 // @ts-expect-error — plain .mjs, as above
 import { verifyThenStamp } from './release-verify.mjs'
+// @ts-expect-error — plain .mjs, as above
+import { minosProblems, SUPPORTED_MACOS } from './macos-minos.mjs'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
@@ -671,7 +673,15 @@ if (target && ARCH_PKG) {
   step('Verifying the bundle')
   target.check(dest)
 
-  if (target.stagesShell) await stageShellAndContent(target.id, dest)
+  if (target.stagesShell) {
+    await stageShellAndContent(target.id, dest)
+    // After the staging, so the keeper copy in the content folder and the shell are in what is read: every Mach-O file
+    // the package ships, against the macOS the app supports (a build of the bundle alone is checked in build.yml)
+    step('Checking the oldest macOS the package runs on')
+    const problems = (minosProblems as (dir: string) => string[])(dest)
+    if (problems.length) fail(`the package would not open on macOS ${SUPPORTED_MACOS as string}:\n  ${problems.join('\n  ')}`)
+    console.log(`  every Mach-O file in the package asks for macOS ${SUPPORTED_MACOS as string} or older`)
+  }
 
   if (HOST_PKG) {
     // From `src-tauri/resources/host`, which the build's `beforeBuildCommand` has just written: the
