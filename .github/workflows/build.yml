@@ -1040,7 +1040,8 @@ jobs:
         env:
           # Never the real data folder, on any OS (AGENTS.md)
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
-        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher-
+        # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto
+        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher- tooling/key-pairing-vector
 
   host-tests-remote-node-skipped:
     name: host tests, remote Node (${{ matrix.runner }})

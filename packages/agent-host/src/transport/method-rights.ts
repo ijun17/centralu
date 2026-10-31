@@ -369,7 +369,12 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'host.send': 'link',
   /** What `kill` does anyway; `centralu serve --stop` asks for it */
   'host.stop': 'everyday',
-  'host.handover': 'link',
+  /**
+   * A sign-in's serve saying it waits to take over, or gave up (#1224): a note of a fixed shape (a state and a time, no
+   * text) on the machine's row, which moves and stops nothing (#1711, docs/plans/key-pairing.md §4.4). Everyday, so the
+   * launcher says it with the limited credential and no full one crosses a port for it; `host.stop` does far more
+   */
+  'host.handover': 'everyday',
   'host.hubOffer': 'link',
 
   // The window's own state, preferences, themes and approval rules

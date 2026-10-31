@@ -1,11 +1,17 @@
 /** The file of full credentials used on a `centralu serve` host (#1712), on the in-memory OS of each family */
 import { describe, expect, it } from 'vitest'
-import { credentialCheck, credentialsReport, encodeUsedRecord, parseUsedRecords, UsedCredentials, usedEvent, verifierOf, WITHDRAWN_KEPT_MS, type FullCredential, type UsedRecord } from './serve-credentials.js'
+import { generateKeyPairSync } from 'node:crypto'
+import { credentialCheck, credentialsReport, encodeUsedRecord, parseUsedRecords, UsedCredentials, usedEvent, verifierOf, WITHDRAWN_KEPT_MS, type FullCredential, type KeyCredential, type UsedRecord } from './serve-credentials.js'
+import { linkPublicKeyOf } from '../transport/link-keys.js'
 import { UsedCredentialsFile, usedCredentialsPath } from './used-credentials-file.js'
 import type { Os } from '../os/port.js'
 import { memoryOs } from '../os/memory.js'
 
 const c = (id: string, label: string, o: Partial<FullCredential> = {}): FullCredential => ({ id, label, verifier: verifierOf(id), created: 1, replaced: false, ...o })
+/** A hub's public key, as slice 4's key file will hold one (#1711) */
+const hubKey = (): string => linkPublicKeyOf(generateKeyPairSync('ed25519').privateKey)!.text
+/** A hub's key entry (#1711): the public key where a full credential has a verifier */
+const k = (id: string, label: string, publicKey: string, o: Partial<KeyCredential> = {}): KeyCredential => ({ id, label, publicKey, created: 1, replaced: false, ...o })
 /** The n-th id, in order */
 const idOf = (n: number): string => n.toString(16).padStart(8, '0')
 const recordOf = (n: number, o: Partial<UsedRecord> = {}): UsedRecord => ({ id: idOf(n), verifier: verifierOf(idOf(n)), label: 'x', created: n, replaced: false, ...o })
@@ -55,7 +61,7 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
       return {
         used,
         store,
-        hello: (cred: FullCredential) => {
+        hello: (cred: FullCredential | KeyCredential) => {
           const first = used.saw(cred)
           if (first) store.add(first)
           return first
@@ -445,6 +451,136 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     const report = credentialsReport(f.serveState, () => named, h.used, undefined, (l) => h.store.settle(l, Date.now() + 365 * 24 * 60 * 60 * 1000))
     expect(report.usedIds).toEqual([idOf(1)])
     expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain('goneAt')
+  })
+  /*
+   * #1711 (decided with the #1717 review): a hub's key entry is a record of its own kind. Its secret is public, so the
+   * record holds the public key where a full credential's holds the verifier, and nothing in it is a verifier
+   */
+  it('records a key entry under its public key, writes the key and no verifier, and reports it as gone after a restart with the key and no check', () => {
+    const f = folder()
+    const key = hubKey()
+    const first = f.host().hello(k('aaaaaaaa', 'hub:test-0123abcd', key))
+    expect(first).toEqual({ id: 'aaaaaaaa', publicKey: key, label: 'hub:test-0123abcd', created: 1, replaced: false })
+    const text = f.os.files.readFileSync(f.file, 'utf8')
+    expect(text).toContain(key)
+    expect(text).not.toContain('verifier')
+    const again = f.host()
+    const empty = () => JSON.stringify({ v: 2, key: 'k', full: [] })
+    const report = credentialsReport(f.serveState, empty, again.used, 'bm9uY2Vub25jZQ')
+    expect(report.credentials).toEqual([{ id: 'aaaaaaaa', label: 'hub:test-0123abcd', created: 1, replaced: false, gone: true, publicKey: key }])
+    expect(report.usedUnderHubLabels).toEqual([{ id: 'aaaaaaaa', label: 'hub:test-0123abcd', created: 1, publicKey: key }])
+    expect(report.usedIds).toEqual(['aaaaaaaa'])
+  })
+
+  it('keeps an id reused under another key apart, and a verifier entry of the same id apart from a key entry', () => {
+    const f = folder()
+    const [one, two] = [hubKey(), hubKey()]
+    const h = f.host()
+    expect(h.hello(k('aaaaaaaa', 'hub:a', one))).not.toBeNull()
+    expect(h.hello(k('aaaaaaaa', 'hub:a', one))).toBeNull()
+    expect(h.hello(k('aaaaaaaa', 'hub:a', two))).not.toBeNull()
+    expect(h.hello(c('aaaaaaaa', 'hub:a'))).not.toBeNull()
+    // Three records of one id, in memory and in the file
+    expect(h.used.records().map((r) => r.publicKey ?? 'verifier')).toEqual([one, two, 'verifier'])
+    expect(f.host().used.records().map((r) => r.publicKey ?? 'verifier')).toEqual([one, two, 'verifier'])
+  })
+
+  // M1 of the #1717 review: whatever the file said of the entry, a full hello under it is recorded
+  it('records a key entry that carries the via of the launcher one-call credential, which only a verifier entry is spared', () => {
+    const f = folder()
+    const h = f.host()
+    expect(h.hello({ ...k('aaaaaaaa', 'hub:a', hubKey()), via: 'handover' })).not.toBeNull()
+    expect(h.used.gone([]).map((g) => g.id)).toEqual(['aaaaaaaa'])
+    expect(f.host().used.gone([]).map((g) => g.id)).toEqual(['aaaaaaaa'])
+  })
+
+  // #1717 recheck, F2: the restore of a key record. Skipped, the first note stays and the second withdrawal is judged by its date
+  it('forgets the note of a key record that serve.json names again, so a later withdrawal starts a new week and is reported, also after a restart', () => {
+    const f = folder()
+    const key = hubKey()
+    const h = f.host()
+    h.hello(k('aaaaaaaa', 'hub:a', key))
+    const day = 24 * 60 * 60 * 1000
+    const t0 = Date.UTC(2026, 5, 1)
+    const named = [{ id: 'aaaaaaaa', publicKey: key }]
+    // Withdrawn at t0, then named again (a restored serve.json) three days after
+    h.store.settle([], t0)
+    h.store.settle(named, t0 + 3 * day)
+    // Withdrawn again after the first note is older than a week: a new week, not the old one
+    h.store.settle([], t0 + 9 * day)
+    expect(h.used.ids()).toEqual(['aaaaaaaa'])
+    expect(h.used.gone([]).map((g) => g.publicKey)).toEqual([key])
+    expect(f.os.files.readFileSync(f.file, 'utf8')).toContain(`"goneAt":${t0 + 9 * day}`)
+    // The week of the new note, from the file
+    const restarted = f.host()
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS - 1)
+    expect(restarted.used.ids()).toEqual(['aaaaaaaa'])
+    restarted.store.settle([], t0 + 9 * day + WITHDRAWN_KEPT_MS)
+    expect(restarted.used.ids()).toEqual([])
+    // A restart between the restore and the second withdrawal does not bring the first note back
+    const g = folder()
+    const first = g.host()
+    first.hello(k('aaaaaaaa', 'hub:a', key))
+    first.store.settle([], t0)
+    first.store.settle(named, t0 + 3 * day)
+    const second = g.host()
+    expect(second.used.records()).toEqual([{ id: 'aaaaaaaa', publicKey: key, label: 'hub:a', created: 1, replaced: false }])
+    second.store.settle([], t0 + 9 * day)
+    expect(second.used.ids()).toEqual(['aaaaaaaa'])
+  })
+
+  it('settles a key record by id and public key: the same id under another key does not keep it named, and withdrawn it is noted and expires', () => {
+    const f = folder()
+    const [one, two] = [hubKey(), hubKey()]
+    const h = f.host()
+    h.hello(k('aaaaaaaa', 'hub:a', one))
+    const t0 = Date.UTC(2026, 5, 1)
+    h.store.settle([{ id: 'aaaaaaaa', publicKey: one }], t0)
+    expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain('goneAt')
+    // The entry was rewritten under another key with the same id: the first key's record is withdrawn
+    h.store.settle([{ id: 'aaaaaaaa', publicKey: two }], t0)
+    expect(f.os.files.readFileSync(f.file, 'utf8')).toContain(`"goneAt":${t0}`)
+    expect(h.used.gone([{ id: 'aaaaaaaa', publicKey: two }]).map((g) => g.publicKey)).toEqual([one])
+    // Named again under its key: the note is forgotten
+    h.store.settle([{ id: 'aaaaaaaa', publicKey: one }], t0 + 1000)
+    expect(h.used.gone([{ id: 'aaaaaaaa', publicKey: one }])).toEqual([])
+    // Withdrawn for good, it is dropped a week after
+    h.store.settle([], t0 + 2000)
+    h.store.settle([], t0 + 2000 + WITHDRAWN_KEPT_MS)
+    expect(h.used.ids()).toEqual([])
+  })
+})
+
+describe('a key record in the file (#1711)', () => {
+  const key = hubKey()
+  const verifier = verifierOf('a')
+
+  it('round-trips both shapes, a verifier record and a key record, and skips a line with both secrets, with neither, or with a refused key', () => {
+    const records: UsedRecord[] = [
+      { id: 'aaaaaaaa', verifier, label: 'x', created: 1, replaced: false },
+      { id: 'bbbbbbbb', publicKey: key, label: 'hub:y', created: 2, replaced: true, goneAt: 9 },
+    ]
+    expect(parseUsedRecords(records.map(encodeUsedRecord).join(''))).toEqual(records)
+    expect(encodeUsedRecord(records[1]!)).not.toContain('verifier')
+    expect(encodeUsedRecord(records[0]!)).not.toContain('publicKey')
+    const identity = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString('base64url')
+    const base = { v: 1, id: 'cccccccc', label: 'x', created: 1, replaced: false }
+    const lines = [
+      { ...base, verifier, publicKey: key },
+      base,
+      { ...base, publicKey: identity },
+      { ...base, publicKey: 'short' },
+      { ...base, verifier: 'not hex' },
+      { ...base, publicKey: key },
+    ].map((l) => JSON.stringify(l))
+    expect(parseUsedRecords(lines.join('\n')).map((r) => r.publicKey)).toEqual([key])
+  })
+
+  it('is told to the hubs with the public key and no nonce or check, which a hub compares with its own key', () => {
+    const e = usedEvent({ id: 'aaaaaaaa', publicKey: key, label: 'hub:y', created: 5, replaced: false })
+    expect(e).toEqual({ type: 'host_credential_used', credential: { id: 'aaaaaaaa', label: 'hub:y', created: 5, replaced: false, publicKey: key } })
+    expect(Object.keys(e.credential)).not.toContain('check')
+    expect(Object.keys(e.credential)).not.toContain('nonce')
   })
 })
 

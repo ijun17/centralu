@@ -11,6 +11,8 @@ import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/ins
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
 import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, credentialCheck, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
+import { createHmac, generateKeyPairSync, type KeyObject } from 'node:crypto'
+import { hostLinkKey, LINK_AUTH_MARKER, linkAddress, linkPublicKeyOf, linkTranscript, parseLinkPublicKey, signLink, verifyLink } from '../packages/agent-host/src/transport/link-keys.js'
 import {
   connectionLine,
   decodeChildSpec,
@@ -798,6 +800,43 @@ async function hello(port: number, token: string): Promise<Record<string, unknow
   }
 }
 
+/**
+ * A hub's key link to the host on `port` (#1711, docs/plans/key-pairing.md §4.3), played with the host's own primitives:
+ * its prove, the transcript, the hello with the marker and its signature. `first` is the frame that answered the hello
+ * (or how the socket closed); `call` asks the host something on that socket
+ */
+async function keyLink(port: number, hubPrivate: KeyObject, hub: string, keyId: string) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  const nonce = Buffer.alloc(24, 7).toString('base64url')
+  const waiting = new Map<string, (f: Record<string, any>) => void>()
+  let resolveClosed: (code: number) => void = () => {}
+  const closed = new Promise<number>((r) => (resolveClosed = r))
+  const first = await new Promise<string>((resolve) => {
+    ws.onopen = () => ws.send(JSON.stringify({ kind: 'prove', nonce, key: keyId }))
+    ws.onmessage = (ev) => {
+      const f = JSON.parse(String(ev.data)) as Record<string, any>
+      if (f.kind === 'proof') {
+        const t = linkTranscript({ hubNonce: nonce, hostNonce: f.hostNonce, hostKey: f.hostKey, hubKey: hub, keyId, address: linkAddress(port)! })
+        if (!t || !verifyLink('host', parseLinkPublicKey(f.hostKey)!, t, f.sig)) return resolve('host did not sign')
+        ws.send(JSON.stringify({ kind: 'hello', token: LINK_AUTH_MARKER, protocolVersion: PROTOCOL_VERSION, auth: { key: keyId, sig: signLink('hub', hubPrivate, t) } }))
+      } else if (f.kind === 'res' && typeof f.id === 'string') waiting.get(f.id)?.(f)
+      else resolve(String(f.kind))
+    }
+    ws.onclose = (ev) => {
+      resolveClosed(ev.code)
+      resolve(`closed ${ev.code}`)
+    }
+  })
+  let n = 0
+  const call = (method: string) =>
+    new Promise<unknown>((resolve, reject) => {
+      const id = `k${++n}`
+      waiting.set(id, (f) => (f.ok ? resolve(f.result) : reject(new Error(String(f.error?.message)))))
+      ws.send(JSON.stringify({ kind: 'rpc', id, method, params: {} }))
+    })
+  return { first, call, closed, close: () => ws.close() }
+}
+
 /** One call to the host after a hello with `token`, its result, or the error it answered */
 async function askHost(port: number, token: string, method: string, params: unknown = {}): Promise<unknown> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
@@ -1076,6 +1115,57 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       }
     },
     120_000 * SLOW,
+  )
+
+  /*
+   * #1711 slice 3, against a real host: `--pair-key` reports the key the running host signs with, the hub's key
+   * handshake makes the socket full, `host.credentials` lists the key entry with its public key (main.ts hands the key
+   * hello to `UsedCredentials` too), and `--rotate-token` closes that socket while the next `--pair-key` reports the key
+   * the running host still signs with, so the hub links again at once (§7)
+   */
+  it(
+    'pairs a hub by key with a running host, lists the entry, and links again at once after --rotate-token',
+    async () => {
+      const d = tempDir()
+      const port = await freePort()
+      const s = serve(d, ['--port', String(port)])
+      await s.until(/listening on 127\.0\.0\.1:\d+/)
+      // The key the host started with, which it signs with and hands out until it restarts
+      const startKey = String(readServeState(d).key)
+      try {
+        const hubPair = generateKeyPairSync('ed25519')
+        const hub = linkPublicKeyOf(hubPair.privateKey)!.text
+        const first = (await cli(d, ['--connection', '--pair-key', 'hub:test-0123abcd', hub])).line
+        expect(first).toMatchObject({ hostKey: hostLinkKey(startKey).publicKey.text, keyId: expect.stringMatching(/^[0-9a-f]{8}$/), hostRunning: true, takes: expect.arrayContaining(['pairKey']) })
+        expect(first.token).toBeUndefined()
+        const linked = await keyLink(port, hubPair.privateKey, hub, String(first.keyId))
+        expect(linked.first).toBe('hello_ok')
+        const r = (await linked.call('host.credentials')) as Record<string, any>
+        expect(r.credentials).toEqual([expect.objectContaining({ id: first.keyId, label: 'hub:test-0123abcd', publicKey: hub })])
+        expect(r.usedUnderHubLabels).toEqual([expect.objectContaining({ id: first.keyId, publicKey: hub })])
+        // A same-user reader of the file gets the key, the limited credential and the hub's public key: none is a hub's hello
+        for (const v of [startKey, hub, String(first.keyId), limitedOf(startKey)]) {
+          const got = await hello(port, v).then((f) => String(f.kind), (e: Error) => e.message)
+          if (v === limitedOf(startKey)) expect(got).toBe('hello_ok')
+          else expect(got, v).toMatch(/closed 4001/)
+        }
+        // --rotate-token prints no line on stdout, only what it did on stderr
+        expect(await new Promise((r) => spawn(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d), stdio: 'ignore' }).once('close', r))).toBe(0)
+        expect(await linked.closed).toBe(4001)
+        const again = (await cli(d, ['--connection', '--pair-key', 'hub:test-0123abcd', hub])).line
+        expect(again.hostKey).toBe(hostLinkKey(startKey).publicKey.text)
+        expect(again.keyId).not.toBe(first.keyId)
+        const relinked = await keyLink(port, hubPair.privateKey, hub, String(again.keyId))
+        expect(relinked.first).toBe('hello_ok')
+        relinked.close()
+      } finally {
+        // The host still runs on the key it started with, which --stop no longer has after the rotation (§7)
+        if (POSIX) s.child.kill('SIGTERM')
+        else await askHost(port, limitedOf(startKey), 'host.stop').catch(() => undefined)
+        await s.exited
+      }
+    },
+    90_000 * SLOW,
   )
 
   // Windows cannot send a Ctrl+C to one process from Node (the console delivers it to the whole group), and serve
@@ -1513,6 +1603,60 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     } finally {
       await h.server.close()
     }
+  })
+
+  /*
+   * #1711 §4.4 (H2 of the #1714 review): the hand-over note used to be said with a full credential made for the call,
+   * sent to whatever answered the proof under serve.json's key. A squatter with the file answers that proof now as then,
+   * and receives only the limited credential, which the file gives it anyway; serve.json's full credentials never change
+   */
+  it('says the hand-over with the limited credential: a squatter on the port gets nothing the file does not hold', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    pairServe(d, 'hub:test')
+    const port = await freePort()
+    recordServePort(d, port)
+    const state = readServeState(d)!
+    const before = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
+    const { WebSocketServer } = createRequire(join(ROOT, 'packages/agent-host/package.json'))('ws') as {
+      WebSocketServer: new (o: { port: number; host: string }) => { on(e: string, f: (...a: any[]) => void): void; once(e: string, f: () => void): void; close(f: () => void): void }
+    }
+    const wss = new WebSocketServer({ port, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    const tokens: string[] = []
+    // It holds the file: it answers the proof under the key, then takes whatever hello comes
+    wss.on('connection', (ws: any) =>
+      ws.on('message', (raw: unknown) => {
+        const f = JSON.parse(String(raw)) as { kind: string; nonce?: string; token?: string; id?: string }
+        if (f.kind === 'prove') ws.send(JSON.stringify({ kind: 'proof', nonce: f.nonce, mac: createHmac('sha256', String(state.key)).update(`centralu host proof v1\0${f.nonce}`).digest('base64url') }))
+        else if (f.kind === 'hello') {
+          tokens.push(String(f.token))
+          ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0 }))
+          // Answered at once, so each note does not wait out the launcher's 5 s for an answer
+        } else if (f.kind === 'rpc') ws.send(JSON.stringify({ kind: 'res', id: f.id, ok: true, result: { ok: true } }))
+      }),
+    )
+    const files: string[] = []
+    try {
+      const moved = await moveIntoSignIn({
+        dataDir: d,
+        entry: SOURCE_HOST,
+        env: {},
+        existing: { running: true, logon: 'network', protocolVersion: PROTOCOL_VERSION },
+        platform: 'win32',
+        logonOf: async () => 'interactive',
+        stop: async () => (files.push(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')), { ok: false, busy: true }),
+        pollMs: 10,
+        maxWaitMs: 0,
+      })
+      expect(moved).toBe(false)
+    } finally {
+      await new Promise<void>((r) => wss.close(() => r()))
+    }
+    // The waiting note and the gave-up one, each said with the limited credential and nothing else
+    expect(tokens.filter((t) => t !== state.token)).toEqual([])
+    expect(tokens.length).toBeGreaterThanOrEqual(2)
+    expect([...files, readFileSync(join(d, SERVE_STATE_FILE), 'utf8')].every((f) => f === before)).toBe(true)
   })
 
   it('moves nothing that is not a network logon, nor from a serve that is not in the sign-in itself, nor off Windows', async () => {

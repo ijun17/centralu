@@ -21,7 +21,9 @@ import { isLimitedToken } from './limited-token.js'
 import { conditionalRight, limitedRefusal, type RightsHost } from './method-rights.js'
 import { sessionOfToken } from './session-token.js'
 import { credentialProof, hostProof } from './host-proof.js'
-import { isFullCredential, type CredentialsRead, type FullCredential } from '../lifecycle/serve-credentials.js'
+import { isFullCredential, isHandoverCredential, type CredentialsRead, type FullCredential, type KeyCredential } from '../lifecycle/serve-credentials.js'
+import { LINK_AUTH_MARKER } from './link-keys.js'
+import { answerKeyProve, HostSigningKey, linkAddressOf, verifyKeyHello, type KeyProve } from './link-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -115,12 +117,17 @@ export type HostServerOptions = {
    */
   credentialSweepMs?: number
   /**
-   * A hello with one of the full credentials `fullCredentials` names is about to be let in (#1405 review,
-   * `UsedCredentials`; #1712). Called before the socket has any rights, once the hello is whole (a refused one is not
-   * reported), and never waited on beyond the call itself: it must write down what it keeps and tell the hubs without
-   * waiting for them (`tellHubs`). A throw is said and the hello goes on
+   * A hello with one of the full credentials `fullCredentials` names, or under one of its key entries (#1711), is about to
+   * be let in (#1405 review, `UsedCredentials`; #1712). Called before the socket has any rights, once the hello is whole
+   * (a refused one is not reported), and never waited on beyond the call itself: it must write down what it keeps and
+   * tell the hubs without waiting for them (`tellHubs`). A throw is said and the hello goes on
    */
-  onFullHello?: (credential: FullCredential) => void
+  onFullHello?: (credential: FullCredential | KeyCredential) => void
+  /**
+   * The front door's address when a keeper runs this host (`CC_FRONT_DOOR`, #1711): what a key `prove` signs, since the
+   * socket then comes from the door's relay on the inner port. Absent: the socket's own local address
+   */
+  frontDoor?: string
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
@@ -278,9 +285,11 @@ export class HostServer {
    * The sockets in with one of a `centralu serve` host's full credentials, by that credential's id (#1405 review):
    * closed once it is no longer listed (`sweepWithdrawn`)
    */
-  private fullBy = new Map<WebSocket, string>()
+  private fullBy = new Map<WebSocket, { id: string; publicKey?: string }>()
   /** Those of them paired by a hub (a `hub:` label), which `tellHubs` reaches (#1712) */
   private hubLinks = new Set<WebSocket>()
+  /** What a key `prove` signs with (#1711): derived from the token, a serve host's key, at the first one */
+  private readonly signing: HostSigningKey
   private sweepTimer: ReturnType<typeof setInterval> | undefined
   /** The sockets in `clients` by their `RpcContext.client`, for a call to one of them (`call`, #550) */
   private byClient = new Map<number, WebSocket>()
@@ -326,6 +335,7 @@ export class HostServer {
      * rule.
      */
     if (!opts.token.trim()) throw rpcError('Host token must not be empty')
+    this.signing = new HostSigningKey(opts.token)
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
     const maxBufferedBytes = opts.maxBufferedBytes ?? TRANSPORT_LIMITS.maxBufferedBytes
     this.limits = {
@@ -578,8 +588,15 @@ export class HostServer {
    * peer sees 4001 "credential withdrawn": a hub reads its connection line again and pairs anew
    */
   private sweepWithdrawn(read: CredentialsRead): void {
-    for (const [ws, id] of this.fullBy) {
-      if (read.open.some((c) => c.id === id)) continue
+    for (const [ws, held] of this.fullBy) {
+      /*
+       * A socket in under a key entry stays while an entry with its id **and** its public key is listed (#1711, §4.4): an
+       * entry that reuses the id under another key does not keep it full
+       */
+      const still = held.publicKey === undefined
+        ? read.open.some((c) => c.id === held.id)
+        : (read.openKeys ?? []).some((k) => k.id === held.id && k.publicKey === held.publicKey)
+      if (still) continue
       this.fullBy.delete(ws)
       this.hubLinks.delete(ws)
       /*
@@ -595,7 +612,7 @@ export class HostServer {
     const r = this.opts.fullCredentials?.()
     if (!r) return null
     if ('unreadable' in r) return r
-    return { full: [...r], open: [...r], unreadable: null }
+    return { full: [...r], open: [...r], unreadable: null, keys: [], openKeys: [] }
   }
 
   private refuse(ws: WebSocket, code: number, reason: string): void {
@@ -617,6 +634,8 @@ export class HostServer {
     const leaving = new AbortController()
     /** Whether this socket already asked for the host's proof (`prove`, #838): once, before hello */
     let proved = false
+    /** What a key `prove` left for this socket's hello (#1711): dropped at its first hello attempt, whatever the outcome */
+    let keyProve: KeyProve | null = null
     const client = ++this.lastClient
     // A socket that never says hello is closed, not kept forever (#82). Its slot is given back when it is gone ('close' below), not before
     this.handshakeTimers.set(
@@ -673,8 +692,28 @@ export class HostServer {
         proved = true
         // A hub that paired names its credential (#1405): the proof is under that credential's verifier
         const ask = frame.data
+        const read = this.credentialRead()
+        /*
+         * A hub that paired by key names its key entry (#1711, docs/plans/key-pairing.md §4.3): this host signs the
+         * transcript with a nonce of its own for this socket. A serve host only: another holds no key entries, and
+         * answers as an older host does
+         */
+        if (ask.key !== undefined && read) {
+          const answer = answerKeyProve({
+            signing: this.signing,
+            nonce: ask.nonce,
+            keyId: ask.key,
+            entry: (read.openKeys ?? []).find((k) => k.id === ask.key),
+            address: linkAddressOf(this.opts.frontDoor, req.socket.localAddress, req.socket.localPort),
+          })
+          // Malformed: no answer at all, never the proof under the key (§9). No entry: as for a verifier entry gone, the hub pairs anew
+          if ('refused' in answer) return this.refuse(ws, CLOSE_AUTH, answer.refused === 'withdrawn' ? 'credential withdrawn' : 'not a hello')
+          keyProve = answer.pending
+          this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac: hostProof(this.opts.token, ask.nonce), ...answer.fields }))
+          return
+        }
         // From what a socket in may keep: a proof lets nothing in, and the hello after it says why it is refused
-        const named = ask.credential ? this.credentialRead()?.open.find((c) => c.id === ask.credential) : undefined
+        const named = ask.credential ? read?.open.find((c) => c.id === ask.credential) : undefined
         const mac = named ? credentialProof(named.verifier, ask.nonce) : hostProof(this.opts.token, ask.nonce)
         this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac }))
         return
@@ -687,15 +726,32 @@ export class HostServer {
          * delivered seq 2 twice — and the client has no way to tell a repeat from new work.
          */
         if (authed) return
+        // What a key `prove` left is used by this hello or by none (#1711, §9 item 4): a failed hello is not followed by another on the same nonces
+        const proven = keyProve
+        keyProve = null
         // Full: the token, or for a `centralu serve` host one of the full credentials serve.json names (#1405)
         const listed = this.credentialRead()
-        const match = listed ? isFullCredential(listed.full, frame.data.token) : null
-        const full = listed ? match !== null : sameSecret(frame.data.token, this.opts.token)
+        /*
+         * A key hello (#1711, §4.3): the token is the fixed marker, and it is full only under the key entry its `prove`
+         * named, with the hub's signature over the transcript that `prove` began. The marker with anything less is
+         * refused, neither full nor limited. An `auth` beside any other token is ignored: it never upgrades a limited or a
+         * verifier hello (§9 item 3)
+         */
+        const byKey = frame.data.token === LINK_AUTH_MARKER
+        const keyMatch = byKey && listed ? verifyKeyHello({ signing: this.signing, pending: proven, auth: frame.data.auth, keys: listed.keys ?? [] }) : null
+        const match = listed && !byKey ? isFullCredential(listed.full, frame.data.token) : null
+        const full = byKey ? keyMatch !== null : listed ? match !== null : sameSecret(frame.data.token, this.opts.token)
         // Read now anyway: a socket already in with a credential this read no longer names goes (`sweepWithdrawn`)
         if (listed) this.sweepWithdrawn(listed)
+        if (byKey && !full) return this.refuse(ws, CLOSE_AUTH, listed?.unreadable ? CREDENTIAL_FILE_UNREADABLE : 'bad token')
         if (!full) {
           // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
           limited = isLimitedToken(this.opts.token, frame.data.token)
+          /*
+           * So does an older launcher's one-call hand-over credential (#1711, §4.4): `host.handover` is everyday now, and
+           * such a credential went to whatever answered the proof under the key
+           */
+          if (!limited && listed) limited = isHandoverCredential(listed.full, frame.data.token) !== null
           // A session's processes hold a credential with the same rights, naming the session (session-token.ts)
           if (!limited) {
             const of = sessionOfToken(this.opts.token, frame.data.token)
@@ -730,9 +786,10 @@ export class HostServer {
          * A full credential is written down BEFORE the socket gets its rights (#1712): once `authed` is set below nothing
          * of this hello can be undone by a stop of the host
          */
-        if (match) {
+        const entered = match ?? keyMatch
+        if (entered) {
           try {
-            this.opts.onFullHello?.(match)
+            this.opts.onFullHello?.(entered)
           } catch (e) {
             console.error(`[agent-host] a full hello could not be recorded: ${e instanceof Error ? e.message : String(e)}`)
           }
@@ -753,8 +810,12 @@ export class HostServer {
         this.clients.add(ws)
         this.byClient.set(client, ws)
         if (match) {
-          this.fullBy.set(ws, match.id)
+          this.fullBy.set(ws, { id: match.id })
           if (match.label.startsWith('hub:')) this.hubLinks.add(ws)
+        }
+        if (keyMatch) {
+          this.fullBy.set(ws, { id: keyMatch.id, publicKey: keyMatch.publicKey })
+          if (keyMatch.label.startsWith('hub:')) this.hubLinks.add(ws)
         }
         label = frame.data.client?.trim().slice(0, 60) || null
         if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {

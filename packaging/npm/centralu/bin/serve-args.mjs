@@ -1,5 +1,6 @@
 /** The arguments after `centralu serve`, and its help */
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
+import { parseLinkPublicKey } from './serve-keys.mjs'
 
 export const SERVE_HELP = `centralu serve: run the Centralu host on this machine, without a window
 
@@ -83,6 +84,8 @@ export function parseServeArgs(argv) {
   let autostart = null
   let from = null
   let pair = null
+  let pairKey = null
+  let keyPaired = false
   let revoke = null
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -90,6 +93,19 @@ export function parseServeArgs(argv) {
       const raw = a === '--pair' ? argv[++i] : a.slice('--pair='.length)
       if (typeof raw !== 'string' || !PAIR_LABEL_RE.test(raw)) return { error: `--pair needs a label: letters, digits, ':', '.', '_' and '-' (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
       pair = raw
+    } else if (a === '--pair-key') {
+      /*
+       * `--pair-key <label> <public key>` (#1711, docs/plans/key-pairing.md §4.2): a hub's key pairing, at each link in
+       * place of `--pair`. The key is checked as the host checks it (§4.1): a refused one writes nothing
+       */
+      const label = argv[++i]
+      const publicKey = argv[++i]
+      if (typeof label !== 'string' || !PAIR_LABEL_RE.test(label)) return { error: `--pair-key needs a label: letters, digits, ':', '.', '_' and '-' (got ${label === undefined ? 'nothing' : JSON.stringify(label)})` }
+      if (!parseLinkPublicKey(publicKey)) return { error: `--pair-key needs an Ed25519 public key after the label, as 43 characters of base64url (got ${publicKey === undefined ? 'nothing' : JSON.stringify(String(publicKey).slice(0, 64))})` }
+      pairKey = { label, publicKey }
+    } else if (a === '--key-paired') {
+      // The hub has paired by key with this machine before (#1711, §4.2): a key line removes the label's verifier entry
+      keyPaired = true
     } else if (a === '--revoke' || a.startsWith('--revoke=')) {
       const raw = a === '--revoke' ? argv[++i] : a.slice('--revoke='.length)
       if (typeof raw !== 'string' || !CREDENTIAL_ID_RE.test(raw)) return { error: `--revoke needs a credential's id, as --connection lists it (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
@@ -121,6 +137,9 @@ export function parseServeArgs(argv) {
   }
   if (help) return { mode: 'help', port }
   if (pair !== null && mode !== 'connection') return { error: '--pair goes with --connection' }
+  if (pairKey !== null && mode !== 'connection') return { error: '--pair-key goes with --connection' }
+  if (pair !== null && pairKey !== null) return { error: '--pair and --pair-key are two ways of pairing; pass one' }
+  if (keyPaired && pairKey === null) return { error: '--key-paired goes with --pair-key' }
   if (mode === 'revoke') return port !== null ? { error: '--revoke takes no --port' } : { mode, port, revoke }
   if (from !== null && mode !== 'serve' && mode !== 'detach') return { error: `--from goes with \`centralu serve\` and --detach, which start a host; not with ${FLAG_OF[mode]}` }
   if (child !== null) {
@@ -136,7 +155,7 @@ export function parseServeArgs(argv) {
     if (port !== null) return { error: '--autostart takes no --port: the entry it writes starts serve on the port serve recorded' }
     return { mode, port, autostart }
   }
-  return { mode, port, ...(from !== null ? { from } : {}), ...(pair !== null ? { pair } : {}) }
+  return { mode, port, ...(from !== null ? { from } : {}), ...(pair !== null ? { pair } : {}), ...(pairKey !== null ? { pairKey, keyPaired } : {}) }
 }
 
 function parsePort(raw) {
