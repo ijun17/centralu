@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::front_door::FrontDoor;
+use super::server::log;
 use super::source::{BuildSource, Claim, Copies};
 use crate::host_proc::{self, parse_ready, Adopted, HostInfo, HostOut, NextLine, Supervisor};
 
@@ -357,10 +358,6 @@ fn retire_old(sup: &Supervisor, drain_wait: Duration, stop_wait: Duration) -> bo
     }
     log("swap: the old host is still running after it was killed");
     false
-}
-
-fn log(msg: &str) {
-    eprintln!("[keeper] {msg}");
 }
 
 /// Where a swap reads a host's lines from: the host's stdout (`HostOut`), or a list in tests.

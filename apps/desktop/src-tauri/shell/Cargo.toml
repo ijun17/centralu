@@ -31,6 +31,7 @@ libc = "0.2"
 
 # Signing test content in the unit tests, as scripts/content-manifest.mts does in a release.
 [dev-dependencies]
+centralu-keeper-core = { path = "../keeper", features = ["test-support"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 base64 = "0.22"

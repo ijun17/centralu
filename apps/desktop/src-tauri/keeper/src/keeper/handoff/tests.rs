@@ -3,26 +3,12 @@
 //! `scripts/keeper-handoff-integration.mjs` covers with two real keepers).
 
 use super::*;
+use crate::keeper::test_support::temp_dir;
 use std::io::{Read, Write};
 
 /// The test process as the host the child socket answers (#538): the tests connect from it.
 fn this_process() -> std::sync::Arc<dyn Fn() -> Option<u32> + Send + Sync> {
     std::sync::Arc::new(|| Some(std::process::id()))
-}
-
-struct Dir(PathBuf);
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn temp_dir(name: &str) -> Dir {
-    // Short: a unix socket path must fit in 104 bytes.
-    let d = PathBuf::from(format!("/tmp/cch-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    Dir(d)
 }
 
 fn send(s: &mut UnixStream, v: &Value) {

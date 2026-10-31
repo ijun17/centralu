@@ -1,26 +1,12 @@
 //! The child service against real processes and a real socket, the way a host uses it.
 
 use super::*;
+use crate::keeper::test_support::{temp_dir, TempDir as Dir};
 use std::io::{BufRead, BufReader};
 
 /// The test process as the host the child socket answers (#538): the tests connect from it.
 fn this_process() -> std::sync::Arc<dyn Fn() -> Option<u32> + Send + Sync> {
     std::sync::Arc::new(|| Some(std::process::id()))
-}
-
-struct Dir(PathBuf);
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn temp_dir(name: &str) -> Dir {
-    // Short: a unix socket path must fit in 104 bytes.
-    let d = PathBuf::from(format!("/tmp/cck-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    Dir(d)
 }
 
 /// A control connection, as a host holds one.

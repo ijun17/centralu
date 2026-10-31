@@ -574,6 +574,7 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keeper::test_support::temp_path as temp;
 
     /// #840 item 11: threads writing the same file at once each publish their own content whole.
     /// With one temporary name per process they truncated and wrote the same temporary file, and
@@ -613,13 +614,6 @@ mod tests {
         let (failures, torn) = (failures.load(std::sync::atomic::Ordering::SeqCst), torn.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!((failures, torn), (0, 0), "writes that failed, reads of a torn file");
         assert_eq!(left.len(), 1, "temporary files left behind: {left:?}");
-    }
-
-    fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("cc-keeper-src-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&p);
-        fs::create_dir_all(&p).unwrap();
-        p
     }
 
     fn fake_host(dir: &Path, commit: &str, built_at: &str) {
