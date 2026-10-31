@@ -339,6 +339,41 @@ describe('what the runtime keeps beside its private files', () => {
     expect(readdirSync(dataRoot)).toEqual(['app-busy.json', 'some-app'])
   })
 
+  it('the busy book still never throws when a scanner holds the temp file, so removing it fails too', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({
+      ...(await original<typeof import('node:fs')>()),
+      rmSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) },
+    }))
+    try {
+      const { BusyBook: Book } = await import('./busy-book.js')
+      const file = join(dataRoot, 'app-busy.json')
+      mkdirSync(join(file, 'inside'), { recursive: true })
+      expect(() => new Book(file).set('p1/notes', { projectId: 'p1', appId: 'notes', reason: 'merging', at: 1 })).not.toThrow()
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+
+  it('an app folder that cannot be read is refused by the OS code, never by the message that names the path', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({
+      ...(await original<typeof import('node:fs')>()),
+      readdirSync: () => { throw Object.assign(new Error("EACCES: permission denied, scandir '/elsewhere/secret-folder'"), { code: 'EACCES' }) },
+    }))
+    try {
+      const { IMPORT_LIMITS, stageLocal } = await import('./imports.js')
+      const src = join(dataRoot, 'src')
+      mkdirSync(src)
+      let said = ''
+      try { stageLocal(src, join(dataRoot, 'dest'), IMPORT_LIMITS) } catch (e) { said = (e as Error).message }
+      expect(said).toMatch(/^Could not read .*: EACCES$/)
+      expect(said).not.toContain('secret-folder')
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+
   it('the import marks say why the data folder could not be listed by its code, never by the message of an error that has none', async () => {
     vi.resetModules()
     vi.doMock('node:fs', async (original) => ({ ...(await original<typeof import('node:fs')>()), readdirSync: () => { throw new Error('cannot list /elsewhere/secret-folder') } }))

@@ -30,7 +30,11 @@ export class BusyBook {
       writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
       renameSync(tmp, this.file)
     } catch (e) {
-      rmSync(tmp, { force: true })
+      try {
+        rmSync(tmp, { force: true })
+      } catch {
+        // Held open by a scanner: the leftover is not worth failing `set()` for, and the next write replaces it
+      }
       console.error(`[apps] could not record which apps are busy in ${this.file}: ${(e as Error).message}`)
     }
   }
