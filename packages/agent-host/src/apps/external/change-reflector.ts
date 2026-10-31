@@ -90,7 +90,7 @@ export class ChangeReflector {
       this.host.rescanNow(ref)
       const after = this.host.find(ref)
       if (before && after && after !== before) {
-        if (before.life.stamp !== null) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
+        if (before.life.stamp !== null || replacedEarlier) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
         return
       }
       if (replacedEarlier && after && after.life.stamp === null) {
