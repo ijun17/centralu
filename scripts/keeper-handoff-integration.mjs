@@ -68,16 +68,14 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { buildKeeper, HOST_SRC, log, readyView, recordedOnce, started, STEPS, TARGET, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
 const BIN = join(TARGET, 'debug', 'centralu')
 const KEEPER_BIN = join(TARGET, 'debug', 'centralu-keeper')
 const argValue = (flag) => {
@@ -87,7 +85,6 @@ const argValue = (flag) => {
 const OLD_KEEPER = argValue('--old-keeper')
 /** `keeper::exe::EXIT_NOT_A_KEEPER`: `centralu --keeper` refusing (#461) */
 const EXIT_NOT_A_KEEPER = 64
-const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 const WITH_CLAUDE = !process.argv.includes('--no-claude')
 const WITH_CODEX = !process.argv.includes('--no-codex')
 const HOLD_MS = 1500
@@ -99,12 +96,9 @@ const HOLD_MS = 1500
 const CLEAN_HOLD_MS = 2000
 const COPY_HOLD_MS = 4000
 
-const started = new Set()
-const tempDirs = []
 const heldPids = new Set()
 let failures = 0
 
-const log = (msg) => process.stdout.write(`${msg}\n`)
 function check(cond, what, detail = '') {
   if (cond) log(`  ok   ${what}`)
   else {
@@ -207,27 +201,6 @@ function attachClient(sock, out) {
   return child
 }
 
-/** The host ready under a new pid, or undefined: at once if the keeper has given up on it */
-async function readyView(sock, notPid) {
-  let gaveUp = false
-  const view = await waitFor(async () => {
-    const v = await status(sock)
-    // Five failed starts take the keeper about 11 s; waiting out the minute after that only delays the report
-    if (v?.status?.state === 'failed') return (gaveUp = true)
-    return v?.status?.state === 'ready' && v.hostPid && v.hostPid !== notPid && v
-  }, 60_000, 250)
-  return gaveUp ? undefined : view
-}
-
-const transcript = async (host, id) => JSON.stringify(await host.call('messages.load', { sessionId: id, limit: 400 }))
-async function recordedOnce(host, id) {
-  const rows = await host.call('messages.load', { sessionId: id, limit: 400 })
-  const ids = (kind) => rows.filter((r) => r.kind === kind).map((r) => r.payload?.callId)
-  const calls = ids('tool_call')
-  const results = ids('tool_result')
-  const unique = (a) => new Set(a).size === a.length
-  return { ok: unique(calls) && unique(results) && calls.length === results.length && calls.length > 0, calls: calls.length, results: results.length }
-}
 /**
  * The turn really ended: the last step's tool result is recorded and an assistant reply says DONE.
  * (The prompt itself contains both words, so searching the whole transcript proves nothing.)
@@ -241,12 +214,6 @@ async function turnDone(host, id, n) {
     .join('')
   return lastStep && /DONE/.test(said)
 }
-const toolResults = (host, id) => host.events.filter((e) => e.type === 'tool_result' && e.sessionId === id).length
-
-const STEPS = (n) =>
-  `Run these ${n} shell commands one at a time, each as its own separate tool call, waiting for each to finish before starting the next: ` +
-  Array.from({ length: n }, (_, i) => `\`sleep 4; echo step${i + 1}\``).join(', ') +
-  '. Do not combine them. After the last one, reply with exactly DONE.'
 
 /** Numbers printed as `<tag> <n>` on their own lines, in order of appearance */
 function numbers(text, tag) {
@@ -555,14 +522,7 @@ const cleanup = once((threw) => {
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
-    log('bundling the host (pnpm bundle:host)')
-    execFileSync('pnpm', ['bundle:host'], { cwd: ROOT, stdio: 'inherit' })
-    log(`building the binary (cargo build, CARGO_TARGET_DIR=${TARGET})`)
-    const r = spawnSync('cargo', ['build', '--manifest-path', join(ROOT, 'apps/desktop/src-tauri/Cargo.toml')], {
-      stdio: 'inherit',
-      env: { ...process.env, CARGO_TARGET_DIR: TARGET },
-    })
-    if (r.status !== 0) throw new Error('cargo build failed')
+    buildKeeper()
   }
   if (!existsSync(BIN)) throw new Error(`no binary at ${BIN}`)
   if (!existsSync(KEEPER_BIN)) throw new Error(`no keeper executable at ${KEEPER_BIN}`)

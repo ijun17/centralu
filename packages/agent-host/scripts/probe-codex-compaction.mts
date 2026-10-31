@@ -14,19 +14,13 @@
  * Run with: node --import tsx packages/agent-host/scripts/probe-codex-compaction.mts
  * (two or three short model turns. PROBE_MODEL picks the model, default gpt-5.6-luna at low effort.)
  */
-import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { CLIENT_INFO } from '@cc/protocol'
-import { CodexClient } from '../src/adapters/codex/client.js'
+import { readFileSync } from 'node:fs'
+import type { CodexClient } from '../src/adapters/codex/client.js'
+import { openProbe, probeDir } from './codex-probe-kit.mjs'
 
 const model = process.env.PROBE_MODEL ?? 'gpt-5.6-luna'
-const cwd = mkdtempSync(join(tmpdir(), 'cc-codex-compact-'))
-execFileSync('git', ['init', '-q'], { cwd })
-const log = join(cwd, '..', `${cwd.split('/').pop()}.frames.jsonl`)
-const t0 = Date.now()
-const record = (dir: string, frame: unknown) => appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, dir, frame }) + '\n')
+const dir = probeDir('cc-codex-compact-', true)
+const { cwd, log, record } = dir
 
 type Frame = { method: string; params?: Record<string, unknown> }
 let waiter: { method: string; resolve: () => void } | null = null
@@ -39,32 +33,17 @@ const waitFor = (method: string, ms = 180_000) =>
     waiter = { method, resolve: () => (clearTimeout(timer), resolve()) }
   })
 
-function open(tag: string): CodexClient {
-  const client: CodexClient = new CodexClient(
-    {
-      onNotification: (n) => {
-        record(`${tag} notification`, n)
-        if (waiter && n.method === waiter.method) {
-          const w = waiter
-          waiter = null
-          w.resolve()
-        }
-      },
-      onServerRequest: (r) => {
-        record(`${tag} request`, r)
-        client.respond(r.id, { decision: 'accept' })
-      },
-      onExit: () => {},
+const open = (tag: string) =>
+  openProbe(dir, {
+    tag,
+    onNotification: (n) => {
+      if (waiter && n.method === waiter.method) {
+        const w = waiter
+        waiter = null
+        w.resolve()
+      }
     },
-    { cwd },
-  )
-  return client
-}
-
-async function init(client: CodexClient) {
-  await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
-  client.notify('initialized')
-}
+  })
 
 const say = async (client: CodexClient, threadId: string, text: string) => {
   const done = waitFor('turn/completed')
@@ -73,8 +52,7 @@ const say = async (client: CodexClient, threadId: string, text: string) => {
 }
 
 // 1. A manual compaction
-const a = open('A')
-await init(a)
+const { client: a } = await open('A')
 const started = await a.request<{ thread?: { id?: string; path?: string } }>('thread/start', {
   cwd,
   approvalPolicy: 'never',
@@ -108,8 +86,7 @@ await say(a, autoId, 'Reply with the single word "done".')
 await a.dispose()
 
 // 3. What the record says afterwards, from a fresh process (as history import and resume would see it)
-const b = open('B')
-await init(b)
+const { client: b } = await open('B')
 for (const id of [threadId, autoId]) {
   const read = await b.request<{ thread?: { turns?: { items?: unknown[] }[] } }>('thread/read', { threadId: id, includeTurns: true })
   record('B response', { method: 'thread/read', params: read })

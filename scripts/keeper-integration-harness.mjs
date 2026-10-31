@@ -3,11 +3,11 @@
  * bundled host are, the processes and folders a run made (ended and removed by `cleanup`), how a
  * check is reported, and how a keeper, an attached app and a host client are started.
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { killFamily, once, printLogTails, waitFor } from './keeper-test-processes.mjs'
+import { killFamily, once, printLogTails, status, waitFor } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -136,6 +136,48 @@ async function helloOk(port, token) {
   }
 }
 
+/** `pnpm bundle:host`, then `cargo build` of the desktop binaries into `TARGET` (never `tauri build`) */
+function buildKeeper() {
+  log('bundling the host (pnpm bundle:host)')
+  execFileSync('pnpm', ['bundle:host'], { cwd: ROOT, stdio: 'inherit' })
+  log(`building the binary (cargo build, CARGO_TARGET_DIR=${TARGET})`)
+  const r = spawnSync('cargo', ['build', '--manifest-path', join(ROOT, 'apps/desktop/src-tauri/Cargo.toml')], {
+    stdio: 'inherit',
+    env: { ...process.env, CARGO_TARGET_DIR: TARGET },
+  })
+  if (r.status !== 0) throw new Error('cargo build failed')
+}
+
+/** The host ready under a new pid, or undefined: at once if the keeper has given up on it */
+async function readyView(sock, notPid) {
+  let gaveUp = false
+  const view = await waitFor(async () => {
+    const v = await status(sock)
+    // Five failed starts take the keeper about 11 s; waiting out the minute after that only delays the report
+    if (v?.status?.state === 'failed') return (gaveUp = true)
+    return v?.status?.state === 'ready' && v.hostPid && v.hostPid !== notPid && v
+  }, 60_000, 250)
+  return gaveUp ? undefined : view
+}
+
+const session = async (host, id) => (await host.call('sessions.list', {})).find((s) => s.id === id)
+const transcript = async (host, id) => JSON.stringify(await host.call('messages.load', { sessionId: id, limit: 400 }))
+/** Each tool call and result recorded once: nothing lost or doubled across the restart */
+async function recordedOnce(host, id) {
+  const rows = await host.call('messages.load', { sessionId: id, limit: 400 })
+  const ids = (kind) => rows.filter((r) => r.kind === kind).map((r) => r.payload?.callId)
+  const calls = ids('tool_call')
+  const results = ids('tool_result')
+  const unique = (a) => new Set(a).size === a.length
+  return { ok: unique(calls) && unique(results) && calls.length === results.length && calls.length > 0, calls: calls.length, results: results.length }
+}
+const toolResults = (host, id) => host.events.filter((e) => e.type === 'tool_result' && e.sessionId === id).length
+
+const STEPS = (n) =>
+  `Run these ${n} shell commands one at a time, each as its own separate tool call, waiting for each to finish before starting the next: ` +
+  Array.from({ length: n }, (_, i) => `\`sleep 4; echo step${i + 1}\``).join(', ') +
+  '. Do not combine them. After the last one, reply with exactly DONE.'
+
 function newData() {
   // Short on purpose: a unix socket path is limited to 104 bytes on macOS.
   const d = mkdtempSync('/tmp/ck-')
@@ -165,4 +207,4 @@ function countFailure() {
   failures++
 }
 
-export { ROOT, TARGET, BIN, HOST_SRC, FAKE_BUNDLE, started, tempDirs, failures, log, check, hostsFor, startKeeper, attachClient, helloOk, newData, bundleInfo, keyOf, ready, cleanup, countFailure }
+export { ROOT, TARGET, BIN, HOST_SRC, FAKE_BUNDLE, started, tempDirs, failures, log, check, hostsFor, startKeeper, attachClient, helloOk, buildKeeper, readyView, session, transcript, recordedOnce, toolResults, STEPS, newData, bundleInfo, keyOf, ready, cleanup, countFailure }

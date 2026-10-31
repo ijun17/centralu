@@ -24,16 +24,13 @@
  *     still alive 20 s later (Codex does not kill a running command on interrupt); it went with the app-server.
  */
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, appendFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { CLIENT_INFO } from '@cc/protocol'
-import { CodexClient } from '../src/adapters/codex/client.js'
+import { appendFileSync } from 'node:fs'
+import type { CodexClient } from '../src/adapters/codex/client.js'
+import { probeDir, openProbe } from './codex-probe-kit.mjs'
 
 const mode = process.argv[process.argv.indexOf('--mode') + 1] === 'stop' ? 'stop' : 'interrupt'
-const cwd = mkdtempSync(join(tmpdir(), 'cc-codex-bg-'))
-const log = join(cwd, '..', `${cwd.split('/').pop()}.frames.jsonl`)
-const t0 = Date.now()
+const dir = probeDir('cc-codex-bg-')
+const { cwd, log, t0 } = dir
 const ms = () => String(Date.now() - t0).padStart(6)
 const childAlive = () => /sleep 193/.test(execFileSync('ps', ['-axo', 'pid,command']).toString())
 
@@ -59,44 +56,36 @@ const act = async (client: CodexClient) => {
   stopAt = Date.now() + 20_000
 }
 
-const client: CodexClient = new CodexClient(
-  {
-    onNotification: (n) => {
-      appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, n }) + '\n')
-      if (n.method.endsWith('/delta') || n.method.includes('Delta')) return
-      const p = (n.params ?? {}) as Record<string, unknown>
-      const from = String(p.threadId ?? '')
-      const who = from === parent ? 'parent' : from ? `child ${from.slice(-6)}` : '-'
-      const item = p.item as Record<string, unknown> | undefined
-      const turn = p.turn as Record<string, unknown> | undefined
-      let tag = ''
-      if (n.method === 'thread/status/changed') tag = ` ${JSON.stringify(p.status)}`
-      if (turn) tag = ` turn=${String(turn.id)} status=${String(turn.status)}`
-      if (item) tag = ` ${String(item.type)}`
-      if (item?.type === 'collabAgentToolCall') tag += ` tool=${String(item.tool)} status=${String(item.status)} receivers=${JSON.stringify(item.receiverThreadIds)} states=${JSON.stringify(item.agentsStates)}`
-      if (item?.type === 'commandExecution') tag += ` ${JSON.stringify(item.command)} status=${String(item.status)}`
-      if (item?.type === 'subAgentActivity') tag += ` kind=${String(item.kind)} agent=${String(item.agentThreadId)}`
-      if (item?.type === 'agentMessage' && n.method === 'item/completed') tag += ` ${JSON.stringify(String(item.text ?? '').slice(0, 60))}`
-      console.log(`${ms()} ${who.padEnd(13)} ${n.method}${tag}`)
-      if (n.method === 'turn/started' && turn) {
-        if (from === parent) parentTurn = String(turn.id)
-        else childTurns.set(from, String(turn.id))
-      }
-      if (from && from !== parent && item?.type === 'commandExecution' && n.method === 'item/started') childCommandStarted = true
-      if (from === parent && n.method === 'turn/completed') parentDone = true
-      if (!acted && (mode === 'interrupt' ? childCommandStarted && !parentDone : parentDone && childTurns.size > 0)) void act(client)
-    },
-    onServerRequest: (r) => {
-      console.log(`${ms()} request ${r.method}`)
-      client.respond(r.id, { decision: 'accept' })
-    },
-    onExit: () => console.log(`${ms()} app-server exited`),
+const { client } = await openProbe(dir, {
+  record: false,
+  onNotification: (n, client) => {
+    appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, n }) + '\n')
+    if (n.method.endsWith('/delta') || n.method.includes('Delta')) return
+    const p = (n.params ?? {}) as Record<string, unknown>
+    const from = String(p.threadId ?? '')
+    const who = from === parent ? 'parent' : from ? `child ${from.slice(-6)}` : '-'
+    const item = p.item as Record<string, unknown> | undefined
+    const turn = p.turn as Record<string, unknown> | undefined
+    let tag = ''
+    if (n.method === 'thread/status/changed') tag = ` ${JSON.stringify(p.status)}`
+    if (turn) tag = ` turn=${String(turn.id)} status=${String(turn.status)}`
+    if (item) tag = ` ${String(item.type)}`
+    if (item?.type === 'collabAgentToolCall') tag += ` tool=${String(item.tool)} status=${String(item.status)} receivers=${JSON.stringify(item.receiverThreadIds)} states=${JSON.stringify(item.agentsStates)}`
+    if (item?.type === 'commandExecution') tag += ` ${JSON.stringify(item.command)} status=${String(item.status)}`
+    if (item?.type === 'subAgentActivity') tag += ` kind=${String(item.kind)} agent=${String(item.agentThreadId)}`
+    if (item?.type === 'agentMessage' && n.method === 'item/completed') tag += ` ${JSON.stringify(String(item.text ?? '').slice(0, 60))}`
+    console.log(`${ms()} ${who.padEnd(13)} ${n.method}${tag}`)
+    if (n.method === 'turn/started' && turn) {
+      if (from === parent) parentTurn = String(turn.id)
+      else childTurns.set(from, String(turn.id))
+    }
+    if (from && from !== parent && item?.type === 'commandExecution' && n.method === 'item/started') childCommandStarted = true
+    if (from === parent && n.method === 'turn/completed') parentDone = true
+    if (!acted && (mode === 'interrupt' ? childCommandStarted && !parentDone : parentDone && childTurns.size > 0)) void act(client)
   },
-  { cwd },
-)
-
-await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
-client.notify('initialized')
+  onRequest: (r) => console.log(`${ms()} request ${r.method}`),
+  onExit: () => console.log(`${ms()} app-server exited`),
+})
 const started = await client.request<{ thread?: { id?: string } }>('thread/start', {
   cwd,
   approvalPolicy: 'never',

@@ -331,57 +331,14 @@ type Target = {
   withKeeper?: (dest: string, stage: (keeper: string) => void) => void
 }
 
-const TARGETS: Record<string, Target | undefined> = {
-  'darwin-arm64': {
-    id: 'darwin-arm64',
-    /*
-     * Only the `.app`, even though the config also builds a `.dmg`. Same rule as Linux —
-     * a release builds what it publishes and nothing else — but here it also removes a
-     * failure mode from the release path: Tauri's `bundle_dmg.sh` drives Finder through
-     * `osascript`, and a shell with no GUI session behind it is denied Automation access
-     * and exits 64. That would fail a release whose `.app` was already built and signed.
-     * CI also builds only the `.app` (#628); no workflow consumes or ships a `.dmg`.
-     */
-    bundles: 'app',
-    stagesShell: true,
-    artifact: `${APP_NAME}.app`,
-    locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
-    install: (src, dest) => {
-      rmSync(dest, { recursive: true, force: true })
-      // ditto, not cp — carries over permissions and extended attributes unchanged (so the
-      // signature does not break).
-      sh('/usr/bin/ditto', [src, dest])
-    },
-    check: (dest) => {
-      // (a) Is the signature intact — confirmed it survives a round trip through an npm
-      // tarball, but that is pointless if it was already broken before packing.
-      sh('/usr/bin/codesign', ['--verify', '--deep', '--strict', dest])
-      console.log('  signature valid')
-
-      // (b) Does the executable have the exec bit — without it, the install succeeds but it
-      // never opens.
-      const bin = join(dest, 'Contents/MacOS/centralu')
-      if (!existsSync(bin)) fail(`executable is missing: ${bin}`)
-      const mode = out('/bin/sh', ['-c', `stat -f '%p' '${bin}'`])
-      if (!/[157][157][157]$/.test(mode.slice(-3))) fail(`no exec bit (${mode})`)
-      console.log('  exec bit ok')
-
-      // (c) architecture
-      const arch = out('/usr/bin/file', ['-b', bin])
-      if (!arch.includes('arm64')) fail(`not arm64: ${arch}`)
-      console.log(`  ${arch.split(',')[0]}`)
-
-      // (d) the keeper executable beside it (#440). Without it the app still runs (the window's
-      // executable runs the keeper itself), so nothing else would notice it missing.
-      checkMacKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE))
-
-      // (e) the pinned Node for remotes, which a Mac hub sends to the machines it installs
-      checkRemoteRuntime(join(dest, 'Contents/Resources/resources/host'))
-    },
-  },
-
-  'linux-x64': {
-    id: 'linux-x64',
+/**
+ * The AppImage-only Linux targets. They differ in the id and in the machine `file` names (#29: linux-arm64 only
+ * matters when `pnpm release:npm` runs on that hardware; docs/releasing.md "Adding a platform" says what else it needs).
+ * None of the checks is architecture-specific: the type-2 magic bytes and the exec bit mean the same on any machine type.
+ */
+const linuxAppImage = (id: string, machine: string): Target => {
+  return {
+    id,
     /*
      * `tauri.linux.conf.json` builds both a `.deb` and an AppImage; narrow it here because
      * only the AppImage is shipped through npm. The AppImage carries its own webkit2gtk and
@@ -437,69 +394,70 @@ const TARGETS: Record<string, Target | undefined> = {
       if (!/[157]$/.test(mode)) fail(`no exec bit (${mode})`)
       console.log('  exec bit ok')
 
-      // (c) machine type
+      // (c) machine type — `file` names 64-bit ARM "aarch64", not "arm64" (that spelling is npm/Node's
+      // `process.arch`, used for the ids and for the package's `cpu` field; the two vocabularies disagree)
       const arch = out('/usr/bin/file', ['-b', dest])
-      if (!arch.includes('x86-64')) fail(`not x86-64: ${arch}`)
+      if (!arch.includes(machine)) fail(`not ${machine}: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
 
       // (d) the keeper executable inside the AppImage (#440), for `CC_USE_KEEPER=1` there
-      checkKeeperInAppImage(dest, 'linux-x64')
+      checkKeeperInAppImage(dest, id)
     },
     withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
-  },
+  }
+}
 
-  /*
-   * #29. Same shape as linux-x64 — same AppImage-only rule, same checks — because none of
-   * those checks are architecture-specific: the type-2 magic bytes and the exec bit mean
-   * the same thing on any machine type. Only the final `file` check has to name a
-   * different machine.
-   *
-   * This entry only matters when `pnpm release:npm` runs *on* linux-arm64 hardware
-   * (HOST below is `${process.platform}-${process.arch}`), so adding it here is safe on
-   * its own: nobody has built on that host yet, so this branch has never executed. What
-   * is *not* done yet on purpose — the shim's `optionalDependencies`, the launcher's
-   * TARGETS table — is explained in docs/releasing.md under "Adding a platform" /
-   * "linux-arm64 (#29)".
-   */
-  'linux-arm64': {
-    id: 'linux-arm64',
-    bundles: 'appimage',
-    artifact: `${APP_NAME}.AppImage`,
-    locate: () => soleFile(join(BUNDLE_ROOT, 'appimage'), (n) => n.endsWith('.AppImage')),
+const TARGETS: Record<string, Target | undefined> = {
+  'darwin-arm64': {
+    id: 'darwin-arm64',
+    /*
+     * Only the `.app`, even though the config also builds a `.dmg`. Same rule as Linux —
+     * a release builds what it publishes and nothing else — but here it also removes a
+     * failure mode from the release path: Tauri's `bundle_dmg.sh` drives Finder through
+     * `osascript`, and a shell with no GUI session behind it is denied Automation access
+     * and exits 64. That would fail a release whose `.app` was already built and signed.
+     * CI also builds only the `.app` (#628); no workflow consumes or ships a `.dmg`.
+     */
+    bundles: 'app',
+    stagesShell: true,
+    artifact: `${APP_NAME}.app`,
+    locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
     install: (src, dest) => {
-      rmSync(dest, { force: true })
-      cpSync(src, dest)
-      cpSync(join(ROOT, 'apps/desktop/src-tauri/icons/icon.png'), join(dirname(dest), 'icon.png'))
-      chmodSync(dest, 0o755)
-      installLinuxHost(dirname(dest))
+      rmSync(dest, { recursive: true, force: true })
+      // ditto, not cp — carries over permissions and extended attributes unchanged (so the
+      // signature does not break).
+      sh('/usr/bin/ditto', [src, dest])
     },
     check: (dest) => {
-      checkLinuxHost(dirname(dest))
-      // (a) same AppImage-magic check as linux-x64 — arch-independent
-      const magic = head(dest, 11)
-      if (magic.subarray(0, 4).toString('latin1') !== '\x7fELF') fail(`not an ELF binary: ${dest}`)
-      if (magic[8] !== 0x41 || magic[9] !== 0x49 || magic[10] !== 0x02) {
-        fail(`not a type-2 AppImage — magic is ${[...magic.subarray(8, 11)].join(',')}, expected 65,73,2`)
-      }
-      console.log('  AppImage magic ok')
+      // (a) Is the signature intact — confirmed it survives a round trip through an npm
+      // tarball, but that is pointless if it was already broken before packing.
+      sh('/usr/bin/codesign', ['--verify', '--deep', '--strict', dest])
+      console.log('  signature valid')
 
-      // (b) exec bit — same as linux-x64
-      const mode = out('/usr/bin/stat', ['-c', '%a', dest])
-      if (!/[157]$/.test(mode)) fail(`no exec bit (${mode})`)
+      // (b) Does the executable have the exec bit — without it, the install succeeds but it
+      // never opens.
+      const bin = join(dest, 'Contents/MacOS/centralu')
+      if (!existsSync(bin)) fail(`executable is missing: ${bin}`)
+      const mode = out('/bin/sh', ['-c', `stat -f '%p' '${bin}'`])
+      if (!/[157][157][157]$/.test(mode.slice(-3))) fail(`no exec bit (${mode})`)
       console.log('  exec bit ok')
 
-      // (c) machine type — `file` names 64-bit ARM "aarch64", not "arm64" (that spelling
-      // is npm/Node's `process.arch`, used for the id above and for the package's `cpu`
-      // field; the two vocabularies just disagree)
-      const arch = out('/usr/bin/file', ['-b', dest])
-      if (!arch.includes('aarch64')) fail(`not aarch64: ${arch}`)
+      // (c) architecture
+      const arch = out('/usr/bin/file', ['-b', bin])
+      if (!arch.includes('arm64')) fail(`not arm64: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
 
-      // (d) the keeper executable inside, same as linux-x64
-      checkKeeperInAppImage(dest, 'linux-arm64')
+      // (d) the keeper executable beside it (#440). Without it the app still runs (the window's
+      // executable runs the keeper itself), so nothing else would notice it missing.
+      checkMacKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE))
+
+      // (e) the pinned Node for remotes, which a Mac hub sends to the machines it installs
+      checkRemoteRuntime(join(dest, 'Contents/Resources/resources/host'))
     },
-    withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   },
+
+  'linux-x64': linuxAppImage('linux-x64', 'x86-64'),
+  'linux-arm64': linuxAppImage('linux-arm64', 'aarch64'),
 
   /*
    * #14, W3. The package ships the same portable folder `build.yml` uploads as the

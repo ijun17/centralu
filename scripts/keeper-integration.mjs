@@ -52,11 +52,10 @@
  * `keeper-integration-relaunch.mjs` and `keeper-integration-swap.mjs`, and what they share in
  * `keeper-integration-harness.mjs`.
  */
-import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { cleanupOnExit } from './keeper-test-processes.mjs'
-import { BIN, cleanup, countFailure, failures, HOST_SRC, log, ROOT, TARGET } from './keeper-integration-harness.mjs'
+import { BIN, buildKeeper, cleanup, countFailure, failures, HOST_SRC, log } from './keeper-integration-harness.mjs'
 import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, scenarioKeeperDies, scenarioStop } from './keeper-integration-lifecycle.mjs'
 import { scenarioFromACopy, scenarioRelaunch } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
@@ -68,14 +67,7 @@ process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
-    log('bundling the host (pnpm bundle:host)')
-    execFileSync('pnpm', ['bundle:host'], { cwd: ROOT, stdio: 'inherit' })
-    log(`building the binary (cargo build, CARGO_TARGET_DIR=${TARGET})`)
-    const r = spawnSync('cargo', ['build', '--manifest-path', join(ROOT, 'apps/desktop/src-tauri/Cargo.toml')], {
-      stdio: 'inherit',
-      env: { ...process.env, CARGO_TARGET_DIR: TARGET },
-    })
-    if (r.status !== 0) throw new Error('cargo build failed')
+    buildKeeper()
   }
   if (!existsSync(BIN)) throw new Error(`no binary at ${BIN}`)
   if (!existsSync(join(HOST_SRC, 'main.mjs'))) throw new Error(`no bundled host at ${HOST_SRC}`)

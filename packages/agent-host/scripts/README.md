@@ -54,6 +54,8 @@ These are **the record that code comments point to as their basis**, kept so tha
 can run them again. A probe whose finding is written into a document and that nothing re-runs is removed once it has done
 its job; the git history keeps it (`git log --diff-filter=D -- <path>` finds the commit).
 
+`codex-probe-kit.mts` and `claude-probe-kit.mts` are what the probes below share (the throwaway folder, the frame log, the client or `query` set-up); they are not probes.
+
 | Script | What it measured, and what it decided |
 |---|---|
 | `probe-askuserquestion.mts` | how AskUserQuestion is actually received, and which of four answers (`--mode A\|B\|C\|D\|all`) reaches the model → `adapters/claude/index.ts` answers with `updatedInput.answers` (mode D, #241) |

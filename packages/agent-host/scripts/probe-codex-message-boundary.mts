@@ -14,37 +14,19 @@
  * (one model turn. PROBE_MODEL=<id from model/list> picks a small model; without it Codex's configured
  * default is used.)
  */
-import { mkdtempSync, appendFileSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { CLIENT_INFO } from '@cc/protocol'
-import { CodexClient } from '../src/adapters/codex/client.js'
-
-const cwd = mkdtempSync(join(tmpdir(), 'cc-codex-boundary-'))
-const log = join(cwd, '..', `${cwd.split('/').pop()}.frames.jsonl`)
-const t0 = Date.now()
-const record = (dir: string, frame: unknown) => appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, dir, frame }) + '\n')
+import { readFileSync } from 'node:fs'
+import { openProbe } from './codex-probe-kit.mjs'
 
 let done: () => void = () => {}
 const finished = new Promise<void>((r) => (done = r))
 
-const client = new CodexClient(
-  {
-    onNotification: (n) => {
-      record('notification', n)
-      if (n.method === 'turn/completed') done()
-    },
-    onServerRequest: (r) => {
-      record('request', r)
-      client.respond(r.id, { decision: 'accept' })
-    },
-    onExit: () => done(),
+const { client, cwd, log } = await openProbe('cc-codex-boundary-', {
+  onNotification: (n) => {
+    if (n.method === 'turn/completed') done()
   },
-  { cwd },
-)
+  onExit: () => done(),
+})
 
-await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
-client.notify('initialized')
 const started = await client.request<{ thread?: { id?: string } }>('thread/start', {
   cwd,
   // The app's auto preset: nothing is asked, so no approval lands between the messages
