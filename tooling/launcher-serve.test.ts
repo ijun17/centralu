@@ -56,10 +56,13 @@ import {
   askHostToStop,
   hostProvesOf,
   heldHere,
+  startedByServe,
+  foreignHolder,
   lockHolderIsAlive,
   lockHolderPid,
   lockHolder,
   moveIntoSignIn,
+  stopServedHost,
   runServe,
   runWindow,
   serveFrom,
@@ -2159,6 +2162,105 @@ describe('asking the host on the port without handing the token to anyone else (
     }
   }, 90_000 * SLOW)
 
+  /*
+   * #1722: serve.json names the port, a stranger answers there (a hub's ssh forward to a linked machine's serve) and
+   * another process holds the folder's lock. The lock holder is a separate child process, as the app's host is: a
+   * launcher that signals it must not take the test down with it (#1721 review).
+   */
+  function lockHolderProcess(dir: string, by?: 'app' | 'keeper' | 'serve', serveLauncher = false) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    started.push(child)
+    const pid = child.pid!
+    const exited = new Promise<void>((r) => child.once('exit', () => r()))
+    writeFileSync(join(dir, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at: Date.now(), ...(by ? { by } : {}) }))
+    // What an older launcher left: its pid, and the host it started (here the same process)
+    if (serveLauncher) writeFileSync(join(dir, SERVE_PID_FILE), JSON.stringify({ pid, hostPid: pid, port: null }))
+    return { pid, exited, alive: () => child.exitCode === null && child.signalCode === null }
+  }
+
+  it.each([['app'], ['keeper'], [undefined]] as const)(
+    'a program on the recorded port is not this folder’s serve while another host holds the lock (started by %s): --stop names it and leaves it',
+    async (by) => {
+      const s = await squatter()
+      const d = tempDir()
+      const holder = lockHolderProcess(d, by)
+      try {
+        ensureServeState(d)
+        recordServePort(d, s.port)
+        const stopped = (await cli(d, ['--stop'])).line.stop
+        expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+        expect(stopped.message).toContain(`belongs to another Centralu host (pid ${holder.pid})`)
+        expect(holder.alive()).toBe(true)
+        expect(s.got.map((g) => JSON.parse(g).kind)).not.toContain('hello')
+        // The same answer for the other two commands that read the probe
+        expect(await connection(d)).toMatchObject({ hostRunning: false, port: s.port })
+      } finally {
+        await s.close()
+      }
+    },
+    90_000 * SLOW,
+  )
+
+  /*
+   * The guard inside stopServedHost, past the probe: the host answers with this folder's key, so the folder counts as held
+   * here, but the lock says the app's or the keeper's host holds it. Asking it to stop is the most that may happen; no
+   * signal, however long it stays up (#1722 review).
+   */
+  it.skipIf(!POSIX).each([['app'], ['keeper']] as const)('a host that proves the key but is held by the %s is asked to stop and never signalled', async (by) => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const holder = lockHolderProcess(d, by)
+    const server = new HostServer({ port: readServeState(d).port!, ...serveHostCredentials(d), onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+    await server.listen()
+    const signals: Array<[number, string]> = []
+    try {
+      const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, platform: 'linux', timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
+      expect(signals).toEqual([])
+      expect(holder.alive()).toBe(true)
+      expect(stopped).toMatchObject({ ok: false, wasRunning: true })
+      expect(stopped.message).toContain(`pid ${holder.pid}`)
+    } finally {
+      await server.close()
+    }
+  }, 30_000 * SLOW)
+
+  /*
+   * What stays stoppable (#838): a host that cannot prove the key (from before proofs, or still on the key it had before
+   * --rotate-token) which serve started. The lock says so, or an older lock without it agrees with serve.pid.
+   */
+  it.skipIf(!POSIX).each([
+    ['a lock that says serve', { by: 'serve' as const, serveLauncher: false }],
+    ['an older lock that serve.pid vouches for', { by: undefined, serveLauncher: true }],
+  ])('a host that cannot prove the key is stopped by signal when serve started it: %s', async (_name, { by, serveLauncher }) => {
+    const s = await squatter()
+    const d = tempDir()
+    const holder = lockHolderProcess(d, by, serveLauncher)
+    try {
+      ensureServeState(d)
+      recordServePort(d, s.port)
+      const stopped = await cli(d, ['--stop'])
+      expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: 'signal' })
+      await holder.exited
+      expect(holder.alive()).toBe(false)
+    } finally {
+      await s.close()
+    }
+  }, 90_000 * SLOW)
+
+  it.skipIf(!POSIX)('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
+    const d = tempDir()
+    const run = serve(d, ['--port', String(await freePort())])
+    await run.until(/listening on 127\.0\.0\.1:\d+/)
+    const hostPid = (JSON.parse(readFileSync(join(d, 'host.lock'), 'utf8')) as { pid: number }).pid
+    // Prints no JSON line: not `cli`
+    expect(spawnSync(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d) }).status).toBe(0)
+    const stopped = await cli(d, ['--stop'])
+    expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: 'signal' })
+    expect(await run.exited).toBe(0)
+    expect(() => process.kill(hostPid, 0)).toThrow()
+  }, 120_000 * SLOW)
+
   it('the real host proves it and then gets the hello', async () => {
     const server = new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '9.9.9' } })
     const port = await server.listen()
@@ -2242,6 +2344,21 @@ describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it 
     expect(started).toEqual(expect.any(String))
     lock(d, { pid: process.pid, started })
     expect(lockHolderIsAlive(d)).toBe(true)
+    // Alive, but nothing says serve started it (the app, a keeper, or an older host nothing vouches for): not serve's
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+    expect(foreignHolder(d)).toEqual({ pid: process.pid, started })
+    lock(d, { pid: process.pid, started, by: 'app' })
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+    expect(foreignHolder(d)).toMatchObject({ pid: process.pid, by: 'app' })
+    lock(d, { pid: process.pid, started, by: 'serve' })
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    expect(foreignHolder(d)).toBeNull()
+    // A lock from before 'by' is serve's when serve.pid names the same host, and only then
+    lock(d, { pid: process.pid, started })
+    writeFileSync(join(d, SERVE_PID_FILE), JSON.stringify({ pid: 1, hostPid: process.pid + 1, port: 1 }))
+    expect(startedByServe(d)).toBe(false)
+    writeFileSync(join(d, SERVE_PID_FILE), JSON.stringify({ pid: 1, hostPid: process.pid, port: 1 }))
+    expect(startedByServe(d)).toBe(true)
     expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
     // An answer on a port serve.json does not name (the default one) is not this folder's, lock holder or not
     expect(heldHere({ running: false, unproven: true }, d, undefined, false)).toBe(false)
