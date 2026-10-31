@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, legacyHostTokenOf, dropLegacyHostToken } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, probeKeyProof, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, takesKeyHellos, ownCredentials } from './serve-host.mjs'
@@ -265,8 +265,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
         const holder = lockHolder(dataDir)
         if (holder && holder.pid !== child.pid && isAlive(holder.pid)) {
           // Who it is, when its host.lock says (#1223)
-          const who = { app: 'the Centralu window on this machine', keeper: "Centralu's keeper on this machine", serve: 'another centralu serve' }[holder.by] ?? 'probably the Centralu app on this machine'
-          say(`the host did not start. ${dataDir} belongs to another Centralu host (pid ${holder.pid}), ${who}. Quit it, or point CC_DATA_DIR at another folder.`)
+          say(`the host did not start. ${dataDir} belongs to another Centralu host (pid ${holder.pid}), ${holderWho(holder.by)}. Quit it, or point CC_DATA_DIR at another folder.`)
         }
       }
       if (logFd !== null) say(`the host exited (${signal ?? code})`)
@@ -292,9 +291,9 @@ export function revokeCredential({ env, home, id, write = (line) => process.stdo
   write(`${JSON.stringify({ v: 1, revoked, id })}
 `)
   if (!revoked) {
-    say(`no full credential ${JSON.stringify(id)} in ${join(dataDir, SERVE_STATE_FILE)}; --connection lists them under others.`)
+    say(`no credential ${id} in ${join(dataDir, SERVE_STATE_FILE)}; --connection lists them under others.`)
     return 1
   }
-  say(`withdrew the full credential ${id}. A running host refuses its next hello and closes a connection already open with it within a second.`)
+  say(`withdrew ${id}. A running host refuses its next hello with it and closes a connection already open with it within a second.`)
   return 0
 }

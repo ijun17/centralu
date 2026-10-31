@@ -217,7 +217,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     /*
      * **The callback is passed even in auto** (#171). It used to be omitted for auto, and
      * AskUserQuestion never reached the person — no choice card appeared, and the model moved
-     * on without an answer. Measured (probe-auto-callback.mts, CLI 2.1.282, SDK 0.3.263,
+     * on without an answer. Measured (probe-auto-callback.mts, a probe since removed and kept in git history, CLI 2.1.282, SDK 0.3.263,
      * haiku, a temp folder, 2026-09-27) — passing a callback alongside bypassPermissions:
      *
      *   AskUserQuestion                             reaches the callback (a tool asked about even before bypass)

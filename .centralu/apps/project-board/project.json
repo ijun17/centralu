@@ -16,7 +16,7 @@
     "pollSeconds": 30,
     "fullTier": "full tier",
     "landTier": "quick",
-    "quickChecks": ["changes", "verify", "windows tests (vitest *)"],
+    "quickChecks": ["changes", "verify", "windows tests (vitest *)", "macos tests"],
     "screen": {
       "judge": ".github/scripts/ci-changes.mjs",
       "checks": ["e2e (webkit *)", "e2e (chromium *)"],

@@ -4,8 +4,8 @@
  */
 import { cpSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
-import { attachClient, bundleInfo, check, FAKE_BUNDLE, helloOk, HOST_SRC, hostClient, hostsFor, keyOf, log, newData, ready, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
+import { alive, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { attachClient, bundleInfo, check, FAKE_BUNDLE, helloOk, HOST_SRC, hostsFor, keyOf, log, newData, ready, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
 
 async function scenarioBackgroundOff() {
   log('\nbackground off (the default)')

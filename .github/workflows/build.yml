@@ -46,7 +46,7 @@ jobs:
   #
   # A draft pull request (a stack's lower, #1066) runs `changes` alone, and every other job skips.
   #
-  # The quick tier, on a pull request: `changes`, `verify` and the Windows unit tests. The full tier,
+  # The quick tier, on a pull request: `changes`, `verify`, the Windows unit tests and the macOS tests. The full tier,
   # every job: a push to main, a manual run (the merge queue's batches; a person on a branch) and a
   # release bump's pull request (it changes the file that declares the version). The merge queue lands
   # nothing on the quick tier alone: only from a full run on what lands, which the `full tier` job
@@ -169,7 +169,10 @@ jobs:
           - target: darwin-arm64
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
-            runner: macos-14
+            # macos-15, not macos-14: GitHub retires the macOS 14 images on 2026-11-02 (runner-images#13518).
+            # The newer Xcode and SDK do not change the oldest macOS the app runs on: the build step
+            # below states it, and the step after it checks it.
+            runner: macos-15
             # npm publishes the `.app`; no workflow consumes the DMG (#628).
             # Tar the app first (below) to preserve its executable bits and signature.
             artifacts: |
@@ -239,8 +242,10 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          # The cache is only valid per platform; the key would otherwise collide.
-          key: ${{ matrix.target }}
+          # The cache is only valid per platform; the key would otherwise collide. The runner image is in it too:
+          # moving to another one (macos-14 to macos-15) must rebuild every dependency, C objects included, with
+          # the new toolchain rather than restore the old objects and recompile only this workspace.
+          key: ${{ matrix.target }}-${{ matrix.runner }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -264,7 +269,30 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS'
         # The unused DMG's intermittent bundle_dmg.sh failures must not block releases.
-        run: pnpm --filter @cc/desktop exec tauri build --bundles app
+        env:
+          # The oldest macOS the app runs on, stated rather than left to the toolchain and the runner's SDK, which a
+          # later Xcode could raise. Tauri sets it from `bundle.macOS.minimumSystemVersion` (tauri.conf.json), which
+          # is the knob that also writes LSMinimumSystemVersion; this repeats it for anything that builds outside Tauri.
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+        shell: bash
+        # The log is kept for the next step: the linker only warns when an object file was built for a newer macOS
+        # than the one it links for, and the file it warns about still reports the lower number.
+        run: |
+          set -o pipefail
+          pnpm --filter @cc/desktop exec tauri build --bundles app 2>&1 | tee "$RUNNER_TEMP/tauri-build.log"
+
+      - name: Check the oldest macOS the app runs on
+        if: runner.os == 'macOS'
+        # Every Mach-O file in the bundle says the macOS it was built for (`minos`): the app, the keeper, and the
+        # upstream prebuilds the host brings (better-sqlite3, node-pty), which no deployment target reaches. A newer
+        # SDK or a dependency can raise one without any error, and the app would then fail to open on the older Macs.
+        # (scripts/macos-minos.mjs; release-npm.mts runs the same check on the staged package.)
+        run: |
+          node scripts/macos-minos.mjs apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app
+          if grep -n "was built for newer" "$RUNNER_TEMP/tauri-build.log"; then
+            echo "::error::an object file was built for a newer macOS than the app supports (the linker's warning above)"
+            exit 1
+          fi
 
       - name: Tar the .app
         if: runner.os == 'macOS'
@@ -426,7 +454,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -442,7 +470,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
     steps:
       - run: echo "Nothing outside the window and the tests changed (.github/scripts/ci-changes.mjs)"
 
@@ -547,6 +575,111 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # The host's tests on macOS (#1704). Until this job existed no CI job ran a unit test on a Mac: the release
+  # rehearsal's darwin job was the first to, so a difference between macOS and Linux (APFS keeps file times in
+  # nanoseconds and `name/` is ENOENT, #1650; libuv 1.51 cuts file times to microseconds, #1713) passed every pull
+  # request and failed the next release instead. The same runner and Node as the darwin build (release.yml: macos-15,
+  # setup-node 22), so a pass here is a pass there.
+  #
+  # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
+  # OS the most, the filters in the step below (the OS layer, the process adapter, apps, dev services, lifecycle,
+  # transport, links, keeper/, a few single files, and three tooling tests: the launcher's, e2e-lock and
+  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `macos tests` is one of
+  # `ci.quickChecks`, so nothing lands without it.
+  # A full run whose files change the host's tests (`host_tests`): the whole host, the protocol and every test of
+  # tooling/. Linux runs tooling/ too, but only a Mac found #1695's two failures there.
+  # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
+  # Measured on macos-14 (before the move to macos-15) and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
+  # job 5.5 minutes with the install. The whole host alone (491 files) was 564 s of vitest (222 s of it collecting the
+  # files, which three cores share), the job 10.0 minutes; with tooling/ (573 files) 822 s of vitest, the job 14.2
+  # minutes. The release's darwin job ran every test of the repository in about 17 minutes on the same runner.
+  #
+  # Not the Node the remotes are pinned to (packaging/remote-runtime.json): the hub installs that Node only where
+  # the installer serves it (Linux and Windows, `host tests, remote Node`), and refuses a Mac (links/install.ts).
+  # A Mac linked as a machine runs the host on the Node the person has, which is what this job runs on.
+  macos-tests:
+    name: macos tests
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # The release's darwin build (release.yml) runs its tests on this
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Say which Node runs the tests
+        run: echo "node $(node -p 'process.versions.node') (libuv $(node -p 'process.versions.uv')) on macOS $(sw_vers -productVersion)"
+
+      # Never the real data folder (AGENTS.md)
+      - name: pnpm test (the tests that touch the OS)
+        id: quick
+        if: needs.changes.outputs.host_tests == 'off'
+        env:
+          CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+        # vitest takes each argument as a part of a test file's path. tooling/build-workflow.test.ts holds that each
+        # matches a test file, since vitest leaves a filter that matches none out without a word.
+        run: >-
+          pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
+          packages/agent-host/src/os
+          packages/agent-host/src/process.test
+          packages/agent-host/src/adapters/local-process
+          packages/agent-host/src/apps/
+          packages/agent-host/src/dev-services/
+          packages/agent-host/src/lifecycle/
+          packages/agent-host/src/transport/
+          packages/agent-host/src/links/
+          packages/agent-host/src/adapters/ends-with-host
+          packages/agent-host/src/fs-containment
+          packages/agent-host/src/env-path
+          packages/agent-host/src/temp-dir
+          packages/agent-host/src/data-dir
+          packages/agent-host/src/tool-launch
+          packages/agent-host/src/keeper/
+          tooling/launcher-
+          tooling/e2e-lock
+          tooling/screen-protocol-rules
+
+      - name: pnpm test (host, protocol, launcher)
+        id: full
+        if: needs.changes.outputs.host_tests == 'true'
+        env:
+          CC_DATA_DIR: ${{ runner.temp }}/centralu-data
+          # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
+          CC_BUNDLE_COMPARED_BY: verify
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/
+
+      # The time each file took, for choosing what the quick tier runs; also when a test failed
+      - name: Say which test files took longest
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f "$RUNNER_TEMP/vitest-times.json" ] || exit 0
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+            const files = r.testResults.map((t) => ({ f: t.name.replace(process.cwd() + "/", ""), s: (t.endTime - t.startTime) / 1000 }))
+            files.sort((a, b) => b.s - a.s)
+            const total = files.reduce((n, x) => n + x.s, 0)
+            console.log(`${files.length} files, ${total.toFixed(0)} s of file time in all`)
+            for (const x of files.slice(0, 25)) console.log(`${x.s.toFixed(1).padStart(7)} s  ${x.f}`)
+          ' "$RUNNER_TEMP/vitest-times.json"
+
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-test-times
+          path: ${{ runner.temp }}/vitest-times.json
+          retention-days: 30
+          if-no-files-found: warn
+
   # The UI scenarios (e2e/, Playwright) in WebKit, on every full run (owner decisions, 2026-10-11:
   # every pull request; 2026-10-18: every full run, which is what lands). The desktop app is WKWebView,
   # and until this job existed no CI job ran Playwright at all: nine WebKit-only failures piled up on
@@ -570,7 +703,7 @@ jobs:
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
   # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10. The three jobs that install a browser (#1503, 2026-10-24) limit
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
   # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux
@@ -1039,7 +1172,7 @@ jobs:
     name: keeper e2e
     needs: changes
     if: needs.changes.outputs.host == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     env:
       # The scripts build into a folder under /tmp by default. rust-cache keeps only folders under
@@ -1066,8 +1199,8 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          # A debug build: it shares nothing with the darwin bundle's release cache.
-          key: keeper-darwin-arm64
+          # A debug build: it shares nothing with the darwin bundle's release cache. The runner image is in the key.
+          key: keeper-darwin-arm64-macos-15
 
       - run: pnpm install --frozen-lockfile
 

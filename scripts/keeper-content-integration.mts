@@ -42,7 +42,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { rawPublicKey, throwawayKey, writeContentManifest, type SigningKey } from './content-manifest.mjs'
-import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildShellExe, TAURI_DIR } from './shell-bundle.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
@@ -108,59 +108,6 @@ function attachClient(sock: string, out: string): number {
   const pid = spawn(process.execPath, ['-e', code], { stdio: 'ignore' }).pid as number
   started.add(pid)
   return pid
-}
-
-/** A WebSocket client of the host through the front door: RPCs and terminal frames */
-async function hostClient(port: number, token: string) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-  const pending = new Map<string, { resolve: (v: Json) => void; reject: (e: Error) => void }>()
-  const frames: Json[] = []
-  let closed = false
-  let next = 1
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('no hello_ok')), 8000)
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 }))
-    ws.onmessage = (e) => {
-      const f = JSON.parse(String(e.data)) as Json
-      if (f.kind === 'hello_ok') {
-        clearTimeout(timer)
-        resolve()
-      } else if (f.kind === 'res' && pending.has(f.id)) {
-        const p = pending.get(f.id)!
-        pending.delete(f.id)
-        if (f.ok) p.resolve(f.result)
-        else p.reject(new Error(f.error?.message ?? 'rpc failed'))
-      } else if (f.kind === 'term') frames.push(f)
-    }
-    ws.onerror = () => reject(new Error('websocket error'))
-  })
-  ws.onclose = () => {
-    closed = true
-  }
-  return {
-    get closed() {
-      return closed
-    },
-    screen: (terminalId: string) =>
-      frames
-        .filter((f) => f.terminalId === terminalId)
-        .map((f) => f.data)
-        .join(''),
-    call: (method: string, params: Json, timeoutMs = 20_000) =>
-      new Promise<Json>((resolve, reject) => {
-        const id = String(next++)
-        const timer = setTimeout(() => {
-          pending.delete(id)
-          reject(new Error(`${method} timed out`))
-        }, timeoutMs)
-        pending.set(id, {
-          resolve: (v) => (clearTimeout(timer), resolve(v)),
-          reject: (e) => (clearTimeout(timer), reject(e)),
-        })
-        ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-      }),
-    close: () => ws.close(),
-  }
 }
 
 /** Numbers printed as `<tag> <n>` on their own lines, in order */

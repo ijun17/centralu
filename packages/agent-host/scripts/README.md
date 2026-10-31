@@ -35,6 +35,10 @@ pnpm measure:tools       # what Centralu's MCP tools cost (#513): dry by default
 pnpm remote-dev <machine> --ref <commit> --repo <path there>  # a dev build of the host on a linked machine (#1036)
 ```
 
+`smoke-delegation.mjs <start-agent|ask-project|app-access|reader>` runs one case of what a real session can reach in another (start_agent, ask_project, a shared app, the reader set), each on a host of its own on a temp folder; its header says what each case checks and which environment variables (`CHILD`, `WORKTREE`, `CALLEE`, `CALLER`, `TRIALS`, `TOOL`) pick the tools.
+
+The smokes that start a host share `host-client.mjs`: `startHost` and `connect`, or `openHost` for both, give the handshake, `hello`, RPC calls and the event log. It is plain JavaScript because the `.mjs` smokes run under bare `node`; `host-client.d.mts` types it for the `.mts` ones. The keeper integration scripts have their own, `hostClient` in `scripts/keeper-test-processes.mjs`.
+
 `remote-dev.mts` builds the host on a linked machine from one commit of a working copy there and swaps to it
 (docs/plans/remote-hub.md §10.11); Settings → Machines' "Roll back" returns to the release. It spends nothing.
 
@@ -49,21 +53,19 @@ read it, and the baseline:
 
 ## Probes — kept as the basis for a decision
 
-These are not throwaway scripts; they are **the record that code comments point to as their basis**.
-They are kept so that whoever asks "why was it built this way" can run them again.
+These are **the record that code comments point to as their basis**, kept so that whoever asks "why was it built this way"
+can run them again. A probe whose finding is written into a document and that nothing re-runs is removed once it has done
+its job; the git history keeps it (`git log --diff-filter=D -- <path>` finds the commit).
 
 | Script | What it measured, and what it decided |
 |---|---|
 | `probe-askuserquestion.mts` | how AskUserQuestion is actually received, and which of four answers (`--mode A\|B\|C\|D\|all`) reaches the model → `adapters/claude/index.ts` answers with `updatedInput.answers` (mode D, #241) |
 | `probe-codex-message-boundary.mts` | two Codex agent messages with nothing recorded between them: a `write_stdin` poll arrives as `item/commandExecution/terminalInteraction`, not an item (#212) → `adapters/codex/normalize.ts` names each chunk's message, and `sessions/manager.ts` starts a new row when it changes |
-| `probe-permission-mode.mts` | can the permission mode override the global setting on a per-session basis (M0's top-priority premise) |
-| `probe-note-follow-up.mts` | what Claude Code's stream says when a note sent into a running turn is not read there and runs as the next turn (#1604): the turn's first message names the note's input (`user_message_uuid`), and the result of the first turn does not → `adapters/claude/session.ts` `turnStartInputs`, and the host puts `origin` on the `state_change` that opens the turn |
 | `probe-subagent-stream.mts` | how a subagent's messages get mixed into the parent stream (#98) → `adapters/claude/normalize.ts` splits them by parent_tool_use_id, and closes the background agent card on task_notification |
 | `probe-codex-subagent.mts` | what a Codex child agent sends on the parent's connection: its items with its own `threadId`, no `thread/started`, and the first of them before the `spawnAgent` `item/completed` that names it in `receiverThreadIds` (#222) → `adapters/codex/index.ts` holds a child's items until the link, then tags them with that card |
-| `probe-subagent-record.mts` | `claude` or `codex`: one real turn that launches one subagent, through the adapter, `SessionManager` and a file store under `CC_DATA_DIR`; prints the conversation and the steps under each launch card (#222) |
 | `probe-codex-file-approval.mts` | what `item/fileChange/requestApproval` carries (only `itemId`, no change) and that the `fileChange` item with the diff starts 1ms before it (#169) → `adapters/codex/index.ts` remembers each item's changes by id for the card |
 | `probe-background-tasks.mts` | `--mode interrupt\|stop`: what a Claude turn's interrupt and `stopTask` do to a background subagent and a backgrounded shell (#290) → interrupt stops the subagent (`task_notification` stopped) and leaves the shell running; `adapters/claude/background-tracker.ts` marks each task with `stopsWithTurn`, and the session's Stop says which stop and which continue |
-| `probe-reader-tools.mts` | what each shape of the ordinary sessions' reader set costs in first-request input tokens, and whether a deferred tool is still called (#320) → `sessions/orchestrator-tools.ts` merges listing into `read_session` and defers only `app_guide`; `smoke-reader.mts` runs the shipped set end to end through a host (`TOOL=codex` for Codex) |
+| `probe-reader-tools.mts` | what each shape of the ordinary sessions' reader set costs in first-request input tokens, and whether a deferred tool is still called (#320) → `sessions/orchestrator-tools.ts` merges listing into `read_session` and defers only `app_guide`; `smoke-delegation.mjs reader` runs the shipped set end to end through a host (`TOOL=codex` for Codex) |
 | `probe-codex-mcp-instructions.mts` | whether a Codex model sees an MCP server's `initialize` `instructions` (no) or the thread's `developerInstructions` (yes), whether `thread/resume` takes new developer instructions (no), and that a thread cannot be resumed before its first turn (#524, #525) → `sessions/orchestrator-tools.ts` `codexToolInstructionsFor` rides in the thread's developer instructions at start, and `adapters/codex/index.ts` names a started thread only at its first turn |
 | `probe-codex-background.mts` | `--mode interrupt\|stop`: what `turn/interrupt` on the parent, and on the child's own turn, does to a Codex child agent (#290) → the parent's interrupt leaves the child running; interrupting the child's turn stops it, which is the per-task stop `adapters/codex/index.ts` offers |
 | `probe-resume-cache.mts` | whether a Claude session the host put to sleep reads the prompt cache when a message wakes it (#568), through a real host with `CC_SLEEP_AFTER_MS` → `capabilities.sleep` on the Claude adapter rests on it. Run it on a Claude Code update, beside `pnpm drift:claude`; it exits 1 under 90% read |

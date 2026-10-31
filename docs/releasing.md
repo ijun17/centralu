@@ -8,12 +8,25 @@ page and no update server.
 All workflows use explicit hosted runner labels, including matrix values; the guard in
 `tooling/workflow-runners.test.ts` rejects floating `ubuntu-latest`, `macos-latest` and
 `windows-latest` labels. General Linux jobs use `ubuntu-24.04`. Native Linux bundles keep
-`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-14`
-(arm64), and Windows on `windows-2022`.
+`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-15`
+(arm64), and Windows on `windows-2022`. GitHub retires the macOS 14 images on 2026-11-02 (and fails every job on them
+during the brownouts before it, runner-images#13518), so the same guard rejects `macos-14` and older. The app's
+oldest macOS is not the runner's. `bundle.macOS.minimumSystemVersion` in `tauri.conf.json` is 11.0 (the Tauri CLI
+sets `MACOSX_DEPLOYMENT_TARGET` from it, and it is what `LSMinimumSystemVersion` in the app's Info.plist says), and the
+macOS builds repeat it in the environment. Nothing reaches the files that are only copied (node-pty and better-sqlite3
+arrive as upstream prebuilds), so `scripts/macos-minos.mjs` reads every Mach-O file (`minos` in `otool -l`) and fails on
+one that asks for more than 11.0: `build.yml` runs it on the built bundle and `release-npm.mts` on the staged package,
+the keeper copy in the content folder and the shell included. `build.yml` also fails on the linker's "was built for
+newer" warning, which a compiled object can raise without changing the file's number. 11.0 is what macos-14 produced
+(measured on a main build and in 0.1.0-beta.45), so moving to macos-15 changed no supported macOS. The Rust cache keys
+carry the runner image, so a runner move rebuilds every dependency. What CI no longer runs is macOS 14 itself (see
+runtime-lessons.md TE4 and FI8).
 
 Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
 and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
-on 2026-10-14. An OS label pins the OS generation, not GitHub's weekly image revision.
+on 2026-10-14. An OS label pins the OS generation, not GitHub's weekly image revision. Those runs show the macOS
+image of the time, `macos-14`; the move to `macos-15` is confirmed from [build run 41108759817](https://github.com/ijun17/centralu/actions/runs/41108759817)
+on 2026-10-30 (image `macos-15-arm64`, version 20261028.0489.1).
 The Ubuntu 26 migration of `ubuntu-latest` starts on 2026-10-19 (#639); a separate PR
 should try `ubuntu-26.04` across the matrix before changing these pins.
 
@@ -72,7 +85,7 @@ script rehearses by default and why nothing publishes automatically.
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
 - **Two tiers** (owner decision, 2026-10-18): a full run is about 24 jobs and the free plan runs 20
   at once, so every push of every pull request used to queue a whole run behind the others. A pull
-  request now runs the **quick tier**: `changes`, `verify` and the Windows unit tests
+  request now runs the **quick tier**: `changes`, `verify`, the Windows unit tests and the macOS tests
   (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
   94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
   is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
@@ -105,6 +118,17 @@ script rehearses by default and why nothing publishes automatically.
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
   the pull request.
+- **`macos tests`** (#1704) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
+  (`macos-14`, Node 22), because until it existed the release rehearsal was the first place any unit test ran on macOS: the
+  differences it found there (#1650's contract cases, #1713's file times under libuv 1.51) failed the release instead of the
+  pull request. In the quick tier it runs the tests that reach the OS the most (the OS layer, the process adapter, apps,
+  dev services, lifecycle, transport, links, the keeper, a few single files such as `ends-with-host`, and three tooling tests:
+  the npm launcher's, `e2e-lock` and `screen-protocol-rules`, the two that failed on a Mac and nowhere else in #1695: 158 test
+  files, about 5.5 minutes); on a full run that changes the host's tests, the whole host, the protocol and every test of
+  `tooling/` (573 files, about 14 minutes); on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
+  with it. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
+  (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
+  the Node this job runs. The release's darwin job still runs `pnpm verify` whole. Its `pnpm test` stays until a change decides otherwise: `tooling/` has Mac-only failures (#1695), and the UI and core tests run on Linux only.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
   tier, leaves out what a run cannot affect, by the files it adds to main (compared with its
   merge-base with main, whatever its base branch, so a stacked pull request is judged by the whole
@@ -181,7 +205,8 @@ script rehearses by default and why nothing publishes automatically.
   runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
   So what differs there must not decide a result: `pnpm typecheck` gives tsc a fixed 4 GB heap
   (package.json), not Node's default of a quarter of the machine's memory, which on the 7 GB
-  macos-14 runner is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap there).
+  macOS runners is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap on `macos-14`; `macos-15` has the same
+  7 GB).
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -217,7 +242,7 @@ squash merge commit, and `git rev-parse <sha>^{tree}` must match for that commit
 A commit landed after the release commit does not matter (#1350). Every required
 check on that exact PR head must be reported and green; missing, pending or failed
 checks refuse it, and so does a run that did not pass the `full tier` check, when the required
-set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
+set names it: a quick run skips every job but `changes`, `verify`, the Windows unit tests and the macOS tests, and a
 skipped job reads as passed. `bump` still requires main's own green CI.
 
 Main's green checks are used directly. A failing main check blocks reuse, including a
@@ -263,7 +288,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, `macos-tests`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
@@ -491,7 +516,7 @@ path is removed.
 ```
 guard ──┬── linux-x64 (ubuntu-22.04) ──────┐
         ├── linux-arm64 (ubuntu-22.04-arm) ─┤
-        ├── darwin-arm64 (macos-14) ────────┤
+        ├── darwin-arm64 (macos-15) ────────┤
         └── win32-x64 (windows-2022) ───────┴── centralu (shim)
 ```
 

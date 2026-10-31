@@ -31,10 +31,12 @@ describe('CI bundles carry the release their commit was cut from (#1501)', () =>
 
 describe('CI proves the macOS app bundles without making an unused disk image', () => {
   it('builds only the app on macOS and keeps the default bundles on other platforms', () => {
-    const builds = steps.filter((step) => /run:.*tauri build/.test(step))
+    const builds = steps.filter((step) => /exec tauri build/.test(step))
     const mac = builds.find((step) => step.includes("if: runner.os == 'macOS'"))
     expect(mac, 'macOS must override the default app,dmg bundles').toBeDefined()
-    expect(mac).toContain('run: pnpm --filter @cc/desktop exec tauri build --bundles app\n')
+    // Through `tee`, for the linker's warnings (the oldest-macOS check reads the log), and with `pipefail` so a failed build still fails
+    expect(mac).toContain('set -o pipefail\n')
+    expect(mac).toContain('pnpm --filter @cc/desktop exec tauri build --bundles app 2>&1 | tee "$RUNNER_TEMP/tauri-build.log"\n')
     const others = builds.find((step) => step.includes("if: runner.os != 'macOS'"))
     expect(others).toContain('run: pnpm --filter @cc/desktop exec tauri build\n')
     expect(others).toContain('APPIMAGE_EXTRACT_AND_RUN: 1')
@@ -58,7 +60,7 @@ describe('CI proves the macOS app bundles without making an unused disk image', 
  * Which jobs a commit needs (2026-10-17): `changes` answers from the files it changes, and each job a commit cannot
  * affect is left out. A left-out job must still report the check a required set waits for.
  *
- * Two tiers (2026-10-18): a pull request runs the quick tier (`changes`, `verify`, the Windows unit tests), every
+ * Two tiers (2026-10-18): a pull request runs the quick tier (`changes`, `verify`, the Windows unit tests, the macOS tests), every
  * other run the full one. Every other job waits on `changes`, and on a quick run neither it nor its stand-in runs.
  * A draft pull request (#1066: a stack's lower PRs are drafts) runs `changes` alone.
  */
@@ -74,6 +76,8 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       // The quick tier: what catches most problems cheaply (the Windows unit tests: build.yml's comment has the numbers)
       verify: 'quick',
       'windows-tests-unit': 'quick',
+      // The host's tests on the release's own Mac, so a macOS-only difference fails the pull request (#1704)
+      'macos-tests': 'quick',
       'full-tier': 'full',
       bundle: 'bundle',
       'content-verify': 'host',
@@ -143,6 +147,39 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(1)
   })
 
+  // #1704: no CI job ran a unit test on a Mac, so macOS-only differences failed the release rehearsal instead of the pull request
+  it("runs the host's tests on the release's own Mac and Node, a small set in the quick tier and the whole host when the host's tests changed, and lands nothing without it", () => {
+    const mac = job('macos-tests').body
+    expect(names(mac)).toEqual(['macos tests'])
+    const release = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+    const darwin = /- target: darwin-arm64\n\s+runner: (\S+)/.exec(release)![1]
+    expect(mac).toMatch(new RegExp(`^ {4}runs-on: ${darwin}$`, 'm'))
+    // The Node the release's platform jobs run `pnpm verify` on
+    const nodeOf = (text: string) => /node-version: (\d+)\n/.exec(text)![1]
+    expect(nodeOf(mac)).toBe(nodeOf(release.slice(release.indexOf('\n  platform:\n'))))
+    // Never the real data folder (AGENTS.md)
+    expect(mac.match(/CC_DATA_DIR: \$\{\{ runner\.temp \}\}\//g)).toHaveLength(2)
+    // Three answers of `host_tests`: off (the quick tier) the small set, true the whole host, false (a full run it cannot affect) neither
+    const quick = mac.slice(mac.indexOf('id: quick'), mac.indexOf('id: full'))
+    const full = mac.slice(mac.indexOf('id: full'))
+    expect(quick).toContain("if: needs.changes.outputs.host_tests == 'off'")
+    expect(full).toContain("if: needs.changes.outputs.host_tests == 'true'")
+    expect(full).toContain('packages/agent-host packages/protocol tooling/\n')
+    // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
+    expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
+    // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
+    const filters = quick.split('\n').map((l) => l.trim()).filter((l) => /^(packages|tooling)\//.test(l))
+    expect(filters.length).toBeGreaterThan(5)
+    const files = execFileSync('git', ['ls-files'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' }).split('\n')
+    const tests = files.filter((f) => /\.test\.(ts|tsx)$/.test(f))
+    for (const f of filters) expect(tests.some((t) => t.includes(f)), `${f} matches no test file`).toBe(true)
+    // The tooling tests that failed on a Mac and nowhere else (#1695: a SIGTERM hang, macOS's /var -> /private/var link)
+    for (const f of ['tooling/e2e-lock', 'tooling/screen-protocol-rules', 'tooling/launcher-']) expect(filters, f).toContain(f)
+    // A landing condition: the board waits for the check of this name on a batch (project.json ci.quickChecks)
+    const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
+    expect(board.ci.quickChecks).toContain('macos tests')
+  })
+
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
   it('runs each e2e shard once, retrying a failed test inside Playwright, and names every test that passed only on retry', () => {
     const config = readFileSync(new URL('../e2e/playwright.config.ts', import.meta.url), 'utf8')
@@ -171,7 +208,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
     // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
     const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
-    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
     for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
     expect(limit('e2e')).toBe(25)
     expect(limit('e2e-chromium')).toBe(25)
