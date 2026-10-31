@@ -3572,15 +3572,6 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     expect(remote.store.projects.listProjects().length).toBe(1)
   })
 
-  it('names a machine on a Centralu from before it as too old, before any card', async () => {
-    const { remote, hub, orc } = await linked({ without: ['projects.inspect'] })
-    const r = await addProject(hub, orc.id, { path: folder(), machine: 'Remote box' })
-    expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/Remote box runs a Centralu too old to check a folder/)
-    expect(addCard(hub, orc.id)).toBeUndefined()
-    expect(remote.store.projects.listProjects()).toEqual([])
-  })
-
   it('lists the machines machines.list answers, one line each', async () => {
     const { hub, orc, u } = await linked()
     const listed: MachineInfo[] = await u.call('machines.list')

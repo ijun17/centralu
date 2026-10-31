@@ -31,13 +31,10 @@ describe('parseStopLine', () => {
   })
 })
 
-describe('stopRemoteHost tells a person which shim to type (#688)', () => {
-  const tooOld = (shell: 'posix' | 'powershell') =>
-    stopRemoteHost({ exec: async () => ({ code: 2, stderr: 'unknown option for serve: --stop', stdout: '' }), spec: { shell }, target: 'box' }, { forUpdate: true })
-
-  it('names centralu.cmd on a PowerShell machine and centralu elsewhere', async () => {
-    await expect(tooOld('powershell')).rejects.toThrow(/stop `centralu\.cmd serve` there/)
-    await expect(tooOld('posix')).rejects.toThrow(/stop `centralu serve` there/)
+describe('stopRemoteHost', () => {
+  it('says what the serve there printed when it gave no stop line', async () => {
+    const stop = stopRemoteHost({ exec: async () => ({ code: 2, stderr: 'unknown option for serve: --stop', stdout: '' }), spec: { shell: 'posix' }, target: 'box' }, { forUpdate: true })
+    await expect(stop).rejects.toThrow('Stopping Centralu on box gave no answer: unknown option for serve: --stop')
   })
 })
 

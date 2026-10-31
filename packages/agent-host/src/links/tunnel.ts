@@ -53,9 +53,8 @@ export type ConnectionLine = {
    */
   autostart?: RemoteAutostart
   /**
-   * The options that remote's `serve` takes that an older one refuses (#1223): `from`, the hub's name on `--detach`,
-   * which the host there writes to its `host.lock` so a second Centralu on that folder can say whose link holds it.
-   * Absent from a remote that predates it, which is never sent one
+   * The options that remote's `serve` takes that an older one refuses (#1223), `pair` among them (#1405). Every
+   * serve from 0.1.0-beta.45 on takes `from`, the hub's name on `--detach`, so the hub always sends it (#1143)
    */
   takes?: string[]
   /**
@@ -760,8 +759,6 @@ export class SshTunnel implements Tunnel {
   private readonly ended = new WeakSet<ChildProcess>()
   /** The remote cannot start a host outside a session (WMI blocked): the forward runs it (`startHost`) */
   private linkBound = false
-  /** The last connection line said its `serve --detach` takes `--from` (#1223) */
-  private takesFrom = false
 
   constructor(private readonly opts: SshTunnelOptions) {
     if (!opts.target.trim() || opts.target.startsWith('-')) throw new Error('Not an ssh target')
@@ -777,7 +774,6 @@ export class SshTunnel implements Tunnel {
       throw err
     })
     this.ifClosed()
-    this.takesFrom = line.takes?.includes('from') === true
     if (!line.hostRunning && !this.linkBound) {
       return { url: '', token: line.token ?? '', line, localPort: 0 }
     }
@@ -821,7 +817,7 @@ export class SshTunnel implements Tunnel {
   async startHost(): Promise<HostStart> {
     this.ifClosed()
     const remote = this.opts.remote ?? { shell: 'posix' }
-    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.takesFrom ? (this.opts.hubName ?? hostname()) : null)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.opts.hubName ?? hostname())], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)

@@ -532,7 +532,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     it('starts it with `centralu serve --detach` through the same lookup, in every shell, and then forwards to it', async () => {
       for (const spec of [{ shell: 'posix' }, { shell: 'powershell' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }] as RemoteSpec[]) {
         rmSync(stateFile(), { force: true })
-        const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'ok', FAKE_SSH_LINE: line({ port: await freePort() }) }, spec)
+        const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'ok', FAKE_SSH_LINE: line({ port: await freePort() }) }, spec, { hubName: 'hub' })
         expect((await t.open()).line.hostRunning).toBe(false)
         await expect(t.startHost()).resolves.toEqual({ how: 'detached', note: null })
         const ep = await t.open()
@@ -541,8 +541,8 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       }
       const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
       expect(detaches.map((r) => r.shell)).toEqual(['posix', 'powershell', 'wsl:Ubuntu-24.04'])
-      expect(detaches[0]!.run).toMatch(/^sh -c .d=.*; m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach; elif command -v centralu .*then exec centralu serve --detach; elif .* exec "\$d\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
-      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach }')
+      expect(detaches[0]!.run).toMatch(/^sh -c .d=.*; m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach --from hub; elif command -v centralu .*then exec centralu serve --detach --from hub; elif .* exec "\$d\/bin\/centralu" serve --detach --from hub; else echo CENTRALU-NOT-FOUND/)
+      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach --from hub }')
       // A detached host needs nothing from the forward: a plain -N (and the distro keep-alive for WSL)
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
       expect(forwards[0]).toContain('-N')
@@ -551,10 +551,10 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
 
     /*
      * #1223: the host a link starts writes the hub's name to its host.lock, so a Centralu window on that machine that
-     * finds the folder held can say whose link holds it. Only a remote whose line says it takes `--from` is sent one:
-     * an older serve answers an option it does not know with an error, and would never start
+     * finds the folder held can say whose link holds it. Every serve from 0.1.0-beta.45 on takes `--from` (#1143), so
+     * it is sent whatever the line's `takes` lists
      */
-    it('names this computer to a remote that takes --from, cleaned for its command line, and to no other', async () => {
+    it('names this computer to the remote, cleaned for its command line', async () => {
       for (const takes of [['from'], undefined]) {
         rmSync(stateFile(), { force: true })
         const t = tunnel(
@@ -567,7 +567,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       }
       const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
       expect(detaches[0]!.run).toContain('{ & centralu.cmd serve --detach --from Jun-s-MacBook-Pro.local }')
-      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach }')
+      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach --from Jun-s-MacBook-Pro.local }')
       expect(hubNameForRemote('---')).toBeNull()
       expect(hubNameForRemote('a'.repeat(80))).toHaveLength(64)
     }, 30_000 * SLOW)
