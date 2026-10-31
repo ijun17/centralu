@@ -217,6 +217,7 @@ image (by reading): its own small fix.
 |---|---|---|
 | `tool-process.ts` | starting a tool's process (local, keeper, adopted, replayed), the tap that records its frames, its stderr tail, its exit, the stop (EOF, the stop bound, the tree), `detach` | `local-process.ts`, the three spawn sites, `frames/recorder.ts`, the three `dispose`s |
 | `ledger.ts` | the session's phase (`opening`, `ready`, `closed`), the turn that runs, the input queue for a tool without mid-turn input or in a blocking turn, the `InputReceipts`, the Stop and its confirmation timer, "interrupted by the tool", undelivered input on exit and dispose, crash vs asleep | the three `session.ts` |
+| `mid-turn-ledger.ts` (PR 6, §4.2) | the same for a tool that takes input mid-turn and names its turns (Codex; Claude in PR 7): inputs bound to the turn the tool says took them, the queue behind a blocking turn | `codex/session.ts`, `codex/turns.ts` |
 | `grants.ts` | the decision order of §2.7 (with the tool's `auto` answer) over `AlwaysAllowRules`, `insideFolder`, the preset; the cards (`PendingCards`, `CardIds`) and releasing them on stop, exit and dispose | `claude/session-cards.ts`, `codex/server-requests.ts`, `acp/session.ts` |
 | `events.ts` | the hygiene every tool's events pass: `TouchedFiles`, the image cap, token totals, the context guard (§2.2), compaction marks (dedupe, manual when our compact turn runs), `RetryActivity`, `UnmappedTypes` | the shared helpers plus their per-tool bypasses |
 
@@ -352,6 +353,54 @@ sequences each of inputs, Stops, the tool's endings, exits and the close, for an
 input, and an `agy`-like tool (`midTurnInput: false`, `interruptEndsProcess: true`, its id said at the first input), and
 compare the ledger's events, what the wire was asked to write on which process, and how every input ended.
 
+### 4.2 As built in PR 6
+
+Codex runs on `core/mid-turn-ledger.ts` (`MidTurnLedger`), not on PR 5's `CoreSession`. `CodexSession` holds one and is its
+wire (`MidTurnWire`, an object it builds over its own methods); the frames, the slash commands, the cards and the child
+threads stay in `codex/`. Why a second ledger and not a branch in the first: the two kinds of tool differ in what a turn is,
+not in a setting. ACP's turn is the one prompt the core wrote, begun by the core and ended by its answer. Codex merges an input
+into the turn it runs or starts a turn for it, and says which only afterwards, by its turn id: in the `turn/start` answer, or
+in the turn's first item (#1604), and the answer can come after that turn has already ended. An input is therefore bound to
+the turn the tool names, and a turn can start that no input of ours began (a goal's next turn, a review, the turn an adopted
+process was running). PR 5's path for mid-turn input (an input joins the turn running when it is written) fitted neither
+Codex nor Claude (§9 Q9, Q10), had no tool on it, and is removed with its model in `ledger.test.ts`; so is `confirmsStop`,
+whose only `false` was Codex's.
+
+| Proposal (§4) | As built | Why |
+|---|---|---|
+| `CoreIo.turnStarted({ toolTurnId, inputIds })` | `MidTurnIo.turnStarted(toolTurnId)` for a turn the tool started (`turn/started`); `taken(inputs, toolTurnId)` for the turn that took inputs (the answer, or the `userMessage` item's `clientId`) | the two come apart in Codex: an answer names the turn before or after `turn/started`, and a late answer never brings an ended turn back as the one a Stop targets |
+| `startTurn(input): Promise<{ toolTurnId?, blocking? }>` | `write(inputs, queued): { answer, blocking? }`: several inputs only when they waited behind a blocking turn, sent then as one `turn/start` | Codex sends what waited behind a `/compact` or `/review` as one turn, each message its own input item (#1604 names them all) |
+| `turnEnded(how)` | `turnEnded(toolTurnId, ending \| null)`: the core says the ending (`turn_complete`, `waiting_input`, `error`) and settles the inputs bound to it; null for a turn that ended with nothing more said (`turn/failed`) | the ending event and the inputs' completion stay in today's order: the queue behind a blocking turn is written first, then the event, then the receipts |
+| the process through `SessionProcess` | the wire owns its connection (`CodexClient`: local, the keeper's, or adopted) and says its end (`exited(expected, crash)`) | Codex's tests drive the client itself; the keeper's adoption and `detach` stay where the client is |
+| the Stop and its timer | no timer (Codex's `turn/interrupt` answer is the acceptance, §2.4); a refused interrupt is the notice "Could not stop: …" | §9.2 is still open |
+
+What the mid-turn ledger owns, Codex's copies gone (`CodexTurns`, `WakingSends`, `pendingInputs`/`flushPending`,
+`startsInFlight`/`idle()`, the exit's decision, the close's undelivered count, `InputReceipts`' own set of ended turns):
+
+- **The phase and the queue.** What is sent while the conversation opens waits and is written in order once it is open;
+  what is sent behind a blocking turn waits and goes as one message when that turn ends. Everything else is written on the
+  tick after it was sent, as before: a Stop in the same tick keeps a tracked input from going.
+- **The receipts and the turns.** A tracked input (`sendTracked`) is bound to the turn the tool names and completes after that
+  turn's end is said; one bound to a turn that already ended completes at once. An untracked one (`send`) has no receipt, as
+  before, and gives `turn/start` no client id.
+- **The Stop.** Every tracked input fails at once (Claude does the same; ACP's fail when the stopped turn ends, §2.3), the
+  turns they were bound to are stopped, the wire releases its cards and app calls, and the running turn is stopped. While the
+  conversation opens, what was sent is dropped and the stop is said there (#168). A turn ended `interrupted` is the person's
+  Stop when our Stop was sent to it (by id, including one named after the Stop), otherwise `INTERRUPTED_BY_TOOL` (#698).
+- **An error.** A turn that failed, or an error of the thread's own, fails the tracked inputs with its message before it is
+  said; a write the tool refused is said with the wire's words (`turnError`), and stops the session when it carried a
+  tracked input.
+- **The exit** (#1397): asleep when nothing is in flight; a crash while opening, with a turn running, a write unanswered, a
+  message not yet written, or a blocking turn. The tracked inputs fail with "The session process ended before the parent
+  note finished", and the wire's words for the crash are kept (`codex app-server exited (code N)` with its stderr tail).
+- **The close and `detach`.** The close fails the tracked inputs and says what never went, in the words of where it waited
+  ("were sent while it was opening" or "were sent during compaction"); `detach` says only what waited for the opening.
+
+The core tests (`core/mid-turn-ledger.test.ts`) play the tool on a scripted wire: the queue while opening and behind a
+blocking turn, binding and late answers, the Stop and a turn named after it, a refused Stop, a failed turn, a refused write,
+the exit in each state, and the close's words. Codex's own tests (36 files, through its client's frames) pass unchanged. Codex
+has no recorded replays yet (PR 2 recorded none), so those tests are the pin.
+
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
 The core reaches the OS only through `tool-process.ts`, which takes an `Os` (`os/port.ts` on `centralu/os-interface`,
@@ -485,7 +534,7 @@ estimates of changed lines without fixtures.
 | 3 | **The process seam**: `tool-process.ts` starts every tool (local, host watch, keeper, adopt) and stops it (EOF, bound, tree); the spawn and dispose paths call it; `endsWithHost` for every tool (Q3); what `agy` needs (§5.1) | M, ~350 | all adapter tests and replays unchanged; core tests for stop order and bound; a real-OS test per tool that it ends with its host | 1 (built before 2: Claude's spawn flag is in `claude/sdk-query.ts`, not its spawn site) |
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
-| 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (`confirmsStop: false`, §2.4) | L, ~450 | Codex's replays (PR 2), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
+| 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (`confirmsStop: false`, §2.4). Done: `core/mid-turn-ledger.ts` (§4.2) | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
 | 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
@@ -563,8 +612,11 @@ wire, may still need a Stop to deny every open request first (`GateRequests`).
    ledger lets an input sent after a Stop, before the tool has ended the stopped turn, join that turn; the turn then ends
    `interrupted` with the Stop asked, and that input fails as stopped though it was written after the Stop. Should an
    input sent after a Stop wait in the queue for the next turn instead? No tool on the core has mid-turn input yet (ACP
-   and `agy` queue), so nothing reaches it today.
+   and `agy` queue), so nothing reaches it today. PR 6 removed that path (§4.2): on the mid-turn ledger an input sent after a
+   Stop goes to the tool, and is bound to whichever turn the tool says took it, as Codex did before.
 10. **A mid-turn write that fails** (PR 6/7; from #1674's review). When `startTurn` throws on a later input that joins a
     running turn, the ledger ends the whole turn `failed`: the inputs already written and accepted fail too, and the
     session goes idle while the tool may still be working. Should only that input fail, the turn going on? Unreachable
-    today: ACP has no mid-turn input, and `AcpWire.startTurn` does not throw.
+    today: ACP has no mid-turn input, and `AcpWire.startTurn` does not throw. PR 6 removed that path (§4.2): on the mid-turn
+    ledger a refused write is said as an error and the turn goes on, unless the write carried a tracked input: then the
+    session is stopped as on a Stop, as Codex did before.

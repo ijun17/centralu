@@ -1,10 +1,9 @@
-import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import { hostAccessEnv } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
 import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
-import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
+import type { CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { imageEventFromDisk } from '../images.js'
 import { launchedThreads } from './child-tracker.js'
@@ -16,7 +15,7 @@ import { reconcileOpenedThread, threadSettingsChanged, threadSettingsOf, type Co
 import { CodexRequestInputs } from './token-readings.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
-import { stopNotConfirmed, undeliveredError, undeliveredText } from '../session-kit.js'
+import { undeliveredText } from '../session-kit.js'
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
 import { CodexRequests } from './server-requests.js'
@@ -25,9 +24,10 @@ import { CodexChildThreads } from './child-threads.js'
 import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { codexCompactAt, initializeAppServer, latestRunningTurn, networkAccessOf, resumeFailure, resumeThreadParams, startThreadParams } from './thread-open.js'
-import { CodexTurns } from './turns.js'
-import { WakingSends, watchBackgroundResume } from './background-resume.js'
+import { watchBackgroundResume } from './background-resume.js'
 import { keepAttachedAppMarks } from '../tool-titles.js'
+import { MidTurnLedger } from '../core/mid-turn-ledger.js'
+import type { MidTurnInput, MidTurnIo } from '../core/seam.js'
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
@@ -42,27 +42,18 @@ export class CodexSession implements SessionHandle {
    * failing to resume one. A resumed thread has a rollout, and names itself at once.
    */
   externalId: string | null = null
-  private closed = false
 
   private client: CodexClient
   private threadId: string | null = null
-  /** Which turn is running, which ended, and which we interrupted: what Stop targets (see `CodexTurns`) */
-  private readonly turns = new CodexTurns()
   /**
-   * Messages that arrived while a compact/review turn was running (measured while dogfooding,
-   * 2026-09-02, a dogfooding session).
-   *
-   * In codex 0.147.0, turn/start **answers success while dropping the input** while a compact
-   * turn is running — the rollout kept only the settings application (thread_settings_applied)
-   * and not a single line of the user message, and since no error came back either, our screen
-   * made it look sent. Upstream also pins these turns as unsteerable ("cannot steer a compact
-   * turn" — turn_processor.rs). A normal turn is different: codex core merges input into a turn
-   * that is running, so we just send it as usual. So we only queue here during compact/review
-   * **that we ourselves started**, and flush the queue as a single turn once that turn ends.
+   * The inputs, their receipts, the turn a Stop targets, the queue behind a compact or review, and the exit (`MidTurnLedger`).
+   * Codex merges an input into a turn that is running; a compact or review turn takes none (upstream: "cannot steer a compact
+   * turn", turn_processor.rs), so what is sent during one waits for its end
    */
-  private pendingInputs: { text: string; receipt?: InputReceipt }[] = []
-  private inputReceipts = new InputReceipts()
-  private inputGroups = new Map<string, InputReceipt[]>()
+  private readonly ledger: MidTurnLedger
+  private io!: MidTurnIo
+  /** The inputs a `turn/start` sent, by the client id it gave them: the turn's first item names it (#1604) */
+  private inputGroups = new Map<string, MidTurnInput[]>()
   /**
    * The turn that started and has shown no item yet (#1604): the first item of a turn Codex starts for `turn/start` is the
    * message it was started with, which names the id it came under (`clientId`). A message that joined a turn already running
@@ -71,21 +62,10 @@ export class CodexSession implements SessionHandle {
   private openingTurn: string | null = null
   /** The inputs the turn whose opening is being handled began from (`turnStartInputs`); null outside that event */
   private startInputs: readonly string[] | null = null
-  /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
-  private blockingTurn = false
-  /** The unsteerable turn is a compaction we started (`/compact`), not a review: a compaction event in it is manual */
+  /** A compaction we started (`/compact`) is running: a compaction event in it is manual */
   private compactTurn = false
-  /** Messages sent while the thread was still coming up, and those a Stop reclaimed (see `WakingSends`, #168) */
-  private readonly sends = new WakingSends()
   /** Codex is reconnecting on its own (#168): the `retrying` activity and what it puts back (see `RetryActivity`) */
   private readonly retry: RetryActivity
-  /**
-   * The thread never came up. Only possible after a lazy resume handed the handle out:
-   * watchBackgroundStart reports that once, counting the messages it swallowed (#168, item 5).
-   */
-  private startFailed = false
-  /** The thread came up (`ready` resolved). Until then, every message sent is still waiting on it */
-  private started = false
   /** Notification methods this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
   private readonly unmapped: UnmappedTypes
   /** /compact, /review and /goal (see `CodexSlashCommands`) */
@@ -137,11 +117,6 @@ export class CodexSession implements SessionHandle {
       emit: (e) => this.emit(e),
       request: (method, params) => this.client.request(method, params),
       threadId: () => this.threadId,
-      setBlockingTurn: (on, compact) => {
-        this.blockingTurn = on
-        this.compactTurn = on && compact === true
-      },
-      flushPending: () => this.flushPending(),
     })
     this.childThreads = new CodexChildThreads({ sessionId: opts.sessionId, emit: (e) => this.emit(e) })
     this.threadServers = new CodexServers({
@@ -173,33 +148,12 @@ export class CodexSession implements SessionHandle {
          * buried underneath, out of sight. Calling a process that never crashed a crash left no
          * way to find the actual cause.
          */
-        onExit: (code, expected) => {
-          // The child threads lived in that process (#290) — closed by us or not, they are gone
-          this.releaseChildren()
-          if (expected) return
-          /*
-           * **An app-server that goes while no turn is running is not a crash** (#1397). A Codex session keeps its app-server
-           * alive while idle (#568), so a Mac shutdown, a logout or an `kill` of the process lands on sessions that were doing
-           * nothing, and each used to show an error. With nothing in flight the process is only gone: the session is asleep
-           * and the next message resumes the thread, with no error and no mark, whatever the exit code. A turn in flight (a
-           * running turn, an input not yet taken, a blocking command) or a process that never finished starting is still a
-           * crash.
-           */
-          if (this.idle()) {
-            this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })
-            return
-          }
-          this.emit({
-            type: 'error',
-            sessionId: this.sessionId,
-            error: {
-              code: 'adapter_crashed',
-              // What it printed last is the reason a person can act on: a lock, a bad config line, a panic
-              message: withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client),
-              retryable: true,
-            },
-          })
-        },
+        /*
+         * The ledger says whether it went with work in flight (a crash) or idle (asleep: a Codex session keeps its app-server
+         * while idle, #568, so a shutdown or a kill lands on sessions doing nothing, #1397). What it printed last is the reason
+         * a person can act on: a lock, a bad config line, a panic
+         */
+        onExit: (code, expected) => this.io.exited(expected, withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client)),
       },
       {
         cwd: opts.cwd,
@@ -212,16 +166,28 @@ export class CodexSession implements SessionHandle {
         env: hostAccessEnv(opts.hostAccess),
       },
     )
-    this.ready = this.start()
-    // Registered before any send's continuation, so the flag is set by the time a send's catch runs
-    this.ready.then(
-      () => {
-        this.started = true
+    this.ledger = new MidTurnLedger(opts.sessionId, this.emit, {
+      label: 'Codex',
+      open: (io) => {
+        this.io = io
+        return this.start()
       },
-      () => {
-        this.startFailed = true
+      write: (inputs, queued) => this.write(inputs, queued),
+      refusal: (err) => turnError(err.message),
+      interrupt: (turnId) => this.client.request('turn/interrupt', { threadId: this.threadId, turnId }),
+      releaseCards: () => this.releaseCards(),
+      // The child threads lived in that process (#290): closed by us or not, they are gone
+      connectionEnded: () => {
+        this.inputGroups.clear()
+        for (const e of this.childThreads.children.release('Ended with the session process')) this.emit(e)
       },
-    )
+      close: () => this.close(),
+      detach: async () => {
+        this.opts.apps?.close()
+        await this.client.detach()
+      },
+    })
+    this.ready = this.ledger.ready
   }
 
   /**
@@ -255,18 +221,6 @@ export class CodexSession implements SessionHandle {
     return settings
   }
 
-  /**
-   * Messages sent (`send`, `sendTracked`, a flush of the queue) whose `turn/start` has not been answered yet. An ordinary
-   * `send` has no receipt, so between sending it and getting the turn's id the session is not idle: an app-server that exits
-   * then has lost that message, and says so as a crash (#1397 review).
-   */
-  private startsInFlight = 0
-
-  /** Started, and nothing in flight: no turn running, no `turn/start` unanswered, no input queued, no input waiting for its turn, no blocking command (#1397) */
-  private idle(): boolean {
-    return this.started && this.turns.turnId === null && this.startsInFlight === 0 && this.pendingInputs.length === 0 && this.inputReceipts.size === 0 && !this.blockingTurn
-  }
-
   private async start(): Promise<void> {
     const adopted = !!this.opts.processSource?.adopt
     await initializeAppServer(this.client, this.sessionId, adopted, (e) => this.emit(e))
@@ -293,7 +247,7 @@ export class CodexSession implements SessionHandle {
       this.threadServers.checkAppMode(res)
       this.networkAccess = networkAccessOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
-      if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))
+      if (adopted && this.io.taken([], runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))) this.threadWritten()
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -369,12 +323,13 @@ export class CodexSession implements SessionHandle {
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') {
-      this.turns.turnId = turnIdOf(n.params)
-      this.openingTurn = this.turns.turnId
+      this.openingTurn = turnIdOf(n.params)
+      this.io.turnStarted(this.openingTurn)
       // Before the event below goes out: the manager records a handle's external id as its events arrive
       this.threadWritten()
     }
-    if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turns.ended(turnIdOf(n.params))
+    if (n.method === 'turn/failed') this.io.turnEnded(turnIdOf(n.params), null)
+    if (n.method === 'turn/completed') this.compactTurn = false
 
     // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
     const resumed = n.method.startsWith('item/') ? this.retry.resumed() : null
@@ -392,17 +347,10 @@ export class CodexSession implements SessionHandle {
         const group = this.inputGroups.get(p.item.clientId)
         if (group) {
           this.inputGroups.delete(p.item.clientId)
-          this.takeInputTurn({ turn: { id: p.turnId } }, group)
-          if (opening) this.announceStart(group.map((r) => r.id))
+          if (this.io.taken(group, p.turnId)) this.threadWritten()
+          if (opening) this.announceStart(group.flatMap((i) => (i.receipt ? [i.receipt.id] : [])))
         }
       }
-    }
-
-    // Where compact/review ends — if messages piled up during it, they go out now
-    if (n.method === 'turn/completed' && this.blockingTurn) {
-      this.blockingTurn = false
-      this.compactTurn = false
-      this.flushPending()
     }
     if (n.method === 'thread/settings/updated') {
       const { next, events } = threadSettingsChanged(this.sessionId, this.threadSettings, n.params, {
@@ -436,7 +384,6 @@ export class CodexSession implements SessionHandle {
       // The point a thread of this process was started to compact at, with its window readings (#1553); an adopted one was started with a limit this host did not keep
       const compactAt = codexCompactAt(this.opts)
       const e = sort.type === 'context_update' && compactAt !== undefined ? { ...sort, compactAt } : sort
-      if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
        * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize
        * is a pure function and cannot read files — IO is the adapter's job. The read is async,
@@ -465,37 +412,35 @@ export class CodexSession implements SessionHandle {
       }
       // Each attempt sends its own notice; one indication is enough
       if (e.type === 'activity' && !this.retry.admit(e.activity)) continue
-      /*
-       * Who interrupted the turn is logged (#698): a real one ended a delegated turn as "finished" seven seconds before
-       * the person quit, and nothing said whether the person's Stop, the host or Codex itself had sent it.
-       */
-      const interrupted = e.type === 'state_change' && e.reason === 'interrupted' && n.method === 'turn/completed'
-      if (interrupted) {
+      if (n.method === 'turn/completed' && (e.type === 'turn_complete' || e.type === 'error' || (e.type === 'state_change' && e.reason === 'interrupted'))) {
+        // The turn's end, which the ledger says, with the inputs it took
         const turn = turnIdOf(n.params)
-        const ours = !!turn && this.turns.interruptSent(turn)
-        console.error(`[codex] ${this.sessionId.slice(0, 8)} turn ${turn ?? '?'} interrupted ${ours ? 'by a stop from Centralu' : 'by Codex, not by a stop from Centralu'}`)
-        this.emit(ours ? e : { ...e, reason: INTERRUPTED_BY_TOOL })
-      } else {
-        this.emit(e)
+        if (e.type === 'state_change') {
+          /*
+           * Who interrupted the turn is logged (#698): a real one ended a delegated turn as "finished" seven seconds before
+           * the person quit, and nothing said whether the person's Stop, the host or Codex itself had sent it.
+           */
+          const ours = !!turn && this.io.stopSent(turn)
+          console.error(`[codex] ${this.sessionId.slice(0, 8)} turn ${turn ?? '?'} interrupted ${ours ? 'by a stop from Centralu' : 'by Codex, not by a stop from Centralu'}`)
+        }
+        this.io.turnEnded(turn, e.type === 'error' ? { how: 'failed', error: e.error } : { how: e.type === 'turn_complete' ? 'complete' : 'interrupted' })
+        continue
       }
-      if (e.type === 'turn_complete' || interrupted) {
-        const ended = turnIdOf(n.params)
-        if (ended) this.inputReceipts.endTurn(ended)
-      }
+      // An error of the thread's own: the tracked inputs still waiting fail with it
+      if (e.type === 'error') this.io.failed(new Error(e.error.message))
+      this.emit(e)
     }
   }
 
   // The origin is Claude's: Codex has no such stamp. `id` goes to `turn/start` as the message's client id, which the turn it starts names (#1604)
   sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
-    const receipt = this.inputReceipts.create(observer, opts?.id !== undefined && isUuid(opts.id) ? opts.id : undefined)
-    this.sendInput(text, receipt)
-    return receipt.done
+    return this.ledger.sendTracked(text, observer, opts?.id)
   }
 
   /**
    * Says which inputs a turn Codex started began from (#1604): a second `working` for the turn, which the host reads with
    * `turnStartInputs` as it handles it. Codex starts a turn for a `turn/start` sent after the turn it was meant for ended, or
-   * queued behind a compact or a review (`flushPending`), and the message it began from is what tells a hub whose that turn is
+   * queued behind a compact or a review (`MidTurnLedger`), and the message it began from is what tells a hub whose that turn is
    */
   private announceStart(inputs: readonly string[]): void {
     this.startInputs = inputs
@@ -510,7 +455,9 @@ export class CodexSession implements SessionHandle {
     return this.startInputs
   }
 
-  send(text: string): void { this.sendInput(text) }
+  send(text: string): void {
+    this.ledger.send(text)
+  }
 
   /**
    * A note steered into the regular turn that is running, starting nothing (#1492). `turn/start` would do it only while a turn is
@@ -521,66 +468,51 @@ export class CodexSession implements SessionHandle {
    * whether it was taken: a refused note is not told, and waits for a later request of a running turn (`ContextNudges`).
    */
   nudge(text: string): boolean | Promise<boolean> {
-    const turnId = this.turns.turnId
-    if (this.closed || !this.started || !this.threadId || turnId === null || this.blockingTurn || this.pendingInputs.length > 0) return false
+    const turnId = this.ledger.steerable()
+    if (!this.threadId || turnId === null) return false
     return this.client.request('turn/steer', { threadId: this.threadId, input: [{ type: 'text', text }], expectedTurnId: turnId }).then(
       () => true,
       () => false,
     )
   }
 
-  private sendInput(text: string, receipt?: InputReceipt): void {
-    const nth = this.sends.issue()
-    // Raised now, not when `turn/start` goes out: the message is already ours to lose (`startsInFlight`)
-    this.startsInFlight += 1
-    void this.ready
-      .then(() => {
-        // A Stop pressed before the thread was up already reclaimed this message (`sends`) — do not send it
-        if (this.sends.reclaimed(nth) || receipt?.cancelled) return
-        if (!this.threadId) throw new Error('Thread is not ready')
-        /*
-         * While compact/review is running, we do not send but queue instead — the measurement in
-         * the pendingInputs comment is the reason (if sent, codex answers success while
-         * **dropping** it). This leaves a limitation where a slash command hitting this path is
-         * delivered as literal text, but /compact during a compact is meaningless anyway.
-         */
-        if (this.blockingTurn) {
-          this.pendingInputs.push({ text, receipt })
-          return
-        }
-        const command = this.slashCommands.run(text)
-        if (command) return command
-        if (receipt) this.inputGroups.set(receipt.id, [receipt])
-        return (
-          this.client
-            .request('turn/start', {
-              threadId: this.threadId,
-              ...(receipt ? { clientUserMessageId: receipt.id } : {}),
-              input: [{ type: 'text', text }],
-              ...this.turnSettings(),
-              ...this.outputSchemaParam(),
-            })
-            // The turn also rides along on the response — this covers the case where it arrives before the notification (the target of stop)
-            .then((res) => this.takeInputTurn(res, receipt ? [receipt] : []))
-        )
+  /**
+   * Writes what the ledger sends: a slash command as its own request (`CodexSlashCommands`), anything else as one `turn/start`,
+   * each message its own input item. Messages that waited behind a compact or review go as they are, so a slash command among
+   * them is read as text (a `/compact` during a compact means nothing anyway)
+   */
+  private write(inputs: readonly MidTurnInput[], queued: boolean): { answer: Promise<unknown>; blocking?: boolean } {
+    if (!this.threadId) return { answer: Promise.reject(new Error('Thread is not ready')) }
+    const [first] = inputs
+    const command = queued || !first ? null : this.slashCommands.run(first.text)
+    if (command?.blocks) {
+      this.compactTurn = command.blocks === 'compact'
+      const answer = command.request.catch((err: unknown) => {
+        this.compactTurn = false
+        throw err
       })
-      .catch((e: Error) => {
-        if (receipt) this.inputGroups.delete(receipt.id)
-        if (receipt?.cancelled || receipt?.completed) return
-        if (receipt) this.interrupt(e)
-        // The thread never came up — watchBackgroundStart says so once, counting this message (#168, item 5)
-        if (this.startFailed) return
-        this.emit({
-          type: 'error',
-          sessionId: this.sessionId,
-          error: turnError(e.message),
-        })
+      return { answer, blocking: true }
+    }
+    if (command) return { answer: command.request }
+    const clientId = inputs.find((i) => i.receipt)?.receipt?.id
+    if (clientId) this.inputGroups.set(clientId, [...inputs])
+    const answer = this.client
+      .request('turn/start', {
+        threadId: this.threadId,
+        ...(clientId ? { clientUserMessageId: clientId } : {}),
+        input: inputs.map(({ text }) => ({ type: 'text', text })),
+        ...this.turnSettings(),
+        ...this.outputSchemaParam(),
       })
-      // After the catch: a process's exit handler runs before the rejection is seen, so an exit with this message
-      // unanswered is read as a crash
-      .finally(() => {
-        this.startsInFlight -= 1
+      // The turn also rides on the response, which can come before its notification (the target of a Stop)
+      .then((res) => {
+        if (this.io.taken(inputs, turnIdOf(res))) this.threadWritten()
       })
+      .catch((err: unknown) => {
+        if (clientId) this.inputGroups.delete(clientId)
+        throw err
+      })
+    return { answer }
   }
 
   /**
@@ -595,69 +527,6 @@ export class CodexSession implements SessionHandle {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
     }
-  }
-
-  /** Sends the messages that were queued out as one turn — each message as its own input item (does not blur the boundary) */
-  private flushPending(): void {
-    if (this.pendingInputs.length === 0 || !this.threadId) return
-    const pending = this.pendingInputs
-    const receipts = pending.flatMap((p) => p.receipt ? [p.receipt] : [])
-    const clientId = receipts[0]?.id
-    if (clientId) this.inputGroups.set(clientId, receipts)
-    const input = pending.map(({ text }) => ({ type: 'text', text }))
-    this.pendingInputs = []
-    this.startsInFlight += 1
-    void this.client
-      .request('turn/start', {
-        threadId: this.threadId,
-        ...(clientId ? { clientUserMessageId: clientId } : {}),
-        input,
-        ...this.turnSettings(),
-        ...this.outputSchemaParam(),
-      })
-      .then((res) => this.takeInputTurn(res, receipts))
-      .catch((e: Error) => {
-        if (clientId) this.inputGroups.delete(clientId)
-        if (receipts.length && receipts.every((r) => r.cancelled || r.completed)) return
-        if (this.inputReceipts.size) this.interrupt(e)
-        this.emit({
-          type: 'error',
-          sessionId: this.sessionId,
-          error: turnError(e.message),
-        })
-      })
-      .finally(() => {
-        this.startsInFlight -= 1
-      })
-  }
-
-  private takeInputTurn(res: unknown, receipts: InputReceipt[]): void {
-    if (receipts.length && receipts.every((r) => r.completed)) return
-    const id = turnIdOf(res)
-    if (!receipts.length) { this.takeStartedTurn(id); return }
-    if (!id) {
-      this.interrupt(new Error('Codex did not identify the turn accepting the parent note'))
-      return
-    }
-    // Stop can arrive while turn/start is in flight, before the next turn is named.
-    if (receipts.some((r) => r.cancelled) && !this.turns.hasEnded(id)) {
-      // Ours: the person's Stop, so its ending is not Codex's own interrupt (#698)
-      this.turns.noteInterruptSent(id)
-      void this.client.request('turn/interrupt', { threadId: this.threadId, turnId: id }).catch(() => {})
-    }
-    if (receipts.some((r) => r.cancelled)) return
-    this.takeStartedTurn(id)
-    for (const receipt of receipts) this.inputReceipts.bind(receipt, id)
-  }
-
-  /**
-   * Takes a running turn's id from a response, unless the notifications already named one or already ended it. The
-   * response and the notifications race: `turn/started` can come after the response (Stop pressed very quickly), and
-   * `turn/completed` can come before it (a short turn), so a late response must not bring an ended turn back.
-   */
-  private takeStartedTurn(id: string | null): void {
-    this.threadWritten()
-    this.turns.take(id)
   }
 
   /**
@@ -690,14 +559,12 @@ export class CodexSession implements SessionHandle {
     return this.slashCommands.list()
   }
 
-  interrupt(reason = new Error('The parent note was stopped before it finished')): void {
-    const turns = this.inputReceipts.failAll(reason)
-    this.pendingInputs = this.pendingInputs.filter((p) => !p.receipt)
-    for (const turnId of turns) {
-      if (!this.threadId || turnId === this.turns.turnId || this.turns.hasEnded(turnId)) continue
-      this.turns.noteInterruptSent(turnId)
-      void this.client.request('turn/interrupt', { threadId: this.threadId, turnId }).catch(() => {})
-    }
+  interrupt(): void {
+    this.ledger.interrupt()
+  }
+
+  /** What a Stop releases besides the turns (`MidTurnLedger.interrupt`) */
+  private releaseCards(): void {
     /*
      * Stops app calls made by this session (M4 A-5) — **even without a turn.** A call that had
      * already returned early past 240 seconds keeps running even after the turn ends. Work from a
@@ -707,16 +574,6 @@ export class CodexSession implements SessionHandle {
      */
     this.opts.apps?.cancelAll()
     /*
-     * The thread has not come up yet (a lazy resume is in progress) — reclaim the queued message
-     * and go back to waiting for input (#168, `sends`). No turn/completed(interrupted) will
-     * arrive either, since no turn was ever started — the state is flipped here instead.
-     */
-    if (!this.threadId && this.sends.unsent > 0) {
-      this.sends.reclaim()
-      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
-      return
-    }
-    /*
      * Answers this thread's open approvals with a refusal before the interrupt, the way the Claude adapter does. The
      * interrupt ends them on Codex's side too, but only if it lands: answering them here closes the cards either way,
      * and a refusal sent to a request the interrupt already ended is ignored. A child's request stays open, because
@@ -725,17 +582,6 @@ export class CodexSession implements SessionHandle {
     for (const requestId of this.serverRequests.approvals.ids((a) => a.threadId === null || a.threadId === this.threadId)) {
       this.respondApproval(requestId, 'deny')
     }
-    // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
-    if (!this.threadId || !this.turns.turnId) return
-    this.turns.noteInterruptSent(this.turns.turnId)
-    /*
-     * Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so. As a
-     * notice, as Claude does (#1060): the turn is still running, and an error would end it for the host (a delegation
-     * wait settles, a queued request goes in) and leave its `turn_complete` an illegal move from `error`.
-     */
-    void this.client
-      .request('turn/interrupt', { threadId: this.threadId, turnId: this.turns.turnId })
-      .catch((err: Error) => this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`)))
   }
 
   /**
@@ -750,19 +596,12 @@ export class CodexSession implements SessionHandle {
     await this.client.request('turn/interrupt', { threadId: taskId, turnId })
   }
 
-  /** The app-server is gone, and the child threads with it — each still listed ends as stopped. */
-  private releaseChildren(): void {
-    this.inputGroups.clear()
-    this.inputReceipts.failAll(new Error('The session process ended before the parent note finished'))
-    for (const e of this.childThreads.children.release('Ended with the session process')) this.emit(e)
-  }
-
   /** The watchdog for a background resume (lazy resume only, see `watchBackgroundResume`) */
   watchBackgroundStart(): void {
     watchBackgroundResume({
       sessionId: this.sessionId,
       emit: (e) => this.emit(e),
-      closed: () => this.closed,
+      closed: () => this.ledger.closed,
       ready: this.ready,
       unsentNote: () => this.unsentNote(),
       dispose: () => this.dispose(),
@@ -775,42 +614,19 @@ export class CodexSession implements SessionHandle {
    * one error rather than after it: once the manager retires the handle, a later event from it may not be heard.
    */
   private unsentNote(): string {
-    const unsent = this.sends.reclaim()
+    const unsent = this.ledger.takeQueued()
     return unsent > 0 ? ` — ${undeliveredText(unsent, 'were sent while it was opening')}` : ''
   }
 
-  /**
-   * Closed or let go while a lazy resume was still waking (#428). The client's dispose or detach rejects the pending
-   * resume, so `ready` fails after the handle is closed, and neither send's catch (it leaves a failed start to
-   * watchBackgroundStart) nor watchBackgroundStart (it returns once closed) would speak for the messages sent
-   * meanwhile. They are said here, and marked stopped so a start that still lands does not send them.
-   */
-  private reportUnsentWhileWaking(when: string): void {
-    if (this.started) return
-    const unsent = this.sends.reclaim()
-    if (unsent > 0) this.emit(undeliveredError(this.sessionId, unsent, when))
+  /** Does not silently drop a pending approval (same reason as the claude adapter — the screen would be stuck holding the card) */
+  dispose(): Promise<void> {
+    return this.ledger.dispose()
   }
 
-  /** Does not silently drop a pending approval (same reason as the claude adapter — the screen would be stuck holding the card) */
-  async dispose(): Promise<void> {
-    this.closed = true
+  private async close(): Promise<void> {
     // App attachment closes together with the handle — a new handle gets its own
     this.opts.apps?.close()
     this.serverRequests.closeApprovals()
-    // Said before the process goes, while this handle is still the session's (the manager drops a stale handle's events)
-    this.releaseChildren()
-    /*
-     * The case of dying together with messages that were waiting for a compact to finish — the
-     * screen already shows them as sent (the manager records them first), so dropping them
-     * silently would just resurrect the original bug at shutdown time. We have to say delivery
-     * failed, so the user can resend.
-     */
-    if (this.pendingInputs.length > 0) {
-      const n = this.pendingInputs.length
-      this.pendingInputs = []
-      this.emit(undeliveredError(this.sessionId, n, 'were sent during compaction'))
-    }
-    this.reportUnsentWhileWaking('were sent while it was opening')
     await this.client.dispose()
   }
 
@@ -819,12 +635,8 @@ export class CodexSession implements SessionHandle {
    * the next host's `thread/resume` gets it re-sent under the same id — and no EOF, which would make
    * codex exit. The bridge processes codex started for this thread stay with codex.
    */
-  async detach(): Promise<void> {
+  detach(): Promise<void> {
     // The next host resumes the thread, but not the messages this one held behind a resume still waking (#428)
-    this.reportUnsentWhileWaking('were sent while it was opening, as Centralu restarted,')
-    this.opts.apps?.close()
-    await this.client.detach()
-    this.closed = true
+    return this.ledger.detach()
   }
 }
-
