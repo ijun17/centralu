@@ -112,6 +112,6 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
-# The temporary-folder helper the shell tests share with the keeper's (keeper/src/test_support.rs).
+# The temporary-folder helper the shell tests share with the keeper's (keeper/src/keeper/test_support.rs).
 [target.'cfg(unix)'.dev-dependencies]
 centralu-keeper-core = { path = "keeper", features = ["test-support"] }

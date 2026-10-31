@@ -6,7 +6,6 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
@@ -35,11 +34,7 @@ fn trusted(k: &SigningKey) -> TrustedKey {
 struct Temp(PathBuf);
 impl Temp {
     fn new(tag: &str) -> Temp {
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("cc-shell-run-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-        let _ = remove_content(&p);
-        fs::create_dir_all(&p).unwrap();
-        Temp(p)
+        Temp(centralu_keeper_core::keeper::test_support::temp_path(tag))
     }
     fn join(&self, p: &str) -> PathBuf {
         self.0.join(p)

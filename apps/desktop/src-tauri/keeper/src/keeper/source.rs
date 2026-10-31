@@ -542,6 +542,8 @@ pub fn save_background(data: &Path, on: bool) -> io::Result<Settings> {
     Ok(settings)
 }
 
+static NEXT_TMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /**
  * Writes a file only this user can read, atomically (temp file + rename): a reader sees the old
  * file or the new one, whole.
@@ -550,15 +552,24 @@ pub fn save_background(data: &Path, on: bool) -> io::Result<Settings> {
  * two threads writing `keeper.json` at once (the status sink and a request) truncated and wrote the
  * same temporary file, and the rename could publish the two interleaved, or fail because the other
  * thread had renamed it away. The data is synced before the rename, so a crash leaves the old file,
- * not an empty new one.
+ * not an empty new one. A temporary file an earlier process with this pid left behind (killed
+ * between create and rename) is removed and the create tried once more.
  */
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let n = NEXT_TMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = path.with_extension(format!("tmp-{}-{n}", std::process::id()));
     let written = (|| {
         use std::io::Write;
-        let mut f = fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&tmp)?;
+        let open = || fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&tmp);
+        // A name is this process's and this call's, so one that exists was left by an earlier process
+        // with the same pid that died between create and rename: nobody else is writing it.
+        let mut f = match open() {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                fs::remove_file(&tmp)?;
+                open()?
+            }
+            opened => opened?,
+        };
         f.write_all(bytes)?;
         f.write_all(b"\n")?;
         f.sync_all()?;
@@ -579,6 +590,21 @@ mod tests {
     /// #840 item 11: threads writing the same file at once each publish their own content whole.
     /// With one temporary name per process they truncated and wrote the same temporary file, and
     /// a rename failed or published a mix.
+    #[test]
+    fn a_stale_temporary_file_of_a_dead_process_with_this_pid_does_not_stop_the_write() {
+        let dir = temp("stale-tmp");
+        let path = dir.join("shell-status.json");
+        // The names this call may pick: this pid's, from the counter on (other tests advance it).
+        let from = NEXT_TMP.load(std::sync::atomic::Ordering::Relaxed);
+        for n in from..from + 256 {
+            fs::write(path.with_extension(format!("tmp-{}-{n}", std::process::id())), b"stale").unwrap();
+        }
+        write_private(&path, b"fresh").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"fresh
+");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn concurrent_private_writes_never_tear_or_fail() {
         let dir = temp("concurrent-writes");

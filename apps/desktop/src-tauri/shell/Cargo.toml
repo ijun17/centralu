@@ -20,17 +20,15 @@ path = "src/main.rs"
 # What the shell links is code that cannot be patched without asking every person for their
 # permissions again (thin-shell.md §3), so nothing here is new to the workspace: the verifier, the
 # keeper's start (the same `keeper::exe::Start` the window uses, so the shell starts exactly what the
-# window would), and the JSON and libc the two already use.
+# window would), and the JSON the two already use.
 [dependencies]
 content-verify = { path = "../../content-verify" }
 centralu-keeper-core = { path = "../keeper" }
 serde_json = "1"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 # Signing test content in the unit tests, as scripts/content-manifest.mts does in a release.
 [dev-dependencies]
+libc = "0.2"
 centralu-keeper-core = { path = "../keeper", features = ["test-support"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 sha2 = "0.10"
