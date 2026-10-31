@@ -50,8 +50,8 @@ import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { hubUpdatesMachines, UpdateService } from './updates.js'
-import { installsByDefault, updateSwitches } from './update-switches.js'
-import { installedCopyPath } from './os.js'
+import { copyFollowsHost, installsByDefault, updateSwitches } from './update-switches.js'
+import { copySwapMayPrompt, installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
@@ -983,6 +983,10 @@ if (swapping && (store.deferredSteps.length > 0 || store.vacuumOwed)) {
  * is still needed.
  */
 updates.start()
+// A host a linked hub installed brings this machine's desktop copy to its own version (#1736): the hub's update has none
+if (copyFollowsHost({ build: BUILD, startedBy: launch.startedBy, env: process.env, entry: process.argv[1], hubInstall: join(dataRoot(), 'remote'), swapMayPrompt: copySwapMayPrompt() })) {
+  void updates.followHost()
+}
 // The linked machines (#82): each opens its ssh link in the background and reports through `machine_status`
 links.start()
 // The installed agent CLIs are read now and every ten minutes (#297); a window gaining focus asks too
