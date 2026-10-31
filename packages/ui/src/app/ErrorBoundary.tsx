@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '../components/Button.jsx'
+import { useStore } from '../store/store.js'
 
 /**
  * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
@@ -27,6 +28,18 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // Also logs to the console — during development this is what catches the eye first
     console.error('[centralu] render crashed', error, info.componentStack)
+    /*
+     * And to the host's log, where it outlives a reload (the console does not). Nothing waits for it and nothing can
+     * come back from it: a crash report that itself throws would be a second crash on the screen that just crashed.
+     */
+    try {
+      void useStore
+        .getState()
+        .platform?.diagnostics.reportCrash({ message: error.message, stack: error.stack ?? '', componentStack: info.componentStack ?? '' })
+        .catch(() => {})
+    } catch {
+      // No platform yet, or a port without the call: the console line above is all there is
+    }
   }
 
   override render(): ReactNode {

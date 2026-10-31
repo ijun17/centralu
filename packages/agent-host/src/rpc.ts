@@ -9,6 +9,7 @@ import type { CommandRunner } from './dev-services/commands.js'
 import { findStrays, stopStrays } from './dev-services/strays.js'
 import { gitLogPath } from './dev-services/git.js'
 import { rpcError } from './rpc-error.js'
+import { createUiCrashLog } from './ui-crash-log.js'
 
 /** Internal handle → protocol shape (history is rendered as a fresh snapshot each time) */
 const toInfo = (h: TerminalHandle) => ({
@@ -162,6 +163,7 @@ export function createRpcHandler(
   adapters: Map<ToolName, AgentAdapter>,
   { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
+  const reportUiCrash = createUiCrashLog((line) => console.error(line))
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
     return themes
@@ -1101,6 +1103,10 @@ export function createRpcHandler(
     'requests.answer': async (p) => {
       const a = RpcMethods['requests.answer'].params.parse(p)
       return { ok: requests?.answer(a.requestId, a.decision) ?? false }
+    },
+    'ui.reportCrash': async (p) => {
+      reportUiCrash(RpcMethods['ui.reportCrash'].params.parse(p))
+      return {}
     },
     'updates.reportApply': async (p, ctx) => {
       const r = RpcMethods['updates.reportApply'].params.parse(p)
