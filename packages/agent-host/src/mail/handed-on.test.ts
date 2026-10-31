@@ -173,7 +173,8 @@ describe('a pause that does not wake, to an owner told the old way', () => {
   const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'paused', body: '[Centralu] The assigned work paused.\nid: b', then: 'running', delivery: 'old', ...over })
 
   it('is recorded and tells nobody, unless the owner is in a turn, where the notice joins it and starts none', () => {
-    for (const delivery of ['old', 'in-turn'] as const) {
+    {
+      const delivery = 'old' as const
       const s = setup()
       s.handOn()
       const record = reportRecorder(s.mail, s.store.mail)

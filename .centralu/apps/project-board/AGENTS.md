@@ -125,28 +125,14 @@ intermittent failures (#368).
   `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
   non-required checks. Compact output still says when the PR adds required jobs (#445).
   `read_failed_job` reads at most 40 lines around a job failure, without timestamps or colour codes.
-- **`merge_when_green`** (`pr`, `body?`, `deleteBranch?`, `intoBatch?`): refuses unless the
-  gh account has maintain or admin permission (checked first), the PR is open and not a draft, the
-  checks are green and GitHub can merge it. Squash only, with `--match-head-commit`, never `--auto`
-  and never `--delete-branch` (that flag deletes the local branch and, when a Centralu worktree
-  has it checked out, removes that worktree and its session's folder, #715; the branch is deleted
-  through the API when asked, on GitHub only, never a fork's, never a local branch). Session
-  deletion removes a worktree and its branch, not the merge. Subject `Title (#N)`; body from `body`
-  or the description's Why / What changed / Closes, without `Co-Authored-By:` or "Generated with" lines; no author flag,
-  so the PR author stays the author. Pending answers at once (it never waits: `queue_merge` merges once green, or
-  `bin/wait-checks.mjs` below waits in the background; #1143 P16). When the merge queue has a batch running on the
-  same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
-  ("Not merged: …", `outcome: 'batch-running'`, `isError`: it is not a success an agent could read as merged): merging here moves the default branch under the batch, which then stops
-  before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
-  `intoBatch: true` merges anyway (the answer then says it again).
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
-  merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
+  merging is the maintainer's act, and `queue_merge` refuses without maintain or
   admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
   names as `ci_status` does; pending checks do not stop it, and the answer says CI goes on. `note`
   becomes a comment for the maintainer under the public text rules (checked before anything is
   written), ending with the CI line. No permission check: anyone who may push to the pull request
   may mark it ready.
-- **Never call `merge_when_green` or `mark_ready` against a real PR in a test**; the tests use a fake `gh`.
+- **Never call `mark_ready` against a real PR in a test**; the tests use a fake `gh`.
 
 ### Waiting without blocking
 
@@ -181,7 +167,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **`queue_merge`** (`pr`, `lowers?`, `owner?`, `author?`, `deleteBranch?`; model only): one pull request, or a
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
-  Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
+  Refuses at once, without maintain or admin, for a draft or a closed pull
   request, for a top based on a branch none of its lowers has, and for a top whose squash subject (`Title (#N)`,
   the stack lands through its top) is over 72 characters (`kind: 'subject'`, "Shorten the title", nothing
   queued: #1593, as `integrate` does, #1222). A pull request is in one item only.
@@ -242,7 +228,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (`lowerFailureCounts`, → attention `lower-failed`). A later failure is evidence the top's run
   missed (#1072 under #1075: a runner-dependent Windows bug); an earlier one is outlived by the top's
   run on a newer main (#1039 under #1040: a test main had since fixed). Then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
-  attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
+  attribution lines (`squashMessage`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head). A stack lands only when the top merged into the default branch, here or found merged
   (a driver stopped between the merge and writing it down, or by hand): then each head branch is
@@ -545,8 +531,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
   place of a check: the repository has no protection rule, and if one is added that requires checks
   on the head, GitHub answers BLOCKED and the member goes back to its own CI. Requiring only a batch
   status in branch protection was the other option; it was not taken: it changes the repository's
-  settings, and every merge would then need a batch's status, which `merge_when_green` and a pull
-  request queued alone never get.
+  settings, and every merge would then need a batch's status, which a pull
+  request queued alone never gets.
 - **Landing**: one member per tick, in order, as its own squash (`land`, `afterMerge`: the same
   checks, subject, lowers and branches as alone), each only while the default branch's tree is the
   tree the batch had before it; the last one leaves exactly the tree CI tested, and the batch's end
@@ -563,8 +549,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
   (`decideLanding` answers `subject: true`): its head is what CI tested, its poll says `subject`, and shortened it is batched
   again by itself, a batch of one included; the members after it are sent back as for any stop (`batchless`), which stays as
   it was (#1593).
-- **The default branch moved under the batch** (#1548, 2026-10-26: batch-209 had #1542 green when the release bump #1545
-  landed through `merge_when_green`; the stop marked it `alone` and its session was told to queue it again by hand,
+- **The default branch moved under the batch** (#1548, 2026-10-26: batch-209 had #1542 green when #1545
+  landed outside the queue; the stop marked it `alone` and its session was told to queue it again by hand,
   for a pull request whose tests had passed). That stop alone ("something else landed", `decideLanding`'s `moved`) is not
   the members' fault: the ones not landed are put into a **new batch on the new default branch at once**
   (`rebatchAfterMove`, called as the old batch ends), with no `batchless`, no `alone`, no message to a session, and
@@ -693,8 +679,6 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   a conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
   its session (`full-tier`, with the batch's reason). A new head, or queueing it again, clears it.
   Without this a red batch of one was formed again every tick.
-- **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
-  `queue_merge` or to start the full tier), and waits while the full tier's check has not passed.
 - **The release** takes a commit's own push run as evidence only when the full tier's check passed on it,
   when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
 - `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
@@ -831,8 +815,8 @@ model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
   description the template refuses (an `open_pr` dry run), a branch not on GitHub, a branch with nothing over
   main, and any tier but auto, with the files and rules that put it there and the normal path (`open_pr`
   after the review its tier asks for, then `queue_merge`).
-- **The record is a draft until the squash** (#1259 review): GitHub refuses to merge a draft, and so do
-  `merge_when_green` and every version of this queue, so a board server started before this code (a session's,
+- **The record is a draft until the squash** (#1259 review): GitHub refuses to merge a draft, and so does
+  every version of this queue, so a board server started before this code (a session's,
   which can drive the queue for days) or a merge by hand cannot land a record it did not judge. This queue accepts
   a draft only for an item it marked `auto` (`decideBefore`, the batch's build, run and landing), and `land` readies
   it (`gh pr ready`) right before the squash, under the lease, turning it back into a draft when the squash does
@@ -1047,7 +1031,7 @@ push run of CI is fully green, the full tier included (or `commit`).
   screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (save_answer, list_owner_answers,
   mark_answer_recorded), `contribute-tools.mjs` (comment, edit_comment, file_issue,
-  open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
+  open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status,
   mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
   edit_private_words).
@@ -1110,7 +1094,7 @@ push run of CI is fully green, the full tier included (or `commit`).
    `open_pr` and `rebase_stack` routine. `rebase_stack` asks when `path` names a checkout of the caller's choosing
    (its git would run there) or when `push` is true. `open_pr` asks unless `skipPrePr` is given (or `dryRun`):
    `pnpm pre-pr` runs the tests and the vitest config of the head the session pushed, outside any sandbox, and also
-   when `path` is set. `merge_when_green`, `queue_merge`, `integrate`, `edit_comment`, `release` and
+   when `path` is set. `queue_merge`, `integrate`, `edit_comment`, `release` and
    `edit_private_words` declare nothing and always ask. The merges, so a card stays the check on "never merge your
    own pull request" (the owner's call, 2026-10-24); `edit_comment`, because every comment is under the one gh
    login and the owner's cannot be told from the session's; the word list, so a session refused for a private

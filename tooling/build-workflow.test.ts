@@ -9,7 +9,7 @@ import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
-import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
+import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf } from '../.github/scripts/ci-changes.mjs'
 
 // Like release-workflow.test.ts, inspect the workflow without adding a YAML dependency.
 const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')
@@ -446,41 +446,35 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     for (const f of included) expect(classify([f]).host, f).toBe(true)
   })
 
-  it('runs the quick tier on a pull request, and the full tier on main, on a manual run and on a release bump', () => {
+  it('runs the quick tier on a pull request, and the full tier on main, on a manual run', () => {
     expect(tierOf({ files: ['packages/agent-host/src/rpc.ts'] }).tier).toBe('quick')
     expect(tierOf({ files: ['docs/a.md'] }).tier).toBe('quick')
     // A build or CI change is still the quick tier: the full one runs in the merge queue's batch
     expect(tierOf({ files: ['.github/workflows/build.yml'] }).tier).toBe('quick')
     expect(tierOf({ files: null, onMain: true }).tier).toBe('full')
-    // The merge queue's batch asks for the quick tier (#1259); a release bump or a commit on main still runs in full
+    // The merge queue's batch asks for the quick tier (#1259); a commit on main still runs in full
     expect(tierOf({ files: ['packages/ui/src/a.ts'], dispatch: true, dispatchTier: 'quick' }).tier).toBe('quick')
-    expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE], dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
     expect(tierOf({ files: null, onMain: true, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
     expect(tierOf({ files: null, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
     expect(tierOf({ files: ['docs/a.md'], dispatch: true }).tier).toBe('full')
     expect(tierOf({ files: null }).tier).toBe('full')
-    expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE] })).toMatchObject({ tier: 'full', why: expect.stringContaining('release bump') })
   })
 
-  it('fails fast on a manual run alone, never on a release bump, on main or when the files are not known', () => {
+  it('fails fast on a manual run alone, never on main or when the files are not known', () => {
     expect(failFastOf({ files: ['packages/ui/src/a.ts'], dispatch: true })).toBe(true)
     expect(failFastOf({ files: [], dispatch: true })).toBe(true)
-    // A pull request's run, a release bump's included, and main's: every job to its end
+    // A pull request's run and main's: every job to its end
     expect(failFastOf({ files: ['packages/ui/src/a.ts'] })).toBe(false)
-    expect(failFastOf({ files: [VERSION_SOURCE] })).toBe(false)
     expect(failFastOf({ files: null, onMain: true })).toBe(false)
-    // A manual run that is a release bump (a batch holding the bump PR), on main, or whose files are not known
-    expect(failFastOf({ files: ['docs/a.md', VERSION_SOURCE], dispatch: true })).toBe(false)
+    // A manual run on main, or whose files are not known
     expect(failFastOf({ files: null, onMain: true, dispatch: true })).toBe(false)
     expect(failFastOf({ files: null, dispatch: true })).toBe(false)
   })
 
   // #1066: a stack's lower PRs are drafts, and the top's run (and the merge queue's batch) proves the stack
-  it('runs nothing but changes for a draft pull request, except a release bump, and asks the event last', () => {
+  it('runs nothing but changes for a draft pull request, and asks the event last', () => {
     expect(tierOf({ files: ['packages/agent-host/src/rpc.ts'], draft: true }).tier).toBe('none')
     expect(tierOf({ files: ['packages/agent-host/src/rpc.ts'], draft: false }).tier).toBe('quick')
-    // A bump is the release's evidence, and runs in full whatever it is
-    expect(tierOf({ files: [VERSION_SOURCE], draft: true }).tier).toBe('full')
     expect(tierOf({ files: null, onMain: true, draft: true }).tier).toBe('full')
     expect(outputs('none', classify(['packages/agent-host/src/rpc.ts']))).toEqual({ quick: 'off', full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off' })
   })
@@ -512,14 +506,6 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
 
   it('runs everything when the changed files are not known', () => {
     expect(classify(null)).toEqual({ bundle: true, host: true, host_tests: true, code: true })
-  })
-
-  // So a bump PR's run is main's run, which runs everything (the release script's reuse, docs/releasing.md)
-  it('runs everything for a release bump, from the file that declares the version alone', () => {
-    const release = (JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { release: { source: { path: string } } }).release
-    expect(VERSION_SOURCE).toBe(release.source.path)
-    expect(classify([release.source.path])).toEqual({ bundle: true, host: true, host_tests: true, code: true })
-    expect(outputs(tierOf({ files: [release.source.path] }).tier, classify([release.source.path]))).toEqual(outputs('full', classify(null)))
   })
 
   /*
@@ -580,7 +566,7 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
   })
 
   // The script as the `changes` job runs it: what it writes to $GITHUB_OUTPUT, by event
-  it('writes the quick tier for a pull request, nothing but changes for a draft, and the full tier for a manual run, a release bump and main', () => {
+  it('writes the quick tier for a pull request, nothing but changes for a draft, and the full tier for a manual run and main', () => {
     const f = fixture()
     const script = fileURLToPath(new URL('../.github/scripts/ci-changes.mjs', import.meta.url))
     const event = `${f.dir}-event.json`
@@ -606,14 +592,6 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
       // (the only runs where a failed verify cancels the rest)
       expect(answer('true')).toEqual({ ...all, fail_fast: 'true' })
       expect(answer('false')).toEqual({ quick: 'true', full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false', fail_fast: 'true' })
-      // A release bump's pull request
-      f.git('checkout', '-q', '-b', 'bump', 'main')
-      f.commit({ [VERSION_SOURCE]: "export const APP_VERSION = '9.9.9'\n" }, 'chore(release): 9.9.9')
-      f.merge('bump', 'main')
-      expect(answer()).toEqual(all)
-      expect(answer('', true)).toEqual(all)
-      // Even run by hand, a release bump's run is never cut short
-      expect(answer('true')).toEqual(all)
       // A commit on main
       f.git('checkout', '-q', 'main')
       f.commit({ 'docs/b.md': 'docs' }, 'docs on main')

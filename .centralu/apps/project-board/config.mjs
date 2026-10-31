@@ -39,14 +39,14 @@ function screenOf(v) {
   return names && judge && steps && inputs ? { judge, checks: names, steps, inputs } : false
 }
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
-// CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
+// CI (ci_status, the queue): which workflows hold the required checks, the issue that lists
 // known intermittent failures.
 export const CI = {
   workflows: config.ci?.workflows ?? ['.github/workflows/build.yml'],
   knownFailures: config.ci?.knownFailuresIssue ?? null,
   // Two tiers (2026-10-18): the name of the check that passes only on a full run (build.yml's `full
   // tier` job). Set, nothing lands on a run where it did not pass: the merge queue lands such a pull
-  // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
+  // request through a batch.
   // PROJECT_BOARD_CI_FULL_TIER: for the tests only, which run the queue without tiers too (empty: none)
   fullTier: fullTierOf(process.env.PROJECT_BOARD_CI_FULL_TIER ?? config.ci?.fullTier),
   // What a change lands after, with two tiers (#1259, the owner's decision of 2026-10-19): `quick`, its own quick
@@ -84,6 +84,7 @@ if (CI.landTier === 'quick' && CI.fullTier && !CI.quickChecks?.length) {
 // ready make a batch, `max` at most (default 4, the owner's, 2026-10-19). `min` is at least 2, or 1 with two tiers
 // (`ci.fullTier`): there every pull request lands through a batch, a batch of one included.
 // PROJECT_BOARD_QUEUE_BATCH_MIN: for the tests only, which queue several pull requests one call at a time
+// PROJECT_BOARD_QUEUE_BATCH=off: for the tests only, which run the queue without batches
 // The checkout rebase_stack and the merge queue's conflicts work from by default: the one this app is committed in
 export const APP_DIR = fileURLToPath(new URL('.', import.meta.url))
 
@@ -112,7 +113,7 @@ const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOAR
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
   flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
-  batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 4) || 4) } : null,
+  batch: batch && batch.enabled !== false && process.env.PROJECT_BOARD_QUEUE_BATCH !== 'off' ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 4) || 4) } : null,
   conflicts: {
     mechanical: Array.isArray(conflicts.mechanical) ? conflicts.mechanical.filter((e) => Array.isArray(e?.files) && Array.isArray(e?.run) && e.run.every((a) => Array.isArray(a) && a.length > 0)) : [],
     never: Array.isArray(conflicts.never) ? conflicts.never : [],

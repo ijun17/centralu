@@ -136,6 +136,17 @@ async function decisionSummaries({ refresh }) {
   return answer(summary, { ok: true, decisionStatus: decision, items: rows, fetchedAt: b.fetchedAt })
 }
 
+// Each option belongs to one view; one meant for another is refused, so an agent that moved from the old
+// list_needs_decision (area, detail) without view "items" is told so and not given the answers list.
+const VIEW_OF = { all: 'answers', area: 'items', detail: 'items', refresh: 'summaries' }
+const VIEWS = { answers: listOwnerAnswers, items: needsDecision, summaries: decisionSummaries }
+function listed(args) {
+  const view = args.view ?? 'answers'
+  const stray = Object.keys(VIEW_OF).filter((k) => args[k] !== undefined && args[k] !== false && VIEW_OF[k] !== view)
+  if (stray.length) throw new GitHubError('input', `Not listed: ${stray.map((k) => `${k} is for view "${VIEW_OF[k]}"`).join(', ')}, not for view "${view}".`)
+  return VIEWS[view](args)
+}
+
 export const tools = {
   // The owner's answer, saved or deleted on this machine only (never posted as written: the repository is
   // public). Screen-only; agents read and close them with the two tools after this.
@@ -165,12 +176,12 @@ export const tools = {
         view: z.enum(['answers', 'items', 'summaries']).optional().describe('Default "answers"'),
         all: z.boolean().optional().describe('answers: also the answers already recorded; default false'),
         area: z.string().optional().describe('items: only this Area, for example "UI"'),
-        detail: detailInput,
+        detail: detailInput.describe('items: "full" adds type, state, URL and ids; default "compact"'),
         refresh: refreshInput.describe('summaries: skip the short cache and ask GitHub now'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    handler: (args, ctx) => (args.view === 'summaries' ? forView(decisionSummaries) : answering(args.view === 'items' ? needsDecision : listOwnerAnswers))(args, ctx),
+    handler: (args, ctx) => (args.view === 'summaries' ? forView(listed) : answering(listed))(args, ctx),
   },
 
   mark_answer_recorded: {

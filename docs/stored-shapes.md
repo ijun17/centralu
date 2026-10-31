@@ -190,7 +190,7 @@ host. What it would take:
 4. **The UI.** The previous release's window ships inside its platform package as an app bundle, which Playwright
    does not drive, so the screen half stays with `older-host.spec.ts`; this test drives the older host through its
    RPCs (`hostCall`), as that spec does for its event.
-5. **Where it runs.** The full tier, once per platform: the host package is per platform, and a release bump is
+5. **Where it runs.** The full tier, once per platform: the host package is per platform, and a new release is
    the moment a new previous release exists. It cannot run before the first release that has the shapes it checks,
    so each shape's assertion lands one release after the shape.
 
