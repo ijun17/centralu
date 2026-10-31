@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { fakeClaudeSdk, type CanUseTool } from './claude-sdk-fake.test-helpers.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
@@ -8,24 +9,13 @@ import { answerOrCard } from '../approval-outcome.test-helpers.js'
  * (measured, see `CreateSessionOpts.readableDirs`), and the adapter asks the host's `mayRead`. Here the SDK is a
  * fake and the callback is called directly, as in always-allow.test.ts.
  */
-type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string }>
 const sdk = vi.hoisted(() => ({ canUseTool: null as CanUseTool | null }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: ({ options }: { options: { canUseTool?: CanUseTool } }) => {
+vi.mock('@anthropic-ai/claude-agent-sdk', () =>
+  fakeClaudeSdk((options) => {
     sdk.canUseTool = options.canUseTool ?? null
-    return {
-      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
-      async *[Symbol.asyncIterator]() {
-        await new Promise(() => {})
-      },
-      interrupt: async () => {},
-      close: () => {},
-      supportedCommands: async () => [],
-      getContextUsage: async () => undefined,
-    }
-  },
-}))
+  }),
+)
 
 const { ClaudeAdapter } = await import('./index.js')
 

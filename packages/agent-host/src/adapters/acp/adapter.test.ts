@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { launchRefusal, type AdapterCapabilities, type PermissionPreset } from '@cc/protocol'
 import type { AgentSpawnSpec } from '../contract.js'
 import { cursorProfile } from '../cursor-agent/index.js'
+import { antigravityProfile } from '../antigravity/index.js'
 import { openCodeProfile } from '../opencode/index.js'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
-import type { AcpProfile } from './profile.js'
+import { ACP_CAPABILITIES, type AcpProfile } from './profile.js'
 
 /**
  * What the ACP adapter starts a tool with, and what Cursor's profile lets it start under. The real-process side of each
@@ -58,6 +59,15 @@ describe("Cursor's presets", () => {
   it('start it under Auto only: it writes without asking, so no preset that asks before a change can be kept', () => {
     expect(refusal('auto')).toBeNull()
     for (const p of ['safe', 'normal', 'edits'] as const) expect(refusal(p)).toMatch(/only under Auto/)
+  })
+})
+
+describe('what the ACP tools keep alike', () => {
+  it('is ACP_CAPABILITIES for all three, each overriding only what it measured different', () => {
+    expect(cursorProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, contextUsage: 'none', presets: ['auto'] })
+    expect(openCodeProfile().capabilities).toStrictEqual(ACP_CAPABILITIES)
+    expect(antigravityProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, autoTitle: false })
+    expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, midTurnInput: false, instructionChannel: 'server', processModel: 'per-session', roleText: false })
   })
 })
 

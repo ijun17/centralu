@@ -3,6 +3,28 @@ import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LocalUsage } from
 import type { AdapterSurface } from '../contract/surface.js'
 import type { RequestPermission, ToolCallFields } from './wire.js'
 
+/** What every ACP tool keeps alike (Cursor, OpenCode, Antigravity): each profile spreads it and overrides what differs */
+export const ACP_CAPABILITIES: AdapterCapabilities = {
+  approvals: true,
+  contextUsage: 'exact',
+  resume: true,
+  autoTitle: true,
+  attachments: [],
+  verbosities: [],
+  exclusiveWriter: false,
+  backgroundTasks: false,
+  midTurnInput: false,
+  gatesSteps: false,
+  toolDeferral: false,
+  instructionChannel: 'server',
+  processModel: 'per-session',
+  builtInSubagents: false,
+  peerMessaging: false,
+  sleep: false,
+  keepsRepoFilesOut: false,
+  roleText: false,
+}
+
 /**
  * Everything one tool adds to the generic ACP adapter (docs/plans/acp-adapter.md §2): the only place a tool is named.
  * Data and small hooks; the turn logic is the core's.

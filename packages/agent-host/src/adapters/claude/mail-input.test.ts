@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { fakeClaudeSdkWire } from './claude-sdk-fake.test-helpers.js'
 
 /**
  * What the Claude adapter writes to the CLI for the mailbox's delivery (#1347, docs/plans/mailbox.md §7.1): the input is stamped
@@ -7,20 +8,7 @@ import type { NormalizedEvent } from '@cc/protocol'
  */
 const wire = vi.hoisted(() => ({ messages: [] as Record<string, unknown>[] }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: ({ prompt }: { prompt: AsyncIterable<Record<string, unknown>> }) => {
-    void (async () => {
-      for await (const u of prompt) wire.messages.push(u)
-    })()
-    return {
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<unknown>>(() => {}) }),
-      interrupt: async () => {},
-      close: () => {},
-      supportedCommands: async () => [{ name: 'goal' }],
-      getContextUsage: async () => undefined,
-    }
-  },
-}))
+vi.mock('@anthropic-ai/claude-agent-sdk', () => fakeClaudeSdkWire(wire.messages))
 
 const { ClaudeAdapter } = await import('./index.js')
 const { centraluInputId, isCentraluInputId } = await import('../input-receipts.js')
