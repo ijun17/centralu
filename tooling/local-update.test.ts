@@ -220,7 +220,7 @@ describe('the data-only manifest boundary', () => {
   })
 
   it('has one main-module check, and every script that runs a command uses it', () => {
-    for (const name of ['bundle-stage.mts', 'shell-bundle.mts', 'local-update.mts', 'content-manifest.mts', 'dev-live.mts', 'frames-scrub.mts', 'node-pin.mjs', 'pre-pr.mjs', 'release-guard.mjs', 'release-rehearsal.mjs', 'surface-drift.mts']) {
+    for (const name of ['bundle-stage.mts', 'shell-bundle.mts', 'local-update.mts', 'content-manifest.mts', 'dev-live.mts', 'frames-scrub.mts', 'node-pin.mjs', 'pre-pr.mjs', 'release-guard.mjs', 'release-rehearsal.mjs', 'surface-drift.mts', '../tooling/key-pairing-vector.mjs']) {
       const source = readFileSync(resolve(`scripts/${name}`), 'utf8')
       expect(source, name).toMatch(/\bisMain\(import\.meta\.url\)/)
       expect(source, name).not.toMatch(/=== process\.argv\[1\]|pathToFileURL\(process\.argv/)

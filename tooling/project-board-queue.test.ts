@@ -15,7 +15,7 @@ import { g, GIT_ENV, githubStandIn, NO_GIT_MAINTENANCE } from './git-fixture.tes
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, screenLanded, shardsComplete, unexpandedSkip, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState, longSubject } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
-import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
+import { commandEnv, conflictPlan, sweep } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -462,6 +462,18 @@ describe('what the merge queue decides for one poll', () => {
     }
   })
 
+  it('sweeps a left-over worktree folder whose name carries no process id', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'cc-sweep-'))
+    try {
+      mkdirSync(join(base, 'centralu-queue-merge-notapid-1'))
+      mkdirSync(join(base, 'unrelated'))
+      await sweep(base, base)
+      expect(readdirSync(base)).toEqual(['unrelated'])
+    } finally {
+      rmFakeDir(base)
+    }
+  })
+
   it('lets one driver hold the queue at a time, until it lets go or goes quiet', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-queue-lease-'))
     try {
@@ -477,6 +489,11 @@ describe('what the merge queue decides for one poll', () => {
       // A holder killed before it let go (its pid is gone) holds nothing, however fresh its lease
       writeFileSync(join(dir, 'merge-queue.lease.json'), JSON.stringify({ holder: 'server:dead', pid: deadPid(), until: new Date(NOW + 60 * 60_000).toISOString() }))
       expect(takeLease(dir, 'watch:3', NOW)).toBe(true)
+      // A lease that names no process cannot be told gone: it holds until it goes quiet
+      for (const pid of [undefined, 0]) {
+        writeFileSync(join(dir, 'merge-queue.lease.json'), JSON.stringify({ holder: 'server:old', pid, until: new Date(NOW + 60 * 60_000).toISOString() }))
+        expect(takeLease(dir, 'watch:4', NOW)).toBe(false)
+      }
     } finally {
       rmFakeDir(dir)
     }
