@@ -2,7 +2,7 @@ import type { HubAskParams, HubAskResult, HubProject, SessionState } from '@cc/p
 import { oneLineText } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, taskLine } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, pickAskedSession, taskLine } from './ask-project.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { MACHINE_ASKER } from './hub-sender.js'
@@ -104,17 +104,9 @@ export class MachineAsks {
     const wantedSession = p.session?.trim()
     if (!p.task && !wantedSession && mine.length === 1) return this.awaitGiven(mine[0]!, signal)
     const sessions = this.ordinary(target.id)
-    const named = wantedSession ? sessions.filter((s) => s.name.toLowerCase() === wantedSession.toLowerCase()) : sessions
-    const chosen = sessions.find((s) => s.id === wantedSession) ?? (named.length === 1 ? named[0] : undefined)
-    if (!chosen) {
-      const list = sessions.map((s) => JSON.stringify({ id: s.id, name: s.name, state: s.state })).join('\n')
-      return {
-        ok: false,
-        error: sessions.length
-          ? `${wantedSession ? `No unique ordinary session named "${oneLineText(wantedSession, 120)}" in ${label}. ` : ''}Name a session with the session argument. Sessions (name, state):\n${list}`
-          : `${label} has no ordinary session. The person has to open one there; this call cannot create one.`,
-      }
-    }
+    const picked = pickAskedSession(sessions, wantedSession, label)
+    if ('error' in picked) return { ok: false, error: picked.error }
+    const chosen = picked.chosen
     const key = this.keyOf(machine.id, p.caller.sessionId, chosen.id)
     const pending = this.given.get(key)
     if (pending && !p.task) return this.awaitGiven(pending, signal)

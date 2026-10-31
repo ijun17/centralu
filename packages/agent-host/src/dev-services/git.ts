@@ -254,11 +254,18 @@ export async function gitDiff(
   return { diff: binary ? '' : truncated ? stdout.slice(0, max) : stdout, truncated, binary }
 }
 
-export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
-  if (!(await isRepo(cwd))) return []
+/**
+ * Commits that touched a path (M4 E-1) — a project app's history is git's, so this shows the recent commits for that
+ * app's folder (`.centralu/apps/<id>`). The path is passed separately, after `--` (so it is not read as an option).
+ * This does not follow a renamed folder back to its earlier commits (`--follow` only works on a single file).
+ */
+export async function gitLogPath(cwd: string, rel = '', limit = 20): Promise<{ repo: boolean; commits: GitCommit[] }> {
+  if (!(await isRepo(cwd))) return { repo: false, commits: [] }
   const SEP = '\x1f'
-  const stdout = await git(cwd, [
-    'log',
+  let stdout: string
+  try {
+    // An empty `rel` is the whole repository: a root app's folder is its project (#1141)
+    const path = rel === '' ? [] : ['--', assertLexicalGitPath(cwd, rel)]
     /*
      * The order is pinned so that **a child always comes before its parent.**
      *
@@ -268,34 +275,10 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
      * edge — guaranteeing the order here means there is never an edge to drop in the first
      * place (this was the cause of the phantom lanes).
      */
-    '--topo-order',
-    `-n${limit}`,
-    `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`,
-  ])
-  return stdout
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [sha = '', shortSha = '', subject = '', author = '', when = '0', parents = ''] = line.split(SEP)
-      return { sha, shortSha, subject, author, when: Number(when) * 1000, parents: parents.split(' ').filter(Boolean) }
-    })
-}
-
-/**
- * Commits that touched a path (M4 E-1) — a project app's history is git's, so this shows the recent commits for that
- * app's folder (`.centralu/apps/<id>`). The path is passed separately, after `--` (so it is not read as an option).
- * This does not follow a renamed folder back to its earlier commits (`--follow` only works on a single file).
- */
-export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<{ repo: boolean; commits: GitCommit[] }> {
-  if (!(await isRepo(cwd))) return { repo: false, commits: [] }
-  const SEP = '\x1f'
-  let stdout: string
-  try {
-    // An empty `rel` is the whole repository: a root app's folder is its project (#1141)
-    const path = rel === '' ? [] : ['--', assertLexicalGitPath(cwd, rel)]
     stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, ...path])
-  } catch {
-    return { repo: true, commits: [] } // a repository with no commits at all
+  } catch (e) {
+    if ((await gitHeadSha(cwd)) === null) return { repo: true, commits: [] } // a repository with no commits at all
+    throw e
   }
   return {
     repo: true,
@@ -307,6 +290,10 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
         return { sha, shortSha, subject, author, when: Number(when) * 1000, parents: parents.split(' ').filter(Boolean) }
       }),
   }
+}
+
+export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
+  return (await gitLogPath(cwd, '', limit)).commits
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
@@ -413,14 +413,9 @@ export class AskProjectFlow {
       return ask && ask.callerId === callerId
     })
     if (!opts.task && !wantedSession && mine.length === 1) return this.awaitLinkedAsk(this.linkedAsks.get(mine[0]!.id)!, reader, signal)
-    const named = wantedSession ? sessions.filter((s) => s.name.toLowerCase() === wantedSession.toLowerCase()) : sessions
-    const chosen = sessions.find((s) => s.id === wantedSession) ?? (named.length === 1 ? named[0] : undefined)
-    if (!chosen) {
-      const list = sessions.map((s) => JSON.stringify({ id: s.id, name: s.name, state: s.state })).join('\n')
-      return { ok: false, error: sessions.length
-        ? `${wantedSession ? `No unique ordinary session named "${wantedSession}" in ${label}. ` : ''}Name a session with the session argument. Sessions (name, state):\n${list}`
-        : `${label} has no ordinary session. The person has to open one there; this call cannot create one.` }
-    }
+    const picked = pickAskedSession(sessions, wantedSession, label)
+    if ('error' in picked) return { ok: false, error: picked.error }
+    const chosen = picked.chosen
     const pending = this.linkedAsks.get(chosen.id)
     if (pending && pending.callerId === callerId && !opts.task) return this.awaitLinkedAsk(pending, reader, signal)
     if (pending && !pending.settled) {
