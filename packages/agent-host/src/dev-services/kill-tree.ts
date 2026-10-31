@@ -407,7 +407,9 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
   let rows: WinProcRow[]
   try {
     rows = await os.listProcesses()
-  } catch {
+  } catch (e) {
+    const why = typeof e === 'object' && e !== null && 'killed' in e && e.killed ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
+    console.error(`[agent-host] the process table could not be read (${why}); what process ${root.pid} left running may still run`)
     return []
   }
   const ended: number[] = []
