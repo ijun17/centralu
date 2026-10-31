@@ -30,10 +30,10 @@ describe("the smokes' host client", () => {
     await expect(client?.call('agents.resumeSession', { sessionId: 'no-such-session' })).rejects.toThrow('Session not found: no-such-session')
   })
 
-  it('keeps every event the host sends, hands each to onEvent, and waits for one from an index on', async () => {
+  it('keeps every event the host sends, hands each to onEvent, and waits for one that has come or never does', async () => {
     const first = await client?.next((e) => e.type === 'update_status', 'update_status')
     expect(first).toMatchObject({ type: 'update_status' })
     expect(client?.events).toEqual(seen)
-    await expect(client?.next((e) => e.type === 'update_status', 'a later update_status', 50, client.events.length)).rejects.toThrow('no a later update_status in 50 ms')
+    await expect(client?.next((e) => e.type === 'no_such_event', 'no_such_event', 50)).rejects.toThrow('no no_such_event in 50 ms')
   })
 })
