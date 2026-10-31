@@ -239,8 +239,8 @@ export const hostParams = {
      */
     offset: z.number().int().min(0).optional(),
     /**
-     * What to show of a tool call (#1480): `none`, `titles` or `full`; `tools: true` is `full`. Additive, and `tools`
-     * stays a boolean for a machine from before it, which would refuse the words: an older machine ignores this one
+     * What to show of a tool call (#1480): `none`, `titles` or `full`; `tools: true` is `full`. A machine reads this one
+     * first; `tools` stays for a 0.1.0-beta.45 hub, which still sends it beside this one
      */
     toolLines: z.enum(['none', 'titles', 'full']).optional(),
     /** The most characters the lines come to in all (#1480); 12,000 by default, 2,000 to 40,000. Additive: an older machine ignores it */
@@ -255,7 +255,7 @@ export const hostParams = {
    * Whether this host takes `auto` for a session a hub's `auto` session starts here (#1273, start_agent with a
    * machine): its own "Allow auto from a linked computer" switch (`UiPreferences.hubAuto`, on by default). The hub reads
    * it before it decides whether to raise its card; `agents.createSession`'s `fromHub` reads the switch again. Asked by
-   * the hub directly, never routed. A host from before it answers "Unknown method", and the hub keeps `normal`.
+   * the hub directly, never routed. Every host from 0.1.0-beta.45 on has it; the hub says a failure as it came.
    */
   'host.hubAuto': z.object({}),
   /**
@@ -277,9 +277,9 @@ export const hostParams = {
   'host.credentials': z.object({ nonce: z.string().min(8).max(64).optional() }),
   /**
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
-   * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an
-   * older machine's lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that turn
-   * begin, not the last response of the record (an older machine ignores it)
+   * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown; a failure is the hub's answer,
+   * not a read of the lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that
+   * turn begin, not the last response of the record (an older machine ignores it)
    */
   'host.lastAnswer': z.object({
     sessionId: SessionId,

@@ -689,7 +689,7 @@ describe('a long line in read_session', () => {
     expect((await tools.readSession('a') as { lines: string[] }).lines.at(-1)).not.toContain('readOn')
     const past = await tools.readSession('a', 40, { around: 3, offset: 50 })
     expect(JSON.parse((past as { lines: string[] }).lines[0]!)).toMatchObject({ text: '', shown: 'characters 5-5 of 5' })
-    // A read from an offset says what it shows even when that is all of it: a hub tells an older machine by its absence
+    // A read from an offset says what it shows even when that is all of it: a 0.1.0-beta.45 hub tells an older machine by its absence
     const whole = await tools.readSession('a', 40, { around: 3, offset: 0 })
     expect(JSON.parse((whole as { lines: string[] }).lines[0]!)).toMatchObject({ text: 'short', shown: 'characters 0-5 of 5' })
   })

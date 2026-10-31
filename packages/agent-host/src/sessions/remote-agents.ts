@@ -103,17 +103,14 @@ export const INSTRUCTIONS_WAIT_MS = 5_000
 
 /**
  * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
- * trash": removed, left and why, or left because the machine's build predates the cleanup. Nothing for a child started
- * without a worktree.
+ * trash": removed, or left and why. Nothing for a child started without a worktree.
  */
 function remoteWorktreeLine(
   rec: RemoteAgent,
-  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | 'older' | undefined,
+  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | undefined,
 ): string {
   if (!rec.worktree) return ''
-  if (done === 'older' || !done) {
-    return `; its worktree there, on ${rec.worktree}, stays${done === 'older' ? `: ${rec.machine} runs a Centralu from before #1161, which does not remove it` : ''}. The person deletes it on that machine`
-  }
+  if (!done) return `; its worktree there, on ${rec.worktree}, stays. The person deletes it on that machine`
   const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
   // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
   if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
@@ -144,17 +141,15 @@ const carriedPreset = (caller: PermissionPreset): PermissionPreset => (caller ==
 
 /**
  * What a machine says of an `auto` caller's child (#1273, `LinkedSessions.hubAuto`): `auto`, it runs under `auto` there
- * too and no card is raised; otherwise why it runs under `normal` (its switch is off, or its Centralu predates it)
+ * too and no card is raised; otherwise why it runs under `normal` (its switch is off)
  */
-type AutoThere = { auto: true } | { auto: false; withheld: 'machine_off' | 'older' }
+type AutoThere = { auto: true } | { auto: false; withheld: 'machine_off' }
 
 /** What the start tells an `auto` caller of its child's preset (#1273), for its notice */
 const autoNotice = (machine: string, there: AutoThere): string =>
   there.auto
     ? `it runs under auto on ${machine}, as this session does`
-    : there.withheld === 'machine_off'
-      ? `it runs under normal on ${machine}: that computer does not take auto from another computer (its "Allow auto from a linked computer" setting is off)`
-      : `it runs under normal on ${machine}: that computer runs a Centralu from before #1273, which does not take auto from another computer`
+    : `it runs under normal on ${machine}: that computer does not take auto from another computer (its "Allow auto from a linked computer" setting is off)`
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
@@ -698,21 +693,20 @@ export class RemoteAgents {
          * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
          * branch this hub asked for, and a child started without a worktree is deleted as before
          */
-        // A reader without the call (one from before #1161) deletes as before, as a machine that predates it does
+        // A reader without the call (a stand-in) deletes as before
         const canClean = typeof reader.deleteAgentChild === 'function'
         const withWorktree = rec.worktree && canClean
           ? await reader.deleteAgentChild!(rec.sessionId, rec.worktree).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
           : undefined
-        const older = !!rec.worktree && (!canClean || (!!withWorktree && !withWorktree.ok && 'olderBuild' in withWorktree))
-        if (withWorktree && !withWorktree.ok && !older) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(withWorktree.error)}.` }
-        if (!withWorktree?.ok) {
+        if (withWorktree && !withWorktree.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(withWorktree.error)}.` }
+        if (!withWorktree) {
           const r = await reader.deleteSession(rec.sessionId)
           if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
         }
         this.forget(rec.sessionId)
         return {
           ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
-          notice: `It went to ${rec.machine}'s session archive${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
+          notice: `It went to ${rec.machine}'s session archive${remoteWorktreeLine(rec, withWorktree)}.`,
         }
       }
     }
@@ -1393,7 +1387,6 @@ export class RemoteAgents {
   private async autoThere(machine: { id: string; name: string }, reader: LinkedSessions): Promise<AutoThere | { error: string }> {
     const r = await reader.hubAuto(machine.id)
     if (r.ok) return r.allowed ? { auto: true } : { auto: false, withheld: 'machine_off' }
-    if ('olderBuild' in r) return { auto: false, withheld: 'older' }
     return { error: `Could not ask ${machine.name} whether it takes auto from this computer: ${bare(r.error)}. Nothing was started there.` }
   }
 
@@ -1420,10 +1413,6 @@ export class RemoteAgents {
     }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))
-    // A build from before #1038 would not keep the child within the agent depth: a loop of starts between machines
-    if (read.some(({ r }) => !r.ok && 'olderBuild' in r)) {
-      return { error: `${machine.name} runs an older Centralu, which would not keep a session started from here within the agent depth, so nothing was started there. Update Centralu on ${machine.name}, then try again.` }
-    }
     // Asked and not reached: the link went away after the list was read. That is the machine away, not a machine without the checkout
     const unreached = read.map(({ r }) => (!r.ok && (r.error.includes(NOT_REACHABLE) || r.error.includes(NOT_CONNECTED_PHRASE)) ? r.error : null))
     if (read.length > 0 && unreached.every((e) => e !== null)) {
