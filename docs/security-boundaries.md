@@ -1505,13 +1505,12 @@ A host started with `centralu serve` on another machine is reached by the app th
     taken over write. Taking a stale lock over, and removing one's own, move the lock aside first and put back one that
     turns out to be another writer's. Left open: a writer suspended over 2 s between its last read-back and the rename,
     and a system clock set forward by over 10 s while a lock is held.
-  - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
-    it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
-    (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before
-    verifiers (a rollback; `verifiers` absent from its `bundle-info.json`) knows a single token: the launcher keeps one
-    for it (`legacyHostToken`), gives it to that host and to a hub that pairs, and drops it once a host of today runs.
-    A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
-    `CC_HOST_TOKEN`.
+  - **Moving on.** The launchers of 0.1.0-beta.45, the oldest release still served (#1143), moved a version 1 file on
+    at its first use: its token became a full credential labelled `legacy` (a hub or window still holding it kept
+    working) and a new key was drawn. The next pairing of a hub or of the window removes `legacy` (a pairing under any
+    other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). A version 1
+    file is no longer read: it is not a state file. Every host the launcher starts takes verifiers and its key on
+    stdin, so it keeps no single token for an older one; a `legacyHostToken` that release kept goes at the next write.
   - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
     can. It gets a full credential of its own, which the file names by its label. That is made loud rather than
     prevented (owner, 2026-10-21): the hub's machine row in Settings → Machines lists every full credential the machine

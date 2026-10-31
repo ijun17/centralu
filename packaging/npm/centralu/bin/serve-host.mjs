@@ -115,12 +115,10 @@ function parseStartedFrom(raw) {
 /**
  * The host's environment.
  *
- * - The token is in neither: arguments are readable by every user on the machine (`ps`), and a
+ * - The key is in neither: arguments are readable by every user on the machine (`ps`), and a
  *   process's start environment by every process of its user for as long as it runs (`ps eww`,
- *   #502). `CC_HOST_TOKEN_ON_STDIN=1` tells the host it comes as the first line on its stdin
- *   (`tokenLine`, #538), which is a pipe to this launcher anyway (`--watch-parent`). A host bundle
- *   from before #538 reads only `CC_HOST_TOKEN`: given `legacyToken` (`takesTokenOnStdin` said no),
- *   it gets the token there, as before.
+ *   #502). `CC_HOST_TOKEN_ON_STDIN=1` tells the host its key comes as the first line on its stdin
+ *   (`keyLine`, #538), which is a pipe to this launcher anyway (`--watch-parent`).
  * - `CC_HOST_SOURCE` is the record `hello_ok.build` is made from (keeper-link.ts); without it a
  *   client could not see which version the host it reached is.
  * - Headless: no `DISPLAY` / `WAYLAND_DISPLAY`. Nothing the host or an agent starts gets a screen
@@ -130,12 +128,12 @@ function parseStartedFrom(raw) {
  *   `CENTRALU_MANAGED`, which is the launcher's business and would otherwise reach every agent.
  * - `CC_SERVE=1` lets the host take `host.stop` (`--stop`); a host the app runs refuses it.
  */
-export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = null, serveState = null }) {
+export function hostEnv(env, { dataDir, version, hostDir, from = null, serveState = null }) {
   const out = { ...env }
   for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CC_SERVE_STATE', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CC_SERVE_FROM', 'CC_STARTED_BY']) delete out[k]
   /*
-   * A host that checks full credentials against serve.json's verifiers (#1405, `takesVerifiers`): the file it reads at
-   * each hello. A path, not a secret: the file is the user's own, 0600. Its key comes on stdin (`keyLine`)
+   * The host checks full credentials against serve.json's verifiers (#1405): the file it reads at each hello. A path,
+   * not a secret: the file is the user's own, 0600. Its key comes on stdin (`keyLine`)
    */
   if (serveState) out.CC_SERVE_STATE = serveState
   // Who asked for this host, for its host.lock (#1223): a second host on the folder names it when refused
@@ -143,60 +141,17 @@ export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = nu
   out.CC_DATA_DIR = dataDir
   // The host `host.stop` may end (`centralu serve --stop`): nothing else stops it in order on Windows
   out.CC_SERVE = '1'
-  if (legacyToken === undefined) out.CC_HOST_TOKEN_ON_STDIN = '1'
-  else out.CC_HOST_TOKEN = legacyToken
+  out.CC_HOST_TOKEN_ON_STDIN = '1'
   out.CC_HOST_SOURCE = JSON.stringify({ version, bundlePath: hostDir })
   return out
 }
 
 /**
- * Whether the host at `entry` reads its token from stdin (#538): a bundle says so in `bundle-info.json`
- * (`tokenOnStdin`), as the keeper reads it; a host run from source always does. `CENTRALU_HOST_ENTRY` can point at an
- * older bundle, which would otherwise get no token and refuse every hello.
- */
-export function takesTokenOnStdin(entry) {
-  try {
-    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).tokenOnStdin === 1
-  } catch {
-    // not a bundle: the source, which reads it
-  }
-  return !existsSync(join(dirname(entry), 'bundle-info.json'))
-}
-
-/** The first line on the host's stdin: the token (#538, the host's `readHandedToken`) */
-export function tokenLine(token) {
-  return `${JSON.stringify({ token })}\n`
-}
-
-/**
- * The first line on the stdin of a host that takes verifiers (#1405): its key, from which it derives what it hands out.
- * Not a full credential: the host never takes it as one (`CC_SERVE_STATE` says where the full ones' verifiers are)
+ * The first line on the host's stdin (#538, #1405; the host's `readHandedToken`): its key, from which it derives what it
+ * hands out. Not a full credential: the host never takes it as one (`CC_SERVE_STATE` says where the full ones' verifiers are)
  */
 export function keyLine(key) {
   return `${JSON.stringify({ key })}\n`
-}
-
-/**
- * Whether the host at `entry` checks full credentials against serve.json's verifiers (#1405): a bundle says so in
- * `bundle-info.json` (`verifiers`), a host run from source has `lifecycle/serve-credentials.ts`. An older one knows a
- * single token, which this launcher then keeps for it (`legacyHostTokenOf`).
- */
-export function takesVerifiers(entry) {
-  try {
-    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).verifiers === 1
-  } catch {
-    // not a bundle; try the source below
-  }
-  return existsSync(join(dirname(entry), 'lifecycle', 'serve-credentials.ts'))
-}
-
-/**
- * What this launcher says hello with to its own host, and what that host proves with to it: the limited credential
- * and the key for a host that takes verifiers, the one token an older host knows otherwise (#1405).
- */
-export function ownCredentials(state, entry) {
-  if (takesVerifiers(entry) || !state.legacyHostToken) return { token: state.token, proofKey: state.proofKey }
-  return { token: state.legacyHostToken, proofKey: state.legacyHostToken }
 }
 
 /**
