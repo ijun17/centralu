@@ -5,13 +5,14 @@ import type { ApprovalDecision, ApprovalDetail, ApprovalScope } from '@cc/protoc
 import type { EventSink } from '../contract.js'
 import type { ServerRequest } from './client.js'
 import { approvalDetailFrom, toCodexDecision } from './approvals.js'
+import { paramsOf } from './params.js'
 import { changeKindOf, fileChangesOf } from './items.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { insideFolder } from '../edit-grant.js'
 import type { FileChange } from '../file-changes.js'
 import { turnIdOf } from './turn-reads.js'
-import { asObj } from '../../json-value.js'
+import { asObj, str } from '../../json-value.js'
 
 /** What the requests read of the session they belong to */
 export type RequestsHost = {
@@ -101,8 +102,9 @@ export class CodexRequests {
       return
     }
     // The patch can be revised before it is approved (generated/v2/FileChangePatchUpdatedNotification.ts) — not measured
-    if (n.method === 'item/fileChange/patchUpdated' && typeof p.itemId === 'string') {
-      this.fileChanges.set(p.itemId, { thread, changes: fileChangesOf(p) })
+    const patch = paramsOf(n, 'item/fileChange/patchUpdated')
+    if (n.method === 'item/fileChange/patchUpdated' && typeof patch.itemId === 'string') {
+      this.fileChanges.set(patch.itemId, { thread, changes: fileChangesOf(patch) })
       return
     }
     const item = p.item
@@ -124,11 +126,7 @@ export class CodexRequests {
      * screen to ask on would mean deciding on the user's behalf.
      */
     if (r.method.toLowerCase().includes('elicitation')) {
-      const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as {
-        serverName?: string
-        message?: unknown
-        _meta?: unknown
-      }
+      const p = paramsOf(r, 'mcpServer/elicitation/request')
       /*
        * **Tool approval for an attached app goes to our own approval card** (M4 A-5, decision 5).
        *
@@ -187,7 +185,7 @@ export class CodexRequests {
       unknown
     >
 
-    const itemId = typeof params.itemId === 'string' ? params.itemId : ''
+    const itemId = str(paramsOf(r, 'item/fileChange/requestApproval').itemId)
     const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId)?.changes)
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
@@ -307,7 +305,7 @@ function appApprovalDetail(server: string, message: unknown, meta: unknown): App
 export type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null; elicitation?: true }
 
 function requestOrigin(r: ServerRequest): OpenRequest {
-  const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { threadId?: unknown; turnId?: unknown }
+  const p = paramsOf(r, 'item/fileChange/requestApproval')
   return {
     serverId: r.id,
     threadId: typeof p.threadId === 'string' ? p.threadId : null,
