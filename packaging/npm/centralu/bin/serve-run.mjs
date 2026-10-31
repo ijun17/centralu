@@ -292,9 +292,9 @@ export function revokeCredential({ env, home, id, write = (line) => process.stdo
   write(`${JSON.stringify({ v: 1, revoked, id })}
 `)
   if (!revoked) {
-    say(`no full credential ${JSON.stringify(id)} in ${join(dataDir, SERVE_STATE_FILE)}; --connection lists them under others.`)
+    say(`no credential ${id} in ${join(dataDir, SERVE_STATE_FILE)}; --connection lists them under others.`)
     return 1
   }
-  say(`withdrew the full credential ${id}. A running host refuses its next hello and closes a connection already open with it within a second.`)
+  say(`withdrew ${id}. A running host refuses its next hello with it and closes a connection already open with it within a second.`)
   return 0
 }
