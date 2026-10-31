@@ -1972,7 +1972,6 @@ export class SessionManager {
         return self.agentRuns
       },
       answerRoutedCard: (...a) => self.cards.answerRoutedCard(...a),
-      appHostData: (...a) => self.appSessions.appHostData(...a),
       answerQuestion: (...a) => self.answerQuestion(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       appProjectTarget: (...a) => self.projectCreation.appProjectTarget(...a),
@@ -1980,7 +1979,6 @@ export class SessionManager {
       applyStateHint: (...a) => self.events.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askProject: (...a) => self.askProject(...a),
-      askCapability: (...a) => self.hostCards.askCapability(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
       get appsHub() {
         return self.apps.appsHub
@@ -2050,7 +2048,6 @@ export class SessionManager {
       },
       deliver: (...a) => self.events.deliver(...a),
       deliverReport: (...a) => self.reports.deliverReport(...a),
-      dropOpenedByAuto: (...a) => self.queue.dropOpenedByAuto(...a),
       get disposing() {
         return self.disposing
       },
@@ -2144,7 +2141,6 @@ export class SessionManager {
       get interruptions() {
         return self.interruptions
       },
-      isAppAgentSession: (...a) => self.apps.isAppAgentSession(...a),
       get keeperOpts() {
         return self.keeperOpts
       },
@@ -2221,9 +2217,7 @@ export class SessionManager {
       rememberBackgroundTasks: (...a) => self.launches.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
       requireHandle: (...a) => self.requireHandle(...a),
-      requireAppAccess: (...a) => self.apps.requireAppAccess(...a),
       respondApproval: (...a) => self.respondApproval(...a),
-      runAppAgent: (...a) => self.appSessions.runAppAgent(...a),
       appNotice: (...a) => self.appNotice(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
@@ -2273,7 +2267,6 @@ export class SessionManager {
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.trash.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
-      agentRunEnded: (...a) => self.appSessions.agentRunEnded(...a),
       get trashing() {
         return self.trash.trashing
       },
@@ -2296,7 +2289,6 @@ export class SessionManager {
         return self.versionHint
       },
       withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
-      withdrawReaches: (...a) => self.queue.withdrawReaches(...a),
       get worktreeRoot() {
         return self.worktreeRoot
       },

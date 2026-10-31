@@ -1,7 +1,7 @@
 import type { SessionInfo } from '@cc/protocol'
 import { oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
-import type { QueuedRequestsHost } from './queued-requests.js'
+import type { QueuedRequests, QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { HandedOverThread, HandOverScope } from '../mail/service.js'
 import { parseAddress } from '../mail/address.js'
@@ -59,8 +59,8 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'thread
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards' | 'mailPoke'> &
   Pick<QueuedRequestsHost, 'turnRunning'> & {
-    /** Requests of a session that only `auto` let through, dropped when they would go on without it (#606) */
-    dropOpenedByAuto: (sessionId: string, tell?: string) => void
+    /** Requests of a session that only `auto` let through are dropped when they would go on without it (#606) */
+    readonly queue: Pick<QueuedRequests, 'dropOpenedByAuto'>
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
     mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverThread[]
   }
@@ -118,7 +118,7 @@ export class HandoffChildren {
     const removed = scope === 'removed'
     // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told.
     // A removed original's queue moves nowhere: the session archive drops it
-    if (!removed && heir.permissionPreset !== 'auto') this.host.dropOpenedByAuto(from)
+    if (!removed && heir.permissionPreset !== 'auto') this.host.queue.dropOpenedByAuto(from)
     const queuedBy = removed ? new Set<string>() : new Set([...this.host.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string | null => {

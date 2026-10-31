@@ -8,7 +8,7 @@ import type { RoutedCardsHost } from './routed-cards.js'
  * What an agent's update_centralu reaches of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type UpdatesAskedHost = Pick<DelegationHost, 'askHost' | 'meta'> & Pick<RoutedCardsHost, 'isAppAgentSession' | 'toolProfileOf'>
+export type UpdatesAskedHost = Pick<DelegationHost, 'askHost' | 'meta'> & Pick<RoutedCardsHost, 'apps' | 'toolProfileOf'>
 
 /**
  * An agent's update_centralu (#665): check and install through the same service the window calls, and apply through a
@@ -72,7 +72,7 @@ export class UpdatesAsked {
     if (!broker) return { ok: false, error: 'Applying updates is unavailable on this host' }
     const m = this.host.meta.get(sessionId)
     if (!m) return { ok: false, error: 'The calling session is gone' }
-    if (this.host.isAppAgentSession(m)) return { ok: false, error: 'An agent an app started cannot apply Centralu updates.' }
+    if (this.host.apps.isAppAgentSession(m)) return { ok: false, error: 'An agent an app started cannot apply Centralu updates.' }
     if (m.permissionPreset === 'safe') {
       return {
         ok: false,

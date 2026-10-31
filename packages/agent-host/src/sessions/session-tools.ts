@@ -22,7 +22,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   startAgent: AgentStartFlow['startAgent']
   agentSession: DelegationFlow['agentSession']
   listAgents: DelegationFlow['listAgents']
-  requireAppAccess: SessionAppWiring['requireAppAccess']
+  readonly apps: Pick<SessionAppWiring, 'requireAppAccess'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
   /** The `compact_self` tool of a session (#1451) */
@@ -90,9 +90,9 @@ export class SessionTools {
   private orchestratorToolsFor(sessionId: string): OrchestratorTools {
     return {
       ...this.host.orchestratorToolsFor(sessionId),
-      findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
-      attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
-      detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+      findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
+      attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
+      detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       // The mailbox (#1347): it owns the threads `send_to_session` opens (slice 3); it runs the tool as a command
       mail: (args) => this.host.mailTool(sessionId, args),
       compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
@@ -145,9 +145,9 @@ export class SessionTools {
       checkApp: async () => ({ ok: false, text: error }),
       createApp: refuse,
       // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
-      findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
-      attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
-      detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+      findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
+      attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
+      detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       // The mailbox (#1347): the ordinary session's alone, whose seat the tool is defined for
       mail: (args) => this.host.mailTool(sessionId, args),
       compactSelf: (focus) => this.host.compactSelf(sessionId, focus),

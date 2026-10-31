@@ -37,12 +37,10 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
   Pick<RoutedCardsHost, 'toolProfileOf'> & {
     /** A session's row, or `session_not_found` */
     sessionOf: (sessionId: string) => SessionInfo
-    appHostData: AppSessions['appHostData']
-    runAppAgent: AppSessions['runAppAgent']
+    readonly appSessions: Pick<AppSessions, 'appHostData' | 'runAppAgent' | 'agentRunEnded'>
     /** An app's notice into a session that called it (#1161 item 1) — `SessionManager.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
-    agentRunEnded: AppSessions['agentRunEnded']
-    askCapability: HostCards['askCapability']
+    readonly hostCards: Pick<HostCards, 'askCapability'>
     migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']
     /** An app tool's call, asked about when a session's request is the session's turn (§9.7, #1447) */
     whenAsked: WhenAsked
@@ -70,11 +68,11 @@ export class SessionAppWiring {
   private brokerHost(): BrokerHost {
     return {
       defaultAgentTool: (projectId) => this.host.defaultToolFor(projectId),
-      runAgent: (req, ctx) => this.host.runAppAgent(req, ctx),
-      hostData: (name, app) => this.host.appHostData(name, app),
+      runAgent: (req, ctx) => this.host.appSessions.runAppAgent(req, ctx),
+      hostData: (name, app) => this.host.appSessions.appHostData(name, app),
       agentLabel: (tool) => this.host.adapters.get(tool)?.descriptor.label ?? tool,
-      askCapability: (q, signal) => this.host.askCapability(q, signal),
-      agentRunEnded: (run) => this.host.agentRunEnded(run),
+      askCapability: (q, signal) => this.host.hostCards.askCapability(q, signal),
+      agentRunEnded: (run) => this.host.appSessions.agentRunEnded(run),
       appNotice: (sessionId, text, app) => this.host.appNotice(sessionId, text, app),
     }
   }
