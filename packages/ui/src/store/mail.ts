@@ -65,7 +65,7 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
               if (get().platform !== platform) return
               set({ mail })
             } catch {
-              /* a host from before the mailbox, or one that is away: the last list stays */
+              /* a host that is away: the last list stays */
             }
           } while (again)
         } finally {

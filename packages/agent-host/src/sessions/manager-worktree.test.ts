@@ -1336,11 +1336,10 @@ describe('worktree sessions', () => {
   })
 
   // The worktree manager's dialog was where the trunk was chosen; it is chosen on its own now (#561 part 3)
-  it('sets the trunk on its own, and refuses the retired manager seat', async () => {
+  it('sets the trunk on its own', async () => {
     await wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'main' })
     expect(store.projects.worktreeTrunk(project.id)).toBe('main')
     await expect(wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'no..dots' })).rejects.toThrow(/Not a branch name/)
-    await expect(wtRpc('worktrees.createManager', { projectId: project.id, baseBranch: 'main' })).rejects.toThrow(/worktree manager is gone/)
     expect(wtMgr.listSessions()).toEqual([])
   })
 

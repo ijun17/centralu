@@ -206,7 +206,6 @@ describe('list_machines', () => {
       autostart: null,
       elevated: null,
       autoReconnect: true,
-      connect: 'at_start',
       otherCredentials: null,
       ...over,
     }) as MachineInfo
@@ -215,7 +214,7 @@ describe('list_machines', () => {
     const list = [
       machine({ id: 'm1', name: 'laptop', shell: 'powershell', status: 'connected' }),
       machine({ id: 'm2', name: 'pi', shell: 'posix', status: 'unreachable', autostart: { on: true, how: 'systemd', linger: true } }),
-      machine({ id: 'm3', name: 'studio', shell: 'wsl', wslDistro: 'Ubuntu', status: 'disconnected', autoReconnect: false, connect: 'when_needed' }),
+      machine({ id: 'm3', name: 'studio', shell: 'wsl', wslDistro: 'Ubuntu', status: 'disconnected', autoReconnect: false }),
     ]
     mgr.useMachineList(() => list)
     const orc = await mgr.orchestrator()

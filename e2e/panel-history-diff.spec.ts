@@ -51,7 +51,7 @@ test('history is a tab next to git, showing the short hash together with how lon
 
   // The selected tab is carried in the snapshot, for the next time it opens
   const snap = await page.evaluate(() => (window as never as { __mock: any }).__mock.workspaceSnapshot)
-  expect(snap?.panelTab).toBe('history')
+  expect(snap?.panelLayout?.[0]?.active).toBe('history')
 })
 
 test('a single-author repository does not repeat the name, but shows it once there are several authors', async ({ page }) => {

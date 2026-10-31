@@ -59,7 +59,7 @@ export interface Platform {
   commands: CommandRunPort
   processes: ProcessPort
   machines: MachinesPort
-  /** The person's side of the mailbox (#1347); a host before it answers "Unknown method" */
+  /** The person's side of the mailbox (#1347) */
   mail: MailPort
   /** The calls of the limited credential waiting for the person (#1405) */
   requests: HostRequestsPort

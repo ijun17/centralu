@@ -148,14 +148,6 @@ export class Links {
     return m.info()
   }
 
-  /**
-   * `machines.need`, said by a window of the older connect mode (#1134): nothing connects a machine on a need any more
-   * (#1341), so this answers the row as it is. Accepted for one release so an older window does not fail
-   */
-  needs(id: string): MachineInfo {
-    return this.need(id).info()
-  }
-
   acceptVersions(id: string): MachineInfo {
     const m = this.need(id)
     if (m.info().versions?.compatible === false) {

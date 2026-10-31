@@ -165,7 +165,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.gitStatus': project(projectInfo),
   // A remote address, nothing of this machine's ids in it
   'projects.origin': project(),
-  'worktrees.createManager': project(sessionInfo),
   'worktrees.setTrunk': project(),
   'git.status': project(),
   'git.diff': project(),
@@ -345,8 +344,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.revokeCredential': HUB,
   'machines.disconnect': HUB,
   'machines.setAutoReconnect': HUB,
-  'machines.setConnect': HUB,
-  'machines.need': HUB,
   // Stopping a remote host is `centralu serve --stop` over ssh, never a call through the link
   'host.stop': HUB,
   // A sign-in's serve on this machine telling its own host about the hand-over (#1224); never through a link

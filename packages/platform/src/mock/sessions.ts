@@ -402,10 +402,10 @@ export class SessionsMock {
       if (!s) throw new Error(`No session ${sessionId}`)
       s.lastReadSeq = Math.max(s.lastReadSeq, seq)
       const newer = s.state === 'error' && s.lastSeq > seq
-      if (s.state !== 'error' || newer) return { cleared: false, newer, olderHost: false }
+      if (s.state !== 'error' || newer) return { cleared: false, newer }
       s.state = 'idle'
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
-      return { cleared: true, newer: false, olderHost: false }
+      return { cleared: true, newer: false }
     },
     listSessions: async () => [...this.store.sessions.values()].map((s) => ({ ...s })),
     loadMessages: async (sessionId: string, limit = 200, beforeSeq?: number) => {

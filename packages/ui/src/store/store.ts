@@ -315,7 +315,7 @@ export const useStore = create<AppState>((rawSet, get) => {
       try {
         set({ sleepPolicy: await platform.agents.sleepPolicy() })
       } catch {
-        // An older host does not put sessions to sleep: the setting stays hidden
+        // The setting stays hidden until the host answers
       }
     },
 

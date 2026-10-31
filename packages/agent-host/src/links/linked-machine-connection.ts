@@ -427,6 +427,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The link has just connected, its hello and lists read; `LinkedMachine` looks at the versions then (#1508) */
   protected connectedNow(): void {}
 
+  /** The link has just been held at `versions_differ` (`check`); `LinkedMachine` looks at the versions then (#1143) */
+  protected heldNow(): void {}
+
   /** Whether the remote host continues the turns an update's stop cuts (#1618): its last hello said which it continues */
   continuesCutTurns(): boolean {
     return this.updateContinued !== null
@@ -462,7 +465,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       handover: this.handover,
       autoReconnect: this.autoReconnect,
       updateWaits: true,
-      connect: this.autoReconnect ? 'at_start' : 'when_needed',
       ...this.otherCredentials(),
     }
   }
@@ -1161,6 +1163,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       )
       // A later update on either side is noticed by asking again now and then (§4: the prompt comes again)
       this.retryLater(this.deps.versionsRetryMs ?? 60_000, 'reads')
+      this.heldNow()
     }
     return v
   }

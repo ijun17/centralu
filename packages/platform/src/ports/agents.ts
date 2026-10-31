@@ -99,13 +99,12 @@ export interface AgentPort {
   /**
    * The archive for a session that looks idle (#1512), decided by the host at the last moment: it moves the session only when
    * nothing it holds would be lost and it is at rest; otherwise nothing moves and `asks` says what would be lost (empty when it
-   * was only busy). A host from before it throws "Unknown method", and the caller moves the session with `deleteSession` on the person's answer.
+   * was only busy).
    */
   archiveIfAtRest(sessionId: string, deleteExternal?: boolean): Promise<{ archived: true } | { archived: false; asks: string[] }>
   /**
    * What archiving the session would lose and Undo does not bring back (#1595), read only: the lines the archive dialog shows before
-   * anything moves, also when the worktree goes with the session. A host from before it throws "Unknown method"; the caller then
-   * shows none.
+   * anything moves, also when the worktree goes with the session.
    */
   archiveLosses(sessionId: string): Promise<string[]>
   /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */
@@ -176,10 +175,9 @@ export interface AgentPort {
   markRead(sessionId: string, seq: number): Promise<void>
   /**
    * Done on a session in error (#1549): it goes to idle and what the window saw (up to `seq`) is read; the error line stays in the
-   * conversation. `cleared` is false when a newer row exists (`newer`: a later error) and the state is left for the person to look at; `olderHost` when the host could only read the answer.
-   * A host from before it is asked `markRead` instead.
+   * conversation. `cleared` is false when a newer row exists (`newer`: a later error) and the state is left for the person to look at.
    */
-  clearError(sessionId: string, seq: number): Promise<{ cleared: boolean; newer: boolean; olderHost: boolean }>
+  clearError(sessionId: string, seq: number): Promise<{ cleared: boolean; newer: boolean }>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /**
