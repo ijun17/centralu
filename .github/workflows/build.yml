@@ -578,7 +578,7 @@ jobs:
   # The host's tests on macOS (#1704). Until this job existed no CI job ran a unit test on a Mac: the release
   # rehearsal's darwin job was the first to, so a difference between macOS and Linux (APFS keeps file times in
   # nanoseconds and `name/` is ENOENT, #1650; libuv 1.51 cuts file times to microseconds, #1713) passed every pull
-  # request and failed the next release instead. The same runner and Node as the darwin build (release.yml: macos-14,
+  # request and failed the next release instead. The same runner and Node as the darwin build (release.yml: macos-15,
   # setup-node 22), so a pass here is a pass there.
   #
   # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
@@ -589,7 +589,7 @@ jobs:
   # A full run whose files change the host's tests (`host_tests`): the whole host, the protocol and every test of
   # tooling/. Linux runs tooling/ too, but only a Mac found #1695's two failures there.
   # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
-  # Measured on macos-14 and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
+  # Measured on macos-14 (before the move to macos-15) and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
   # job 5.5 minutes with the install. The whole host alone (491 files) was 564 s of vitest (222 s of it collecting the
   # files, which three cores share), the job 10.0 minutes; with tooling/ (573 files) 822 s of vitest, the job 14.2
   # minutes. The release's darwin job ran every test of the repository in about 17 minutes on the same runner.
@@ -601,7 +601,7 @@ jobs:
     name: macos tests
     needs: changes
     if: needs.changes.outputs.quick == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
