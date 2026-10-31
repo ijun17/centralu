@@ -392,7 +392,7 @@ describe('the contents section and the cut results (#1481)', () => {
     const text = buildHandoffRecord({ ...base, rows: big, cap: 50_000, children: [{ id: 'c', name: 'K', state: 'finished' }] })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(50_000)
-    expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 49 KB cap ·earlier material stays/)
+    expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 49 KB cap · earlier material stays/)
     expect(text).toContain('Report at seq 401:\n    last report')
     expect(text).toContain('- "K" — finished — id: c')
     // The table still points at real lines
