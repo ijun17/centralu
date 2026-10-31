@@ -68,27 +68,11 @@ export function installsCliAsVersionFolders(platform: Platform = HOST_PLATFORM):
 }
 
 /**
- * A running program's file cannot be replaced or deleted (Windows, #353). There, a program npm will
- * update is never run in place just to ask its version.
- */
-export function locksRunningPrograms(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).locksRunningPrograms
-}
-
-/**
  * A pty runs on the ConPTY node-pty ships (`useConptyDll`, `conpty/` beside `conpty.node`) rather than the one in the
  * OS (Windows, #849): Windows' own left a `conhost.exe` per terminal tab and per command until the host exited.
  */
 export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
-}
-
-/**
- * A folder being watched cannot be renamed or moved, and neither can any folder above it (Windows, #849): the watch
- * holds the folder open. There a project is watched by one recursive watch on its root instead of one per folder.
- */
-export function locksWatchedFolders(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).locksWatchedFolders
 }
 
 /**
@@ -125,19 +109,6 @@ export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = pr
   if (platform === 'linux' || platform === 'android') return `${cpu}-unknown-linux-musl`
   if (platform === 'win32') return `${cpu}-pc-windows-msvc`
   return null
-}
-
-/**
- * A file's mode bits say which accounts may read it (POSIX). Windows ignores them for that: who may read a file there is
- * its ACL, which a profile folder already gives to its owner alone (#838, `keepDataFolderPrivate`).
- */
-export function modesGuardFiles(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).modesGuardFiles
-}
-
-/** File names that differ only by case are one file (Windows): comparing two spellings of a path folds case first. */
-export function foldsPathCase(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).foldsPathCase
 }
 
 /** The path rules of `platform`: backslashes and drive letters on Windows, slashes elsewhere. */
@@ -217,33 +188,6 @@ export function availableMemorySource(
   if (platform === 'darwin') return { kind: 'command', file: '/usr/bin/vm_stat', args: [], parse: 'vm_stat' }
   if (platform === 'linux' || platform === 'android') return { kind: 'file', path: '/proc/meminfo', parse: 'meminfo' }
   return { kind: 'freemem' }
-}
-
-/**
- * Whether a tree's links to folders keep their meaning in a plain copy (#849, `OsTraits.cpKeepsLinks`). Not on Windows:
- * there a folder is linked with a junction (pnpm without Developer Mode, npm and yarn workspaces), whose target is a
- * whole path, so a copy's junction still leads into the source; a worktree copy there retargets them itself.
- */
-export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).cpKeepsLinks
-}
-
-/**
- * Folder sizes are asked of `du` (#849). Not on Windows: it has none on PATH (Git for Windows keeps one in `usr\bin`,
- * which is not), and given a bare name it looks in the child's working folder first, so a `du.exe` in the project ran.
- * There the sizes are read from the file system.
- */
-export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).measuresWithDu
-}
-
-/**
- * A file name has to pass Windows' rules to be one (#849): there `nul` or `aux.c` names a device and a trailing dot or
- * space is dropped when a program reads the name (Node, writing through `\\?\`, makes a file no other program can open),
- * and `notes.txt:payload` writes a hidden stream on `notes.txt` instead of a file of that name.
- */
-export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean {
-  return traitsOf(familyOf(platform)).hasWindowsFileNames
 }
 
 /**

@@ -1,5 +1,5 @@
 import { closeSync, existsSync, fchmodSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
-import { modesGuardFiles } from './os.js'
+import { traitsFor } from './os.js'
 
 /**
  * **Records the host's output to a file.**
@@ -67,7 +67,7 @@ export class RollingFile {
     try {
       this.fd = openSync(path, 'a', 0o600)
       // The mode above is only for a file this call creates; a log an older build made is 0644 and is narrowed here
-      if (modesGuardFiles()) fchmodSync(this.fd, 0o600)
+      if (traitsFor().modesGuardFiles) fchmodSync(this.fd, 0o600)
     } catch {
       /* a file that could not be narrowed is still written to; one that could not be opened has no fd */
     }

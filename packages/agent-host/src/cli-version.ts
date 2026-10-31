@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { parseCliVersion } from '@cc/protocol'
 import { whichTool } from './env-path.js'
-import { HOST_PLATFORM, locksRunningPrograms, pathsOf } from './os.js'
+import { HOST_PLATFORM, pathsOf, traitsFor } from './os.js'
 import { launchFor, type ToolLaunch } from './tool-launch.js'
 
 const exec = promisify(execFile)
@@ -93,7 +93,7 @@ export async function installedCliVersion(name: string, packageName: string, dep
   }
   const named = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.exec(path.basename(real).replace(/\.exe$/i, ''))
   if (named) return named[0]
-  if (locksRunningPrograms(deps.platform)) return null
+  if (traitsFor(deps.platform).locksRunningPrograms) return null
   try {
     return parseCliVersion(await deps.run(launch.command, [...launch.args, '--version']))
   } catch {

@@ -1,14 +1,15 @@
-import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
+import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
-import type { FolderAdded } from './project-creation.js'
+import type { DelegationForks } from './delegation-forks.js'
+import type { AppSessions } from './app-sessions.js'
+import type { ProjectCreation } from './project-creation.js'
 import type { MachineAnswer, MachineRequest } from './machine-flow.js'
 import type { PreferencesAnswer, PreferencesRequest } from './preferences-flow.js'
 import type { TrashAnswer, TrashRequest } from './trash-flow.js'
@@ -24,7 +25,9 @@ import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcrip
  * the manager's own operations they call. The manager hands itself over through this (`SessionManager.seat`), so the
  * tools stay one function over a narrow surface rather than a method that sees the whole class.
  */
-export type OrchestratorSeatHost = {
+export type OrchestratorSeatHost = Pick<DelegationForks, 'forkFor'> &
+  Pick<ProjectCreation, 'createProjectAsked' | 'askAppProject' | 'createProjectOnMachine' | 'addFolderAsked' | 'addFolderOnMachine'> &
+  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & {
   /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
@@ -55,33 +58,7 @@ export type OrchestratorSeatHost = {
   busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }>
   busyChoices(callerId: string, target: SessionInfo, from: QueuedRequest['via']): BusyChoice[]
   enqueue(callerId: string, target: SessionInfo, via: QueuedRequest['via'], text: string): Extract<BusyAnswer, { state: 'queued' }>
-  forkFor(
-    callerId: string,
-    target: SessionInfo,
-    text: string,
-    readOnly: boolean,
-    via: QueuedRequest['via'],
-    signal?: AbortSignal,
-  ): Promise<{ ok: false; error: string } | { ok: true; fork: SessionInfo } | { ok: true; queued: Extract<BusyAnswer, { state: 'queued' }> }>
   autoBoundaryOpen(sessionId: string, boundary?: string): boolean
-  createProjectAsked(
-    sessionId: string,
-    spec: { name: string; parent?: string; source?: GitSource },
-    signal?: AbortSignal,
-  ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }>
-  /** create_app without a project (#1141): create_project's card for the folder it makes (`ProjectCreation.askAppProject`) */
-  askAppProject(sessionId: string, spec: { id: string; parent?: string }, signal?: AbortSignal): Promise<string | null>
-  createProjectOnMachine(
-    sessionId: string,
-    reader: LinkedSessions,
-    machine: { id: string; name: string },
-    spec: { name: string; parent?: string; source?: GitSource },
-    signal?: AbortSignal,
-  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }>
-  /** add_project (#1220): `ProjectCreation.addFolderAsked`, a folder on this computer */
-  addFolderAsked(sessionId: string, path: string, signal?: AbortSignal): Promise<FolderAdded>
-  /** add_project on a linked machine (#1220): `ProjectCreation.addFolderOnMachine` */
-  addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded>
   /** The linked machines as `machines.list` answers them (#1220), once wired (`useMachineList`); empty without links */
   machineList(): MachineInfo[]
   /** The machine commands (#1219): `MachineFlow.run`, with the orchestrator as the session its cards stand in */
@@ -111,16 +88,6 @@ export type OrchestratorSeatHost = {
   usageHistory(p: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy }): UsageHistory
   /** handoff_session's waitFor (#694): `HandoffFlow.wait` */
   handoffWait(callerId: string, handle: string, signal?: AbortSignal): Promise<HandoffResult>
-  builderRefOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>): AppRef | null
-  checkApp(ref: AppRef): Promise<AppCheckReport>
-  createApp(params: {
-    projectId: string | null
-    id: string
-    name: string
-    description?: string
-    tool?: ToolName
-    parent?: string
-  }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }>
 }
 
 /**
