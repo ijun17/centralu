@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRpcHandler } from './rpc.js'
 import { Store } from './dev-services/store.js'
 import { SessionManager } from './sessions/manager.js'
-import type { AgentAdapter } from './adapters/types.js'
+import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
 import { CRASH_LINES_PER_WINDOW, CRASH_WINDOW_MS, createUiCrashLog } from './ui-crash-log.js'
 
