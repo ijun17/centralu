@@ -13,7 +13,7 @@ export const GUIDE = [
   '- CI of a PR or commit → ci_status; a failed job → read_failed_job (not gh pr checks / gh run view).',
   '- Open a PR → open_pr; comment → comment; file an issue → file_issue; a commit message → commit_check (not gh pr create / gh pr comment / gh issue create).',
   '- A release → release_status, then release (not gh release or git tag).',
-  "- The board → list_items, get_items, set_item_fields, add_item; the Needs decision items and the owner's saved answers → list_owner_answers (view items, answers or summaries), then comment and mark_answer_recorded.",
+  "- The board → list_items, get_items, set_item_fields, add_item; the Needs decision items and the owner's saved answers → list_owner_answers (view items or answers), then comment and mark_answer_recorded.",
 ].join('\n')
 
 export const tools = {

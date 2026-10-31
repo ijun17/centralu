@@ -160,13 +160,13 @@ export const tools = {
   list_owner_answers: {
     config: {
       title: "The owner's decisions and answers",
-      description: `By default the answers the owner saved on the board's screen to "${config.decisionStatus}" items and no agent has recorded yet (all: true adds the recorded ones), each with the item, its title and the text as the owner wrote it (often not English; never post it as written). For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**", then call mark_answer_recorded with that comment's address. view "items": the items whose Status is "${config.decisionStatus}", highest priority first, one line each, optionally one Area, marked when an answer waits. view "summaries": those items each with the question, options and recommendation of its latest "Decision needed (summary, …)" comment and its answer.`,
+      description: `By default the answers the owner saved on the board's screen to "${config.decisionStatus}" items and no agent has recorded yet (all: true adds the recorded ones), each with the item, its title and the text as the owner wrote it (often not English; never post it as written). For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**", then call mark_answer_recorded with that comment's address. view "items": the items whose Status is "${config.decisionStatus}", highest priority first, one line each, optionally one Area, marked when an answer waits. view "summaries" is the screen's: those items as data with the question, options and recommendation of its latest "Decision needed (summary, …)" comment as HTML; a failure comes as ok: false.`,
       inputSchema: z.object({
         view: z.enum(['answers', 'items', 'summaries']).optional().describe('Default "answers"'),
         all: z.boolean().optional().describe('answers: also the answers already recorded; default false'),
         area: z.string().optional().describe('items: only this Area, for example "UI"'),
         detail: detailInput,
-        refresh: refreshInput,
+        refresh: refreshInput.describe('summaries: skip the short cache and ask GitHub now'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
