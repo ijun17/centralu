@@ -501,6 +501,8 @@ describe('who takes it', () => {
     expect(agents).toMatch(/native Windows/)
     const contributing = readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8')
     expect(contributing).toMatch(/WSL/)
+    // The shell line this replaced is gone from the runners, so no document tells a session to expect its folder
+    expect(contributing).not.toMatch(/centralu-e2e\.lock/)
   })
 })
 
