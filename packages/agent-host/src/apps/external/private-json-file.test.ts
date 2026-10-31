@@ -328,3 +328,27 @@ describe('PrivateJsonFile.create', () => {
     expect(existsSync(join(dataRoot, 'b.json'))).toBe(false)
   })
 })
+
+describe('what the runtime keeps beside its private files', () => {
+  it('the busy book leaves no temp file when the rename fails', async () => {
+    const { BusyBook } = await import('./busy-book.js')
+    // A folder in the place of the file: the rename onto it fails after the temp file was written
+    const file = join(dataRoot, 'app-busy.json')
+    mkdirSync(join(file, 'inside'), { recursive: true })
+    new BusyBook(file).set('p1/notes', { projectId: 'p1', appId: 'notes', reason: 'merging', at: 1 })
+    expect(readdirSync(dataRoot)).toEqual(['app-busy.json', 'some-app'])
+  })
+
+  it('the import marks say why the data folder could not be listed by its code, never by the message of an error that has none', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({ ...(await original<typeof import('node:fs')>()), readdirSync: () => { throw new Error('cannot list /elsewhere/secret-folder') } }))
+    try {
+      const { ImportBook: Book } = await import('./import-book.js')
+      const reason = new Book(dataRoot).doubt()
+      expect(reason).toContain('could not be listed (unknown error)')
+      expect(reason).not.toContain('secret-folder')
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+})
