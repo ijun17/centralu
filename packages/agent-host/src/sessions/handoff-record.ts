@@ -1,3 +1,4 @@
+import { bytesText } from '../bytes-text.js'
 import { scriptLabel } from '../mail/script-label.js'
 import type { StoredMessage } from '@cc/protocol'
 import { trustedJsonText } from './orchestrator-tools.js'
@@ -427,7 +428,7 @@ export function buildHandoffRecord(opts: {
   const from = kept.length ? kept[0]!.seq : lastSeq
   const covers =
     `covers seq ${num(from)}–${num(lastSeq)} of ${num(lastSeq)}` +
-    ` · ${(cap / 1_000_000).toFixed(1)} MB cap` +
+    ` · ${bytesText(cap)} cap` +
     (dropped > 0 || folded ? " · earlier material stays in the app's records" : '')
   const header = `# Handoff · ${trustedJsonText(opts.name)} · ${oneLine(opts.tool)}${opts.toTool ? ` → ${oneLine(opts.toTool)}` : ''}\n${covers}\n${previousLine}${lineageText}${touchedLine}\n`
 
