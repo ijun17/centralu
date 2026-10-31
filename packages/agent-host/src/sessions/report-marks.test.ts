@@ -1,13 +1,12 @@
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
-import type { AdapterCapabilities, BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AgentAdapter, AgentProcess } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
+import { SessionManager } from './manager.js'
+import { Adapter, FakeProcess, Handle, processes } from './kept-host.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -16,70 +15,6 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * process, the keeper keeps it, and the next host adopts it (#280 step 2) and finds the report it still owes in the
  * store's `report_marks`.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
-
-class Handle implements SessionHandle {
-  externalId: string | null
-  sent: string[] = []
-  constructor(
-    readonly sessionId: string,
-    readonly opts: CreateSessionOpts,
-    private emit: EventSink,
-  ) {
-    this.externalId = opts.resumeExternalId ?? `ext-${sessionId}`
-  }
-  send(text: string) {
-    this.sent.push(text)
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-  }
-  /** The turn ends with this as its final text */
-  answer(text: string) {
-    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
-    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
-  }
-  respondApproval() {
-    return false
-  }
-  /** Any event of the tool's, as the CLI sends it */
-  emitEvent(e: NormalizedEvent) {
-    this.emit(e)
-  }
-  interrupt() {}
-  async dispose() {}
-  /** Set by a test: the turn ends while the leaving host lets the process go */
-  endOnDetach?: string
-  async detach() {
-    if (this.endOnDetach) this.answer(this.endOnDetach)
-  }
-}
-
-class Adapter implements AgentAdapter {
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true,
-  }
-  handles = new Map<string, Handle>()
-  readonly tool: ToolName = 'claude'
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    const h = new Handle(opts.sessionId, opts, emit)
-    this.handles.set(opts.sessionId, h)
-    return h
-  }
-}
-
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
 
 let store: Store
 let root: string
@@ -98,7 +33,7 @@ afterEach(async () => {
 })
 
 function host(kept: ReadonlySet<string> = new Set()) {
-  const claude = new Adapter()
+  const claude = new Adapter(true)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
   const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
   mgr.prLookup = async () => null

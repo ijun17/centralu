@@ -11,9 +11,9 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
+import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, ORCHESTRATOR_INSTRUCTIONS, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { commandsFor, ORCHESTRATOR_INSTRUCTIONS } from './orchestrator-tools.js'
 
 /**
  * The orchestrator's trust commands (#1219, third slice). Each makes the window's own call through the real RPC handler
@@ -69,26 +69,7 @@ async function project(name: string, opts: { app?: Record<string, unknown> } = {
 const projects = async () => (await rpc('projects.list', {})) as ProjectInfo[]
 const trusted = async (id: string) => (await projects()).find((p) => p.id === id)?.trusted
 
-/** The trust card standing in a session, if one is */
-function card(sessionId: string) {
-  const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
-  const d = pending?.detail
-  return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
-}
-
-function run(orcId: string, command: Command, args: Record<string, unknown> = {}) {
-  return mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
-}
-
-/** Runs a command whose card the person answers; the card's question and the answer */
-async function answered(orcId: string, command: Command, args: Record<string, unknown>, decision: 'allow' | 'deny', whileStanding?: () => Promise<void>) {
-  const call = run(orcId, command, args)
-  await eventually(() => !!card(orcId))
-  const question = card(orcId)!.text
-  await whileStanding?.()
-  mgr.respondApproval(orcId, card(orcId)!.requestId, decision)
-  return { question, r: await call }
-}
+const { card, run, answered } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_projects', () => {
   it('lists each project with its id, folder and trust, and says when there is none', async () => {
@@ -669,14 +650,7 @@ describe('who may run them', () => {
   })
 
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    for (const name of COMMANDS) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
-      for (const tier of RARE_TIERS) {
-        for (const profile of ['scoped', 'builder', 'reader'] as const) {
-          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
-        }
-      }
-    }
+    expectOnlyOrchestratorRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and trusts nothing", async () => {

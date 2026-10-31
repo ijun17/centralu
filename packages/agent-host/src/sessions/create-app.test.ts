@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, ExternalAppInfo, NormalizedEvent, ProjectInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { ExternalAppInfo, NormalizedEvent, ProjectInfo, ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
@@ -12,6 +12,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { DEFAULT_RARE_TIER, profileAllows, setRareTier } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { CapturingAdapter } from './session-apps.test-helpers.js'
 import { linkDir } from '../link.test-helpers.js'
 
 /**
@@ -20,31 +21,8 @@ import { linkDir } from '../link.test-helpers.js'
  * real runtime and a real template. Only the adapter is fake.
  */
 
-class Handle implements SessionHandle {
-  externalId = 'ext-1'
-  constructor(readonly sessionId: string) {}
-  send() {}
-  respondApproval() {
-    return false
-  }
-  interrupt() {}
-  async dispose() {}
-}
-
-class FakeAdapter implements AgentAdapter {
-  constructor(readonly tool: ToolName) {}
-  descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  seen: CreateSessionOpts[] = []
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, _emit: EventSink) {
-    this.seen.push(opts)
-    return new Handle(opts.sessionId)
-  }
+class FakeAdapter extends CapturingAdapter {
+  override descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
 }
 
 let root = ''

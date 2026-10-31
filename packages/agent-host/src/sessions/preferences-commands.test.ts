@@ -10,10 +10,9 @@ import { ThemeFiles } from '../themes.js'
 import type { UpdateService } from '../updates.js'
 import type { AgentVersionService } from '../agent-versions.js'
 import { SessionManager } from './manager.js'
+import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import type { SessionSleeper } from './sleep.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
-import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * The orchestrator's preference commands (#1219, second slice): `get_preferences` reads what Settings shows,
@@ -112,26 +111,11 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** The preferences card standing in a session, if one is */
-function card(sessionId: string) {
-  const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
-  const d = pending?.detail
-  return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
-}
+const { card, run, answered: answeredAny } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
 
-function run(orcId: string, command: (typeof COMMANDS)[number], args: Record<string, unknown> = {}) {
-  return mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
-}
-
-/** Runs a command whose card the person answers with `decision`; the card's question and the answer */
-async function answered(orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) {
-  const call = run(orcId, 'set_preferences', args)
-  await eventually(() => !!card(orcId))
-  const question = card(orcId)!.text
-  await whileStanding?.()
-  mgr.respondApproval(orcId, card(orcId)!.requestId, decision)
-  return { question, r: await call }
-}
+/** Runs set_preferences, whose card the person answers with `decision`; the card's question and the answer */
+const answered = (orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) =>
+  answeredAny(orcId, 'set_preferences', args, decision, whileStanding)
 
 const prefs = () => rpc('prefs.get', {}) as Promise<Record<string, unknown>>
 
@@ -740,14 +724,7 @@ describe('who may run them', () => {
   })
 
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    for (const name of COMMANDS) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
-      for (const tier of RARE_TIERS) {
-        for (const profile of ['scoped', 'builder', 'reader'] as const) {
-          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
-        }
-      }
-    }
+    expectOnlyOrchestratorRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and changes nothing", async () => {

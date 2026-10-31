@@ -1,12 +1,11 @@
-import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
-import { PassThrough } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 
 /**
  * A session's background work across a host swap, and a process that goes away without a replacement (#648).
@@ -20,16 +19,6 @@ import { SessionManager, type AgentProcessHost } from './manager.js'
  * learn that the session is no longer live, as it does for a sleep; before, the windows kept `live: true` and the
  * screen's wake stepped back.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'

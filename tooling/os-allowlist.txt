@@ -299,7 +299,6 @@ packages/agent-host/src/sessions/housekeeping-commands.test.ts
 packages/agent-host/src/sessions/human-origin.test.ts
 packages/agent-host/src/sessions/interruptions.test.ts
 packages/agent-host/src/sessions/keeper-reattach.test.ts
-packages/agent-host/src/sessions/launch-options.test.ts
 packages/agent-host/src/sessions/launch-refusal.test.ts
 packages/agent-host/src/sessions/linked-ask-paused.test.ts
 packages/agent-host/src/sessions/linked-start-params.test.ts

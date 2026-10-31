@@ -1,11 +1,10 @@
-import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 
 /**
  * A host leaving while a process comes up or a turn ends (#839, item 7). Quitting (`disposeAll`) stops the processes it
@@ -14,18 +13,6 @@ import { SessionManager, type AgentProcessHost } from './manager.js'
  * deferred restart at a turn's end during a handover stopped the process the keeper was keeping and started one nobody
  * kept; and a kept process offered while a wake was already under way was never used and never stopped.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kills: string[] = []
-  kill(signal: NodeJS.Signals = 'SIGTERM') {
-    this.kills.push(signal)
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null

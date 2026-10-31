@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
+import type { ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -9,7 +9,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
-import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
@@ -38,24 +38,12 @@ class Handle implements SessionHandle {
   async dispose() {}
 }
 
-class CapturingAdapter implements AgentAdapter {
-  descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  seen: CreateSessionOpts[] = []
+class CapturingAdapter extends BaseAdapter {
+  override descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
   emits: EventSink[] = []
-  constructor(readonly tool: ToolName) {}
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    this.seen.push(opts)
+  protected override handle(opts: CreateSessionOpts, emit: EventSink) {
     this.emits.push(emit)
     return new Handle(opts.sessionId, this.tool === 'codex')
-  }
-  last(): CreateSessionOpts {
-    return this.seen.at(-1)!
   }
 }
 

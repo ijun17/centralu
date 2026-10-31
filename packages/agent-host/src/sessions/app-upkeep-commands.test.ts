@@ -12,9 +12,8 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
+import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
-import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * The orchestrator's app upkeep commands (#1219, fourth slice). Each makes the window's own call through the real RPC
@@ -22,7 +21,6 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * itself act at once; removing an app waits for the person's card.
  */
 const COMMANDS = ['list_app_versions', 'restore_app_version', 'restart_app', 'check_app', 'list_app_runs', 'list_app_errors', 'app_usage', 'remove_app'] as const
-type Command = (typeof COMMANDS)[number]
 
 const FIXTURE = fileURLToPath(new URL('../apps/external/test-fixtures/app.mjs', import.meta.url))
 
@@ -72,26 +70,7 @@ const ref = (appId: string) => ({ projectId: null, appId })
 const versions = async (appId: string) => ((await rpc('apps.versions', ref(appId))) as Extract<AppVersions, { kind: 'snapshots' }>).snapshots
 const listed = async () => ((await rpc('apps.list', {})) as { appId: string; projectId: string | null }[]).map((a) => `${a.projectId ?? 'user'}/${a.appId}`)
 
-/** The card standing in a session, if one is */
-function card(sessionId: string) {
-  const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
-  const d = pending?.detail
-  return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
-}
-
-function run(orcId: string, command: Command, args: Record<string, unknown> = {}) {
-  return mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
-}
-
-/** Runs a command whose card the person answers; the card's question and the answer */
-async function answered(orcId: string, command: Command, args: Record<string, unknown>, decision: 'allow' | 'deny', whileStanding?: () => Promise<void>) {
-  const call = run(orcId, command, args)
-  await eventually(() => !!card(orcId))
-  const question = card(orcId)!.text
-  await whileStanding?.()
-  mgr.respondApproval(orcId, card(orcId)!.requestId, decision)
-  return { question, r: await call }
-}
+const { card, run, answered } = commandRig(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_app_versions and restore_app_version', () => {
   it('lists the kept versions of a user-folder app, newest first, and marks the code now', async () => {
@@ -346,14 +325,7 @@ describe('remove_app', () => {
 
 describe('who may run them', () => {
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    for (const name of COMMANDS) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
-      for (const tier of RARE_TIERS) {
-        for (const profile of ['scoped', 'builder', 'reader'] as const) {
-          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
-        }
-      }
-    }
+    expectOnlyOrchestratorRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and changes nothing", async () => {

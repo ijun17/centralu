@@ -1,8 +1,6 @@
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
@@ -14,6 +12,7 @@ import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -65,16 +64,6 @@ describe('which failures the network caused', () => {
     expect(isNetworkFailure(message)).toBe(false)
   })
 })
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null

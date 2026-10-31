@@ -1,6 +1,4 @@
-import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
-import { PassThrough } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
@@ -11,24 +9,13 @@ import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
 import { MailService } from '../mail/service.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 
 /**
  * A host restart under the keeper (#280 step 2), seen by the session manager: the leaving host lets
  * go of its sessions without stopping them, and the next host re-attaches to the same processes
  * and finds the sessions as they were.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kills: string[] = []
-  kill(signal: NodeJS.Signals = 'SIGTERM') {
-    this.kills.push(signal)
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'
