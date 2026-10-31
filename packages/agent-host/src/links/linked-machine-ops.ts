@@ -9,6 +9,7 @@ import { installVersion, type InstallVersion } from './registry.js'
 import { RemoteClient } from './remote-client.js'
 import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, type RemoteRun } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -299,14 +300,21 @@ export class LinkedMachine extends LinkedMachineConnection {
     this.followHub()
   }
 
+  /** Held only on the minimum (#1143): the machine follows the hub as it did when such a link still connected */
+  protected override heldNow(): void {
+    this.followHub()
+  }
+
   /**
-   * Starts the hub's own update of this machine (#1508) when it follows the hub (`followsHub`), the link is up and nothing
+   * Starts the hub's own update of this machine (#1508) when it follows the hub (`followsHub`), the link is up (or held only on
+   * the minimum supported version, #1143) and nothing
    * else runs there: once per version of the hub's, and once more `FOLLOW_RETRY_MS` after a failure. It does not wait for
    * what runs there (#1618, `stopAtOnce`): the turns it ends continue on the new version, and terminals and project
    * commands close. The steps show on the row as the person's do
    */
   followHub(): void {
-    if (this.stopped || this.busy || this.status !== 'connected' || !this.followsHub()) return
+    const reachable = this.status === 'connected' || (this.status === 'versions_differ' && this.versions !== null && heldOnMinimum(this.versions))
+    if (this.stopped || this.busy || !reachable || !this.followsHub()) return
     const version = this.deps.hub.version
     if (this.follow?.version === version && !this.follow.due) return
     if (this.follow?.version !== version) {
@@ -507,7 +515,9 @@ export class LinkedMachine extends LinkedMachineConnection {
     const failed = (err: unknown) => ({ activity: null, cannot: /^Unknown method/.test(errorMessage(err)) })
     if (this.client?.connected) return this.client.call('host.activity', {}).then(read, failed)
     const e = this.endpoint
-    if (!e?.url || this.versions?.compatible === false || this.held) return Promise.resolve({ activity: null, cannot: true })
+    // Held only on the minimum (#1143), the protocol is one and the host there answers as it did when the link connected
+    const otherProtocol = this.versions?.compatible === false && !heldOnMinimum(this.versions)
+    if (!e?.url || otherProtocol || this.held) return Promise.resolve({ activity: null, cannot: true })
     return new Promise((resolve) => {
       let settled = false
       const done = (v: { activity: HostActivity | null; cannot: boolean }) => {

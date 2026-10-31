@@ -1032,11 +1032,6 @@ describe.each([
   })
 
   /**
-   * The text size moved from the workspace snapshot into the preferences (#312 step 5). The old
-   * step comes across once; after that the record has its own value, and a snapshot that still
-   * carries the old step (written by an older window) does not override a size chosen since.
-   */
-  /**
    * The notification switches moved from the workspace snapshot into the preferences (#1306).
    * The snapshot's come across once; after that the record is the source, and a snapshot an older window still writes does
    * not override a switch chosen since. A change carries only the switches that changed, and every change is announced.

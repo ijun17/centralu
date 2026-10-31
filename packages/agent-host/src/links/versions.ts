@@ -4,7 +4,8 @@ import { isNewerVersion, isSupportedVersion, releaseOf, type MachineSide, type M
  * The version check a link runs before it connects (docs/plans/remote-hub.md §4, relaxed by #689):
  *
  *   - A different protocol never connects: the remote host would refuse the hello anyway (4002). Nor does a remote
- *     release older than `MIN_SUPPORTED_VERSION` (#1143): this build no longer keeps what such a remote needed.
+ *     release older than `MIN_SUPPORTED_VERSION` (#1143) that this hub names as the side to update: this build no longer
+ *     keeps what such a remote needed. Where the hub names no update (a dev hub, two channels), it connects as before.
  *   - One protocol connects, whatever the app versions. A different version of one channel still
  *     names the older side, so the UI can *offer* to bring it up (the hub through its own update,
  *     the remote over ssh); nothing waits for the person to answer.
@@ -15,7 +16,6 @@ import { isNewerVersion, isSupportedVersion, releaseOf, type MachineSide, type M
  *   - Releases of two channels (a beta and a stable) are not ranked against each other.
  */
 export function compareVersions(hub: MachineSide, remote: MachineSide, accepted: boolean): MachineVersions {
-  const compatible = hub.protocolVersion === remote.protocolVersion && (remote.dev || isSupportedVersion(remote.version))
   const hubRelease = releaseOf(hub.version)
   const remoteRelease = releaseOf(remote.version)
   const sameChannel = channel(hubRelease) === channel(remoteRelease)
@@ -24,7 +24,14 @@ export function compareVersions(hub: MachineSide, remote: MachineSide, accepted:
   if (!dev && sameChannel && hubRelease !== remoteRelease) {
     older = isNewerVersion(hubRelease, remoteRelease) ? 'remote' : isNewerVersion(remoteRelease, hubRelease) ? 'hub' : null
   }
+  // The minimum holds a link only where this hub can name the update that lifts it; otherwise the link connects as before
+  const compatible = hub.protocolVersion === remote.protocolVersion && !(older === 'remote' && !isSupportedVersion(remote.version))
   return { hub, remote, older, compatible, sameChannel, accepted: compatible && accepted }
+}
+
+/** Whether a link is held only on `MIN_SUPPORTED_VERSION` (#1143): one protocol, a remote below it, and the update named */
+export function heldOnMinimum(v: MachineVersions): boolean {
+  return !v.compatible && v.hub.protocolVersion === v.remote.protocolVersion
 }
 
 /** Whether a link with these versions may connect now: one protocol is enough (#689) */

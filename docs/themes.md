@@ -101,6 +101,9 @@ lowercase letters, digits and hyphens.
 - **Mistakes never stop the app.** An unknown key or token, or a value the browser rejects, is
   listed next to the theme in Settings and skipped. A file that does not parse (halfway through an
   edit) is listed as broken, and the screen keeps showing the last version of it that did.
+- **A token Centralu stopped using is skipped without a word.** A theme made before it left still
+  names it, and nothing is wrong with that file: `activity-1` to `activity-5` went with the working
+  orbit (#742), and the schema still accepts them, marked retired (`RETIRED_THEME_TOKENS`).
 
 **Live.** The host watches the folder (`packages/agent-host/src/themes.ts`) and announces every
 change (`themes_changed`); the screen re-reads the list and re-applies. Saving the file in an

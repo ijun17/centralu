@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MIN_SUPPORTED_VERSION } from '@cc/protocol'
-import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
+import { acceptanceKey, compareVersions, heldOnMinimum, mayConnect } from './versions.js'
 
 const side = (version: string, protocolVersion = 1, dev = false) => ({ version, protocolVersion, dev })
 
@@ -61,6 +61,16 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
     expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side('0.1.0-beta.44', 1, true), false))).toBe(true)
     // A remote host from source says `0.0.0-dev` on its connection line, before its hello can say it is a dev build
     expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side('0.0.0-dev'), false))).toBe(true)
+    expect(heldOnMinimum(old)).toBe(true)
+    expect(heldOnMinimum(compareVersions(side('0.2.0', 2), side('0.1.0', 1), false))).toBe(false)
+  })
+
+  it('connects a remote below the minimum as before where this hub names no update to lift it: a dev hub, a stable hub (#1143)', () => {
+    const fromDev = compareVersions(side('0.0.0-dev', 1, true), side('0.1.0-beta.44'), false)
+    expect(fromDev).toMatchObject({ older: null, compatible: true })
+    const fromStable = compareVersions(side('0.1.0'), side('0.1.0-beta.44'), false)
+    expect(fromStable).toMatchObject({ older: null, compatible: true })
+    expect(mayConnect(fromDev) && mayConnect(fromStable)).toBe(true)
   })
 
   it('keeps what the person accepted per pair: either side moving asks again', () => {

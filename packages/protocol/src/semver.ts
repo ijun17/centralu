@@ -80,9 +80,10 @@ const LOCAL_BUILD =
 
 /**
  * The oldest Centralu another one still works with (#1143): every window, host, launcher and linked machine in use runs it or
- * later, so the code that served a peer before it is gone. A linked machine below it does not connect and is offered the
- * update (`compareVersions` in agent-host's links/versions.ts); a window and a host of two builds already meet the "another
- * build" bar, and the launcher ships in one package with its host. Raised when compatibility code for a release is removed.
+ * later, so the code that served a peer before it is gone. A linked machine below it does not connect where the hub can name
+ * the update, and is offered it or follows the hub (`compareVersions` in agent-host's links/versions.ts); a window and a host
+ * of two builds already meet the "another build" bar, and the launcher ships in one package with its host. What the update
+ * from below it needs is kept. Raised when compatibility code for a release is removed.
  */
 export const MIN_SUPPORTED_VERSION = '0.1.0-beta.45'
 
