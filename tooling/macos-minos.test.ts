@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+// @ts-expect-error Plain JavaScript, run directly by node in build.yml.
 import { compareVersions, minosOf, minosProblems } from '../scripts/macos-minos.mjs'
 
 const build = (minos: string) => `Load command 8\n      cmd LC_UUID\n  cmdsize 24\nLoad command 9\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos ${minos}\n      sdk 15.5\n   ntools 1\n`
