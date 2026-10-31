@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { type MigrationStep } from './migrations/context.js'
+import { BASELINE_VERSION } from './migrations/v27-baseline.js'
 import { pragmaNumber } from './rows.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 
@@ -37,6 +38,28 @@ export function storeTooNewMessage(minReaderVersion: number, knownVersion: numbe
     `  Update Centralu to open it. Nothing in the data was changed.\n` +
     `  Store: ${dbPath}`
   )
+}
+
+/**
+ * The store is older than the oldest one this host migrates (#1143): the steps that brought it to v27 are gone. Thrown
+ * by the constructor before anything touches the file, like `StoreTooNewError`.
+ */
+export class StoreTooOldError extends Error {
+  constructor(
+    readonly userVersion: number,
+    readonly dbPath: string,
+  ) {
+    super(
+      `[agent-host] This data was written by a Centralu too old for this one to update.
+` +
+        `  It is at store version ${userVersion}; this Centralu updates store versions from ${BASELINE_VERSION} on.
+` +
+        `  Open it once with Centralu 0.1.0-beta.45, then with this one. Nothing in the data was changed.
+` +
+        `  Store: ${dbPath}`,
+    )
+    this.name = 'StoreTooOldError'
+  }
 }
 
 /**
@@ -78,6 +101,12 @@ export abstract class ReaderGate {
   /** The lowest schema version that can still read this store (#292) */
   get minReaderVersion(): number {
     return this.storedMinReader() ?? 0
+  }
+
+  /** A new store (version 0) starts from the baseline; one between it and the baseline is refused */
+  protected refuseIfTooOld(): void {
+    const version = pragmaNumber(this.db, 'user_version')
+    if (version > 0 && version < BASELINE_VERSION) throw new StoreTooOldError(version, this.dbPath)
   }
 
   protected refuseIfTooNew(): void {

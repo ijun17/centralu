@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GridPanel, SessionInfo, StoredMessage } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
-import { Store } from './store.js'
+import { Store, StoreTooOldError } from './store.js'
 
 /**
  * The current latest schema version, read from the step list itself. v22, v23 and v24 broke the same six
@@ -72,60 +72,23 @@ function indexRowsOf(s: Store, sessionId: string): () => number {
 }
 
 /**
- * v10 rebuilds the table whole (SQLite cannot drop a NOT NULL).
- * This is the riskiest change in this project, so **actual data is loaded into an old database
- * and actually migrated.** Silently losing even one row would be unrecoverable.
+ * A store between v1 and v26 is older than the v27 baseline (#1143): the steps that would bring it there are gone, so
+ * it is refused before anything writes, and is left as it was.
  */
-describe('v10 migration — allows a session with no project', () => {
-  it('the sessions and messages of an old database (v9) survive the move intact', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v10-'))
+describe('a store older than the v27 baseline', () => {
+  it('is refused and left untouched', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-too-old-'))
     const file = join(dir, 'store.db')
-
-    // Build a v9-state database by hand (project_id NOT NULL)
     const old = new Database(file)
-    old.pragma('foreign_keys = ON')
-    old.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-      CREATE TABLE sessions (id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
-        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
-        archived INTEGER NOT NULL DEFAULT 0, is_orchestrator INTEGER NOT NULL DEFAULT 0,
-        last_read_seq INTEGER NOT NULL DEFAULT 0, waiting_since INTEGER, created_at INTEGER NOT NULL,
-        touched_paths TEXT NOT NULL DEFAULT '[]', model TEXT, effort TEXT,
-        permission_preset TEXT NOT NULL DEFAULT 'normal', imported_from TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
-        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
-    `)
-    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
-    for (const id of ['s1', 's2', 's3']) {
-      old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES (?,?,?,?,?)`)
-        .run(id, 'p1', 'claude', 'name ' + id, 1)
-      old.prepare(`INSERT INTO messages VALUES (?,?,?,?,?,?)`).run(id, 1, 'user', 'text', '{"text":"hello"}', 1)
-    }
-    old.pragma('user_version = 9')
+    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY); PRAGMA user_version = 26`)
     old.close()
 
-    const store = new Store(file)
-    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.sessions.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
-    expect(store.sessions.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
-    expect(store.messages.loadMessages('s1').length).toBe(1)
-
-    // And now a session with no project is inserted
-    store.sessions.upsertSession({
-      id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
-      autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
-      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
-    })
-    expect(store.sessions.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
-    // Closed before the folder goes: Windows cannot delete a file that is still open
-    store.close()
+    expect(() => new Store(file)).toThrow(StoreTooOldError)
+    const raw = new Database(file, { readonly: true })
+    expect(raw.pragma('user_version', { simple: true })).toBe(26)
+    expect(raw.prepare(`SELECT name FROM sqlite_master`).pluck().all()).toEqual(['projects', 'sqlite_autoindex_projects_1'])
+    raw.close()
+    expect(existsSync(`${file}-wal`)).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -242,44 +205,6 @@ describe('Store (dev sqlite)', () => {
 })
 
 describe('migrations (E-0)', () => {
-  it('opening a v1 database adds new columns and FTS, and existing messages become searchable', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-migrate-'))
-    const file = join(dir, 'old.db')
-
-    // Build a v1 state by hand (neither touched_paths nor messages_fts exist)
-    const raw = new Database(file)
-    raw.exec(`
-      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, tool TEXT, external_id TEXT,
-        name TEXT, auto_named INTEGER, state TEXT, archived INTEGER, last_read_seq INTEGER,
-        waiting_since INTEGER, created_at INTEGER);
-      CREATE TABLE messages (session_id TEXT, seq INTEGER, role TEXT, kind TEXT, payload TEXT, ts INTEGER,
-        PRIMARY KEY (session_id, seq));
-      INSERT INTO sessions VALUES ('s1','p1','claude',NULL,'Old session',1,'idle',0,0,NULL,0);
-      INSERT INTO messages VALUES ('s1',1,'assistant','text','{"text":"승인을 기다립니다"}',0);
-      PRAGMA user_version = 1;
-    `)
-    raw.close()
-
-    const store = new Store(file)
-    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-
-    // Only the backfill lets an old conversation be found
-    const hits = store.messages.searchMessages('승인')
-    expect(hits.length).toBe(1)
-    expect(hits[0]!.sessionId).toBe('s1')
-
-    // The new column is usable too
-    store.sessions.setTouchedPaths('s1', ['src/a.ts'])
-    expect(store.sessions.getTouchedPaths('s1')).toEqual(['src/a.ts'])
-
-    // v4: model and permission are also attached to an existing session (with default values)
-    const migrated = store.sessions.listSessions().find((s) => s.id === 's1')
-    expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null })
-
-    store.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
-
   it('a search still matches a word with a Korean particle attached (trigram tokenizer)', () => {
     const s = seeded()
     s.messages.appendMessages([
@@ -812,190 +737,6 @@ describe('the orchestrator marker (kind)', () => {
     expect(s.sessions.orchestratorId()).toBeNull()
     s.close()
   })
-
-  /**
-   * v26 — the safeguard for retiring the project orchestrator (2026-09-01).
-   *
-   * **This was about to become a promotion, not a demotion.** Once the project-scoped tier is
-   * gone from the code, a session that still carries the marker gets, the next time it wakes, a
-   * tool that sees **every project** rather than just its own — a privilege escalation that
-   * shows up nowhere on screen. So the data is fixed first.
-   */
-  it('v26: an old marker with a project is cleared, and the central marker survives', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v26-'))
-    const file = join(dir, 'store.db')
-
-    // Build a v25 state: one project orchestrator plus one central orchestrator
-    const before = newestStore(file)
-    before.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    mk(before, 'proj-orc', 'p1', 'orchestrator')
-    mk(before, 'central', null, 'orchestrator')
-    before.close()
-    const raw = new Database(file)
-    raw.pragma('user_version = 25')
-    raw.close()
-
-    const after = new Store(file)
-    expect(after.schemaVersion).toBe(LATEST_SCHEMA)
-    // The marker with a project disappears — the conversation is untouched
-    expect(after.sessions.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
-    // The central one is untouched — the app's only orchestrator
-    expect(after.sessions.orchestratorId()).toBe('central')
-    after.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
-})
-
-/**
- * The last piece of the rename: the database table name.
- *
- * The data has to survive — a session that vanished from the grid because of a rename becomes
- * "why is the screen empty," and that is not a price worth paying to line up a name.
- */
-describe('v13 migration — the old-named table becomes grid_panels', () => { // legacy-name
-  it('a saved grid layout survives the move intact', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v13-'))
-    const file = join(dir, 'store.db')
-
-    /*
-     * Build an old database by hand (with the table under its old name).
-     *
-     * **The version number has to be genuine.** This file has the old-named table and no
-     * `grid_panels`, which is the shape the database had before v9 (the step that creates
-     * grid_panels). This test used to get away with writing 12 — because schema.sql reset
-     * user_version to 1, v9 replayed anyway. Once that replay was removed, this lie surfaced
-     * immediately (`no such table: grid_panels`). A genuine v12 database has already passed
-     * through v9, so it is guaranteed to have that table.
-     */
-    const old = new Database(file)
-    old.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
-        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
-        archived INTEGER NOT NULL DEFAULT 0, last_read_seq INTEGER NOT NULL DEFAULT 0,
-        waiting_since INTEGER, created_at INTEGER NOT NULL, touched_paths TEXT NOT NULL DEFAULT '[]',
-        model TEXT, effort TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal',
-        imported_from TEXT, worktree_path TEXT, worktree_branch TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
-        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
-      CREATE TABLE control_center (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, -- legacy-name
-        position INTEGER NOT NULL);
-    `)
-    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
-    old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('s1','p1','claude','Pinned session',1)`).run()
-    old.prepare(`INSERT INTO control_center (session_id, position) VALUES ('s1', 0)`).run() // legacy-name
-    old.pragma('user_version = 8')
-    old.close()
-
-    const store = new Store(file)
-
-    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.grid.listGridView()).toEqual([sp('s1')])
-    store.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
-})
-
-/**
- * v14: a session's cwd stops being recomputed. (issue #28)
- *
- * The whole failure was a derived path. Renaming the data directory moved the orchestrator's
- * cwd, Claude Code files conversations by working directory, and the tool went looking under a
- * slug that had never existed. So this runs against a real v13-shaped database — a migration
- * that is only assumed to work is exactly the kind that quietly orphans someone's history.
- */
-describe('v14 migration — remembers the directory a session was created in', () => {
-  const v13Db = (file: string) => {
-    const old = new Database(file)
-    old.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
-        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
-        archived INTEGER NOT NULL DEFAULT 0, is_orchestrator INTEGER NOT NULL DEFAULT 0,
-        last_read_seq INTEGER NOT NULL DEFAULT 0,
-        waiting_since INTEGER, created_at INTEGER NOT NULL, touched_paths TEXT NOT NULL DEFAULT '[]',
-        model TEXT, effort TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal',
-        imported_from TEXT, worktree_path TEXT, worktree_branch TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
-        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
-      CREATE TABLE grid_panels (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-        position INTEGER NOT NULL);
-    `)
-    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
-    const add = old.prepare(
-      `INSERT INTO sessions (id, project_id, tool, name, created_at, is_orchestrator, worktree_path, worktree_branch)
-       VALUES (?,?,?,?,?,?,?,?)`,
-    )
-    add.run('plain', 'p1', 'claude', 'Project session', 1, 0, null, null)
-    add.run('wt', 'p1', 'claude', 'Worktree session', 1, 0, '/tmp/wt/feature', 'feature')
-    add.run('orc', null, 'claude', 'Orchestrator', 1, 1, null, null)
-    old.pragma('user_version = 13')
-    old.close()
-  }
-
-  it('project and worktree sessions are backfilled with their own path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-'))
-    const file = join(dir, 'store.db')
-    v13Db(file)
-
-    const store = new Store(file)
-
-    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.sessions.sessionCwd('plain')).toBe('/tmp/p1')
-    // A worktree session's history is filed under the worktree, not the project it came from
-    expect(store.sessions.sessionCwd('wt')).toBe('/tmp/wt/feature')
-    store.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  /*
-   * The orchestrator is the one row SQL cannot answer for: it has no project and no worktree,
-   * and the only source left is `orchestratorHome()`, which creates a directory under the
-   * user's home. A migration that does that on every open is how `pnpm verify` once created
-   * `~/.centralu/orchestrator` and blocked the real data move (see data-dir.ts). So it stays
-   * NULL here and the manager resolves it the first time it actually needs a path.
-   */
-  it('the orchestrator stays NULL — the migration does not touch the home directory', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-orc-'))
-    const file = join(dir, 'store.db')
-    v13Db(file)
-
-    const store = new Store(file)
-
-    expect(store.sessions.sessionCwd('orc')).toBeNull()
-    store.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  /*
-   * schema.sql resets user_version to 1, so every migration step replays on every open. A
-   * backfill without `WHERE cwd IS NULL` would therefore rewrite the stored path on each
-   * start — reintroducing the recomputation this version exists to end.
-   */
-  it('reopening does not overwrite the recorded path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-again-'))
-    const file = join(dir, 'store.db')
-    v13Db(file)
-
-    const first = new Store(file)
-    first.sessions.setSessionCwd('plain', '/tmp/where-it-really-started')
-    first.close()
-
-    const second = new Store(file)
-    expect(second.sessions.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
-    second.close()
-    rmSync(dir, { recursive: true, force: true })
-  })
 })
 
 /**
@@ -1005,27 +746,14 @@ describe('v14 migration — remembers the directory a session was created in', (
  * point — and the failure would be silent in the worst way. A menu that lost them says
  * "nothing saved yet", which reads as "you never added any" rather than as "they are gone",
  * so nobody would think to report it.
- *
- * Run against a real v14-shaped database rather than a fresh one: the column has to arrive
- * on the file people already have, which is the half `CREATE TABLE IF NOT EXISTS` never does.
  */
 describe('v15 migration — remembers the shell commands a project registered', () => {
-  it('the column exists on an old database (v14), and commands survive a restart', () => {
+  it('commands survive a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v15-'))
     const file = join(dir, 'store.db')
 
-    const old = new Database(file)
-    old.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
-        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-    `)
-    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
-    old.pragma('user_version = 14')
-    old.close()
-
-    const first = new Store(file)
-    expect(first.schemaVersion).toBe(LATEST_SCHEMA)
+    const first = newestStore(file)
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     // A project that never existed correctly has none — an empty list is exactly 'never registered any'
     expect(first.projects.projectCommands('p1')).toEqual([])
     first.projects.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
@@ -1043,8 +771,6 @@ describe('v15 migration — remembers the shell commands a project registered', 
     raw2.close()
     const third = new Store(file)
     expect(third.projects.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
-    // schema.sql resets user_version to 1, so steps replay on every open —
-    // a second open must not recreate the column and wipe the list
     expect(third.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     third.close()
     rmSync(dir, { recursive: true, force: true })
@@ -1088,18 +814,11 @@ describe('v15 migration — remembers the shell commands a project registered', 
  * turned it off.
  */
 describe('v16 migration — the host settings survive a restart', () => {
-  it('the table exists on an old database, and the value survives a restart', () => {
+  it('the value survives a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v16-'))
     const file = join(dir, 'store.db')
 
-    const old = new Database(file)
-    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-      default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
-      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);`)
-    old.pragma('user_version = 15')
-    old.close()
-
-    const first = new Store(file)
+    const first = newestStore(file)
     // Something never written is null — distinct from 'false'
     expect(first.settings.appSetting('updates.auto')).toBeNull()
     first.settings.setAppSetting('updates.auto', 'false')
@@ -1107,8 +826,519 @@ describe('v16 migration — the host settings survive a restart', () => {
 
     const second = new Store(file)
     expect(second.settings.appSetting('updates.auto')).toBe('false')
-    // schema.sql resets user_version to 1, so steps replay on every open —
-    // a second open must not recreate the table and wipe the answer
+    second.settings.setAppSetting('updates.auto', 'true')
+    expect(second.settings.appSetting('updates.auto')).toBe('true')
+    second.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('updateAppSetting computes the next value from the stored one, and keeps the old value when that fails', () => {
+    const s = new Store()
+    s.settings.updateAppSetting('k', (cur) => {
+      expect(cur).toBeNull()
+      return 'a'
+    })
+    s.settings.updateAppSetting('k', (cur) => `${cur}b`)
+    expect(s.settings.appSetting('k')).toBe('ab')
+    expect(() =>
+      s.settings.updateAppSetting('k', () => {
+        throw new Error('nope')
+      }),
+    ).toThrow('nope')
+    expect(s.settings.appSetting('k')).toBe('ab')
+    s.close()
+  })
+})
+
+/**
+ * v17 — how full the context is survives the host (issue #48).
+ *
+ * The reading was always right; it lived in memory and died with the process, so a cold start
+ * showed `Context —` on every session until that one happened to work again. The gauge looked
+ * broken when nobody had written the number down — the same disease as #37.
+ */
+describe('v17 migration — context usage survives a restart', () => {
+  const row = (over: Partial<SessionInfo>): SessionInfo => ({
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
+    autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+    createdAt: Date.now(), waitingSince: null, live: true,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
+    ...sessionLiveDefaults(),
+    ...over,
+  })
+
+  it('the effort column exists and round-trips', () => {
+    const store = seeded()
+    store.sessions.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
+    const back = store.sessions.listSessions().find((r) => r.id === 's-effort')
+    expect(back?.effort).toBe('xhigh')
+    expect(back?.model).toBe('fable')
+    store.close()
+  })
+
+  it('a session with no effort chosen stays null — distinct from an empty string', () => {
+    const store = seeded()
+    store.sessions.upsertSession(row({ id: 's-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
+    store.close()
+  })
+})
+
+/**
+ * v18 — response length (#54). This is a spot with the same recurring trap as model (v4) and
+ * effort (v7): add a column and miss one of the four places (DDL, INSERT, UPDATE, SELECT), and
+ * it compiles fine while the value just quietly disappears. A round-trip test checks all four
+ * places at once.
+ */
+describe('migration v18 — response length', () => {
+  const row = (over: Partial<SessionInfo>): SessionInfo => ({
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'Session',
+    autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+    createdAt: Date.now(), waitingSince: null, live: true,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
+    ...sessionLiveDefaults(),
+    ...over,
+  })
+
+  it('the verbosity column exists and round-trips', () => {
+    const store = seeded()
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
+    // An update persists too — missing it from the UPDATE clause would save it only the first time and never after
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
+    store.close()
+  })
+
+  it('a session with none chosen is null — distinct from the tool default', () => {
+    const store = seeded()
+    store.sessions.upsertSession(row({ id: 's-verb-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
+    store.close()
+  })
+
+  /** Response speed (v20) is the same kind of property — the same round-trip contract */
+  it('the service_tier column exists and round-trips', () => {
+    const store = seeded()
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: null }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
+    store.close()
+  })
+})
+
+/**
+ * The sidebar order was set by a person, so it **has to survive a restart.** This also checks
+ * that saving a session (upsert) does not overwrite the order — upsert runs on every line of a
+ * conversation, and if the order reset there, what the person arranged would keep getting
+ * shuffled.
+ */
+describe('migration v8 — sidebar order', () => {
+  it('saves session order and reads it back in that order', () => {
+    const s = seeded()
+    for (const id of ['s2', 's3']) {
+      s.sessions.upsertSession({
+        id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
+        autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+        createdAt: Date.now(), waitingSince: null, live: true,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
+        ...sessionLiveDefaults(),
+      })
+    }
+    s.sessions.setSessionOrder(['s3', 's1', 's2'])
+    expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
+    s.close()
+  })
+
+  it('saving a session again does not disturb the order', () => {
+    const s = seeded()
+    s.sessions.setSessionOrder(['s1'])
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
+    expect(s.sessions.listSessions().map((x) => x.name)).toEqual(['renamed'])
+    s.close()
+  })
+
+  it('project order is saved too', () => {
+    const s = seeded()
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.setProjectOrder(['p2', 'p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
+    s.close()
+  })
+})
+
+/**
+ * The grid layout has to **survive a restart** — it is a screen a person arranged. Since it is
+ * kept separate from the sessions table, this also checks that saving a session does not
+ * disturb the layout.
+ */
+describe('migration v9 — the grid layout', () => {
+  it('comes back in the order it was placed', () => {
+    const s = seeded()
+    for (const id of ['s2', 's3']) {
+      s.sessions.upsertSession({
+        id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
+        autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+        createdAt: Date.now(), waitingSince: null, live: true,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
+        ...sessionLiveDefaults(),
+      })
+    }
+    s.grid.setGridView([sp('s3'), sp('s1')])
+    expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1')])
+    s.close()
+  })
+
+  it('rewrites the whole thing — adding, removing and reordering all come through the same call', () => {
+    const s = seeded()
+    s.grid.setGridView([sp('s1')])
+    s.grid.setGridView([])
+    expect(s.grid.listGridView()).toEqual([])
+    s.close()
+  })
+
+  it('the layout stays put even after resaving a session', () => {
+    const s = seeded()
+    s.grid.setGridView([sp('s1')])
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
+    expect(s.grid.listGridView()).toEqual([sp('s1')])
+    s.close()
+  })
+
+  it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
+    const s = seeded()
+    s.grid.setGridView([sp('s1')])
+    await s.trash.trashSession('s1', KEEP_ALL)
+    expect(s.grid.listGridView()).toEqual([])
+    s.close()
+  })
+})
+
+/**
+ * v42: apps stand on the grid too (#288). The table is rebuilt, so the panels a person already
+ * arranged are moved through a real v41-shaped table — a grid that comes back empty after an
+ * update reads as the app forgetting.
+ */
+describe('migration v42 — the grid holds apps as well as sessions', () => {
+  const ap = (projectId: string | null, appId: string): GridPanel => ({ kind: 'app', projectId, appId })
+
+  it('a v41 grid of session ids comes back as the same sessions, in the same order', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v42-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = newestStore(file)
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
+      fresh.close()
+      // Take the grid back to v41: one row per session id
+      const raw = new Database(file)
+      raw.exec(`
+        DROP TABLE grid_layout;
+        INSERT INTO grid_panels (session_id, position) VALUES ('s3', 0), ('s1', 1), ('s2', 2);
+      `)
+      // A row whose session is gone, written with the key unenforced: never shown, and it must not stop the copy
+      raw.pragma('foreign_keys = OFF')
+      raw.exec(`INSERT INTO grid_panels (session_id, position) VALUES ('vanished', 3)`)
+      raw.pragma('user_version = 41')
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      expect(s.migrationsRun).toBe(LATEST_SCHEMA - 41)
+      expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
+      // Now an app can stand between them
+      s.grid.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      s.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /*
+   * #292's rule: v42 only expands. A v41 host opening the same store still reads and rewrites `grid_panels` with its own
+   * statements (copied here from that build's listGridView and setGridView), and this build's list is untouched by it.
+   */
+  it('leaves grid_panels as a v41 host reads and writes it, and this build’s list apart from it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v42-old-'))
+    const file = join(dir, 'store.db')
+    try {
+      const s = newestStore(file)
+      s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
+      s.grid.setGridView([ap('p1', 'slider'), sp('s1')])
+      s.close()
+
+      const older = new Database(file)
+      older.pragma('foreign_keys = ON')
+      older.transaction(() => {
+        older.prepare(`DELETE FROM grid_panels`).run()
+        const ins = older.prepare(`INSERT INTO grid_panels (session_id, position) VALUES (?, ?)`)
+        ;['s2', 's1'].forEach((id, i) => ins.run(id, i))
+      })()
+      const read = older
+        .prepare(
+          `SELECT g.session_id FROM grid_panels g JOIN sessions s ON s.id = g.session_id
+           WHERE s.deleted_at IS NULL ORDER BY g.position`,
+        )
+        .all() as { session_id: string }[]
+      expect(read.map((r) => r.session_id)).toEqual(['s2', 's1'])
+      // That v42 does not raise min_reader_version is the step's flag, checked in store-min-reader.test.ts: the
+      // record of this newest store is v56's (#423), which says nothing about v42
+      older.close()
+
+      const again = new Store(file)
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
+      again.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('sessions, a project’s app and a user-folder app keep one order, and a panel named twice keeps its first place', () => {
+    const s = seeded()
+    s.grid.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
+    s.close()
+  })
+
+  it('two projects’ apps with the same id are two panels', () => {
+    const s = seeded()
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.grid.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
+    s.close()
+  })
+
+  it('deleting a project takes its apps off the grid and leaves the rest where they were', () => {
+    const s = seeded()
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.grid.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.trash.deleteProject('p2')
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.close()
+  })
+})
+
+/**
+ * v43: an app panel's span on the grid (#306) — two nullable columns on `grid_layout`, written with the placement and
+ * read back with it. Absent is "not chosen", which the UI resolves; it is never stored as 1 × 1.
+ */
+describe('migration v43 — an app panel keeps its span', () => {
+  const ap = (projectId: string | null, appId: string, span?: { cols: number; rows: number }): GridPanel => ({
+    kind: 'app',
+    projectId,
+    appId,
+    ...(span ? { span } : {}),
+  })
+
+  it('a span round-trips with its placement, and a panel without one reads without one', () => {
+    const s = seeded()
+    s.grid.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    // Rewritten without it: the choice is gone, not kept from the last write
+    s.grid.setGridView([sp('s1'), ap('p1', 'board')])
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
+    s.close()
+  })
+
+  it('a v42 store keeps its grid, and a v42 host still rewrites the table, its rows reading as no span chosen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v43-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = newestStore(file)
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      gridSession(fresh, 's1', 'p1')
+      fresh.close()
+      // Take the table back to v42's shape, with an app and a session on it
+      const raw = new Database(file)
+      raw.exec(`
+        DROP TABLE grid_layout;
+        CREATE TABLE grid_layout (
+          panel_key  TEXT PRIMARY KEY,
+          kind       TEXT NOT NULL CHECK (kind IN ('session', 'app')),
+          session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+          project_id TEXT,
+          app_id     TEXT,
+          position   INTEGER NOT NULL
+        );
+        INSERT INTO grid_layout (panel_key, kind, project_id, app_id, position) VALUES ('app:p1/board', 'app', 'p1', 'board', 0);
+        INSERT INTO grid_layout (panel_key, kind, session_id, position) VALUES ('session:s1', 'session', 's1', 1);
+      `)
+      raw.pragma('user_version = 42')
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
+      s.grid.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      s.close()
+
+      // A v42 host's setGridView, copied from that build: it names neither column, and must still succeed
+      const older = new Database(file)
+      older.transaction(() => {
+        older.prepare(`DELETE FROM grid_layout`).run()
+        older
+          .prepare(
+            `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position) VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run('app:p1/board', 'app', null, 'p1', 'board', 0)
+      })()
+      older.close()
+      const again = new Store(file)
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'board')])
+      again.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('half a span, or one outside the bounds, reads as none chosen', () => {
+    const s = seeded()
+    s.grid.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
+    const db = (s as unknown as { db: Database.Database }).db
+    db.exec(`UPDATE grid_layout SET span_cols = 2 WHERE app_id = 'a'`)
+    db.exec(`UPDATE grid_layout SET span_cols = 9, span_rows = 1 WHERE app_id = 'b'`)
+    db.exec(`UPDATE grid_layout SET span_cols = 2, span_rows = 2 WHERE app_id = 'c'`)
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
+    s.close()
+  })
+})
+
+describe('remembered consents between projects across builds (#384)', () => {
+  it('a kind a newer build added stays in the store but is not listed here', () => {
+    const s = seeded()
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    const db = (s as unknown as { db: Database.Database }).db
+    db.prepare(`INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES ('p1', 'p2', 'files', 1)`).run()
+    expect(s.permissions.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
+    expect(db.prepare(`SELECT kind FROM project_consents ORDER BY kind`).all()).toEqual([{ kind: 'delegate' }, { kind: 'files' }])
+    s.close()
+  })
+})
+
+/**
+ * There is one marker, kind (#13). There used to be a separate markOrchestrator, which meant
+ * "two write paths." With the project orchestrator retired (v26), the marked session is once
+ * again unique to the app.
+ */
+describe('the orchestrator marker (kind)', () => {
+  const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
+    s.sessions.upsertSession({
+      id, projectId, kind, tool: 'claude', externalId: null, name: id,
+      autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
+      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+
+  it('the central orchestrator is null when there is no marker', () => {
+    expect(seeded().sessions.orchestratorId()).toBeNull()
+  })
+
+  it('kind round-trips through upsert — there is one write path', () => {
+    const s = seeded()
+    mk(s, 'orc', null, 'orchestrator')
+    expect(s.sessions.orchestratorId()).toBe('orc')
+    expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
+    // A demotion persists through the same path
+    mk(s, 'orc', null, 'worker')
+    expect(s.sessions.orchestratorId()).toBeNull()
+    s.close()
+  })
+})
+
+/**
+ * v15: a project remembers the shell commands saved on it. (issue #44)
+ *
+ * The Run menu is the only place these are registered, so surviving a relaunch is the whole
+ * point — and the failure would be silent in the worst way. A menu that lost them says
+ * "nothing saved yet", which reads as "you never added any" rather than as "they are gone",
+ * so nobody would think to report it.
+ */
+describe('v15 migration — remembers the shell commands a project registered', () => {
+  it('commands survive a restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v15-'))
+    const file = join(dir, 'store.db')
+
+    const first = newestStore(file)
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    // A project that never existed correctly has none — an empty list is exactly 'never registered any'
+    expect(first.projects.projectCommands('p1')).toEqual([])
+    first.projects.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
+    first.close()
+
+    const second = new Store(file)
+    expect(second.projects.projectCommands('p1')).toEqual([
+      { command: 'pnpm test', label: 'Test' },
+      { command: 'pnpm e2e' },
+    ])
+    // A row from before labels (~2026-09-06) is an array of strings — upgraded on read
+    second.close()
+    const raw2 = new Database(file)
+    raw2.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('["pnpm dev","pnpm lint"]')
+    raw2.close()
+    const third = new Store(file)
+    expect(third.projects.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
+    expect(third.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
+    third.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /**
+   * A value that cannot be parsed reads as 'none'.
+   *
+   * Throwing here would block the whole path that builds the project list, leaving the sidebar
+   * empty — the worst that can be lost has to end at "the menu has to be filled in again."
+   */
+  it('the project list survives a corrupted value', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v15-bad-'))
+    const file = join(dir, 'store.db')
+
+    const first = newestStore(file)
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.close()
+
+    const poke = new Database(file)
+    poke.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('{ this is not json')
+    poke.close()
+
+    const second = new Store(file)
+    expect(second.projects.projectCommands('p1')).toEqual([])
+    expect(second.projects.listProjects().map((p) => p.name)).toEqual(['p1'])
+    second.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v16 — the host's own settings (issue #43).
+ *
+ * The first one to go in is "check for updates automatically," and this only counts as a
+ * setting if the answer **survives a restart.** A checkbox that turns itself back on every time
+ * it is switched off is the same as being permanently on.
+ *
+ * A value that was never written is distinguished from one holding `'false'` — room left so
+ * that changing the default later does not overrule the choice of a person who deliberately
+ * turned it off.
+ */
+describe('v16 migration — the host settings survive a restart', () => {
+  it('the value survives a restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v16-'))
+    const file = join(dir, 'store.db')
+
+    const first = newestStore(file)
+    // Something never written is null — distinct from 'false'
+    expect(first.settings.appSetting('updates.auto')).toBeNull()
+    first.settings.setAppSetting('updates.auto', 'false')
+    first.close()
+
+    const second = new Store(file)
+    expect(second.settings.appSetting('updates.auto')).toBe('false')
     second.settings.setAppSetting('updates.auto', 'true')
     expect(second.settings.appSetting('updates.auto')).toBe('true')
     second.close()
@@ -1181,13 +1411,14 @@ describe('v17 migration — context usage survives a restart', () => {
     ...over,
   })
 
-  it('the column exists on an old database, and usage survives a restart', () => {
+  it('usage survives a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v17-'))
     const file = join(dir, 'store.db')
-    v16Db(file)
 
-    const first = new Store(file)
-    expect(first.schemaVersion).toBe(LATEST_SCHEMA)
+    const first = newestStore(file)
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.sessions.upsertSession(row({}))
+    first.sessions.upsertSession(row({ id: 'fresh', tool: 'codex', name: 'Session that has not run yet' }))
     // A session that has never reported one is null — the `—` on screen is exactly this fact
     expect(first.sessions.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.sessions.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
@@ -1200,8 +1431,6 @@ describe('v17 migration — context usage survives a restart', () => {
     })
     // A session that has not had a single turn yet is still unknown — this must read as unknown, not 0%
     expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
-    // schema.sql resets user_version to 1, so steps replay on every open —
-    // a second open must not recreate the column and wipe the value
     expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
     second.close()
     rmSync(dir, { recursive: true, force: true })
@@ -1320,135 +1549,6 @@ describe('loadMessages reads one row as one message (#77)', () => {
     expect(s.messages.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
     s.messages.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
     expect(s.messages.searchMessages('a growing body').length).toBe(1)
-  })
-})
-
-/*
- * v21 migration (#66): merges rows from the delta era into whole messages.
- *
- * The property that matters most is not size but **not losing any text** — at the time of the
- * move, reads were also joining rows by the same rule to display them, so if the text differs
- * after the move, data was lost. Reads no longer join rows (#77) — the text formed by joining
- * the pre-move rows has to equal the post-move text.
- */
-describe('v21 migration — merges delta rows into messages', () => {
-  const oldDbWithDeltas = () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
-    const file = join(dir, 'store.db')
-    const s = newestStore(file)
-    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.sessions.upsertSession({
-      id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
-      autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
-      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
-      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
-      ...sessionLiveDefaults(),
-    })
-    // The exact shape observed in the real data: one token is one row
-    s.messages.appendMessages([
-      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '맵 추출 어떻게 해?' }, ts: 1 },
-      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '한 ' }, ts: 2 },
-      { sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '번에 ' }, ts: 3 },
-      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '뽑게 됩니다.' }, ts: 4 },
-      { sessionId: 's1', seq: 5, role: 'system', kind: 'tool_call', payload: { summary: { tool: 'Bash', title: 'ls' } }, ts: 5 },
-      { sessionId: 's1', seq: 6, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '결과는 ' }, ts: 6 },
-      { sessionId: 's1', seq: 7, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '이렇습니다' }, ts: 7 },
-      { sessionId: 's1', seq: 8, role: 'assistant', kind: 'reasoning', payload: { text: '생각 ' }, ts: 8 },
-      { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
-    ])
-    s.sessions.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
-    const beforeRead = s.messages.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
-    s.close()
-    return { file, beforeRead }
-  }
-
-  it('the row count drops, but the read result is identical to before the move', () => {
-    const { file, beforeRead } = oldDbWithDeltas()
-    // Roll back to the pre-move state (writes already use the new approach, so only the version is lowered to replay this step)
-    const raw = new Database(file)
-    raw.pragma('user_version = 20')
-    const rawRows = (raw.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }).n
-    raw.close()
-
-    const s = new Store(file)
-    const rows = s.messages.loadMessages('s1', 50)
-    const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
-
-    // Different text means data was lost — the text joined from the 9 pre-move rows equals the text joined from the 5 post-move messages
-    const joined = (read: (string | undefined)[][]) => read.map(([, t]) => t ?? '').join('')
-    expect(joined(afterRead)).toBe(joined(beforeRead))
-    expect(afterRead).toEqual([
-      ['text', '맵 추출 어떻게 해?'],
-      ['text', '한 번에 뽑게 됩니다.'],
-      ['tool_call', undefined],
-      ['text', '결과는 이렇습니다'],
-      ['reasoning', '생각 조각'],
-    ])
-    // 9 rows -> 5 rows
-    const nowRows = s.messages.loadMessages('s1', 50).length
-    expect(rawRows).toBe(9)
-    expect(nowRows).toBe(5)
-    s.close()
-  })
-
-  it('a text row whose payload is JSON that is no object is left as it is, and the rows around it still merge', () => {
-    const { file } = oldDbWithDeltas()
-    const raw = new Database(file)
-    raw.pragma('user_version = 20')
-    // Valid JSON, not an object: reading its text used to throw inside the migration and roll the whole step back
-    raw.prepare(`UPDATE messages SET payload = 'null' WHERE session_id = 's1' AND seq = 3`).run()
-    raw.close()
-
-    const s = new Store(file)
-    const rows = s.messages.loadMessages('s1', 50)
-    expect(rows.map((m) => m.seq)).toContain(3)
-    expect(rows.find((m) => m.seq === 3)?.payload).toBeNull()
-    s.close()
-  })
-
-  it('the seq of a merged spot is the first chunk\'s, so the read position never moves backward', () => {
-    const { file } = oldDbWithDeltas()
-    const raw = new Database(file)
-    raw.pragma('user_version = 20')
-    raw.close()
-
-    const s = new Store(file)
-    const merged = s.messages.loadMessages('s1', 50)
-    expect(merged[1]!.seq).toBe(2) // the spot where 2, 3, 4 merged is numbered 2
-    // The read position (3) is unchanged, and since the first chunk (2) survives, a reply already read never comes back as unread
-    expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(3)
-    s.close()
-  })
-
-  it('after merging, even a phrase that spanned a chunk boundary is searchable', () => {
-    const { file } = oldDbWithDeltas()
-    const raw = new Database(file)
-    raw.pragma('user_version = 20')
-    raw.close()
-
-    const s = new Store(file)
-    expect(s.messages.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
-    expect(s.messages.searchMessages('결과는 이렇습니다').length).toBe(1)
-    s.close()
-  })
-
-  /*
-   * Preserving the timestamp (real incident, 2026-09-03): this step stamped ts with
-   * Date.now(), even on rows that had nothing to merge. When beta.4 rewound user_version and
-   * this step replayed, the timestamps of an entire night's conversation were overwritten with
-   * the time the step ran — the real cause behind "it looks like the conversation never saved."
-   */
-  it('the timestamp of a merged row is the last chunk\'s — not the current time', () => {
-    const { file } = oldDbWithDeltas()
-    const raw = new Database(file)
-    raw.pragma('user_version = 20')
-    raw.close()
-
-    const s = new Store(file)
-    const ts = s.messages.loadMessages('s1', 50).map((m) => m.ts)
-    // [user 1] [2+3+4 merged -> 4] [tool 5] [6+7 merged -> 7] [8+9 merged -> 9]
-    expect(ts).toEqual([1, 4, 5, 7, 9])
-    s.close()
   })
 })
 

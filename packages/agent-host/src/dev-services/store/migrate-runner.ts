@@ -73,8 +73,8 @@ export abstract class MigrationRunner extends ReaderGate {
    * (66,700 rows). Removing that PRAGMA is what gives migrations this property.
    *
    * The steps in `store/migrations/` still **have to be written idempotently.** A new database starts at 0 and
-   * runs all 26 steps in order in one go, and many steps run on top of tables schema.sql has
-   * already created (for example v13 sees the empty table v9 made and skips it).
+   * runs every step in order in one go, from the v27 baseline (#1143), on top of the tables schema.sql has already
+   * created.
    *
    * Which builds can still read the store is kept alongside (#292): see the rule above the list in
    * `migrationSteps`. A store newer than this host runs no step at all — the loop below only knows
@@ -168,8 +168,7 @@ export abstract class MigrationRunner extends ReaderGate {
    *
    * Raised **before** the step runs, in the same commit. A store an older host opens and breaks on is what the record
    * exists to prevent; since the step and the record commit together (#396), a step that fails takes the raise back
-   * with it and the store stays one any older host could read. A step that commits on its own (`ownTransaction`) keeps
-   * the old order: the record first, then the step.
+   * with it and the store stays one any older host could read.
    */
   private runStep(step: MigrationStep, floor: number, record: () => void): number {
     const raise = step.breaksOlderReaders && step.to > floor
@@ -186,19 +185,15 @@ export abstract class MigrationRunner extends ReaderGate {
      * transaction (VACUUM) waits for the commit (`afterStep`), and the step records in its commit that the vacuum is
      * owed (`vacuumAfterStep`): one that is cut off is run again by the next open.
      */
-    if (step.ownTransaction) {
-      apply()
-    } else {
-      this.pendingAfterStep = []
-      let later: (() => void)[]
-      try {
-        this.db.transaction(apply)()
-      } finally {
-        later = this.pendingAfterStep
-        this.pendingAfterStep = null
-      }
-      for (const work of later) work()
+    this.pendingAfterStep = []
+    let later: (() => void)[]
+    try {
+      this.db.transaction(apply)()
+    } finally {
+      later = this.pendingAfterStep
+      this.pendingAfterStep = null
     }
+    for (const work of later) work()
     this.migrationsRun += 1
     return raise ? step.to : floor
   }

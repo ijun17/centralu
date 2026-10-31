@@ -218,13 +218,13 @@ describe('which builds can still read the store (#292)', () => {
    * The classification is part of the record: changing a step's flag after it shipped changes what older hosts are
    * told. A new breaking or heavy step adds itself here, where a reviewer sees it.
    */
-  it('every step declares whether it breaks older readers; v13, v28, v32 and v56 do, and v3, v11, v21 and v40 are heavy', () => {
+  it('every step declares whether it breaks older readers; v28, v32 and v56 do, and v40 is heavy', () => {
     type Step = { to: number; breaksOlderReaders: boolean; heavy?: true }
     const steps = (new Store() as unknown as { migrationSteps(): Step[] }).migrationSteps()
-    expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 1 }, (_, i) => i + 2))
+    expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 26 }, (_, i) => i + 27))
     expect(steps.every((s) => typeof s.breaksOlderReaders === 'boolean')).toBe(true)
-    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56])
-    expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([3, 11, 21, 40])
+    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([28, 32, 56])
+    expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([40])
   })
 
   /*
@@ -247,6 +247,21 @@ describe('which builds can still read the store (#292)', () => {
     expect(r.status).toBe(1)
     expect(r.stdout).toContain('This data was written by a newer Centralu.')
     expect(r.stdout).toContain(`store version ${KNOWN + 1} on; this Centralu knows store versions up to ${KNOWN}`)
+    expect(r.stdout).not.toContain('"ready":true')
+  }, 60_000 * SLOW)
+
+  it('a host given a store older than the v27 baseline says so on stdout and exits with 1 (#1143)', () => {
+    const file = currentStore()
+    raw(file, (db) => db.pragma('user_version = 26'))
+    const root = fileURLToPath(new URL('../../../../', import.meta.url))
+    const r = spawnSync(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--db', file, '--port', '0'], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, CI: '1', CC_DATA_DIR: join(file, '..') },
+    })
+    expect(r.status).toBe(1)
+    expect(r.stdout).toContain('It is at store version 26; this Centralu updates store versions from 27 on.')
     expect(r.stdout).not.toContain('"ready":true')
   }, 60_000 * SLOW)
 })

@@ -1,10 +1,10 @@
 /**
  * Stores written by older builds open in this one with everything in them (#845).
  *
- * `store-migrations.test.ts` runs the whole list from a v1 store, but a v1 store holds only what v1 had: every
+ * `store-migrations.test.ts` runs the whole list from a v27 store made from a v1 one, which holds only what v1 had: every
  * column, table and kind of row added later reaches the later steps empty, so a step that rewrites one of them
  * (v40 takes tool calls out of the search index) never meets a row there. The stores here were written by the
- * builds that had v20, v39 and v47 as their newest step, through their own `Store` API, and kept as SQL in
+ * builds that had v39 and v47 as their newest step, through their own `Store` API, and kept as SQL in
  * `store-fixtures/` (`scripts/write-store-fixture.mts` says how; a fixture is never edited by hand). Each is opened with this
  * build and read back through today's API.
  */
@@ -34,7 +34,7 @@ function olderStore(version: number): string {
 
 const LATEST = new Store().latestKnownVersion
 
-describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
+describe.each([39, 47])('a store the v%i build wrote', (version) => {
   it('migrates to the newest schema and keeps its projects, sessions, conversation and rules', () => {
     const file = olderStore(version)
     const store = new Store(file)

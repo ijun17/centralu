@@ -3844,8 +3844,11 @@ step against:
    column, and the next start, finding it, skipped the rest of the step for good. `VACUUM` cannot run in a
    transaction, so a step queues it for after its commit and records in that commit that it is owed (a `vacuum_owed`
    row in `app_settings`, deleted once the vacuum has run or failed; `vacuumAfterStep`). A host stopped during the
-   vacuum leaves the row, and the next open vacuums, or, in a swap, `runDeferred` does. v10 switches `foreign_keys`,
-   which SQLite ignores inside a transaction, and commits on its own (`ownTransaction`), as one unit by itself.
+   vacuum leaves the row, and the next open vacuums, or, in a swap, `runDeferred` does.
+7. **New stores start from v27 (#1143).** Steps v2 to v27 are one step now, which makes of a new store what they
+   made, in their order, so it ends with the same tables, columns and SQL as before (`store-new.golden.json`). A
+   store between v1 and v26 is refused before anything touches it ("too old for this one to update", exit 1); every
+   store in use was past v27 when they went. The table below still lists the steps a store at v27 went through.
 
 | Steps | What they do | Older build |
 |---|---|---|

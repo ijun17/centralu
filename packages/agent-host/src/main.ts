@@ -36,7 +36,7 @@ import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, commandsFor, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
 import { readShared } from './sessions/app-access.js'
-import { Store, StoreTooNewError } from './dev-services/store.js'
+import { Store, StoreTooNewError, StoreTooOldError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
@@ -296,8 +296,8 @@ start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))
 
 /*
- * A store a newer Centralu wrote, past what this host can read (#292), is refused like a lock
- * conflict (HO2). Any other failure to open still throws.
+ * A store a newer Centralu wrote, past what this host can read (#292), or one older than the v27 baseline (#1143), is
+ * refused like a lock conflict (HO2). Any other failure to open still throws.
  */
 start.at('store')
 let store: Store
@@ -305,7 +305,7 @@ try {
   // Taking over in a swap: only what the previous build can still read runs now (store.ts, "During a swap")
   store = new Store(dbPath, { swap: swapping })
 } catch (err) {
-  if (!(err instanceof StoreTooNewError)) throw err
+  if (!(err instanceof StoreTooNewError || err instanceof StoreTooOldError)) throw err
   refuse(err.message)
   process.exit(1)
 }

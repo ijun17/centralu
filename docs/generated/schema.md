@@ -548,14 +548,14 @@ Added in schema.sql.
 
 ### `command_cache`
 
-Added in v6.
+Added in v27.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `tool` | TEXT | no |  | PK 1 | v6 |
-| `cwd` | TEXT | no |  | PK 2 | v6 |
-| `commands` | TEXT | no |  |  | v6 |
-| `updated_at` | INTEGER | no |  |  | v6 |
+| `tool` | TEXT | no |  | PK 1 | v27 |
+| `cwd` | TEXT | no |  | PK 2 | v27 |
+| `commands` | TEXT | no |  |  | v27 |
+| `updated_at` | INTEGER | no |  |  | v27 |
 
 ### `commit_sessions`
 
@@ -600,12 +600,12 @@ Added in v42.
 
 ### `grid_panels`
 
-Added in v9.
+Added in v27.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `session_id` | TEXT | yes |  | PK, FK → `sessions.id` (cascade) | v9 |
-| `position` | INTEGER | no |  |  | v9 |
+| `session_id` | TEXT | yes |  | PK, FK → `sessions.id` (cascade) | v27 |
+| `position` | INTEGER | no |  |  | v27 |
 
 ### `linked_machines`
 
@@ -789,13 +789,13 @@ Added in schema.sql.
 
 ### `messages_fts`
 
-Virtual table. Added in v3.
+Virtual table. Added in v27.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `body` | — | yes |  |  | v3 |
-| `session_id` | — | yes |  |  | v3 |
-| `seq` | — | yes |  |  | v3 |
+| `body` | — | yes |  |  | v27 |
+| `session_id` | — | yes |  |  | v27 |
+| `seq` | — | yes |  |  | v27 |
 
 ### `project_consents`
 
@@ -821,8 +821,8 @@ Added in schema.sql.
 | `default_models` | TEXT | yes |  |  | schema.sql |
 | `sidebar_order` | INTEGER | no | `0` |  | schema.sql |
 | `created_at` | INTEGER | no |  |  | schema.sql |
-| `commands` | TEXT | no | `'[]'` |  | v15 |
-| `worktree_setup` | TEXT | yes |  |  | v23 |
+| `commands` | TEXT | no | `'[]'` |  | v27 |
+| `worktree_setup` | TEXT | yes |  |  | v27 |
 | `worktree_manager` | TEXT | yes |  |  | v27 |
 | `trusted` | INTEGER | no | `0` |  | v33 |
 
@@ -868,22 +868,22 @@ Added in schema.sql.
 | `last_read_seq` | INTEGER | no | `0` |  | schema.sql |
 | `waiting_since` | INTEGER | yes |  |  | schema.sql |
 | `created_at` | INTEGER | no |  |  | schema.sql |
-| `touched_paths` | TEXT | no | `'[]'` |  | v2 |
-| `model` | TEXT | yes |  |  | v4 |
-| `permission_preset` | TEXT | no | `'normal'` |  | v4 |
-| `imported_from` | TEXT | yes |  |  | v5 |
-| `effort` | TEXT | yes |  |  | v7 |
-| `sidebar_order` | INTEGER | no | `0` |  | v8 |
-| `worktree_path` | TEXT | yes |  |  | v12 |
-| `worktree_branch` | TEXT | yes |  |  | v12 |
-| `cwd` | TEXT | yes |  |  | v14 |
-| `context_used` | INTEGER | yes |  |  | v17 |
-| `context_window` | INTEGER | yes |  |  | v17 |
-| `context_exactness` | TEXT | yes |  |  | v17 |
-| `verbosity` | TEXT | yes |  |  | v18 |
-| `service_tier` | TEXT | yes |  |  | v20 |
-| `parent_session_id` | TEXT | yes |  |  | v22 |
-| `worktree_base` | TEXT | yes |  |  | v24 |
+| `touched_paths` | TEXT | no | `'[]'` |  | v27 |
+| `model` | TEXT | yes |  |  | v27 |
+| `permission_preset` | TEXT | no | `'normal'` |  | v27 |
+| `imported_from` | TEXT | yes |  |  | v27 |
+| `effort` | TEXT | yes |  |  | v27 |
+| `sidebar_order` | INTEGER | no | `0` |  | v27 |
+| `worktree_path` | TEXT | yes |  |  | v27 |
+| `worktree_branch` | TEXT | yes |  |  | v27 |
+| `cwd` | TEXT | yes |  |  | v27 |
+| `context_used` | INTEGER | yes |  |  | v27 |
+| `context_window` | INTEGER | yes |  |  | v27 |
+| `context_exactness` | TEXT | yes |  |  | v27 |
+| `verbosity` | TEXT | yes |  |  | v27 |
+| `service_tier` | TEXT | yes |  |  | v27 |
+| `parent_session_id` | TEXT | yes |  |  | v27 |
+| `worktree_base` | TEXT | yes |  |  | v27 |
 | `scope_session_ids` | TEXT | yes |  |  | v30 |
 | `role_append` | TEXT | yes |  |  | v30 |
 | `app_id` | TEXT | yes |  |  | v31 |

@@ -22,7 +22,7 @@ import {
   type ProjectConsentKind,
 } from './store/permissions.js'
 import { ProjectRecords } from './store/projects.js'
-import { StoreTooNewError, storeTooNewMessage } from './store/reader-gate.js'
+import { StoreTooNewError, StoreTooOldError, storeTooNewMessage } from './store/reader-gate.js'
 import { SessionRecords } from './store/sessions.js'
 import { SettingsRecords } from './store/settings.js'
 import { UsageRecords } from './store/usage-history.js'
@@ -45,7 +45,7 @@ export type {
 }
 
 // The migration runner and the reader gate `Store` stands on are named here as they always were
-export { StoreTooNewError, storeTooNewMessage }
+export { StoreTooNewError, StoreTooOldError, storeTooNewMessage }
 
 /**
  * Where the schema lives depends on how the process is running.
@@ -128,6 +128,7 @@ export class Store extends MigrationRunner {
        * as the newer build wrote it.
        */
       this.refuseIfTooNew()
+      this.refuseIfTooOld()
       this.db.pragma('journal_mode = WAL')
       /*
        * Set here rather than left to how better-sqlite3 happens to be built (#396). CASCADE on project and session
