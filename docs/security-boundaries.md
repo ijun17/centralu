@@ -615,9 +615,8 @@ on and nothing but the caller's own turn is running (#1509, `UpdatesAsked.update
 auto-apply would relaunch at that moment. It is judged after a window said it is ready and again right before the relaunch (`update_apply_go.unasked`, on which the window also waits
 out someone typing, as its own auto-apply does), and remembers nothing, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked.
 
-**The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
-`CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or
-`commands`) the host takes the orchestrator's
+**The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn as if every command were a tool.
+The host takes the orchestrator's
 `create_app`, `propose_skill` and `propose_mcp_server` out of its tool list
 and gives it `centralu_commands`, `centralu_help` and `centralu_run` instead; no other seat changes. Who
 may run what does not change: `centralu_run` lists and runs only the commands `profileAllows` gives the
@@ -626,8 +625,7 @@ checked against the command's own schema before it goes through the same runner,
 its gates and its card (the screen re-reads both proposal lists on a `centralu_run` it cannot name). The
 three are Centralu tools (`mcp__centralu__*`), allowed under every preset like the rest.
 `sessions/command-tier.test.ts` checks, profile by profile, that the tier changes how a seat reaches a
-command and never which commands it reaches. `CC_RARE_COMMANDS=deferred` keeps the three as tools and
-defers them behind Claude's tool search, which changes nothing here. The measurement is in
+command and never which commands it reaches. The measurement is in
 [tool-cost.md](tool-cost.md) §9.
 
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the

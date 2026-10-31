@@ -11,10 +11,8 @@ import {
   ORCHESTRATOR_TOOLS,
   RARE_COMMANDS,
   commandsFor,
-  currentRareTier,
   instructionsFor,
   profileAllows,
-  rareTierFrom,
   runOrchestratorTool,
   setRareTier,
   toolDefsFor,
@@ -44,15 +42,9 @@ function fakeTools() {
 
 const orchestrator = { sessionId: 'orc', profile: 'orchestrator' as const }
 
-describe('the switch', () => {
-  it('is the commands tier unless CC_RARE_COMMANDS names another (decision of 2026-10-12)', () => {
+describe('the tier', () => {
+  it('is the commands tier (decision of 2026-10-12)', () => {
     expect(DEFAULT_RARE_TIER).toBe('commands')
-    expect(currentRareTier()).toBe('commands')
-    expect(rareTierFrom(undefined)).toBe('commands')
-    expect(rareTierFrom('')).toBe('commands')
-    expect(rareTierFrom('Resident')).toBe('commands')
-    expect(rareTierFrom('resident')).toBe('resident')
-    expect(rareTierFrom('deferred')).toBe('deferred')
   })
 
   it("changes only the orchestrator by default: every other seat is shown what the resident tier shows it", () => {
@@ -215,22 +207,6 @@ describe('the commands tier', () => {
     const branch = await runOrchestratorTool(viaRun, 'centralu_run', { command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } }, orchestrator)
     expect(branch.isError).toBe(true)
     expect(profileAllows('orchestrator', 'propose_worktree_session')).toBe(true)
-  })
-})
-
-describe('the deferred tier', () => {
-  afterEach(() => setRareTier(DEFAULT_RARE_TIER))
-
-  it("defers the orchestrator's rare tools on Claude and nothing else changes", () => {
-    setRareTier('deferred')
-    const defs = toolDefsFor('orchestrator')
-    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
-    expect(defs.map((t) => t.name)).toEqual(toolDefsFor('orchestrator', 'resident').map((t) => t.name))
-    const cost = residentCost('orchestrator', DEFERRED_SERVER)
-    expect(cost.deferredChars).toBeGreaterThan(3_500)
-    // Codex has no deferral of ours: all of it counts
-    expect(residentCost('orchestrator', EAGER_DEVELOPER).deferredChars).toBe(0)
-    for (const p of ['scoped', 'builder'] as const) expect(residentCost(p, DEFERRED_SERVER).deferredChars, p).toBe(0)
   })
 })
 

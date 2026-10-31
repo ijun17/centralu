@@ -163,20 +163,18 @@ and the baseline: [tool-cost.md](tool-cost.md). That baseline (2026-10-12) found
 MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
 deferral" above describes the CLI the numbers above were taken with.
 
-**The orchestrator's rare commands** (#512; `CC_RARE_COMMANDS`, the commands tier by default since 2026-10-12).
+**The orchestrator's rare commands** (#512, the commands tier since 2026-10-12).
 `create_app`, `propose_skill` and `propose_mcp_server` are a third of what the orchestrator carries and the
-least of what it calls. By default (`CC_RARE_COMMANDS` unset, or `commands`) the host takes
+least of what it calls. The host takes
 them out of the tool list and serves three fixed tools in their place, `centralu_commands` (one line each),
 `centralu_help` (one command's schema) and `centralu_run` (checked on the host against that schema, strictly;
 a wrong call answers with it), plus one line in the instructions saying they exist. The profile rule is the
 same (`commandsFor` lists and runs only what `profileAllows` gives the seat), and a run goes through the same
 runner, so each command keeps its result and its card. `propose_worktree_session` was in the tier at first and
 came out: nothing in the instructions names it, and hidden it was never reached. `app_guide` stays a tool: the person's questions about
-the app come unannounced, and deferred it was found less often (tool-cost.md §8). The setting is read once at
-start, since a session's tool list is its prompt prefix. The other two stay selectable for measurement:
-`CC_RARE_COMMANDS=resident` serves every command as a tool, as before, and `CC_RARE_COMMANDS=deferred` defers
-the three behind Claude's tool search (the server is then loaded tool by tool, as the reader's is). The three
-arms are compared in [tool-cost.md](tool-cost.md) §9. On Sonnet the tier lost nothing (every rare command
+the app come unannounced, and deferred it was found less often (tool-cost.md §8). The tier never changes while the host runs, since a session's tool list is its prompt prefix; there is no setting
+for it (the `resident` and `deferred` arms were measurement switches, removed under #1143). The three
+arms were compared in [tool-cost.md](tool-cost.md) §9. On Sonnet the tier lost nothing (every rare command
 reached, first-try arguments valid, English and Korean) and saved 835 tokens a request; on haiku it saved 709
 and reached a rare command less often (15 of 24 against 23 of 24). The owner made it the default on the Sonnet
 numbers and because it keeps the orchestrator's resident prefix from growing as commands are added
@@ -186,15 +184,15 @@ numbers and because it keeps the orchestrator's resident prefix from growing as 
 otherwise, agents running in Centralu use Centralu's own features first. Two seats carry it. The orchestrator's role
 starts with a preamble saying so (`orchestratorRole`; it names `centralu_commands` where the seat has the tier), first
 measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no regression and no gain that held, and on
-by default since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
+since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
 (`READER_INSTRUCTIONS`): one sentence naming which tool answers which need (`READER_FIRST`: `recall` for earlier
 conversations, `read_session` for other sessions, `ask_project` for another project's work,
 `find_apps` for another project's apps, and `start_agent`, not the CLI's own Agent tool, for long work, another CLI
 or a worktree, or work the person will follow; the CLI's own subagents stay the way to hand off short helper work
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states
 in words adds its line there. Before #564 the reader set had no instructions, on the principle that Centralu offered
-tools to the person's sessions and did not direct them; the owner withdrew that principle. `CC_ORCHESTRATOR_PREAMBLE=0`
-and `CC_READER_INSTRUCTIONS=0` (read once at start) turn either off, for measuring them against their absence. What
+tools to the person's sessions and did not direct them; the owner withdrew that principle. The switches that turned either off
+(`CC_ORCHESTRATOR_PREAMBLE`, `CC_READER_INSTRUCTIONS`) were measurement tools and are removed. What
 they cost and change: [tool-cost.md](tool-cost.md) §11.
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts

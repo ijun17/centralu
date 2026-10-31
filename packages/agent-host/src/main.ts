@@ -33,8 +33,7 @@ import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
 import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
-import { DEFAULT_RARE_TIER, commandsFor, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
-import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
+import { commandsFor } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
@@ -223,21 +222,6 @@ const pathResult = ensureToolPath()
 if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
-
-/*
- * How the orchestrator's rare commands are exposed (#512): the commands tier unless this names another, kept
- * selectable for measurement. Set before any session starts, since a session's tool list is its prompt prefix.
- */
-setRareTier(rareTierFrom(process.env.CC_RARE_COMMANDS))
-if (currentRareTier() !== DEFAULT_RARE_TIER) console.error(`[agent-host] rare commands: ${currentRareTier()} (CC_RARE_COMMANDS)`)
-/*
- * "Use Centralu's features first unless the person says otherwise" (#564): the orchestrator's preamble and the
- * ordinary sessions' tool instructions, both on unless these say 0 (kept for measuring them against their absence)
- */
-setOrchestratorPreamble(process.env.CC_ORCHESTRATOR_PREAMBLE !== '0')
-if (process.env.CC_ORCHESTRATOR_PREAMBLE === '0') console.error('[agent-host] orchestrator preamble off (CC_ORCHESTRATOR_PREAMBLE)')
-setReaderInstructions(process.env.CC_READER_INSTRUCTIONS !== '0')
-if (process.env.CC_READER_INSTRUCTIONS === '0') console.error("[agent-host] ordinary sessions' tool instructions off (CC_READER_INSTRUCTIONS)")
 
 /*
  * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,
