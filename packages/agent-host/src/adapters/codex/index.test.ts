@@ -303,3 +303,70 @@ describe('the CLI version a Codex app-server runs (#297)', () => {
     expect(events.some((e) => e.type === 'agent_version')).toBe(false)
   })
 })
+
+/**
+ * Reasoning summaries of two items run together (#1464). The headings below are the ones the issue quotes from a stored
+ * session: `**Checking projects child process****흰 화면의 초기화 로그를 확인합니다.**` and
+ * `**검증 기록 출처를 확인합니다****Awaiting RPC verification**`. Each pair is two reasoning items (each starts at part 0
+ * and sends no `summaryPartAdded`), appended into one row by the host.
+ */
+describe('codex reasoning summaries stay apart (#1464)', () => {
+  const live = async () => {
+    state.failInitialize = false
+    state.instances.length = 0
+    const events: { type: string; text?: string }[] = []
+    const adapter = new CodexAdapter()
+    await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    const client = state.instances[0]!
+    const say = (method: string, params: Record<string, unknown>) => client.notifyFrom({ method, params: { threadId: 'thread-1', turnId: 't1', ...params } })
+    const delta = (itemId: string, summaryIndex: number, text: string) => say('item/reasoning/summaryTextDelta', { itemId, summaryIndex, delta: text })
+    /** What one stored row would hold: the chunks of one open row, joined */
+    const reasoning = () => events.filter((e) => e.type === 'reasoning_delta').map((e) => e.text ?? '').join('')
+    return { events, say, delta, reasoning }
+  }
+
+  it('a second reasoning item starts after a blank line, not glued to the first', async () => {
+    const { delta, reasoning } = await live()
+    delta('rs_1', 0, '**Checking projects child process**')
+    delta('rs_2', 0, '**흰 화면의 초기화 로그를 확인합니다.**')
+    expect(reasoning()).toBe('**Checking projects child process**\n\n**흰 화면의 초기화 로그를 확인합니다.**')
+  })
+
+  it('an empty first chunk of the second item does not make its next chunk look like a continuation', async () => {
+    const { delta, reasoning } = await live()
+    delta('rs_1', 0, '**One**')
+    delta('rs_2', 0, '')
+    delta('rs_2', 0, '**Two**')
+    expect(reasoning()).toBe('**One**\n\n**Two**')
+  })
+
+  it('the same for headings of two languages, streamed in chunks', async () => {
+    const { delta, reasoning } = await live()
+    delta('rs_1', 0, '**검증 기록 ')
+    delta('rs_1', 0, '출처를 확인합니다**')
+    delta('rs_2', 0, '**Awaiting RPC ')
+    delta('rs_2', 0, 'verification**')
+    expect(reasoning()).toBe('**검증 기록 출처를 확인합니다**\n\n**Awaiting RPC verification**')
+  })
+
+  it('parts of one item keep the one blank line summaryPartAdded gives them', async () => {
+    const { say, delta, reasoning } = await live()
+    delta('rs_1', 0, '**One**')
+    say('item/reasoning/summaryPartAdded', { itemId: 'rs_1', summaryIndex: 1 })
+    delta('rs_1', 1, '**Two**')
+    delta('rs_2', 0, '**Three**')
+    expect(reasoning()).toBe('**One**\n\n**Two**\n\n**Three**')
+  })
+
+  it('the first reasoning of a row, after a tool call or in the next turn, has no blank line in front', async () => {
+    const { say, delta, reasoning } = await live()
+    delta('rs_1', 0, '**One**')
+    delta('rs_2', 0, '**Two**')
+    say('item/completed', { item: { type: 'commandExecution', id: 'c1', command: 'ls', cwd: '/tmp', status: 'completed', aggregatedOutput: '', exitCode: 0, commandActions: [], source: 'agent', processId: null, durationMs: 1 } })
+    delta('rs_3', 0, '**Three**')
+    say('turn/completed', { turn: { id: 't1', status: 'completed', items: [], error: null } })
+    delta('rs_4', 0, '**Four**')
+    // Joined within the row of rs_1 and rs_2; the tool call and the turn's end each start a row, whose first chunk has none
+    expect(reasoning()).toBe('**One**\n\n**Two****Three****Four**')
+  })
+})

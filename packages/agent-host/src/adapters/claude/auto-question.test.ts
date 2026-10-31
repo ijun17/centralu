@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { fakeClaudeSdk, type QueryOptions } from './claude-sdk-fake.test-helpers.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
@@ -10,23 +11,12 @@ import { answerOrCard } from '../approval-outcome.test-helpers.js'
  * by `scripts/probe-auto-callback.mts`, a probe since removed and kept in git history. The SDK is swapped for a fake and the options the adapter
  * passed are inspected directly.
  */
-type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string; message?: string }>
-const sdk = vi.hoisted(() => ({ options: null as null | { canUseTool?: CanUseTool; permissionMode?: string } }))
+const sdk = vi.hoisted(() => ({ options: null as null | QueryOptions }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: ({ options }: { options: { canUseTool?: CanUseTool; permissionMode?: string } }) => {
+  ...fakeClaudeSdk((options) => {
     sdk.options = options
-    return {
-      // eslint-disable-next-line require-yield -- a stream where the CLI says nothing; this test only calls the callback
-      async *[Symbol.asyncIterator]() {
-        await new Promise(() => {})
-      },
-      interrupt: async () => {},
-      close: () => {},
-      supportedCommands: async () => [],
-      getContextUsage: async () => undefined,
-    }
-  },
+  }),
   // Centralu's own in-process server, for the session that is given it (#382) — only its slot matters here
   createSdkMcpServer: (cfg: { name: string }) => ({ type: 'sdk' as const, name: cfg.name }),
   tool: (name: string) => ({ name }),

@@ -4,7 +4,7 @@ import type { Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
-import type { AcpProfile } from '../acp/profile.js'
+import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
 import { agyHome, agyPlatformKey, browserFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
@@ -27,24 +27,8 @@ import { AGY_SURFACE } from './surface.js'
  *   the project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus
  */
 const CAPABILITIES: AdapterCapabilities = {
-  approvals: true,
-  contextUsage: 'exact',
-  resume: true,
+  ...ACP_CAPABILITIES,
   autoTitle: false,
-  attachments: [],
-  verbosities: [],
-  exclusiveWriter: false,
-  backgroundTasks: false,
-  midTurnInput: false,
-  gatesSteps: false,
-  toolDeferral: false,
-  instructionChannel: 'server',
-  processModel: 'per-session',
-  builtInSubagents: false,
-  peerMessaging: false,
-  sleep: false,
-  keepsRepoFilesOut: false,
-  roleText: false,
 }
 
 /** The label and mark carried over from the earlier `agy` design; install and sign-in are Centralu's own (`ToolSetup`) */
