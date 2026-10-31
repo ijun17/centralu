@@ -55,9 +55,8 @@ const held = new Set<Database.Database>()
 export type HolderDescription = { by?: 'app' | 'keeper' | 'serve'; from?: { hub?: string; ssh?: string } }
 
 /**
- * The lock file's contents. A file an older host wrote is just a bare pid number, or `{ pid, started }`; `at` (when it
- * took the folder, as epoch milliseconds: `started` is null on Windows, which has no `ps`), `by` and `from` are
- * additive (#1223), and a field of the wrong shape is read as absent
+ * The lock file's contents: `{ pid, started }`, with `at` (when it took the folder, as epoch milliseconds: `started` is
+ * null on Windows, which has no `ps`), `by` and `from` (#1223); a field of the wrong shape is read as absent
  */
 export type Holder = { pid: number; started: string | null; at?: number } & HolderDescription
 
@@ -88,7 +87,6 @@ const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
 
 function parseHolder(raw: string): Holder {
   const text = raw.trim()
-  if (/^\d+$/.test(text)) return { pid: Number(text), started: null }
   const v = tryParseJson(text)
   if (!isObj(v)) return { pid: NaN, started: null }
   const holder: Holder = {

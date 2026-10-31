@@ -711,8 +711,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /**
    * Tells the machine who this hub is and whether its sessions may ask this hub's projects (`host.hubOffer`), so the
    * machine knows the connection to call back on. Said off too, so a machine that heard "on" earlier in its own life
-   * stops offering this hub to its sessions. A machine from before the reverse direction answers "Unknown method": the
-   * row then says to update it there, while the switch is on
+   * stops offering this hub to its sessions. A machine that could not be told says so on the row, while the switch is on
    */
   protected async offerAsks(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
@@ -722,11 +721,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     try {
       await client.call('host.hubOffer', { hub: self, on })
     } catch (err) {
-      if (on) {
-        note = /Unknown method/i.test((err as Error).message)
-          ? `${this.name} runs a Centralu from before this: update it there before its sessions can ask this computer's projects`
-          : `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
-      }
+      if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
     const changed = note !== this.asksNote

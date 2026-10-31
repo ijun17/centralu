@@ -2204,9 +2204,8 @@ else's code that will run as the user. It gets its own confirmation, separate fr
 - **The confirmation is held by the host and bound to what was seen.** It lives in
   `app-imports.json` (0600) in the data folder, not in the app folder, so neither the app's code nor
   an archive can supply it. It is bound to the folder's exact file id (bigint stat, persisted as
-  the decimal string `inoExact`). Numeric `ino` is kept for older hosts during swaps and rollbacks
-  until a later release can remove it ("add first, remove later"). The new host compares `inoExact`
-  when present. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
+  the decimal string `inoExact`), which every host the store is still shared with compares first; a
+  record from before it (#562) has only a numeric `ino`, no longer written. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
   import mark but require fresh review. A folder that is not the one marked (recreated under the id
   outside Centralu, or unreadable) also keeps the import mark and is unconfirmed until reviewed (#838):
   it used to read as no mark, which the gate takes for the person's own app, so replacing an enabled

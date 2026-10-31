@@ -31,9 +31,9 @@ export type ImportMark = {
   /** Where it came from — exactly as shown to the person (a path or an https address) */
   source: string
   importedAt: number
-  /** Kept as a Number for older hosts during swaps and rollbacks (add first, remove later). */
-  ino: number
-  /** Exact decimal file id; absent in records written by older hosts. */
+  /** The file id as a Number, the only one in a record written before `inoExact` (#562); no longer written */
+  ino?: number
+  /** Exact decimal file id; absent in records written before #562 */
   inoExact?: string
   /** The record of the person enabling it — the server and uses seen at that time, and their key. Null if never enabled */
   confirmed: { key: string; at: number; server: AppManifest['server']; uses: AppManifest['uses'] } | null
@@ -142,9 +142,7 @@ export class ImportBook {
   mark(appId: string, dir: string, source: string, at = Date.now()): void {
     const ino = statSync(dir, { bigint: true }).ino
     this.current()
-    // Keep the legacy number: the previous host compares statSync(dir).ino === m.ino.
-    // Replacing it with a string would drop the import mark and bypass that host's gate.
-    this.doc[appId] = { source, importedAt: at, ino: Number(ino), inoExact: ino.toString(), confirmed: null }
+    this.doc[appId] = { source, importedAt: at, inoExact: ino.toString(), confirmed: null }
     this.write()
   }
 
@@ -164,9 +162,9 @@ export class ImportBook {
      * folder holds now (`enable` checks the key against the current manifest), a legacy record or a folder recreated
      * under the import's id alike (#838). Nothing changes stored state during get().
      */
+    const { ino: _number, ...rest } = m
     this.doc[appId] = {
-      ...m,
-      ino: Number(ino),
+      ...rest,
       inoExact: ino.toString(),
       confirmed: { key: reviewKey(manifest), at, server: manifest.server, uses: manifest.uses },
     }
@@ -181,7 +179,7 @@ export class ImportBook {
 
   private matchingMark(m: ImportMark, ino: string): ImportMark | null {
     if (m.inoExact !== undefined) return ino === m.inoExact ? m : null
-    if (Number.isSafeInteger(m.ino)) return ino === m.ino.toString() ? m : null
+    if (m.ino !== undefined && Number.isSafeInteger(m.ino)) return ino === m.ino.toString() ? m : null
     // A rounded legacy id cannot prove this is the confirmed folder. Returning null
     // would make AppHandover.gate trust it as a user-folder app. Preserve the import
     // mark and require review; the stored record stays untouched until an explicit write.
@@ -294,7 +292,7 @@ function heldMarks(appsDir: string, copy: string): Doc {
     } catch {
       // Held all the same, under an id no folder has: one that cannot be looked at now may be readable later
     }
-    doc[name] = { source: dir, importedAt: at, ino: ino === null ? 0 : Number(ino), inoExact: ino === null ? '' : ino.toString(), confirmed: null, lost: copy }
+    doc[name] = { source: dir, importedAt: at, inoExact: ino === null ? '' : ino.toString(), confirmed: null, lost: copy }
   }
   return doc
 }

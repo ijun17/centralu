@@ -54,9 +54,6 @@ export async function autostartRemote(
     if (/unknown option for serve: --autostart/.test(r.stderr)) {
       throw unasked('too_old', `The Centralu on ${c.target} is too old to start at boot; update it first`)
     }
-    if (/--autostart needs on, off or status \(got "remove"\)/.test(r.stderr)) {
-      throw Object.assign(new Error(`The Centralu on ${c.target} predates --autostart remove`), { olderServe: true })
-    }
     const why = lastLine(r.stderr)
     throw new Error(`Centralu on ${c.target} gave no answer about starting at boot${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
   }
@@ -71,13 +68,7 @@ export async function autostartRemote(
  */
 export async function removeAutostart(c: Parameters<typeof autostartRemote>[0]): Promise<boolean> {
   try {
-    try {
-      await autostartRemote(c, 'remove')
-    } catch (err) {
-      // A serve from before `remove` (#1224 review), where `off` removes the entry
-      if (!(err as { olderServe?: boolean }).olderServe) throw err
-      await autostartRemote(c, 'off')
-    }
+    await autostartRemote(c, 'remove')
     return true
   } catch (err) {
     if ((err as { reason?: AutostartUnasked }).reason) return false

@@ -381,7 +381,7 @@ classDiagram
 
 - `grid_layout`: 그리드의 패널(세션과 앱, 스토어 v42. 차지하는 칸은 v43. 이어진 기기의 세션은 따로 둔 열에, v46).
 - `grid_panels`: v9가 만든 세션 패널 그리드. v42보다 오래된 호스트를 위해 남겨 둔다(이 빌드는 한 번 옮겨 온 뒤에는
-  보관함에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
+  읽지도 쓰지도 않는다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 - `workspace`: UI의 스냅숏. 한 줄.
 - `commit_sessions`: 커밋 귀속.
 

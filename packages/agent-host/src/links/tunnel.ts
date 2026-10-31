@@ -275,7 +275,7 @@ export class StartedNotServing extends Error {
   }
 }
 
-/** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
+/** Reads the one JSON line `--detach` prints; throws when there is none */
 export function parseDetachLine(stdout: string): DetachAnswer {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -829,9 +829,6 @@ export class SshTunnel implements Tunnel {
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
-      if (/unknown option for serve: --detach/.test(r.stderr)) {
-        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${shimNames(remote).centralu} serve\` there, or update it (${npmInstall(remote)})`)
-      }
       const why = lastLine(r.stderr)
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
     }
@@ -968,7 +965,9 @@ export class SshTunnel implements Tunnel {
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
     /*
      * A full credential of this hub's own, made there at each link (#1405): `--connection` alone prints none since. A
-     * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token
+     * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token. Kept
+     * as the update path for a machine below `MIN_SUPPORTED_VERSION` (#1143): `--pair` first shipped in 0.1.0-beta.45, so a
+     * hub reads an older machine's version this way, holds its link and offers the update
      */
     const pair = this.pairs ? this.pairsAs : null
     let r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)

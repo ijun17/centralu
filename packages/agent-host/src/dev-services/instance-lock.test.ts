@@ -51,7 +51,7 @@ describe('single-instance lock for the host', () => {
   it('a lock left by a dead owner is taken over (the app was force-quit)', () => {
     const db = dbIn()
     // A pid that cannot exist
-    writeFileSync(join(db, '..', 'host.lock'), '999999')
+    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: 999999, started: null }))
     const r = acquireInstanceLock(db)
     expect(r.ok).toBe(true)
     expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8'))).toEqual({
@@ -76,9 +76,10 @@ describe('single-instance lock for the host', () => {
     const db = dbIn()
     const mine = acquireInstanceLock(db)
     // The situation where another host took it over in the meantime
-    writeFileSync(join(db, '..', 'host.lock'), String(process.ppid))
+    const theirs = JSON.stringify({ pid: process.ppid, started: null })
+    writeFileSync(join(db, '..', 'host.lock'), theirs)
     if (mine.ok) mine.release()
-    expect(readFileSync(join(db, '..', 'host.lock'), 'utf8')).toBe(String(process.ppid))
+    expect(readFileSync(join(db, '..', 'host.lock'), 'utf8')).toBe(theirs)
   })
 
   it('never blocks an in-memory database, since it can never be shared', () => {
