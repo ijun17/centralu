@@ -418,6 +418,7 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     ['the lockfile', ['pnpm-lock.yaml'], { bundle: true, host: true, host_tests: true, code: true }],
     ['a package manifest', ['packages/ui/package.json'], { bundle: true, host: true, host_tests: true, code: true }],
     ['the web build\'s config', ['apps/web/vite.config.ts'], { bundle: true, host: true, host_tests: true, code: true }],
+    ['the alias map the builds read', ['tooling/aliases.ts'], { bundle: true, host: true, host_tests: true, code: true }],
     // A document that ships (the app template's) is not a document here
     ['an app template document', ['packages/agent-host/app-template/AGENTS.md'], { bundle: true, host: true, host_tests: true, code: true }],
     ['nothing', [], none],
@@ -655,6 +656,7 @@ describe('which changes reach the screen, for the merge queue (.github/scripts/c
       '.github/workflows/build.yml',
       '.github/scripts/ci-changes.mjs',
       'vite.config.ts',
+      'tooling/aliases.ts',
     ],
     quiet: [
       'docs/README.md',

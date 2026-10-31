@@ -97,6 +97,8 @@ const EVERYTHING = [
   /^\.npmrc$/,
   /^\.nvmrc$/,
   /(^|\/)vite\.config\.[cm]?[jt]s$/,
+  // Both Vite builds and vitest read the alias map
+  /^tooling\/aliases\.ts$/,
   /^\.github\/(workflows|scripts|actions)\//,
 ]
 const matches = (patterns, file) => patterns.some((p) => p.test(file))

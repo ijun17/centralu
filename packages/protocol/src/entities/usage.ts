@@ -118,10 +118,11 @@ const CacheCounts = z.object({
 })
 
 /** One session's share of a cache window (`CacheWindowStats.sessions`) */
-export const CacheSessionStats = CacheCounts.extend({
+export const CacheSessionStats = z.object({
   sessionId: z.string(),
   /** The session's name when the host was asked; empty for a session that no longer exists */
   name: z.string(),
+  ...CacheCounts.shape,
 })
 export type CacheSessionStats = z.infer<typeof CacheSessionStats>
 

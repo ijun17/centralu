@@ -9,7 +9,7 @@ const r = (p: string) => fileURLToPath(new URL(p, REPO))
  *
  * Aliases match **by prefix** — a longer one has to come before its shorter one, or `mock/demo` would resolve as
  * `mock/index.ts/demo`. `extra` is where an entry point adds its own, such as `apps/web`'s `mock/demo`: it is put in
- * front of the shared ones, so it wins.
+ * front of the shared ones, so it is tried first. A key in both takes the shared path.
  */
 export function aliases(extra: Record<string, string> = {}): Record<string, string> {
   return {
