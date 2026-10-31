@@ -213,104 +213,41 @@ the tag is for.
 
 ### The release commit (#1350)
 
-The merge queue lands a change every 15 to 30 minutes, so by the time the bump PR's CI and the rehearsal are done, main
-has moved on. A release does not wait for main's head: the **release commit** is the bump's own squash commit on main,
-the commit that declared the version (the board walks main's history back from its head to the first commit that does not
-carry it). `rehearse` and `tag` take it by default, or a `commit` of main's history that carries the version, from any
-checkout of the repository (it must be clean; its branch and how far it is from main do not matter, as the tag is pushed
-by commit from GitHub's history). The gates are that commit's: its own CI on main green (or the bump PR's run on the same
-tree, below), a successful rehearsal on it or on the bump branch at a commit with the same tree, the version untagged and
-after the last tag. What lands after it does not matter: not its CI, and not a rehearsal of main's head (only runs on the release commit
-itself, or on the bump branch at a commit with the same tree, count; a run on main's head does not, even with the same tree).
-The notes and `release_status` list what merged from the last tag to the release commit as this release, and what came
-after it apart as "Not in this release". A shallow checkout whose history stops before the bump is refused (deepen it with
-`git fetch --unshallow`), as the boundary commit would be taken for the bump. **A later commit that changes the version does**: a newer bump superseded this one, and
-the tag for the older version is refused. `release_status` names the release commit and how many commits behind main it is.
-When main has moved on and the bump branch is gone, `rehearse` pushes the release commit to `release.branchPrefix` plus the
-version and runs the workflow there (a workflow is dispatched on a branch, not on a commit); a branch left over with another
-tree is refused, not moved. Once the tag is pushed, a branch the board made at the release commit is deleted; a bump PR's own
-branch is another commit and stays. A bump that was merged and then reverted is named as such.
+The merge queue lands a change every 15 to 30 minutes, so by the time a release is checked and rehearsed, main has moved
+on. A release does not wait for main's head: the **release commit** is the newest commit of main's first-parent history
+since the newest tag whose own push run of CI is fully green, the full tier included (the board looks through the newest
+20). `rehearse` and `tag` take it by default, or a `commit` of that history with such a run, from any checkout of the
+repository (it must be clean; its branch and how far it is from main do not matter, as the tag is pushed by commit from
+GitHub's history). The gates are that commit's: its own push run of CI fully green, a successful rehearsal of the version on
+it or on its rehearsal branch at a commit with the same tree, the version untagged and after the last tag. What lands
+after it does not matter: not its CI, and not a rehearsal of main's head (only runs on the release commit itself, or on the
+rehearsal branch at a commit with the same tree, count; a run on main's head does not, even with the same tree). The notes
+and `release_status` list what merged from the last tag to the release commit as this release, and what came after it
+apart as "Not in this release". `release_status` names the release commit and how many commits behind main it is.
+When main has moved on, `rehearse` pushes the release commit to `release.branchPrefix` plus the version and runs the
+workflow there (a workflow is dispatched on a branch, not on a commit); a branch left over with another tree is refused,
+not moved. Once the tag is pushed, a branch the board made at the release commit is deleted.
 
-### Reusing the bump PR's CI (#629)
+### Release CI evidence
 
-The same tree rule lets `tag` count a rehearsal that ran on the bump branch (step 2 below).
+Release CI reads only GitHub Actions check suites belonging to the configured CI workflow files, matching their run's
+commit and the push event on main: a batch's run of the same workflow (a manual run on a `queue/batch-N` branch) is not
+main's own. Release/rehearsal checks with the same job names cannot replace build checks; check names alone are not
+evidence of their source. A failing check on the commit blocks, and every call reads CI again.
 
-For `rehearse` and `tag`, the board can use the bump PR's green required checks while
-main's checks are pending or absent. The PR must be merged into main from
-`release.branchPrefix` plus the current version, the release commit must be its single-parent
-squash merge commit, and `git rev-parse <sha>^{tree}` must match for that commit and the PR head.
-A commit landed after the release commit does not matter (#1350). Every required
-check on that exact PR head must be reported and green; missing, pending or failed
-checks refuse it, and so does a run that did not pass the `full tier` check, when the required
-set names it: a quick run skips every job but `changes`, `verify`, the Windows unit tests and the macOS tests, and a
-skipped job reads as passed. `bump` still requires main's own green CI.
+Tagging does not authorize publication. Before every `npm-publish` approval (platform jobs and the later shim job),
+`approve` requires CI on the tagged commit, using only the tagged commit: its **own** CI green. No pull request's run
+stands for it. Unrelated later commits on main do not gate platform or shim approval and cannot strand a partially
+published release. Pending or absent CI, and failed CI, refuse approval, and tagged `release_status` explains this gate
+before suggesting approval. Direct approval in GitHub's UI is outside this tool's enforcement.
 
-Main's green checks are used directly. A failing main check blocks reuse, including a
-run that was pending at rehearsal and fails before tagging: every call reads CI again.
-Both steps and `release_status` name their evidence, for example
-`CI: PR #624's run on the same tree`, or explain why main's CI is required. Status's
-next step waits for CI when neither source qualifies.
+A cancelled build refuses approval with the tagged SHA and a recovery command:
+`gh run rerun <run-id> --repo ijun17/centralu`. The tag stays on that commit. Once the new attempt succeeds, approval
+accepts it; an older cancelled attempt cannot override the newer success. Tagged status shows the same recovery
+instructions.
 
-Release CI reads only GitHub Actions check suites belonging to the configured CI
-workflow files, matching their run's commit and event: push-to-main for main, and
-pull-request runs for the PR head. PR evidence must match its number, base branch,
-head branch and commit; when GitHub drops a merged PR from the run, a unique matching
-commit-to-PR association is required. Release/rehearsal checks with the same job names
-cannot replace build checks; check names alone are not evidence of their source.
-
-Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires CI on the tagged commit, using only the tagged
-commit: its **own** CI green, or, while that is pending or absent, the bump PR's run on the
-same tree (#1042, owner decision 2026-10-18). The PR evidence counts on the rules above (the
-merged bump PR for the tagged version, its squash commit the tagged commit, `git rev-parse
-<sha>^{tree}` identical for both, every required check reported and green on the PR head, the
-`full tier` check passed, the audited workflows): the tagged commit is then exactly the files
-that run tested, and main's push build (about 14 minutes) adds nothing to them. Any other tree
-waits for main's own run, as before. A failed or cancelled own run still refuses: PR evidence
-never overrides a failure. Unrelated later commits on main do not gate platform or shim approval
-and cannot strand a partially published release. Pending or absent CI with no PR evidence, and
-failed CI, refuse approval, and tagged `release_status` explains this gate before suggesting
-approval. Direct approval in GitHub's UI is outside this tool's enforcement.
-
-Generated `chore(release):` bump commits on main use a concurrency group per commit
-in `build.yml`; ordinary main pushes keep cancelling superseded ordinary builds,
-but cannot cancel a bump's build. Already-cancelled builds and other cancellations
-still refuse approval with the tagged SHA and a recovery command:
-`gh run rerun <run-id> --repo ijun17/centralu`. The tag stays on that commit. Once the
-new attempt succeeds, approval accepts it; an older cancelled attempt cannot override
-the newer success. Tagged status shows the same recovery instructions.
-
-`ci_status` with a ref also filters checks to the configured build workflows, so
-newer passing release checks cannot hide a failed build. PR merge checks retain their
-existing behavior.
-
-Workflow event audit (2026-10-13):
-
-| Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
-| --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, `macos-tests`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
-| `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
-| `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
-| `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
-| `drift.yml`: `claude-sdk`, `codex-contract`, `codex-types`, `surface` | Schedule or manual dispatch only. `surface` files or updates an issue (`issues: write`). | No. |
-| `discord-notify.yml`: `notify` | Issue, PR and discussion notifications (`pull_request_target`, not build CI). | No. |
-
-Before reusing PR evidence, the tool audits the configured `ci.workflows` files from
-main's fetched commit against the required check names. A required job with event/branch
-context (including inline shell scripts), one outside a shared push/PR workflow, or a required name it cannot
-map to an audited job requires main's own run and says why. This is conservative:
-unsupported workflow shapes do not grant an exemption. Required job conditions are unchanged; the release-bump concurrency exception above
-protects builds that may be tagged while pending.
-
-The automated event audit does not follow scripts called by workflow steps, package
-scripts, imported modules, local actions, or reusable workflows. Those need manual
-review for event-dependent behavior (including environment variables) when they
-change. A clean inline scan is not proof that called code behaves identically. If a
-required called script behaves differently on push-to-main and pull requests, wait
-for main's own green run before invoking `rehearse` or `tag`; the automated fallback
-cannot establish equivalence for that script. Publication still waits for main's
-own CI through the approval gate above, or for the same bump PR evidence on the tagged commit's
-very tree.
+`ci_status` with a ref also filters checks to the configured build workflows, so newer passing release checks cannot hide
+a failed build. PR merge checks retain their existing behavior.
 
 ## One-time setup
 
@@ -326,8 +263,8 @@ very tree.
 
 The project board app (`.centralu/apps/project-board`) carries these steps as tools (#386):
 `release_status` says where the release stands and what is next, and `release` takes `step`
-`bump`, `rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
-permission, checks everything first (for a bump, a clean checkout on main at GitHub's main; for a tag, a clean checkout and the release commit, #1350; qualifying green CI,
+`rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
+permission, checks everything first (for a tag, a clean checkout and the release commit, #1350; green CI on it,
 the version untagged, a successful rehearsal before the tag) and refuses with every reason, and
 does nothing without `confirm: true`. The board's "Release" dialog shows the same state.
 
@@ -357,79 +294,36 @@ subprocesses all share the overall deadline.
 
 Release tools still enforce the required-check set.
 
-The bump scans every tracked text file on remote main, with no extension or e2e exclusion.
-It reports each unexpected reference as `file:line`, including the exact version followed by
-`.local.N` or `+build` (optionally with dot-separated build identifiers), inside template strings,
-and in unquoted text. Different prereleases and metadata are not hits: `1.0.0-beta.21`,
-`1.0.0-rc` and `1.0.0+other` do not pin `1.0.0`. Nor does a different numeric or alphanumeric
-continuation (`beta.210` when checking `beta.21`). In `package.json`, dependency values starting
-with `^`, `~`, `>=` or `workspace:` are exempt only under the top-level `dependencies`,
-`devDependencies`, `peerDependencies` and `optionalDependencies` fields. Exact pins, the package's
-own `version`, scripts and other fields are still checked, with their original line numbers.
-Automatic replacement still changes only whole single- or double-quoted versions in
-`release.versionFiles`; derive embedded runtime/test values from `APP_VERSION`.
-
-Historical references and intentional pins belong in `release.ignore` in
-`.centralu/apps/project-board/project.json`. This explicit path allowlist uses the same patterns
-as `versionFiles`: `*` matches within a path segment and `**` matches zero or more folders.
-The repository allows `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`,
-`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json` and `**/*.lock`.
-These files are scanned only when they are declared in `versionFiles`: that list always wins,
-so the app's own versions in `Cargo.lock` must still be current and are bumped.
-For a fixture that deliberately pins a historical version, add its exact path, for example
-`"fixtures/pinned-version.json"`, to `release.ignore` and explain the pin in the fixture or its
-test. `tooling/project-board-release.test.ts` is explicitly allowed because its regression cases
-intentionally pin stable and prerelease versions. Other fixtures and tests are not exempt by
-default. Keep exemptions narrow; they skip the whole file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
-a release PR (and still reports other readiness problems, such as not being on main).
-
 The steps by hand:
 
-1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in every
-   file listed under `release.versionFiles` in `.centralu/apps/project-board/project.json`:
-   `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (and
-   `Cargo.lock`), `apps/desktop/package.json` and every `packaging/npm/*/package.json`
-   (including the shim's pins). `tooling/brand.test.ts` fails if any of them disagree, and
-   `tooling/project-board-release.test.ts` if a file carries the version without being on that
-   list. Commit and push — the release script refuses to run on a dirty tree, so that what ships
-   and what is in git cannot differ. The board's `bump` warns when other builds hold most of the
-   runners (three quarters of `release.runners`, GitHub's 20 here): the bump PR's 24 jobs would
-   then queue behind them, 5–7 min on 0.1.0-beta.26 (#1035).
-
-2. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked. It builds every
-   platform, packs every package and publishes nothing. Run it on the bump pull request's
-   branch while that pull request's CI runs, not after the merge (#1035, about 27 min off the
-   critical path): the board's `rehearse` does that while main's version is still the released
-   one. `guard` reads the version from that branch's `brand.ts` and checks the ref only for a
-   tag push, so a dispatch on any branch rehearses (`scripts/release-guard.mjs`, run by
-   `tooling/release-guard.test.ts`); publishing from a branch is refused by the `npm-publish` environment's branch
-   policy (main and `v*` only). The squash gives main a new commit with the same tree, and
-   `tag` accepts a successful rehearsal on the bump branch whose commit has main's tree, as
-   it accepts the bump PR's CI (#629). Rehearse only once the branch is up to date with main:
-   `rehearse` refuses otherwise, since the squash would then build other files. It asks for no approval:
-   `npm pack` needs no token, and gating a rehearsal costs an approval per attempt — three
-   were spent that way on the first release.
+1. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked, `version` the next prerelease after the
+   newest tag (left empty, the guard counts it up). Run it on a commit of main whose own push run of CI is fully green
+   (the release commit, #1350): it builds every platform, packs every package and publishes nothing. The board's
+   `rehearse` does that, from a branch at the release commit once main has moved on. `guard` checks the ref only for a tag
+   push, so a dispatch on any branch rehearses (`scripts/release-guard.mjs`, run by `tooling/release-guard.test.ts`);
+   publishing from a branch is refused by the `npm-publish` environment's branch policy (main and `v*` only). It asks for
+   no approval: `npm pack` needs no token, and gating a rehearsal costs an approval per attempt — three were spent that
+   way on the first release.
 
    Read the `npm pack` output for each package. The shim job ends with a yellow warning that
    the platform packages are not on the registry at this version; that is the truth about a
    rehearsal, not a fault.
 
-3. **Tag it.** The tag is the release:
+2. **Tag it.** The tag is the release:
 
    ```bash
-   git tag v0.1.0-beta.3 && git push origin v0.1.0-beta.3
+   git tag -a v0.1.0-beta.3 -m "Centralu 0.1.0-beta.3" <release commit> && git push origin v0.1.0-beta.3
    ```
 
-   `release.yml` checks the tag against `APP_VERSION` before anything is built, so a tag on
-   the wrong commit, or one that outran the version bump, costs seconds rather than four Rust
-   release builds. To fix: `git push --delete origin <tag>`, correct, tag again.
+   `release.yml` checks the tag against the previous release before anything is built, so a tag on
+   the wrong commit costs seconds rather than four Rust release builds. To fix:
+   `git push --delete origin <tag>`, correct, tag again.
 
-4. **Approve.** Publishing waits on the `npm-publish` environment. GitHub asks twice: once
+3. **Approve.** Publishing waits on the `npm-publish` environment. GitHub asks twice: once
    for the four platform jobs, which wait together, and again for the shim job after all of
    them have succeeded. That second approval is the last moment anything is reversible.
 
-   The board's `approve` checks its gate each time: the tagged commit's own CI green (or,
-   while that is pending, the bump PR's run on the very same tree, #1042), and
+   The board's `approve` checks its gate each time: the tagged commit's own CI green, and
    before the shim also every other job of the run succeeded and every platform and host-only
    package on the registry at this version, published from the tagged commit (`gitHead`).
    With `wait: true` (and `confirm: true`) it waits for that gate and approves the moment it
@@ -447,17 +341,14 @@ The steps by hand:
    them changes, or GitHub lists no waiting job yet (so it cannot tell the platforms from the
    shim), it does not approve. A cancelled call approves nothing.
 
-5. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
+4. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
 
 ### The tag scheme (#1501)
 
 Three full CI runs per release (main after the last merge, the bump PR, main again on the bump's squash) become one:
 the version is stamped at build time from the tag, so no file carries it and no bump PR or bump commit exists. The tag
-goes on a commit of main that is already fully green. This lands in steps: the guard and the board's path first (both
-schemes accepted, nothing changes until the switch), then the stamp and the switch, then the old path goes. The design
-and its review are on #1501. **This repository is on the tag scheme** since the switch (`release.scheme: "tag"`,
-`brand.ts` importing the version): the bump steps above describe releases up to 0.1.0-beta.37, and stay until the old
-path is removed.
+goes on a commit of main that is already fully green. The design and its review are on #1501. **This repository is on
+the tag scheme** (`brand.ts` importing the version); the version-bump path of releases up to 0.1.0-beta.37 is gone (#1143).
 
 - **Where a build's version comes from.** Git holds none. `scripts/app-version.mjs` resolves it: `CENTRALU_VERSION`,
   else the newest `v[0-9]*` tag reachable from HEAD, else a packaging build refuses (a shallow checkout, a fork). The
@@ -480,13 +371,12 @@ path is removed.
   `bundle.mjs` runs it under plain node. CI's `bundle` job fetches the tags and stamps the newest one before building,
   so its artifacts carry the release their commit was cut from (a fork without tags keeps the placeholder).
 
-- **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts` with `sourceScheme`
-  (the board's `versions.mjs`, from `project.json` `release.source`): a literal `APP_VERSION` is the brand scheme
-  above. The tag scheme needs positive evidence: the line importing `APP_VERSION` from `./version.generated.js`, or no
-  `APP_VERSION` in the file at all. Any other declaration (other quotes, a type annotation, a computed value) stops the
-  run: guessing "tag" would let a tag of any version publish. The board follows `release.scheme` in its
-  `project.json` ("brand" by default, "tag" to switch), and reads each commit it would release with the same function.
-- **Only a tag push publishes.** Under the tag scheme a manual run is always a rehearsal, whatever `dry_run` says: a
+- **Which commits.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts` with `sourceScheme`
+  (the board's `versions.mjs`, from `project.json` `release.source`). The tag scheme needs positive evidence: the line
+  importing `APP_VERSION` from `./version.generated.js`, or no `APP_VERSION` in the file at all. A literal `APP_VERSION`,
+  or any other declaration (other quotes, a type annotation, a computed value), stops the run: guessing "tag" would let a
+  tag of any version publish. The board reads each commit it would release with the same function.
+- **Only a tag push publishes.** A manual run is always a rehearsal, whatever `dry_run` says: a
   manual publish of a free version would leave it on npm with no tag. A rehearsal builds its `version` input, or the next
   prerelease after the newest tag, and is named `rehearse <version>` (`run-name`) so the board can tell which version it was.
 - **What the guard holds a tag to** (the tree no longer ties a run to a version, so a tag pushed by hand meets these too):
@@ -497,7 +387,7 @@ path is removed.
   tags at once would race for the dist-tags); and `centralu@<version>` is absent, or from this very commit (a re-run of
   the same release). The guard's `version` reaches the platform and shim jobs as `CENTRALU_VERSION`, at job
   level so `pnpm install` sees it too.
-- **The board.** `bump` refuses. `release_status`, `rehearse` and `tag` take the next prerelease after the newest tag (or
+- **The board.** `release_status`, `rehearse` and `tag` take the next prerelease after the newest tag (or
   `version`) and the newest commit of main since that tag whose own push run of CI is fully green, the full tier
   included (or `commit`), passing over a commit whose `brand.ts` still declares the version (the guard would refuse a
   tag there, and its number would be spent). Both refuse while the newest tag is not released yet (its run has not

@@ -1,18 +1,11 @@
 // The release workflow's guard: which version a run of release.yml builds, and whether it publishes.
 // It runs first and alone, so a run it refuses has built nothing and published nothing.
 //
-// Two schemes, told apart by brand.ts (#1501):
-//
-// * **brand** (until the switch): `APP_VERSION` is a literal in packages/protocol/src/brand.ts, kept
-//   equal to every other version file by tooling/brand.test.ts. A tag push must name exactly that
-//   version; a manual run rehearses it, or publishes when `dry_run` is unticked (the hand fallback in
-//   docs/releasing.md). A `version` input, if given, must be that version.
-// * **tag** (once brand.ts imports the version from the generated file, or does not name it at all):
-//   no file carries the release version; the tag is the only statement of it, and the build stamps it.
-//   Told by `sourceScheme`, which the project board reads commits with too, from project.json
-//   `release.source`: only positive evidence is the tag scheme, and a declaration neither reading
-//   understands stops the run (#1501 review item 2). Since the tree no longer ties a run to a version,
-//   the guard does what the literal used to:
+// The tag scheme (#1501): brand.ts imports the version from the generated file, or does not name it at all, so no file
+// carries the release version; the tag is the only statement of it, and the build stamps it. Told by `sourceScheme`,
+// which the project board reads commits with too, from project.json `release.source`: only positive evidence is the
+// tag scheme, and a declaration neither reading understands, or a literal version, stops the run (#1501 review item
+// 2). Since the tree no longer ties a run to a version, the guard holds the tag to these rules:
 //   - only a tag push publishes; a manual run is always a rehearsal, whatever `dry_run` says (a manual
 //     publish of a free version would leave a version on npm with no tag, and the next release stuck);
 //   - the tag is the newest `v[0-9]*` tag, and the previous one is an ancestor of the tagged commit
@@ -36,7 +29,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { sourceScheme } from '../.centralu/apps/project-board/versions.mjs'
 
-// Where the version is declared and how its two schemes read: the board's release configuration, one definition for both
+// Where the version is declared and how the tag scheme reads: the board's release configuration, one definition for both
 const SOURCE = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')).release.source
 export const BRAND = SOURCE.path
 // SemVer without build metadata: content-verify's Rust parser refuses `+meta`, and npm drops it
@@ -109,36 +102,17 @@ const truthy = (v, fallback) => (v === 'true' || v === 'false' ? v : fallback)
  */
 export async function decide(facts) {
   const { event, ref, inputs = {}, source = { scheme: null, problem: 'was not read.' } } = facts
-  const literal = source.scheme === 'brand' ? source.version : null
   const errors = []
   const notes = []
   const push = event === 'push'
   const want = String(inputs.version ?? '').trim().replace(/^v/, '')
   const answer = (scheme, version, dryRun, alsoLatest) => ({ ok: errors.length === 0, scheme, version, dryRun, alsoLatest, errors, notes })
 
-  if (source.scheme === null) {
-    // Never the tag scheme by default: a literal in another form would let a tag of any version publish
-    errors.push(`${BRAND} ${source.problem} Nothing is built until it reads as one scheme or the other.`)
+  if (source.scheme !== 'tag') {
+    // Never the tag scheme by default: a literal would let a tag of any version publish
+    errors.push(`${BRAND} ${source.problem ?? `still declares APP_VERSION as "${source.version}" (the brand scheme).`} Nothing is built until it reads as the tag scheme.`)
     return answer(null, '', 'true', 'true')
   }
-  if (literal !== null) {
-    // The brand scheme, as before #1501
-    if (!literal) errors.push(`${BRAND} declares an empty APP_VERSION.`)
-    if (push) {
-      if (ref !== `${TAG_PREFIX}${literal}`) {
-        errors.push(`tag ${ref} does not match APP_VERSION ${literal}: expected ${TAG_PREFIX}${literal}.`)
-        errors.push('Either the version bump was never committed, or the tag went on the wrong commit. Delete the tag, fix, tag again.')
-      }
-      // A tag push is the release. No stable release exists yet, so `npm i -g centralu` (no tag) has
-      // to resolve to the beta; flip this the day 1.0 ships (docs/releasing.md, --also-latest)
-      return answer('brand', literal, 'false', 'true')
-    }
-    if (want && want !== literal) errors.push(`The version input ${want} is not ${literal}, the APP_VERSION this commit declares; a rehearsal builds what the commit declares.`)
-    // Default to the reversible answer when the value is missing or unexpected
-    return answer('brand', literal, truthy(inputs.dryRun, 'true'), truthy(inputs.alsoLatest, 'true'))
-  }
-
-  // The tag scheme (#1501)
   const tags = releaseTags(facts.tags ?? [])
   if (facts.shallow) errors.push('This checkout is shallow: without the whole history and every tag, the previous release cannot be seen, and the checks against it would pass unasked. Check out with fetch-depth: 0.')
   if (push) {
@@ -258,7 +232,7 @@ async function main() {
     else if (result.dryRun === 'false') lines.push('**Publishing.** Each publish waits for approval on the `npm-publish` environment.', '')
     else lines.push('**Rehearsal.** Builds and `npm pack` only: nothing reaches the registry and no approval is asked for.', '', 'The shim job will warn that the platform packages are not on the registry at this version. That is correct: this run published none.', '')
     for (const n of result.notes) lines.push(`- ${n}`)
-    lines.push(`- version from: ${result.scheme === 'brand' ? `\`${BRAND}\`` : result.scheme === 'tag' ? 'the tag (or the rehearsal input)' : 'not read'}`, `- move the \`latest\` dist-tag: \`${result.alsoLatest}\``, `- triggered by: \`${env.GITHUB_EVENT_NAME}\` \`${env.GITHUB_REF_NAME}\``)
+    lines.push(`- version from: ${result.scheme === 'tag' ? 'the tag (or the rehearsal input)' : 'not read'}`, `- move the \`latest\` dist-tag: \`${result.alsoLatest}\``, `- triggered by: \`${env.GITHUB_EVENT_NAME}\` \`${env.GITHUB_REF_NAME}\``)
     appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`)
   }
   process.exitCode = result.ok ? 0 : 1

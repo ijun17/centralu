@@ -64,31 +64,12 @@
     }
   },
   "release": {
-    "scheme": "tag",
     "source": {
       "path": "packages/protocol/src/brand.ts",
       "pattern": "^export const APP_VERSION = '([^']+)'",
       "marker": "^(?:import|export) \\{ APP_VERSION \\} from '\\./version\\.generated(?:\\.js)?';?$",
       "name": "APP_VERSION"
     },
-    "versionFiles": [
-      "packages/protocol/src/brand.ts",
-      "apps/desktop/package.json",
-      "apps/desktop/src-tauri/tauri.conf.json",
-      "apps/desktop/src-tauri/Cargo.toml",
-      "apps/desktop/src-tauri/Cargo.lock",
-      "packaging/npm/*/package.json"
-    ],
-    "ignore": [
-      "docs/**/*.md",
-      "**/CHANGELOG*",
-      "**/release-notes/**/*.md",
-      "**/pnpm-lock.yaml",
-      "**/package-lock.json",
-      "**/npm-shrinkwrap.json",
-      "**/*.lock",
-      "tooling/project-board-release.test.ts"
-    ],
     "tagPrefix": "v",
     "branchPrefix": "chore/release-",
     "workflow": ".github/workflows/release.yml",

@@ -1,12 +1,9 @@
 // Local git, for rebase_stack and release: run with execFile (never a shell), with no prompts and
 // plain English messages. The app server runs as the person (docs/security-boundaries.md, "App
 // servers"), so this is their git, their credentials and their checkout; stack.mjs works in a
-// temporary worktree and release.mjs in a temporary index, so the checkout itself is never touched.
+// temporary worktree and release.mjs only reads and pushes by id, so the checkout itself is never touched.
 import { execFile } from './system.mjs'
-import { readFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve as resolvePath } from 'node:path'
+import { resolve as resolvePath } from 'node:path'
 
 export class GitError extends Error {
   constructor(message, stderr = '', code = null) {
@@ -174,7 +171,6 @@ export const changes = async (dir) =>
     .map((l) => l.slice(3))
 
 /** The branch the checkout is on; empty when detached. */
-export const currentBranch = (dir) => out(dir, ['branch', '--show-current'])
 export const head = (dir) => out(dir, ['rev-parse', 'HEAD'])
 
 /** The remote's refs under `prefix` (`refs/tags/` or `refs/heads/`) as { name, sha }; an annotated tag's commit. */
@@ -238,42 +234,9 @@ export async function showFile(dir, rev, path) {
 /** Every file of a commit's tree. */
 export const filesAt = async (dir, rev) => (await git(dir, ['ls-tree', '-r', '--name-only', '-z', rev])).split('\0').filter(Boolean)
 
-/** The files of a commit that hold any of the fixed strings; empty when none does. */
-export async function filesHolding(dir, rev, strings) {
-  try {
-    const text = await git(dir, ['grep', '-l', '-z', '-I', '-F', ...strings.flatMap((s) => ['-e', s]), rev, '--'])
-    return text.split('\0').filter(Boolean).map((l) => l.slice(rev.length + 1))
-  } catch (e) {
-    if (e.code === 1) return [] // nothing found; an error is 128
-    throw e
-  }
-}
-
 /** The subjects of the first-parent commits after `from` up to `to`, newest first. */
 export const subjects = async (dir, from, to) =>
   (await git(dir, ['log', '--first-parent', '--format=%s', from ? `${from}..${to}` : to])).split('\n').filter(Boolean)
-
-/**
- * A commit on `parent` with `files` (path → text) changed and nothing else, made in a temporary index
- * so the checkout, its index and its branches never move. Answers the commit, which is on no branch
- * until pushed. The author is the person's own name and address from git config, as for any commit.
- */
-export async function commitFiles(dir, parent, files, message) {
-  const tmp = await mkdtemp(join(tmpdir(), 'centralu-release-'))
-  const env = { GIT_INDEX_FILE: join(tmp, 'index') }
-  try {
-    await git(dir, ['read-tree', parent], { env })
-    for (const [path, text] of Object.entries(files)) {
-      const mode = (await out(dir, ['ls-tree', parent, '--', path])).split(/\s+/)[0] || '100644'
-      const blob = (await git(dir, ['hash-object', '-w', '--no-filters', '--stdin'], { input: text })).trim()
-      await git(dir, ['update-index', '--cacheinfo', `${mode},${blob},${path}`], { env })
-    }
-    const tree = (await git(dir, ['write-tree'], { env })).trim()
-    return (await git(dir, ['commit-tree', tree, '-p', parent, '-F', '-'], { input: message })).trim()
-  } finally {
-    await rm(tmp, { recursive: true, force: true }).catch(() => {})
-  }
-}
 
 /**
  * An annotated tag object for `commit`, named `name`, with `message`, written to the object store only: no tag ref is made
@@ -288,25 +251,3 @@ export async function tagObject(dir, commit, name, message) {
 export const pushRef = (dir, remote, sha, ref) => git(dir, ['push', '--quiet', remote, `${sha}:${ref}`])
 /** Deletes a branch on the remote (never a tag: the caller names a branch) */
 export const deleteRemoteBranch = (dir, remote, branch) => git(dir, ['push', '--quiet', remote, `:refs/heads/${branch}`])
-
-/**
- * The commits at which this checkout's history stops short (a shallow clone's boundary): a walk that ends on one of them has
- * not reached the repository's first commit (#1350). Empty for a full clone.
- */
-export async function shallowBoundary(dir) {
-  try {
-    const path = (await git(dir, ['rev-parse', '--path-format=absolute', '--git-path', 'shallow'])).trim()
-    return new Set(readFileSync(path, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean))
-  } catch {
-    return new Set()
-  }
-}
-
-/** The newest commit on `tip`'s first-parent history that added or removed `text` in `path` (git's pickaxe), or null */
-export async function lastTouching(dir, tip, text, path) {
-  try {
-    return ((await git(dir, ['log', '--first-parent', '-n', '1', '--format=%H', `-S${text}`, tip, '--', path])).trim()) || null
-  } catch {
-    return null
-  }
-}

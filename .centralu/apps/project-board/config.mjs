@@ -131,7 +131,7 @@ export const QUEUE = {
         ),
         // What the steps that set a job up read (#1435): the browser install takes its version from the lockfile, the system
         // libraries come from build.yml, the toolchain from its pin. A commit that changes one of these may be what fails
-        // setup, twice, so main's red is hunted when one is among the commits since the last green (path patterns as `release.versionFiles`).
+        // setup, twice, so main's red is hunted when one is among the commits since the last green.
         setupInputs: (Array.isArray(guardConf.setupInputs) ? guardConf.setupInputs : DEFAULT_SETUP_INPUTS).filter((p) => typeof p === 'string' && p),
       }
     : null,

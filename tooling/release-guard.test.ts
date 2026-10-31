@@ -1,10 +1,10 @@
 /**
  * The release workflow's guard (scripts/release-guard.mjs) decides which version a run builds and
- * whether it publishes, for both schemes (#1501). While brand.ts declares the version, a tag must
- * name it. Once brand.ts declares none, the tag alone is the version, and since the tree no longer
- * ties a run to a version, the guard holds the tag to the previous release instead: only a tag push
- * publishes, the previous release is an ancestor, the tag is the newest, the previous version is on
- * the registry, and npm does not have this version from other code.
+ * whether it publishes (#1501). brand.ts declares no version: the tag alone is the version, and since
+ * the tree no longer ties a run to a version, the guard holds the tag to the previous release: only a
+ * tag push publishes, the previous release is an ancestor, the tag is the newest, the previous version
+ * is on the registry, and npm does not have this version from other code. A brand.ts that still
+ * declares the version stops the run.
  */
 import { describe, expect, it } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
@@ -68,28 +68,13 @@ it('stops, building nothing, when brand.ts declares the version in a form it can
   }
 })
 
-describe('the brand scheme, as before #1501', () => {
-  it('publishes a tag push of the declared version and refuses any other tag', async () => {
-    const { decide } = await load()
-    expect(await decide(facts({ source: { scheme: 'brand', version }, ref: `v${version}` }))).toMatchObject({ ok: true, scheme: 'brand', version, dryRun: 'false', alsoLatest: 'true' })
-    const r = await decide(facts({ source: { scheme: 'brand', version }, ref: 'v0.0.0' }))
-    expect(r.ok).toBe(false)
-    expect(errors(r)).toContain('does not match APP_VERSION')
-  })
-
-  it('rehearses a manual run on any branch by default, publishes one only with dry_run unticked, and refuses another version input', async () => {
-    const { decide } = await load()
-    const run = (inputs: Facts) => decide(facts({ source: { scheme: 'brand', version }, event: 'workflow_dispatch', ref: `chore/release-${version}`, inputs }))
-    expect(await run({ dryRun: 'true', alsoLatest: 'true' })).toMatchObject({ ok: true, version, dryRun: 'true' })
-    // An empty or unexpected input is a rehearsal too: the reversible answer
-    expect(await run({ dryRun: '', alsoLatest: '' })).toMatchObject({ ok: true, dryRun: 'true', alsoLatest: 'true' })
-    expect(await run({ dryRun: 'maybe' })).toMatchObject({ dryRun: 'true' })
-    expect(await run({ dryRun: 'false' })).toMatchObject({ ok: true, dryRun: 'false' })
-    expect(await run({ version: `v${version}` })).toMatchObject({ ok: true, version })
-    const other = await run({ version: '9.9.9' })
-    expect(other.ok).toBe(false)
-    expect(errors(other)).toContain(`is not ${version}`)
-  })
+it('stops, building nothing, when brand.ts still declares the version, for a tag push and a rehearsal alike', async () => {
+  const { decide, schemeOf } = await load()
+  for (const [event, ref] of [['push', `v${version}`], ['workflow_dispatch', 'main']]) {
+    const r = await decide(facts({ event, ref, source: schemeOf(brand) }))
+    expect(r, event).toMatchObject({ ok: false, dryRun: 'true', version: '' })
+    expect(errors(r)).toContain(`still declares APP_VERSION as "${version}" (the brand scheme)`)
+  }
 })
 
 describe('the tag scheme (#1501)', () => {
@@ -264,14 +249,15 @@ describe('run as the workflow runs it', () => {
     expect(r.stdout).toContain('No release tag before v1.0.0-beta.2 is visible, but the registry has centralu')
   })
 
-  it('rehearses a brand.ts of the brand scheme as the old guard did', async () => {
+  it('stops, building nothing, for a brand.ts that still declares the version', async () => {
     const r = await run(
       (d) => commit(d, 'packages/protocol/src/brand.ts', brand, 'c0'),
-      { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: `chore/release-${version}`, INPUT_DRY_RUN: 'true', INPUT_ALSO_LATEST: 'true', INPUT_VERSION: '' },
+      { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'main', INPUT_DRY_RUN: 'true', INPUT_ALSO_LATEST: 'true', INPUT_VERSION: '' },
       {},
     )
-    expect(r.status, r.stdout).toBe(0)
-    expect(r.output).toBe(`version=${version}\ndry_run=true\nalso_latest=true\nscheme=brand\n`)
+    expect(r.status, r.stdout).toBe(1)
+    expect(r.stdout).toContain(`::error::packages/protocol/src/brand.ts still declares APP_VERSION as "${version}" (the brand scheme)`)
+    expect(r.output).toBe('version=\ndry_run=true\nalso_latest=true\nscheme=\n')
   })
 })
 

@@ -1,6 +1,5 @@
-// The release's version rules as pure functions (no git, no gh, no IO): reading the version from its
-// one declaration, the next version, the order of two versions, which files a pattern names, and the
-// bump itself. release.mjs puts them to work; the tests hold them to this repository's own files.
+// The release's version rules as pure functions (no git, no gh, no IO): the next prerelease, the order of two
+// versions, which scheme a commit's version source is in, and which files a pattern names. release.mjs puts them to work.
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
@@ -34,28 +33,19 @@ export function compareVersions(a, b) {
   return 0
 }
 
-export const BUMPS = ['prerelease', 'patch', 'minor', 'major']
-
 /**
- * The version after `current`. `prerelease` counts up the last number of the prerelease
- * (`1.2.0-beta.3` → `1.2.0-beta.4`); the others leave the prerelease behind (`patch` of a
- * prerelease is its release, as semver has it). Throws a sentence when there is no such version.
+ * The prerelease after `current`: the last number of its prerelease counted up (`1.2.0-beta.3` → `1.2.0-beta.4`).
+ * Throws a sentence when there is no such version.
  */
-export function nextVersion(current, bump = 'prerelease') {
+export function nextVersion(current) {
   const v = parseVersion(current)
   if (!v) throw new Error(`"${current}" is not a version (major.minor.patch, with an optional -prerelease).`)
-  if (bump === 'prerelease') {
-    if (!v.pre.length) throw new Error(`${current} has no prerelease part to count up; give the version, or bump patch, minor or major.`)
-    const i = v.pre.findLastIndex(isNum)
-    if (i < 0) throw new Error(`${current} has no number in its prerelease part to count up; give the version.`)
-    const pre = [...v.pre]
-    pre[i] = String(Number(pre[i]) + 1)
-    return `${v.major}.${v.minor}.${v.patch}-${pre.join('.')}`
-  }
-  if (bump === 'patch') return v.pre.length ? `${v.major}.${v.minor}.${v.patch}` : `${v.major}.${v.minor}.${v.patch + 1}`
-  if (bump === 'minor') return v.pre.length && v.patch === 0 ? `${v.major}.${v.minor}.0` : `${v.major}.${v.minor + 1}.0`
-  if (bump === 'major') return v.pre.length && v.patch === 0 && v.minor === 0 ? `${v.major}.0.0` : `${v.major + 1}.0.0`
-  throw new Error(`"${bump}" is not a bump; use one of ${BUMPS.join(', ')}.`)
+  if (!v.pre.length) throw new Error(`${current} has no prerelease part to count up; give the version.`)
+  const i = v.pre.findLastIndex(isNum)
+  if (i < 0) throw new Error(`${current} has no number in its prerelease part to count up; give the version.`)
+  const pre = [...v.pre]
+  pre[i] = String(Number(pre[i]) + 1)
+  return `${v.major}.${v.minor}.${v.patch}-${pre.join('.')}`
 }
 
 /** The version a source file declares, by `pattern` (a regular expression whose first group is it). */
@@ -94,70 +84,6 @@ export function sourceScheme(text, { pattern, marker, name } = {}) {
         ? `declares ${what} as "${version}" and also imports it from the generated file; it must be one or the other.`
         : `declares ${what} in a form that cannot be read: neither a literal matching ${pattern ?? '(no pattern)'} nor ${marker ? `the line matching ${marker}` : 'a marker (none configured)'}.`,
   }
-}
-
-/**
- * Where a file carries `version`: the exact version as a whole quoted string, `"1.2.0-beta.3"` or
- * `'1.2.0-beta.3'`. That is how every file of this repository writes it (package.json, Cargo.toml,
- * Cargo.lock, tauri.conf.json, brand.ts), and it leaves the version alone in prose ("released in
- * 1.2.0-beta.3") and inside longer versions (`1.2.0-beta.30`).
- */
-export const versionPattern = (version) => new RegExp(`(["'])${escape(version)}\\1`, 'g')
-
-export const carries = (text, version) => versionPattern(version).test(String(text ?? ''))
-
-/**
- * Detection is broader than replacement: suffixes, templates and unquoted text can all pin a
- * release. Only local/build suffixes extend this version; other prereleases are different versions.
- * Return each matching line once, even when it holds several references.
- */
-export function versionLines(text, version, path = '') {
-  const pattern = new RegExp(`(?<![0-9.])${escape(version)}(?:\\.local\\.(?:[1-9]\\d*|\\$\\{[^}\\r\\n]+\\})|\\+build(?:\\.[0-9A-Za-z-]+)*)?(?![0-9A-Za-z+-]|\\.[0-9A-Za-z])`)
-  const source = String(text ?? '')
-  return (/(?:^|\/)package\.json$/.test(path) ? withoutDependencyRanges(source) : source)
-    .split('\n')
-    .flatMap((line, i) => (pattern.test(line) ? [i + 1] : []))
-}
-
-const DEPENDENCY_FIELDS = new Set(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])
-
-/** Mask only dependency specifier values, preserving lines and other values on the same line. */
-function withoutDependencyRanges(text) {
-  try {
-    JSON.parse(text)
-  } catch {
-    return text // Invalid JSON must not hide a release reference.
-  }
-  const stack = []
-  return text.replace(/"(?:\\.|[^"\\])*"|[{}[\],:]/g, (token) => {
-    const parent = stack.at(-1)
-    if (token === '{' || token === '[') {
-      stack.push({ object: token === '{', key: null, expectsKey: token === '{', dependencies: token === '{' && stack.length === 1 && DEPENDENCY_FIELDS.has(parent?.key) })
-    } else if (token === '}' || token === ']') {
-      stack.pop()
-    } else if (token === ',') {
-      if (parent?.object) parent.expectsKey = true
-    } else if (token.startsWith('"')) {
-      const value = JSON.parse(token)
-      if (parent?.expectsKey) {
-        parent.key = value
-        parent.expectsKey = false
-      } else if (parent?.dependencies && /^(?:\^|~|>=|workspace:)/.test(value.trim())) {
-        return ' '.repeat(token.length)
-      }
-    }
-    return token
-  })
-}
-
-/** `text` with every quoted `from` turned into `to`, and how many there were. */
-export function bumpText(text, from, to) {
-  let count = 0
-  const out = String(text).replace(versionPattern(from), (_, q) => {
-    count += 1
-    return `${q}${to}${q}`
-  })
-  return { text: out, count }
 }
 
 /**
