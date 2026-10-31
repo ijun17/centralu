@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fakeExe } from '../fake-exe.test-helpers.js'
-import { PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { PROTOCOL_VERSION, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -24,6 +24,7 @@ import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers
 import { activityCounts } from '../idle.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor as worldLine, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -48,11 +49,7 @@ vi.mock('./install.js', async (importOriginal) => {
   }
 })
 
-const TOKEN = 'tok'
-const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c()
-})
+afterEach(runCleanups)
 
 /** What `host.credentials` answers for a test's list, or a test's whole answer (#1405 review) */
 function reportOf(f: () => ListedCredential[] | null | Partial<CredentialsReport>): () => CredentialsReport {
@@ -197,24 +194,9 @@ async function ui(port: number) {
   return { call, frames, events }
 }
 
-const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLine => ({
-  v: 1,
-  port,
-  token: TOKEN,
-  version: RELEASE,
-  protocolVersion: PROTOCOL_VERSION,
-  dataDir: '/remote',
-  hostRunning: true,
-  ...over,
-})
+const lineFor = (port: number, over: Partial<ConnectionLine> = {}) => worldLine(port, { version: RELEASE, ...over })
 
 const status = (hub: Hub) => hub.links.list()[0]!.status
-
-function folder(): string {
-  const d = mkdtempSync(join(tmpdir(), 'cc-links-'))
-  cleanups.push(() => rmSync(d, { recursive: true, force: true }))
-  return d
-}
 
 /** A remote's store with one project and these sessions, written before its host reads it */
 function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boolean][]): { store: Store; projectId: string } {
@@ -223,37 +205,6 @@ function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boo
   store.projects.addProject({ id: projectId, path: folder(), name: 'remote-project' })
   for (const [id, kind, inProject] of sessions) seedSession(store, inProject ? projectId : null, id, kind)
   return { store, projectId }
-}
-
-function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
-  store.sessions.upsertSession({
-    id,
-    projectId,
-    kind,
-    tool: 'claude',
-    externalId,
-    name: id,
-    autoNamed: false,
-    state: 'idle',
-    lastReadSeq: 0,
-    lastSeq: 0,
-    createdAt: Date.now(),
-    waitingSince: null,
-    live: false,
-    model: null,
-    effort: null,
-    verbosity: null,
-    serviceTier: null,
-    permissionPreset: 'normal',
-    importedFrom: null,
-    worktree: null,
-    parentSessionId: null,
-    // A coordinator is a session with a visibility list (store.ts)
-    scopeSessionIds: kind === 'coordinator' ? ['worker1'] : null,
-    roleAppend: null,
-    appId: null,
-    ...sessionLiveDefaults(),
-  })
 }
 
 describe('a hub linked to another host (#82)', () => {

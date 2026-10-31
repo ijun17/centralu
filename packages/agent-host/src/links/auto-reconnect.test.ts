@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { APP_VERSION, MachineInfo, PROTOCOL_VERSION, sessionLiveDefaults, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { APP_VERSION, MachineInfo, PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -15,6 +14,7 @@ import { Qualifier } from './qualifier.js'
 import type { ConnectionLine, Endpoint, Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -26,17 +26,7 @@ import { eventually, SLOW } from '../../../../tooling/test-timing.js'
  * Two real hosts in one process, as links.test.ts runs them; only the transport is direct.
  */
 
-const TOKEN = 'tok'
-const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c()
-})
-
-function folder(): string {
-  const d = mkdtempSync(join(tmpdir(), 'cc-links-auto-'))
-  cleanups.push(() => rmSync(d, { recursive: true, force: true }))
-  return d
-}
+afterEach(runCleanups)
 
 async function remoteHost(store = new Store()) {
   const adapters = scriptedAdapters()
@@ -67,17 +57,6 @@ async function bounce(remote: Awaited<ReturnType<typeof remoteHost>>) {
   await server.listen()
   cleanups.push(() => server.close())
 }
-
-const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLine => ({
-  v: 1,
-  port,
-  token: TOKEN,
-  version: APP_VERSION,
-  protocolVersion: PROTOCOL_VERSION,
-  dataDir: '/remote',
-  hostRunning: true,
-  ...over,
-})
 
 /**
  * A tunnel that counts its openings, so a test can tell that no attempt was made. `unreachable`: ssh cannot reach the
@@ -163,36 +142,6 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
 /** Long enough for several attempts at the test's backoff (50 ms doubling to 200 ms), scaled for a loaded machine */
 const WINDOW_MS = 400 * SLOW
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
-  store.sessions.upsertSession({
-    id,
-    projectId,
-    kind,
-    tool: 'claude',
-    externalId,
-    name: id,
-    autoNamed: false,
-    state: 'idle',
-    lastReadSeq: 0,
-    lastSeq: 0,
-    createdAt: Date.now(),
-    waitingSince: null,
-    live: false,
-    model: null,
-    effort: null,
-    verbosity: null,
-    serviceTier: null,
-    permissionPreset: 'normal',
-    importedFrom: null,
-    worktree: null,
-    parentSessionId: null,
-    scopeSessionIds: null,
-    roleAppend: null,
-    appId: null,
-    ...sessionLiveDefaults(),
-  })
-}
 
 /** A git folder whose `origin` is `url`, with one commit */
 function checkout(url: string): string {

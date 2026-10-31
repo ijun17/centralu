@@ -1,17 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { APP_VERSION, PROTOCOL_VERSION, autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, autoCompactOf } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links } from './links.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine } from './tunnel.js'
+import { DirectTunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -19,34 +17,13 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * own sessions from its own preferences, so the hub tells every machine its setting at connect and when it changes, and a
  * session's menu asks the machine what its next start passes. Real hosts in one process, as reverse-asks.test.ts has them.
  */
-const TOKEN = 'tok'
-const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c()
-})
-
-function folder(): string {
-  const d = mkdtempSync(join(tmpdir(), 'cc-compact-link-'))
-  cleanups.push(() => rmSync(d, { recursive: true, force: true }))
-  return d
-}
-
-const lineFor = (port: number): ConnectionLine => ({ v: 1, port, token: TOKEN, version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dataDir: '/remote', hostRunning: true })
-
-function seedSession(store: Store) {
-  store.sessions.upsertSession({
-    id: 'w1', projectId: 'p-remote', kind: 'worker', tool: 'claude', externalId: 'ext-w1', name: 'w1', autoNamed: false, state: 'idle',
-    lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: false, model: 'sonnet', effort: null, verbosity: null,
-    serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
-    roleAppend: null, appId: null, ...sessionLiveDefaults(),
-  })
-}
+afterEach(runCleanups)
 
 /** The machine, optionally as a build from before the setting answers it */
 async function machineHost(o: { older?: boolean } = {}) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
-  seedSession(store)
+  seedSession(store, 'p-remote', 'w1', 'worker', 'ext-w1', { model: 'sonnet' })
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const handler = createRpcHandler(mgr, adapters)
