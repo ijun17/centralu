@@ -174,6 +174,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     expect((old.prepare(`SELECT COUNT(*) as n FROM messages_fts WHERE body MATCH '"zebracorn"'`).get() as { n: number }).n).toBe(401)
     old.close()
 
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const s = new Store(file)
     expect(s.migrationsRun).toBe(25) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492) and v64 (#1623) after it
     expect(s.messages.searchMessages('zebracorn')).toEqual([])
@@ -182,6 +183,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     s.close()
     const after = statSync(file).size
     expect(after).toBeLessThan(before - 16 * 1024 * 1024)
+    expect(said.mock.calls.map(([line]) => String(line))).toEqual(expect.arrayContaining([expect.stringMatching(/vacuumed \d+(\.\d)? [KM]B -> \d+(\.\d)? [KM]B/)]))
   })
 
   it('a second start finds nothing to do', async () => {
@@ -213,6 +215,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     expect(s.messages.searchMessages('zebracorn')).toEqual([])
     expect(indexRows(s)).toBe(3)
     expect(said.mock.calls.some(([line]) => String(line).includes('could not vacuum'))).toBe(true)
+    expect(said.mock.calls.map(([line]) => String(line))).toEqual(expect.arrayContaining([expect.stringMatching(/could not vacuum; \d+(\.\d)? (B|KB|MB) stay free/)]))
     s.close()
   })
 })

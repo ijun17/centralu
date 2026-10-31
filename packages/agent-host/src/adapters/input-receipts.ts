@@ -51,7 +51,6 @@ export function isUpdateContinueNote(text: string): boolean {
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
 export class InputReceipts {
   private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver; accepted?: true }>()
-  private ended = new Set<string>()
 
   /** `named`: the id the caller gave the input, which the tool then names back; none, one is made (with Centralu's mark) */
   create(observer?: InputObserver, named?: ReturnType<typeof randomUUID>): InputReceipt {
@@ -76,18 +75,15 @@ export class InputReceipts {
     p.observer?.accepted?.()
   }
 
-  /** Codex's turn/start response can arrive after that turn's completion notification. */
+  /** The tool named the turn that took the input: it is taken, and completes when that turn ends (`endTurn`) */
   bind(receipt: InputReceipt, turn: string): void {
     const p = this.pending.get(receipt.id)
     if (!p) return
-    // `turn/start` answered with the turn: the input is taken
     this.accept(receipt.id)
     p.turn = turn
-    if (this.ended.has(turn)) this.finish(receipt.id)
   }
 
   endTurn(turn: string): void {
-    if (this.pending.size) this.ended.add(turn)
     for (const [id, p] of this.pending) if (p.turn === turn) this.finish(id)
   }
 
@@ -102,7 +98,6 @@ export class InputReceipts {
       const p = this.pending.get(id)
       if (!p) continue
       this.pending.delete(id)
-      if (!this.pending.size) this.ended.clear()
       p.receipt.cancelled = true
       p.observer?.fail(error)
       p.reject(error)
@@ -113,7 +108,6 @@ export class InputReceipts {
     const turns = [...new Set([...this.pending.values()].flatMap((p) => p.turn ? [p.turn] : []))]
     const pending = [...this.pending.values()]
     this.pending.clear()
-    this.ended.clear()
     for (const p of pending) { p.receipt.cancelled = true; p.observer?.fail(error); p.reject(error) }
     return turns
   }
@@ -122,7 +116,6 @@ export class InputReceipts {
     const p = this.pending.get(id)
     if (!p) return
     this.pending.delete(id)
-    if (!this.pending.size) this.ended.clear()
     if (!p.accepted) p.observer?.accepted?.()
     p.receipt.completed = true
     p.observer?.complete()

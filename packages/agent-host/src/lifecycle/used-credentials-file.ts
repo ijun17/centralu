@@ -247,11 +247,15 @@ export class UsedCredentialsFile {
     const text = records.map(encodeUsedRecord).join('')
     try {
       const tmp = `${this.path}.${process.pid}.tmp`
-      this.os.files.writeFileSync(tmp, text, { mode: 0o600 })
       try {
+        this.os.files.writeFileSync(tmp, text, { mode: 0o600 })
         this.os.files.renameSync(tmp, this.path)
       } catch (e) {
-        this.os.files.rmSync(tmp, { force: true })
+        try {
+          this.os.files.rmSync(tmp, { force: true })
+        } catch {
+          // Held open by a scanner: the write's own error is the one to say
+        }
         throw e
       }
     } catch (e) {

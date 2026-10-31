@@ -1,3 +1,4 @@
+import { bytesText } from '../bytes-text.js'
 import { isObj } from '../json-value.js'
 import { errnoCode, isMissing } from '../os/errors.js'
 import { spawn } from 'node:child_process'
@@ -343,7 +344,7 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
         truncated: false,
         binary: true,
         bytes: size,
-        previewError: `Image is too large to preview (${(size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
+        previewError: `Image is too large to preview (${bytesText(size)}; limit is ${bytesText(MAX_IMAGE_PREVIEW)})`,
       }
     }
 

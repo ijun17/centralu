@@ -7,9 +7,9 @@ import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from './sea
 import { isMissingProgram, SessionProcess, toolNotInstalled, type ToolStart } from './tool-process.js'
 
 /**
- * The ledger (docs/plans/session-core.md §3.1, §7.2 PR 5, #1654): what every tool's session does the same way, once. The
- * session's phase, the turn that runs and the inputs it took, the queue for a tool that takes no input mid-turn, the input
- * receipts, the Stop and its confirmation timer, "interrupted by the tool", undelivered input on an exit and on the close,
+ * The ledger (docs/plans/session-core.md §3.1, §7.2 PR 5, #1654) for a tool that takes one input at a time (ACP, `agy`): what
+ * every such session does the same way, once. The session's phase, the turn that runs and the input it took, the queue, the
+ * input receipts, the Stop and its confirmation timer, "interrupted by the tool", undelivered input on an exit and on the close,
  * and the exit itself: a crash in a turn or while opening, asleep when idle (#1397). It runs the session's process through
  * `SessionProcess`, and starts it again on the same conversation for a tool whose Stop ends it (`agy`). The tool's frames
  * and their meaning stay in its `ToolWire`.
@@ -25,7 +25,7 @@ type Phase = 'opening' | 'ready' | 'closed'
 type Queued = { input: TurnInput; named: string | null }
 
 type Turn = {
-  inputs: Queued[]
+  input: Queued
   stopAsked: boolean
   /** The process the turn runs on: its exit ends the turn */
   proc: AgentProcess
@@ -138,33 +138,28 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     return this.lastTurnInputs
   }
 
-  /** The next input goes to the tool when the session is ready and, for a tool without mid-turn input, no turn runs */
+  /** The next input goes to the tool when the session is ready and no turn runs */
   private drain(): void {
-    if (this.phase !== 'ready' || this.launching || this.queue.length === 0) return
-    if (this.turn && !this.wire.turns.midTurnInput) return
+    if (this.phase !== 'ready' || this.launching || this.queue.length === 0 || this.turn) return
     if (this.needsProcess()) {
       void this.replaceProcess()
       return
     }
     const proc = this.live
-    if (!proc) return
-    for (let next = this.queue.shift(); next; next = this.wire.turns.midTurnInput ? this.queue.shift() : undefined) {
-      const turn = this.turn ?? this.begin(next, proc)
-      if (turn.inputs[0] !== next) turn.inputs.push(next)
-      const handle = this.handleOf(turn)
-      try {
-        this.wire.startTurn(next.input, handle)
-      } catch (err) {
-        // A wire that could not write the input ends its turn as failed, so neither the input nor the queue waits forever
-        const failure = err instanceof Error ? err : new Error(String(err))
-        handle.end({ how: 'failed', error: { code: 'internal', message: `${this.wire.label}: ${failure.message}`, retryable: true }, inputError: failure })
-        return
-      }
+    const next = proc ? this.queue.shift() : undefined
+    if (!proc || !next) return
+    const handle = this.handleOf(this.begin(next, proc))
+    try {
+      this.wire.startTurn(next.input, handle)
+    } catch (err) {
+      // A wire that could not write the input ends its turn as failed, so neither the input nor the queue waits forever
+      const failure = err instanceof Error ? err : new Error(String(err))
+      handle.end({ how: 'failed', error: { code: 'internal', message: `${this.wire.label}: ${failure.message}`, retryable: true }, inputError: failure })
     }
   }
 
   private begin(first: Queued, proc: AgentProcess): Turn {
-    const turn: Turn = { inputs: [first], stopAsked: false, proc }
+    const turn: Turn = { input: first, stopAsked: false, proc }
     this.turn = turn
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     return turn
@@ -237,7 +232,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     turn.stopAsked = true
     this.wire.interrupt?.()
     this.wire.releaseCards()
-    if (this.wire.turns.confirmsStop && !turn.stopTimer) {
+    if (!turn.stopTimer) {
       turn.stopTimer = setTimeout(() => {
         if (this.turn === turn) this.emit(stopNotConfirmed(this.sessionId, `${this.wire.label} has not confirmed the stop; the turn may still be running.`))
       }, this.stopConfirmMs)
@@ -256,10 +251,10 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     if (turn.stopTimer) clearTimeout(turn.stopTimer)
     this.wire.turnOver()
     this.wire.releaseCards()
-    this.lastTurnInputs = turn.inputs.flatMap((q) => (q.named ? [q.named] : []))
+    this.lastTurnInputs = turn.input.named ? [turn.input.named] : []
     this.turn = null
     for (const e of events?.() ?? []) this.emit(e)
-    const ids = turn.inputs.map((q) => q.input.id)
+    const ids = [turn.input.input.id]
     const sessionId = this.sessionId
     switch (ending.how) {
       case 'complete':
@@ -305,7 +300,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     const failure = new Error(`${this.wire.label} exited${code === null ? '' : ` (code ${code})`}`)
     if (turn) {
       this.wire.turnOver()
-      this.receipts.fail(turn.inputs.map((q) => q.input.id), failure)
+      this.receipts.fail([turn.input.input.id], failure)
     }
     if (turn || !wasOpen) {
       this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(failure.message, proc), retryable: true } })
@@ -333,7 +328,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
       // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
       this.wire.turnOver('Centralu stopped this session while the call ran')
       if (turn.stopTimer) clearTimeout(turn.stopTimer)
-      this.receipts.fail(turn.inputs.map((q) => q.input.id), new Error('the session closed'))
+      this.receipts.fail([turn.input.input.id], new Error('the session closed'))
     }
     await this.wire.close({ turnRunning: turn !== null }).catch(() => {})
     await this.process.close()

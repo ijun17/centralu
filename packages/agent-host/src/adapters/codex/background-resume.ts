@@ -3,42 +3,6 @@ import type { EventSink } from '../contract.js'
 /** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
 const BACKGROUND_RESUME_CAP_MS = 150_000
 
-/**
- * The count of messages sent, and the count reclaimed by a Stop pressed before the thread was
- * up (#168).
- *
- * Before resume finishes there is no turn to stop (there is no threadId or turnId yet). The old
- * Stop did nothing in that window, and a message queued up behind ready went out as turn/start
- * once resume finished — the turn started after the person had already stopped it. Now that
- * Stop reclaims whatever was sent up to that point. Anything sent after that still goes through.
- */
-export class WakingSends {
-  private sendsIssued = 0
-  private sendsStopped = 0
-
-  /** A message was sent; returns its number */
-  issue(): number {
-    return ++this.sendsIssued
-  }
-
-  /** Message `nth` was reclaimed before the thread was up, so it is not sent */
-  reclaimed(nth: number): boolean {
-    return nth <= this.sendsStopped
-  }
-
-  /** How many messages sent so far were not reclaimed */
-  get unsent(): number {
-    return this.sendsIssued - this.sendsStopped
-  }
-
-  /** Reclaims every message sent so far; returns how many were not reclaimed before */
-  reclaim(): number {
-    const unsent = this.sendsIssued - this.sendsStopped
-    this.sendsStopped = this.sendsIssued
-    return unsent
-  }
-}
-
 /** What the watchdog uses of the session it belongs to */
 export type ResumeWatchHost = {
   readonly sessionId: string
