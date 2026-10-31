@@ -1,9 +1,8 @@
-import { isObj } from '../json-value.js'
 import type { OsError } from './port.js'
 
-/** The `code` a failed system call carries (`ENOENT`, `EPERM`, ...), when it is text; a `catch` gets `unknown` */
+/** The `code` a failed system call carries (`ENOENT`, `EPERM`, ...), when it is text, on an `Error` (a plain object that carries one is not a failed call); a `catch` gets `unknown` */
 export function errnoCode(e: unknown): string | undefined {
-  return isObj(e) && typeof e.code === 'string' ? e.code : undefined
+  return e instanceof Error && 'code' in e && typeof e.code === 'string' ? e.code : undefined
 }
 
 /** Whether a failure says there is nothing at the path: `ENOENT`, or `ENOTDIR` when a file stands where a folder should */

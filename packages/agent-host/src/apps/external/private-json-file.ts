@@ -115,10 +115,14 @@ export class PrivateJsonFile<T> {
     try {
       writeFileSync(tmp, JSON.stringify(doc, null, this.opts.indent), { mode: 0o600, flag: 'wx' })
       if (how === 'replace') renameSync(tmp, this.path)
-      else linkSync(tmp, this.path)
-    } catch (e) {
-      if (how === 'create' && errnoCode(e) === 'EEXIST') return false
-      throw e
+      else {
+        try {
+          linkSync(tmp, this.path)
+        } catch (e) {
+          if (errnoCode(e) === 'EEXIST') return false
+          throw e
+        }
+      }
     } finally {
       rmSync(tmp, { force: true })
     }
