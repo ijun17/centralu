@@ -374,18 +374,24 @@ export type LeftoverOs = {
  * processes, almost all of it PowerShell starting. Asynchronous, so the host keeps serving while it runs. PowerShell is
  * named by its full path under the system folder, like taskkill: a bare name would be looked up in the working
  * directory first.
+ *
+ * Its bound is long: on a machine starved of CPU (a CI runner, a host busy with builds) PowerShell took over 10 s to start
+ * and answer, and the listing that was given up on left the leftovers running, with nothing to say so (#1773). The bound is
+ * only reached by a hung PowerShell; a stop that waits for it waits for the one thing that finds what the child left.
  */
 const runFile = promisify(execFile)
 const LIST_PROCESSES =
   "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }"
-const REAL_LEFTOVER_OS: LeftoverOs = {
+/** `run` is `execFile` as a promise, a parameter so a test can answer in its place */
+export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
   listProcesses: async () => {
     const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
-    const { stdout } = await runFile(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 10_000, windowsHide: true })
+    const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 60_000, windowsHide: true })
     return parseWinProcs(stdout)
   },
   taskkill: REAL_OS.taskkill,
-}
+})
+const REAL_LEFTOVER_OS = leftoverOs(runFile)
 
 /**
  * Ends what an ended process left running, on Windows (#14) — the Windows side of `stopGroup`, which has no group to
@@ -401,7 +407,9 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
   let rows: WinProcRow[]
   try {
     rows = await os.listProcesses()
-  } catch {
+  } catch (e) {
+    const why = typeof e === 'object' && e !== null && 'killed' in e && e.killed ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
+    console.error(`[agent-host] the process table could not be read (${why}); what process ${root.pid} left running may still run`)
     return []
   }
   const ended: number[] = []

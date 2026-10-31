@@ -231,7 +231,7 @@ class World {
 
   // --- main, branches and files
   readMain = () => ({ sha: this.main.sha, tree: this.main.tree })
-  /** Something merges into main that the queue did not (a release bump through merge_when_green) */
+  /** Something merges into main that the queue did not (a merge by hand) */
   externalMerge() {
     this.main = { sha: `m${++this.counter}`, tree: this.tree(this.main.tree, `external${this.counter}`) }
   }
