@@ -63,3 +63,8 @@ export function moveTo(ids: readonly string[], dragged: string, target: string, 
 export function dropsBefore(rect: { top: number; height: number }, clientY: number): boolean {
   return clientY < rect.top + rect.height / 2
 }
+
+/** `dropsBefore` across: the left half of the element is before it. For panels laid out side by side (the grid, the project screen, the tab strip) */
+export function dropsLeft(rect: { left: number; width: number }, clientX: number): boolean {
+  return dropsBefore({ top: rect.left, height: rect.width }, clientX)
+}

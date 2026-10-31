@@ -6,6 +6,7 @@ import { formatBytes, formatDay, formatDuration } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Markdown } from '../session/Markdown.jsx'
 import { ReaderItem } from './ArchiveReaderItem.jsx'
+import { SettingsCard } from './SettingsLayout.jsx'
 
 /** One app's records, in the order the session archive lists them (most recently kept first) */
 type RunGroup = { key: string; name: string; projectName: string | null; runs: TrashedRun[] }
@@ -57,7 +58,7 @@ export function ArchiveRuns({
         </p>
       </div>
       {groupRuns(runs).map((g) => (
-        <div key={g.key} className="divide-y divide-line/70 rounded-lg border border-line bg-surface-raised" data-testid={`trash-runs-app-${g.key}`}>
+        <SettingsCard key={g.key} testId={`trash-runs-app-${g.key}`}>
           <div className="flex items-baseline gap-2 px-4 py-2.5">
             <span className="min-w-0 truncate text-sm text-ink">{g.name}</span>
             <span className="min-w-0 shrink truncate text-2xs text-ink-muted">{g.projectName ?? 'Your apps'}</span>
@@ -130,7 +131,7 @@ export function ArchiveRuns({
               </li>
             ))}
           </ul>
-        </div>
+        </SettingsCard>
       ))}
     </div>
   )

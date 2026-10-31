@@ -21,7 +21,7 @@ import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
-import { Pill } from '../../components/Pill.jsx'
+import { WaitCard, WaitFooter } from './WaitCard.jsx'
 
 /**
  * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project. With the keyboard in this session's
@@ -159,23 +159,11 @@ export function ApprovalCard({
   }
 
   return (
-    /*
-      Every card that waits on the person (approvals here, questions in QuestionCard) is drawn alike (owner,
-      2026-10-18): the conversation's 14px corner, a white border all round as the inbox capsule's for an approval
-      (white is what waits on the person), the kind as a capsule, and the answers on a plain footer below a hairline.
-    */
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="approval-card"
-      data-keys={inComposer ? 'composer' : 'bare'}
+    <WaitCard
+      testId="approval-card"
+      keys={inComposer ? 'composer' : 'bare'}
+      subtitle="Agent is blocked, waiting"
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">Agent is blocked, waiting</span>
-      </div>
-
       <pre
         className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-sm leading-body text-ink"
         data-testid="approval-detail"
@@ -183,7 +171,7 @@ export function ApprovalCard({
         {detailText(detail)}
       </pre>
 
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey
           k={keys.allow}
           label="Allow"
@@ -229,8 +217,8 @@ export function ApprovalCard({
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>
         )}
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 
@@ -257,18 +245,12 @@ export function PermissionCard({
   keys?: AnswerKeys
 }) {
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid={testId}
-      data-kind="capability"
-      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    <WaitCard
+      testId={testId}
+      kind="capability"
+      keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+      subtitle="An app asks for a permission, and waits"
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">An app asks for a permission, and waits</span>
-      </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {appName} wants to {text}.
       </p>
@@ -276,11 +258,11 @@ export function PermissionCard({
         Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it
         uses. You can change it later under Runs → Permissions.
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey k={keys.allow} label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 
@@ -302,22 +284,16 @@ function ProjectAccessCard({
   onAnswer: (decision: 'allow' | 'deny' | 'always') => void
 }) {
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="approval-card"
-      data-kind="project_access"
-      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    <WaitCard
+      testId="approval-card"
+      kind="project_access"
+      keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+      subtitle={
+        detail.from.machine
+          ? `A session on ${detail.from.machine} wants to ask a project here, and waits`
+          : 'This session wants to reach another project, and waits'
+      }
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">
-          {detail.from.machine
-            ? `A session on ${detail.from.machine} wants to ask a project here, and waits`
-            : 'This session wants to reach another project, and waits'}
-        </span>
-      </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {projectAccessQuestion(detail)}
       </p>
@@ -345,7 +321,7 @@ function ProjectAccessCard({
           settings.
         </p>
       )}
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey
           k={keys.allow}
           label={detail.from.machine ? 'Allow' : 'Allow once'}
@@ -369,8 +345,8 @@ function ProjectAccessCard({
           testId="approve-deny"
           disabled={busy}
         />
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 
@@ -402,18 +378,12 @@ function AgentStartCard({
   // A child on a linked machine (#1038) is allowed once: nothing is remembered for another machine's project
   const remote = !!detail.machine
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="approval-card"
-      data-kind="agent_start"
-      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    <WaitCard
+      testId="approval-card"
+      kind="agent_start"
+      keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+      subtitle="This session wants to start another agent, and waits"
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">This session wants to start another agent, and waits</span>
-      </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {agentStartQuestion(detail)}
       </p>
@@ -424,7 +394,7 @@ function AgentStartCard({
             ? 'It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer comes back here. Always for the project is remembered; revoke it in Settings.'
             : 'It opens as its own session under this one, in a folder of its own outside any project, with its own approvals and Stop; its answer comes back here. Always for this session lasts until Centralu restarts.'}
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey
           k={keys.allow}
           label="Allow once"
@@ -464,8 +434,8 @@ function AgentStartCard({
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>
         )}
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 
@@ -485,20 +455,12 @@ function ProjectCreateCard({
   onAnswer: (decision: 'allow' | 'deny') => void
 }) {
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="approval-card"
-      data-kind="project_create"
-      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    <WaitCard
+      testId="approval-card"
+      kind="project_create"
+      keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+      subtitle="The orchestrator wants to make a new project, and waits"
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">
-          The orchestrator wants to make a new project, and waits
-        </span>
-      </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {detail.source ? 'Clone a repository as the new project' : 'Make a new project'}{' '}
         <span className="readout">{detail.name}</span>
@@ -534,7 +496,7 @@ function ProjectCreateCard({
           ? `It is cloned with ${detail.machine ? `${detail.machine}'s` : "this machine's"} own git and saved sign-ins, without its submodules, and added to the sidebar. Nothing is made unless you choose Create.`
           : 'An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.'}
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey
           k={keys.allow}
           label="Create"
@@ -549,8 +511,8 @@ function ProjectCreateCard({
           testId="approve-deny"
           disabled={busy}
         />
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 
@@ -572,18 +534,12 @@ function ProjectAddCard({
 }) {
   const found = !detail.exists ? 'Nothing is there' : detail.folder ? 'A folder that exists' : 'Not a folder'
   return (
-    <div
-      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
-      data-testid="approval-card"
-      data-kind="project_add"
-      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    <WaitCard
+      testId="approval-card"
+      kind="project_add"
+      keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+      subtitle="The orchestrator wants to add a folder as a project, and waits"
     >
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <Pill size="label" edge="solid" tone="bright">
-          Awaiting approval
-        </Pill>
-        <span className="text-xs text-ink-faint">The orchestrator wants to add a folder as a project, and waits</span>
-      </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         Add the folder <span className="readout">{detail.name}</span>
         {detail.machine ? (
@@ -620,11 +576,11 @@ function ProjectAddCard({
         It is added to the sidebar as Add project adds a folder, not trusted until you trust it. Nothing is added unless you
         choose Add.
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+      <WaitFooter>
         <ActionKey k={keys.allow} label="Add" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
-      </div>
-    </div>
+      </WaitFooter>
+    </WaitCard>
   )
 }
 

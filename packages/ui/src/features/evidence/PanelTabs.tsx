@@ -15,6 +15,7 @@ import { fitTabs } from './fitTabs.js'
 import { TabActionSlot } from './tabActions.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { TabBody } from './TabBody.jsx'
+import { dropsLeft } from '../sidebar/reorder.js'
 
 /** The gap between tabs (gap-0.5) and the `…` button's width (an IconButton: 14px icon, p-1) — the two numbers the collapse calculation uses */
 const TAB_GAP = 2
@@ -285,8 +286,6 @@ function TabGroup({
  * `dropsBefore`): the boundary at the middle gives each outcome half the button, so
  * the hand can predict which side it gets.
  */
-const dropsLeft = (rect: { left: number; width: number }, clientX: number): boolean =>
-  clientX < rect.left + rect.width / 2
 
 /**
  * The collapsed tabs (`…`).

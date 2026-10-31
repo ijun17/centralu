@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../../store/store.js'
-import { Pill } from '../../components/Pill.jsx'
+import { WaitCard, WaitFooter } from '../approval/WaitCard.jsx'
 
 /** How long a card stands before its buttons take a click: the next card must not take a click meant for the last */
 export const HOST_REQUEST_ARM_MS = 500
@@ -45,16 +45,15 @@ export function HostRequestCards() {
       data-method={first.method}
       data-armed={live ? 'true' : 'false'}
     >
-      <div className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised">
-        <div className="flex items-center gap-2 px-3 pt-3">
-          <Pill size="label" edge="solid" tone="bright">
-            Awaiting approval
-          </Pill>
-          <span className="text-xs text-ink-faint" data-testid="host-request-from">
+      <WaitCard
+        subtitleTestId="host-request-from"
+        subtitle={
+          <>
             A program on this computer{first.client ? ` (it calls itself ${first.client})` : ''}
             {first.session ? `, which says it runs under the session ${first.session},` : ''} asks, and waits
-          </span>
-        </div>
+          </>
+        }
+      >
         {/* All of it shows, wrapped anywhere: what runs is what the card says, and a long line of JSON has no spaces */}
         <p
           className="mt-2 max-h-[50vh] overflow-y-auto whitespace-pre-wrap px-3 text-md leading-body text-ink [overflow-wrap:anywhere]"
@@ -65,7 +64,7 @@ export function HostRequestCards() {
         <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
           It came from outside this window, so it runs only if you allow it. If you did not ask for this, deny it.
         </p>
-        <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <WaitFooter>
           <button className={BUTTON} onClick={() => answer('allow')} disabled={!live} data-testid="host-request-allow">
             Allow
           </button>
@@ -77,8 +76,8 @@ export function HostRequestCards() {
               {more === 1 ? '1 more waits' : `${more} more wait`}
             </span>
           )}
-        </div>
-      </div>
+        </WaitFooter>
+      </WaitCard>
     </div>
   )
 }

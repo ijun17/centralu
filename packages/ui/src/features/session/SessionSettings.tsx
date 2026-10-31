@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
+import { usePresence } from '../../components/presence.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { autoCompactOf, launchRefusal, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -228,16 +229,13 @@ export function SessionSettings({
     [compactPlatform, sessionId, open],
     [compactSetting.controlled, compactSetting.share, model],
   )
-  /** Mid closing-animation — unmounts only after it has fully settled (cc-hang-out) */
-  const [closing, setClosing] = useState(false)
+  /** The menu stays on screen for its exit animation (cc-hang-out), then goes */
+  const { shown, leaving } = usePresence(open)
   // Tells the outside when it opens/closes (the collapsed composer must not fold away meanwhile)
   useEffect(() => {
     onOpenChange?.(open)
   }, [open, onOpenChange])
-  const close = useCallback(() => {
-    setOpen(false)
-    setClosing(true)
-  }, [])
+  const close = useCallback(() => setOpen(false), [])
   const rootRef = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
@@ -259,19 +257,11 @@ export function SessionSettings({
    */
   useDismiss({ open, onClose: close, refs: [rootRef], returnFocusTo: triggerRef })
 
-  // With reduced-motion, animationend never fires — a timer guarantees it finishes
-  useEffect(() => {
-    if (!closing) return
-    const t = window.setTimeout(() => setClosing(false), 200)
-    return () => window.clearTimeout(t)
-  }, [closing])
-
   // The `/model` GUI command (2026-09-07) — a signal from the composer to open this session's
   // menu
   const menuRequest = useStore((s) => s.settingsMenuRequest)
   useEffect(() => {
     if (menuRequest?.sessionId !== sessionId) return
-    setClosing(false)
     setOpen(true)
   }, [menuRequest, sessionId])
 
@@ -321,7 +311,7 @@ export function SessionSettings({
         <ChevronIcon open={open} size={10} />
       </button>
 
-      {(open || closing) && (
+      {shown && (
         /*
           Opens upward. This row sits at the bottom of the window (or the grid pane), so opening
           downward would get clipped immediately — the autocomplete menu uses the same direction
@@ -331,11 +321,8 @@ export function SessionSettings({
         <div
           role="menu"
           data-testid="settings-menu"
-          onAnimationEnd={() => {
-            if (!open) setClosing(false)
-          }}
           className={`absolute bottom-full left-0 z-30 mb-1 max-h-80 w-60 overflow-y-auto overflow-x-hidden rounded-bubble border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
-            open ? 'cc-hang' : 'cc-hang-out pointer-events-none'
+            leaving ? 'cc-hang-out pointer-events-none' : 'cc-hang'
           }`}
         >
           <MenuSection label="Model">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dropsBefore, moveTo } from './reorder.js'
+import { dropsBefore, dropsLeft, moveTo } from './reorder.js'
 
 describe('moveTo', () => {
   const ids = ['a', 'b', 'c', 'd']
@@ -48,5 +48,14 @@ describe('dropsBefore', () => {
 
   it('is after exactly in the middle — the boundary has to fall on one fixed side so the hand can predict it', () => {
     expect(dropsBefore(rect, 110)).toBe(false)
+  })
+})
+
+describe('dropsLeft', () => {
+  const rect = { left: 100, width: 20 }
+
+  it('is before in the left half and after from the middle on', () => {
+    expect(dropsLeft(rect, 109)).toBe(true)
+    expect(dropsLeft(rect, 110)).toBe(false)
   })
 })
