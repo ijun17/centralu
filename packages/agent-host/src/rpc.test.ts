@@ -199,3 +199,29 @@ describe('agents.detect and the setup actions', () => {
     await expect(rpc('agents.signIn', { tool: 'nope' })).rejects.toThrow(/Unknown tool/)
   })
 })
+
+/** Parameters are parsed once, in the dispatcher: a call that fails validation answers the schema's own error and runs nothing */
+describe('parameters at the boundary', () => {
+  const calls: string[] = []
+  const mgr = { interrupt: () => void calls.push('interrupt'), listProjects: () => [] } as unknown as SessionManager
+  const rpc = createRpcHandler(mgr, new Map())
+  const messageOf = (schemaName: 'agents.interrupt', params: unknown) => {
+    const r = RpcMethods[schemaName].params.safeParse(params)
+    return r.success ? '' : r.error.message
+  }
+
+  it('a parsed method with bad parameters answers the schema error and runs nothing', async () => {
+    await expect(rpc('agents.interrupt', {})).rejects.toThrow(messageOf('agents.interrupt', {}))
+    expect(calls).toEqual([])
+    await rpc('agents.interrupt', { sessionId: 's1' })
+    expect(calls).toEqual(['interrupt'])
+  })
+
+  it('a method that takes no parameters never looks at them', async () => {
+    await expect(rpc('projects.list', 'anything')).resolves.toEqual([])
+  })
+
+  it('host.stop still checks it can stop before it reads its parameters', async () => {
+    await expect(rpc('host.stop', { ifIdle: 'yes' })).rejects.toThrow(/quit the app instead/)
+  })
+})

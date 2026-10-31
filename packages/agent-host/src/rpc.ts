@@ -1,5 +1,6 @@
 import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
+import type { z } from 'zod'
 import { ThemeFiles } from './themes.js'
 import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
@@ -149,6 +150,8 @@ export type MachinesPort = {
   followHub?(): void
 }
 
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }
+
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
@@ -206,105 +209,99 @@ export function createRpcHandler(
     return a.setup
   }
 
-  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }) => Promise<unknown> } = {
+  /*
+   * Two methods read their parameters themselves: both accept no parameters at all (`p ?? {}`), and `host.stop` checks that it
+   * can stop before it looks at them. Every other method has its parameters parsed once, by the dispatcher below.
+   */
+  const raw = {
+    'host.credentials': async (p: unknown) => serveCredentials?.(RpcMethods['host.credentials'].params.parse(p ?? {}).nonce) ?? { credentials: null },
+    'host.stop': async (p: unknown) => {
+      if (!stopHost) {
+        throw rpcError('This host runs under the Centralu app, which stops it: quit the app instead')
+      }
+      const { ifIdle, forUpdate } = RpcMethods['host.stop'].params.parse(p ?? {})
+      if (ifIdle) {
+        if (!stopGate) throw rpcError('This host cannot tell whether it is idle')
+        // No await from the check to the refusal: nothing can start in between (lifecycle/stop-gate.ts)
+        const running = stopGate.busy()
+        if (running) return { ok: false as const, ...running }
+        stopGate.refuse()
+      }
+      // After this answer has been written: the shutdown closes the socket it travels on
+      setTimeout(() => stopHost({ forUpdate: forUpdate === true }), 50)
+      return { ok: true as const }
+    },
+  } satisfies Record<string, (p: unknown) => Promise<unknown>>
+
+  /** The answer of a method that only does something: `ack(work)` runs the work as an argument and answers `{ ok: true }` */
+  const ack = (_done?: unknown) => ({ ok: true as const })
+
+  const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
-    'agents.createSession': async (p, ctx) => mgr.createSession({ ...RpcMethods['agents.createSession'].params.parse(p), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
-    'agents.send': async (p, ctx) => {
-      const { sessionId, text, attachments, intent } = RpcMethods['agents.send'].params.parse(p)
+    'agents.createSession': async (p, ctx) => mgr.createSession({ ...p, ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
+    'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
       const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined
       await mgr.send(sessionId, text, attachments, undefined, true, intent, fromScript)
       return { ok: true as const }
     },
-    'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(RpcMethods['agents.reportOwed'].params.parse(p).sessionId) }),
-    'agents.respondApproval': async (p) => {
-      const { sessionId, requestId, decision, scope, matcher } =
-        RpcMethods['agents.respondApproval'].params.parse(p)
-      mgr.respondApproval(sessionId, requestId, decision, scope, matcher)
-      return { ok: true as const }
-    },
-    'agents.answerQuestion': async (p) => {
-      const { sessionId, requestId, answers } = RpcMethods['agents.answerQuestion'].params.parse(p)
-      mgr.answerQuestion(sessionId, requestId, answers)
-      return { ok: true as const }
-    },
-    'agents.models': async (p) => mgr.toolQueries.listModels(RpcMethods['agents.models'].params.parse(p).tool),
-    'agents.interrupt': async (p) => {
-      mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)
-      return { ok: true as const }
-    },
-    'agents.stopBackgroundTask': async (p) => {
-      const { sessionId, taskId } = RpcMethods['agents.stopBackgroundTask'].params.parse(p)
-      await mgr.sessionSettings.stopBackgroundTask(sessionId, taskId)
-      return { ok: true as const }
-    },
-    'agents.clearBackgroundTasks': async (p) => {
-      mgr.sessionSettings.clearBackgroundTasks(RpcMethods['agents.clearBackgroundTasks'].params.parse(p).sessionId)
-      return { ok: true as const }
-    },
+    'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(p.sessionId) }),
+    'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.respondApproval(sessionId, requestId, decision, scope, matcher)),
+    'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.answerQuestion(sessionId, requestId, answers)),
+    'agents.models': async (p) => mgr.toolQueries.listModels(p.tool),
+    'agents.interrupt': async (p) => ack(mgr.interrupt(p.sessionId)),
+    'agents.stopBackgroundTask': async ({ sessionId, taskId }) => ack(await mgr.sessionSettings.stopBackgroundTask(sessionId, taskId)),
+    'agents.clearBackgroundTasks': async (p) => ack(mgr.sessionSettings.clearBackgroundTasks(p.sessionId)),
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
-    'agents.deleteSession': async (p) => {
-      const { sessionId, deleteWorktree, deleteExternal } = RpcMethods['agents.deleteSession'].params.parse(p)
-      await mgr.trashSession(sessionId, deleteWorktree, deleteExternal)
-      return { ok: true as const }
-    },
+    'agents.deleteSession': async ({ sessionId, deleteWorktree, deleteExternal }) => ack(await mgr.trashSession(sessionId, deleteWorktree, deleteExternal)),
     // The window's archive of a session that looks idle: only when nothing is lost (#1512)
-    'agents.archiveIfAtRest': async (p) => {
-      const { sessionId, deleteExternal } = RpcMethods['agents.archiveIfAtRest'].params.parse(p)
+    'agents.archiveIfAtRest': async ({ sessionId, deleteExternal }) => {
       return mgr.trash.archiveIfAtRest(sessionId, deleteExternal)
     },
     // What the window's archive dialog lists before it moves anything (#1595)
-    'agents.archiveLosses': async (p) => {
-      const { sessionId } = RpcMethods['agents.archiveLosses'].params.parse(p)
+    'agents.archiveLosses': async ({ sessionId }) => {
       return { asks: mgr.trash.archiveLosses(sessionId) }
     },
     // A hub's start_agent child deleted with the worktree made for it, when nothing would be lost (#1161 item 3)
-    'agents.deleteAgentChild': async (p) => {
-      const { sessionId, worktreeBranch } = RpcMethods['agents.deleteAgentChild'].params.parse(p)
+    'agents.deleteAgentChild': async ({ sessionId, worktreeBranch }) => {
       return mgr.worktrees.deleteHubChild(sessionId, worktreeBranch)
     },
-    'agents.exportHandoffRecord': async (p) => {
-      const { sessionId, toTool } = RpcMethods['agents.exportHandoffRecord'].params.parse(p)
+    'agents.exportHandoffRecord': async ({ sessionId, toTool }) => {
       return mgr.handoffNotes.exportHandoffRecord(sessionId, toTool)
     },
-    'agents.exportHandoffNote': async (p) => {
-      const { sessionId, afterSeq } = RpcMethods['agents.exportHandoffNote'].params.parse(p)
+    'agents.exportHandoffNote': async ({ sessionId, afterSeq }) => {
       return mgr.handoffNotes.exportHandoffNote(sessionId, afterSeq)
     },
-    'agents.autoCompact': async (p) => mgr.autoCompactFor(RpcMethods['agents.autoCompact'].params.parse(p).sessionId),
+    'agents.autoCompact': async (p) => mgr.autoCompactFor(p.sessionId),
     'agents.worktreeStatus': async (p) =>
-      mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
+      mgr.worktreeStatus(p.sessionId),
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
-    'agents.resolveMcpProposal': async (p) => {
-      const { name, approve } = RpcMethods['agents.resolveMcpProposal'].params.parse(p)
+    'agents.resolveMcpProposal': async ({ name, approve }) => {
       const r = await mgr.orchestratorSlot.resolveMcpProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
     'agents.skillProposals': async () => ({ proposals: mgr.orchestratorSlot.skillProposals() }),
-    'agents.resolveSkillProposal': async (p) => {
-      const { name, approve } = RpcMethods['agents.resolveSkillProposal'].params.parse(p)
+    'agents.resolveSkillProposal': async ({ name, approve }) => {
       const r = await mgr.orchestratorSlot.resolveSkillProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
     'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSlot.orchestratorSkills() }),
-    'agents.deleteOrchestratorSkill': async (p) => {
-      const { name } = RpcMethods['agents.deleteOrchestratorSkill'].params.parse(p)
+    'agents.deleteOrchestratorSkill': async ({ name }) => {
       const r = await mgr.orchestratorSlot.deleteOrchestratorSkill(name)
       if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
       return { ok: true as const }
     },
-    'agents.listExternalSessions': async (p) => {
-      const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
+    'agents.listExternalSessions': async ({ projectId, tool, limit }) => {
       return mgr.externals.listExternalSessions(projectId, tool, limit)
     },
     'agents.restartSession': async (p) =>
-      mgr.restartSession(RpcMethods['agents.restartSession'].params.parse(p).sessionId),
+      mgr.restartSession(p.sessionId),
     'agents.resumeSession': async (p) =>
-      mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
+      mgr.resumeSession(p.sessionId),
     'agents.forkConversation': async (p) =>
-      mgr.forkConversation(RpcMethods['agents.forkConversation'].params.parse(p).sessionId),
+      mgr.forkConversation(p.sessionId),
     'agents.updateSettings': async (p) => {
       /*
        * **Fields are never pulled out one at a time.**
@@ -313,25 +310,23 @@ export function createRpcHandler(
        * reached the host — nothing happened, silently, with no error. Passing the parsed result
        * through whole means this spot never needs fixing again as more settings are added.
        */
-      const { sessionId, by, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
+      const { sessionId, by, ...settings } = p
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
-    'agents.switchTool': async (p) => {
-      const { sessionId, tool } = RpcMethods['agents.switchTool'].params.parse(p)
+    'agents.switchTool': async ({ sessionId, tool }) => {
       return mgr.switchTool(sessionId, tool)
     },
-    'agents.capabilities': async (p) => {
-      const { tool } = RpcMethods['agents.capabilities'].params.parse(p)
+    'agents.capabilities': async ({ tool }) => {
       const a = adapters.get(tool)
       if (!a) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
       return a.capabilities
     },
-    'agents.versions': async (p) => requireAgentVersions().check(RpcMethods['agents.versions'].params.parse(p).force),
+    'agents.versions': async (p) => requireAgentVersions().check(p.force),
     'agents.setAutoApplyVersions': async (p) =>
-      requireAgentVersions().setAutoApply(RpcMethods['agents.setAutoApplyVersions'].params.parse(p).enabled),
-    'agents.applyVersions': async (p) => requireAgentVersions().applyNow({ keepQuiet: RpcMethods['agents.applyVersions'].params.parse(p).keepQuiet === true }),
+      requireAgentVersions().setAutoApply(p.enabled),
+    'agents.applyVersions': async (p) => requireAgentVersions().applyNow({ keepQuiet: p.keepQuiet === true }),
     'agents.sleepPolicy': async () => requireSleeper().policy(),
-    'agents.setSleepPolicy': async (p) => requireSleeper().setAfterMinutes(RpcMethods['agents.setSleepPolicy'].params.parse(p).afterMinutes),
+    'agents.setSleepPolicy': async (p) => requireSleeper().setAfterMinutes(p.afterMinutes),
     'agents.detect': async () =>
       Promise.all(
         [...adapters.values()].map(async (a) => {
@@ -340,181 +335,133 @@ export function createRpcHandler(
           return { ...a.descriptor, installed, loggedIn, detail, setup: setup ?? setupOfDetection(installed, loggedIn) }
         }),
       ),
-    'agents.installTool': async (p) => toolSetup(RpcMethods['agents.installTool'].params.parse(p).tool).install(),
-    'agents.cancelInstallTool': async (p) => toolSetup(RpcMethods['agents.cancelInstallTool'].params.parse(p).tool).cancelInstall(),
-    'agents.signIn': async (p) => toolSetup(RpcMethods['agents.signIn'].params.parse(p).tool).signIn(),
-    'agents.cancelSignIn': async (p) => toolSetup(RpcMethods['agents.cancelSignIn'].params.parse(p).tool).cancelSignIn(),
-    'git.status': async (p) => mgr.files.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
-    'git.diff': async (p) => {
-      const { projectId, path, staged } = RpcMethods['git.diff'].params.parse(p)
+    'agents.installTool': async (p) => toolSetup(p.tool).install(),
+    'agents.cancelInstallTool': async (p) => toolSetup(p.tool).cancelInstall(),
+    'agents.signIn': async (p) => toolSetup(p.tool).signIn(),
+    'agents.cancelSignIn': async (p) => toolSetup(p.tool).cancelSignIn(),
+    'git.status': async (p) => mgr.files.gitStatusFiles(p.projectId),
+    'git.diff': async ({ projectId, path, staged }) => {
       return mgr.files.gitDiff(projectId, path, staged)
     },
-    'git.log': async (p) => {
-      const { projectId, limit } = RpcMethods['git.log'].params.parse(p)
+    'git.log': async ({ projectId, limit }) => {
       return mgr.files.gitLog(projectId, limit)
     },
-    'git.commitDetail': async (p) => {
-      const { projectId, sha } = RpcMethods['git.commitDetail'].params.parse(p)
+    'git.commitDetail': async ({ projectId, sha }) => {
       return mgr.files.gitCommitDetail(projectId, sha)
     },
-    'git.branches': async (p) => mgr.files.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
+    'git.branches': async (p) => mgr.files.gitBranches(p.projectId),
     'git.ignoredEntries': async (p) =>
-      mgr.files.gitIgnoredEntries(RpcMethods['git.ignoredEntries'].params.parse(p).projectId),
-    'git.checkout': async (p) => {
-      const { projectId, branch, dryRun } = RpcMethods['git.checkout'].params.parse(p)
+      mgr.files.gitIgnoredEntries(p.projectId),
+    'git.checkout': async ({ projectId, branch, dryRun }) => {
       return mgr.files.gitCheckout(projectId, branch, dryRun)
     },
-    'git.stage': async (p) => {
-      const { projectId, paths, unstage } = RpcMethods['git.stage'].params.parse(p)
-      await mgr.files.gitStage(projectId, paths, unstage)
-      return { ok: true as const }
-    },
-    'git.commit': async (p) => {
-      const { projectId, message } = RpcMethods['git.commit'].params.parse(p)
+    'git.stage': async ({ projectId, paths, unstage }) => ack(await mgr.files.gitStage(projectId, paths, unstage)),
+    'git.commit': async ({ projectId, message }) => {
       return mgr.files.gitCommit(projectId, message)
     },
-    'git.push': async (p) => mgr.files.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
-    'git.cancel': async (p) => mgr.files.gitCancel(RpcMethods['git.cancel'].params.parse(p).projectId),
-    'attachments.save': async (p) => {
-      const { sessionId, name, mime, dataBase64 } = RpcMethods['attachments.save'].params.parse(p)
+    'git.push': async (p) => mgr.files.gitPush(p.projectId),
+    'git.cancel': async (p) => mgr.files.gitCancel(p.projectId),
+    'attachments.save': async ({ sessionId, name, mime, dataBase64 }) => {
       return mgr.record.saveAttachment(sessionId, name, mime, dataBase64)
     },
-    'fs.listDir': async (p) => {
-      const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
+    'fs.listDir': async ({ projectId, path }) => {
       return mgr.files.listDir(projectId, path)
     },
-    'fs.watch': async (p, ctx) => {
-      const { projectId, paths } = RpcMethods['fs.watch'].params.parse(p)
+    'fs.watch': async ({ projectId, paths }, ctx) => {
       // Each window's set is its own, and the watchers are the union (#842 item 6)
       return { watched: mgr.files.watchDirs(projectId, paths, ctx?.client) }
     },
-    'fs.readFile': async (p) => {
-      const { projectId, path, sessionId } = RpcMethods['fs.readFile'].params.parse(p)
+    'fs.readFile': async ({ projectId, path, sessionId }) => {
       return mgr.files.readTextFile(projectId, path, sessionId)
     },
-    'fs.move': async (p) => {
-      const { projectId, from, toDir } = RpcMethods['fs.move'].params.parse(p)
+    'fs.move': async ({ projectId, from, toDir }) => {
       return mgr.files.moveEntry(projectId, from, toDir)
     },
-    'fs.importFile': async (p) => {
-      const { projectId, toDir, name, dataBase64 } = RpcMethods['fs.importFile'].params.parse(p)
+    'fs.importFile': async ({ projectId, toDir, name, dataBase64 }) => {
       return mgr.files.importFile(projectId, toDir, name, dataBase64)
     },
-    'fs.resolve': async (p) => {
-      const { projectId, path, purpose, sessionId } = RpcMethods['fs.resolve'].params.parse(p)
+    'fs.resolve': async ({ projectId, path, purpose, sessionId }) => {
       return { path: await mgr.files.resolveFile(projectId, path, purpose, sessionId) }
     },
-    'messages.search': async (p) => {
-      const { query, limit } = RpcMethods['messages.search'].params.parse(p)
+    'messages.search': async ({ query, limit }) => {
       return mgr.searchMessages(query, limit)
     },
     'mail.list': async () => requireMail().list(),
-    'mail.thread': async (p) => {
-      const { threadId, after, all, tail, before } = RpcMethods['mail.thread'].params.parse(p)
+    'mail.thread': async ({ threadId, after, all, tail, before }) => {
       return requireMail().thread(threadId, { after, all, tail, before })
     },
-    'mail.reply': async (p) => {
-      const { threadId, text, kind } = RpcMethods['mail.reply'].params.parse(p)
+    'mail.reply': async ({ threadId, text, kind }) => {
       return requireMail().reply(threadId, text, kind)
     },
-    'mail.close': async (p) => {
-      const { threadId, outcome } = RpcMethods['mail.close'].params.parse(p)
+    'mail.close': async ({ threadId, outcome }) => {
       return requireMail().close(threadId, outcome)
     },
-    'mail.reassign': async (p) => {
-      const { threadId, sessionId, text } = RpcMethods['mail.reassign'].params.parse(p)
+    'mail.reassign': async ({ threadId, sessionId, text }) => {
       return requireMail().reassign(threadId, sessionId, text)
     },
-    'mail.unblock': async (p) => {
-      const { threadId, n } = RpcMethods['mail.unblock'].params.parse(p)
+    'mail.unblock': async ({ threadId, n }) => {
       return requireMail().unblock(threadId, n)
     },
-    'mail.held': async (p) => {
-      const { action, recipient, messageIds } = RpcMethods['mail.held'].params.parse(p)
+    'mail.held': async ({ action, recipient, messageIds }) => {
       return requireMail().held(action, recipient, messageIds)
     },
-    'mail.resume': async (p) => {
-      requireMail().resume(RpcMethods['mail.resume'].params.parse(p))
-      return { ok: true as const }
-    },
-    'mail.wake': async (p) => {
-      requireMail().wake(RpcMethods['mail.wake'].params.parse(p).wake)
-      return { ok: true as const }
-    },
-    'approvals.deleteRule': async (p) => {
-      mgr.approvalRules.deleteApprovalRule(RpcMethods['approvals.deleteRule'].params.parse(p).id)
-      return { ok: true as const }
-    },
-    'workspace.save': async (p) => {
-      mgr.prefs.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
-      return { ok: true as const }
-    },
+    'mail.resume': async (p) => ack(requireMail().resume(p)),
+    'mail.wake': async (p) => ack(requireMail().wake(p.wake)),
+    'approvals.deleteRule': async (p) => ack(mgr.approvalRules.deleteApprovalRule(p.id)),
+    'workspace.save': async (p) => ack(mgr.prefs.saveWorkspace(p.layout)),
     'workspace.load': async () => mgr.prefs.loadWorkspace(),
     // The orchestrator's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
     'projects.add': async (p) => {
-      const info = await mgr.addProject(RpcMethods['projects.add'].params.parse(p).path)
+      const info = await mgr.addProject(p.path)
       externalApps?.refresh()
       return info
     },
-    'projects.inspect': async (p) => mgr.projectCreation.inspectFolder(RpcMethods['projects.inspect'].params.parse(p).path),
-    'projects.create': async (p) => {
-      const { name, parent, source } = RpcMethods['projects.create'].params.parse(p)
+    'projects.inspect': async (p) => mgr.projectCreation.inspectFolder(p.path),
+    'projects.create': async ({ name, parent, source }) => {
       const info = await mgr.projectCreation.createProject(name, parent, source)
       externalApps?.refresh()
       return info
     },
-    'projects.createPreview': async (p) => {
-      const { name, parent, source } = RpcMethods['projects.createPreview'].params.parse(p)
+    'projects.createPreview': async ({ name, parent, source }) => {
       return mgr.projectCreation.projectCreatePreview(name, parent, source)
     },
     'orchestrator.get': async () => mgr.orchestrator(),
     'orchestrator.peek': async () => mgr.orchestratorSlot.orchestratorPeek(),
-    'orchestrator.configure': async (p) => {
-      mgr.orchestratorSlot.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
-      return { ok: true as const }
-    },
-    'apps.viewFrame': async (p) => {
-      const { appId, projectId, instanceId, hostOrigin } = RpcMethods['apps.viewFrame'].params.parse(p)
+    'orchestrator.configure': async (p) => ack(mgr.orchestratorSlot.configureOrchestrator(p.tool)),
+    'apps.viewFrame': async ({ appId, projectId, instanceId, hostOrigin }) => {
       return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
     },
     // A hub asks this of the machine a view is open on, and serves the view in its own window (remote-hub.md §11)
-    'apps.viewDocument': async (p) => {
-      const { instanceId } = RpcMethods['apps.viewDocument'].params.parse(p)
+    'apps.viewDocument': async ({ instanceId }) => {
       const d = await requireViews().document(instanceId)
       return { appId: d.app.appId, projectId: d.app.projectId, uri: d.uri, origin: d.origin, resource: d.resource as { contents: unknown[] } }
     },
-    'apps.openView': async (p, ctx) => {
-      const { appId, projectId, lease, openKey } = RpcMethods['apps.openView'].params.parse(p)
+    'apps.openView': async ({ appId, projectId, lease, openKey }, ctx) => {
       // A window that asks for a lease holds the view through its connection (#392); an older window's view lives until closed
       return openHomeView(requireExternalApps(), requireViews(), { appId, projectId }, lease && ctx ? ctx.client : undefined, openKey)
     },
-    'apps.recoverView': async (p, ctx) => {
-      const { appId, projectId, openKey, lease } = RpcMethods['apps.recoverView'].params.parse(p)
+    'apps.recoverView': async ({ appId, projectId, openKey, lease }, ctx) => {
       const prior = requireViews().homeOpen({ appId, projectId }, openKey, lease && ctx ? ctx.client : undefined)
       if (prior) return prior
       // No reservation survived (a crash, an eviction, or an older host). Repeating a home tool is unsafe.
       throw new Error('The original app open could not be recovered — the home tool may or may not have run; check before opening again')
     },
-    'apps.holdViews': async (p, ctx) => {
-      const { instanceIds } = RpcMethods['apps.holdViews'].params.parse(p)
+    'apps.holdViews': async ({ instanceIds }, ctx) => {
       if (!ctx) throw rpcError('App views are held through a window connection')
       return { missing: requireViews().hold(instanceIds, ctx.client) }
     },
-    'apps.closeView': async (p) => {
-      const { instanceId } = RpcMethods['apps.closeView'].params.parse(p)
+    'apps.closeView': async ({ instanceId }) => {
       // If it is a view inside a conversation, that side closes it (along with its own record). Otherwise it is the fixed view
       if (!inlineViews?.close(instanceId)) requireViews().close(instanceId)
       return { ok: true as const }
     },
-    'apps.inlineReopen': async (p) => {
-      const { sessionId, callId } = RpcMethods['apps.inlineReopen'].params.parse(p)
+    'apps.inlineReopen': async ({ sessionId, callId }) => {
       if (!inlineViews) throw rpcError('App views are unavailable')
       return inlineViews.reopen(sessionId, callId)
     },
     // A host with no app runtime holds no views either — a reopened UI shows nothing but "open app"
-    'apps.inlineViews': async (p) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
-    'apps.viewMessage': async (p) => {
-      const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
+    'apps.inlineViews': async (p) => inlineViews?.list(p.sessionId) ?? [],
+    'apps.viewMessage': async ({ sessionId, instanceId, text }) => {
       /*
        * The app is decided by **the instance** — whatever the caller claims is only checked against
        * it (#93, #94).
@@ -535,13 +482,11 @@ export function createRpcHandler(
       await mgr.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
     },
-    'apps.readResource': async (p) => {
-      const { appId, projectId, uri, instanceId } = RpcMethods['apps.readResource'].params.parse(p)
+    'apps.readResource': async ({ appId, projectId, uri, instanceId }) => {
       // The shape of the answer is known between the view and the app. Here, only enough is checked to keep the envelope from breaking
       return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
-    'apps.invoke': async (p) => {
-      const { appId, name, args, projectId, instanceId } = RpcMethods['apps.invoke'].params.parse(p)
+    'apps.invoke': async ({ appId, name, args, projectId, instanceId }) => {
       // The instance is used only as the cause of "changed" — so that view does not hear the change
       // it caused itself (B-5). Unrelated to permissions
       const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}) }
@@ -555,51 +500,36 @@ export function createRpcHandler(
       }
     },
     'apps.list': async () => externalApps?.list() ?? [],
-    'apps.runs': async (p) => {
-      const { appId, projectId, limit } = RpcMethods['apps.runs'].params.parse(p)
+    'apps.runs': async ({ appId, projectId, limit }) => {
       return requireExternalApps().runs({ appId, projectId }, limit)
     },
-    'apps.restart': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.restart'].params.parse(p)
-      await requireExternalApps().restart({ appId, projectId })
-      return { ok: true as const }
-    },
-    'apps.remove': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.remove'].params.parse(p)
-      await requireExternalApps().removeUserApp({ appId, projectId })
-      return { ok: true as const }
-    },
+    'apps.restart': async ({ appId, projectId }) => ack(await requireExternalApps().restart({ appId, projectId })),
+    'apps.remove': async ({ appId, projectId }) => ack(await requireExternalApps().removeUserApp({ appId, projectId })),
     'apps.setSecret': async (p) => {
       // The value goes straight to the runtime here — this layer never records it and never returns it
-      const { appId, projectId, name, value } = RpcMethods['apps.setSecret'].params.parse(p)
+      const { appId, projectId, name, value } = p
       requireExternalApps().updateSecret({ appId, projectId }, name, value)
       return { ok: true as const }
     },
     'apps.setShared': async (p) => {
       // Sharing a project app with the person's other projects (#371 part A) — the manager stores it and recounts sessions
-      const { appId, projectId, shared } = RpcMethods['apps.setShared'].params.parse(p)
+      const { appId, projectId, shared } = p
       mgr.apps.setAppShared({ projectId, appId }, shared)
       return { ok: true as const }
     },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
     // with a review step if requested). All the judgment calls are made by the runtime's handoff
-    'apps.importPrepare': async (p) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
-    'apps.importCommit': async (p) => {
-      const { token, enable, reviewKey, parent } = RpcMethods['apps.importCommit'].params.parse(p)
+    'apps.importPrepare': async (p) => requireExternalApps().prepareImport(p.source),
+    'apps.importCommit': async ({ token, enable, reviewKey, parent }) => {
       // An import lands as a project of its own (#1141): `<parent>/<id>`, `~/Centralu` unless the person chose a parent
       requireExternalApps()
       return mgr.appSessions.commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }, parent)
     },
-    'apps.importCancel': async (p) => {
-      requireExternalApps().cancelImport(RpcMethods['apps.importCancel'].params.parse(p).token)
-      return { ok: true as const }
-    },
-    'apps.review': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.review'].params.parse(p)
+    'apps.importCancel': async (p) => ack(requireExternalApps().cancelImport(p.token)),
+    'apps.review': async ({ appId, projectId }) => {
       return requireExternalApps().reviewApp({ appId, projectId })
     },
-    'apps.enable': async (p) => {
-      const { appId, projectId, reviewKey } = RpcMethods['apps.enable'].params.parse(p)
+    'apps.enable': async ({ appId, projectId, reviewKey }) => {
       return requireExternalApps().enableApp({ appId, projectId }, reviewKey)
     },
     /*
@@ -608,8 +538,7 @@ export function createRpcHandler(
      * (the core). The runtime does not know git (`host-app-runtime-physics-only`): deciding what
      * counts as a version, based on where the app lives, is the core's call.
      */
-    'apps.versions': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.versions'].params.parse(p)
+    'apps.versions': async ({ appId, projectId }) => {
       const apps = requireExternalApps()
       // A user-folder app, or a root app outside git (#1141): the copies Centralu keeps. Otherwise git's history
       if (apps.keepsVersions({ appId, projectId })) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
@@ -619,97 +548,71 @@ export function createRpcHandler(
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
       return { kind: 'git' as const, repo, commits }
     },
-    'apps.restoreVersion': async (p) => {
-      const { appId, projectId, id } = RpcMethods['apps.restoreVersion'].params.parse(p)
+    'apps.restoreVersion': async ({ appId, projectId, id }) => {
       return requireExternalApps().restoreVersion({ appId, projectId }, id)
     },
-    'apps.create': async (p) => mgr.appSessions.createApp(RpcMethods['apps.create'].params.parse(p)),
-    'apps.builder': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)
+    'apps.create': async (p) => mgr.appSessions.createApp(p),
+    'apps.builder': async ({ appId, projectId }) => {
       return mgr.appSessions.builderOf({ appId, projectId })
     },
-    'apps.errors': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.errors'].params.parse(p)
+    'apps.errors': async ({ appId, projectId }) => {
       return requireExternalApps().errors({ appId, projectId })
     },
-    'apps.reach': async (p) => {
-      const { sessionId, appId, projectId } = RpcMethods['apps.reach'].params.parse(p)
+    'apps.reach': async ({ sessionId, appId, projectId }) => {
       return mgr.apps.appReach(sessionId, { appId, projectId })
     },
-    'apps.check': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.check'].params.parse(p)
+    'apps.check': async ({ appId, projectId }) => {
       const r = await mgr.appSessions.checkApp({ appId, projectId })
       return { ok: r.ok, text: r.text, findings: r.findings }
     },
     // A capability question (M4 D-4) — one from a chain started by a view. One started by a session
     // comes through `agents.respondApproval` as that session's own approval card
     'apps.questions': async () => mgr.hostCards.appQuestionList(),
-    'apps.answerQuestion': async (p) => {
-      const { questionId, decision } = RpcMethods['apps.answerQuestion'].params.parse(p)
-      mgr.hostCards.answerAppQuestion(questionId, decision)
-      return { ok: true as const }
-    },
-    'apps.permissions': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.permissions'].params.parse(p)
+    'apps.answerQuestion': async ({ questionId, decision }) => ack(mgr.hostCards.answerAppQuestion(questionId, decision)),
+    'apps.permissions': async ({ appId, projectId }) => {
       return requireExternalApps().permissions({ appId, projectId })
     },
-    'apps.forgetPermission': async (p) => {
-      const { appId, projectId, capability } = RpcMethods['apps.forgetPermission'].params.parse(p)
-      requireExternalApps().forgetPermission({ appId, projectId }, capability)
-      return { ok: true as const }
-    },
+    'apps.forgetPermission': async ({ appId, projectId, capability }) => ack(requireExternalApps().forgetPermission({ appId, projectId }, capability)),
     // Cross-project consents (#371) — the host owns them; Settings lists and revokes
     'projectConsents.list': async () => mgr.consents.projectConsents(),
-    'projectConsents.revoke': async (p) => {
-      const { fromProjectId, toProjectId, kind } = RpcMethods['projectConsents.revoke'].params.parse(p)
-      mgr.consents.revokeProjectConsent(fromProjectId, toProjectId, kind)
-      return { ok: true as const }
-    },
-    'apps.usage': async (p) => {
-      const { appId, projectId } = RpcMethods['apps.usage'].params.parse(p)
+    'projectConsents.revoke': async ({ fromProjectId, toProjectId, kind }) => ack(mgr.consents.revokeProjectConsent(fromProjectId, toProjectId, kind)),
+    'apps.usage': async ({ appId, projectId }) => {
       return requireExternalApps().agentUse({ appId, projectId })
     },
-    'apps.createBuilder': async (p) => {
-      const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
+    'apps.createBuilder': async ({ appId, projectId, tool }) => {
       return mgr.appSessions.createAppBuilder({ appId, projectId }, tool)
     },
-    'apps.sendError': async (p) => {
-      const { appId, projectId, at } = RpcMethods['apps.sendError'].params.parse(p)
+    'apps.sendError': async ({ appId, projectId, at }) => {
       return sendErrorToBuilder(
         { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
         { appId, projectId },
         at,
       )
     },
-    'apps.askBuilder': async (p) => {
-      const { appId, projectId, text, attachments, instanceId } = RpcMethods['apps.askBuilder'].params.parse(p)
+    'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }) => {
       return askBuilder(
         { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
         { ref: { appId, projectId }, text, attachments, instanceId },
       )
     },
-    'orchestrator.tools': async (p) => {
-      const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
+    'orchestrator.tools': async ({ sessionId }) => {
       // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
       if (!sessionId) return orchestratorToolSchemas('orchestrator')
       // A session with no bundle is offered nothing — the full list here would advertise tools its calls are refused
       const profile = mgr.toolProfileOf(sessionId)
       return profile ? orchestratorToolSchemas(profile) : []
     },
-    'orchestrator.tool': async (p) => {
-      const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)
+    'orchestrator.tool': async ({ sessionId, name, args }) => {
       return mgr.runOrchestratorTool(sessionId, name, args)
     },
-    'apps.sessionTools': async (p) => {
-      const { sessionId, server } = RpcMethods['apps.sessionTools'].params.parse(p)
+    'apps.sessionTools': async ({ sessionId, server }) => {
       return { tools: await mgr.apps.appSessionTools(sessionId, server) }
     },
-    'apps.sessionCall': async (p) => {
-      const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
+    'apps.sessionCall': async ({ sessionId, server, name, args, waitMs }) => {
       return mgr.apps.callAppForSession(sessionId, server, name, args, waitMs)
     },
     'grid.get': async () => mgr.layout.grid(),
-    'grid.set': async (p) => mgr.layout.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
+    'grid.set': async (p) => mgr.layout.setGridView(p.panels),
     /*
      * Not listed with no protection (#841 item 7): a keeper that could not answer made every agent it holds a stray,
      * offered to be stopped on quit. The stop refuses that case already; the list says it too.
@@ -720,14 +623,13 @@ export function createRpcHandler(
       return findStrays(mgr.projectRegistry.folderRoots(), process.pid, held)
     },
     'processes.stop': async (p) =>
-      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.projectRegistry.folderRoots(), process.pid, await heldOrUnknown()),
+      stopStrays(p.pids, mgr.projectRegistry.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),
-    'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
+    'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(p.projectId) }),
     'projects.reorder': async (p) =>
-      mgr.projectRegistry.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
-    'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(RpcMethods['projects.deleteOutlook'].params.parse(p).projectId)) ?? 'stays' }),
-    'projects.delete': async (p) => {
-      const { projectId } = RpcMethods['projects.delete'].params.parse(p)
+      mgr.projectRegistry.reorderProjects(p.orderedIds),
+    'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(p.projectId)) ?? 'stays' }),
+    'projects.delete': async ({ projectId }) => {
       /*
        * That project's terminals and Run-menu executions are also ended here (#177). Both use the
        * path as their key, and the manager does not know about them, so this door does it. The path
@@ -752,152 +654,95 @@ export function createRpcHandler(
       void settleDeletedProjects?.()
       return { ok: true as const }
     },
-    'projects.setTrusted': async (p) => {
-      const { projectId, trusted } = RpcMethods['projects.setTrusted'].params.parse(p)
+    'projects.setTrusted': async ({ projectId, trusted }) => {
       // The toggle answers at once; the project's idle sessions restart behind it (#663)
       void mgr.setProjectTrusted(projectId, trusted).catch((err) => console.error('[sessions] restarting for a trust change failed:', err))
       externalApps?.refresh()
       return { ok: true as const }
     },
-    'projects.setCommands': async (p) => {
-      const { projectId, commands } = RpcMethods['projects.setCommands'].params.parse(p)
+    'projects.setCommands': async ({ projectId, commands }) => {
       return mgr.projectRegistry.setProjectCommands(projectId, commands)
     },
-    'worktrees.setTrunk': async (p) => {
-      const { projectId, baseBranch } = RpcMethods['worktrees.setTrunk'].params.parse(p)
-      await mgr.projectRegistry.setWorktreeTrunk(projectId, baseBranch)
-      return { ok: true as const }
-    },
-    'projects.setAgentInstructions': async (p) => {
-      const { projectId, text } = RpcMethods['projects.setAgentInstructions'].params.parse(p)
-      mgr.setAgentInstructions(projectId, text)
-      return { ok: true as const }
-    },
-    'projects.setWorktreeSetup': async (p) => {
-      const { projectId, setup } = RpcMethods['projects.setWorktreeSetup'].params.parse(p)
-      mgr.projectRegistry.setWorktreeSetup(projectId, setup)
-      return { ok: true as const }
-    },
-    'sessions.reorder': async (p) => {
-      const { projectId, orderedIds } = RpcMethods['sessions.reorder'].params.parse(p)
+    'worktrees.setTrunk': async ({ projectId, baseBranch }) => ack(await mgr.projectRegistry.setWorktreeTrunk(projectId, baseBranch)),
+    'projects.setAgentInstructions': async ({ projectId, text }) => ack(mgr.setAgentInstructions(projectId, text)),
+    'projects.setWorktreeSetup': async ({ projectId, setup }) => ack(mgr.projectRegistry.setWorktreeSetup(projectId, setup)),
+    'sessions.reorder': async ({ projectId, orderedIds }) => {
       return mgr.layout.reorderSessions(projectId, orderedIds)
     },
-    'projects.gitStatus': async (p) => {
-      const { projectId } = RpcMethods['projects.gitStatus'].params.parse(p)
+    'projects.gitStatus': async ({ projectId }) => {
       return mgr.projectRegistry.projectGitStatus(projectId)
     },
     'sessions.list': async () => mgr.listSessions(),
-    'sessions.rename': async (p) => {
-      const { sessionId, name } = RpcMethods['sessions.rename'].params.parse(p)
-      mgr.rename(sessionId, name)
-      return { ok: true as const }
-    },
-    'sessions.clearError': async (p) => {
-      const { sessionId, seq } = RpcMethods['sessions.clearError'].params.parse(p)
+    'sessions.rename': async ({ sessionId, name }) => ack(mgr.rename(sessionId, name)),
+    'sessions.clearError': async ({ sessionId, seq }) => {
       return { ok: true as const, ...mgr.clearError(sessionId, seq) }
     },
-    'sessions.markRead': async (p) => {
-      const { sessionId, seq } = RpcMethods['sessions.markRead'].params.parse(p)
-      mgr.sessionSettings.markRead(sessionId, seq)
-      return { ok: true as const }
-    },
-    'messages.load': async (p) => {
-      const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
+    'sessions.markRead': async ({ sessionId, seq }) => ack(mgr.sessionSettings.markRead(sessionId, seq)),
+    'messages.load': async ({ sessionId, limit, beforeSeq }) => {
       return mgr.loadMessages(sessionId, limit, beforeSeq)
     },
-    'messages.image': async (p) => {
-      const { sessionId, path } = RpcMethods['messages.image'].params.parse(p)
+    'messages.image': async ({ sessionId, path }) => {
       return mgr.record.messageImage(sessionId, path)
     },
-    'messages.subagent': async (p) => {
-      const { sessionId, parentCallId, afterSeq, limit } = RpcMethods['messages.subagent'].params.parse(p)
+    'messages.subagent': async ({ sessionId, parentCallId, afterSeq, limit }) => {
       return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },
-    'messages.subagentTrashed': async (p) => {
-      const { sessionId, parentCallId } = RpcMethods['messages.subagentTrashed'].params.parse(p)
+    'messages.subagentTrashed': async ({ sessionId, parentCallId }) => {
       return mgr.trash.subagentTrashed(sessionId, parentCallId)
     },
     'agents.commands': async (p) =>
-      mgr.toolQueries.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
-    'agents.usage': async (p) => {
-      const { tool, limits, settle } = RpcMethods['agents.usage'].params.parse(p)
+      mgr.toolQueries.listCommands(p.sessionId),
+    'agents.usage': async ({ tool, limits, settle }) => {
       return mgr.toolQueries.usageFor(tool, { limits, settle })
     },
-    'usage.history': async (p) => mgr.usageHistory(RpcMethods['usage.history'].params.parse(p)),
-    'agents.account': async (p) => mgr.toolRegistry.accountFor(RpcMethods['agents.account'].params.parse(p).tool),
-    'files.search': async (p) => {
-      const { projectId, query, limit } = RpcMethods['files.search'].params.parse(p)
+    'usage.history': async (p) => mgr.usageHistory(p),
+    'agents.account': async (p) => mgr.toolRegistry.accountFor(p.tool),
+    'files.search': async ({ projectId, query, limit }) => {
       return searchFiles(mgr.cwdOfProject(projectId), query, limit, mgr.projectRegistry.gitTrust(projectId))
     },
-    'terminal.list': async (p) => {
-      const { projectId } = RpcMethods['terminal.list'].params.parse(p)
+    'terminal.list': async ({ projectId }) => {
       // A terminal's key is the **directory**, not the project (preparation for worktrees)
       const cwd = mgr.cwdOfProject(projectId)
       return { terminals: requireTerminals().list(cwd).map(toInfo) }
     },
-    'terminal.create': async (p) => {
-      const { projectId, cols, rows } = RpcMethods['terminal.create'].params.parse(p)
+    'terminal.create': async ({ projectId, cols, rows }) => {
       return toInfo(requireTerminals().create(mgr.cwdOfProject(projectId), cols, rows))
     },
-    'terminal.close': async (p) => {
-      requireTerminals().close(RpcMethods['terminal.close'].params.parse(p).terminalId)
-      return { ok: true as const }
-    },
-    'terminal.input': async (p) => {
-      const { terminalId, data } = RpcMethods['terminal.input'].params.parse(p)
-      requireTerminals().input(terminalId, data)
-      return { ok: true as const }
-    },
-    'terminal.resize': async (p) => {
-      const { terminalId, cols, rows } = RpcMethods['terminal.resize'].params.parse(p)
-      requireTerminals().resize(terminalId, cols, rows)
-      return { ok: true as const }
-    },
-    'terminal.restart': async (p) => {
-      const { terminalId, cols, rows } = RpcMethods['terminal.restart'].params.parse(p)
+    'terminal.close': async (p) => ack(requireTerminals().close(p.terminalId)),
+    'terminal.input': async ({ terminalId, data }) => ack(requireTerminals().input(terminalId, data)),
+    'terminal.resize': async ({ terminalId, cols, rows }) => ack(requireTerminals().resize(terminalId, cols, rows)),
+    'terminal.restart': async ({ terminalId, cols, rows }) => {
       const h = requireTerminals().restart(terminalId, cols, rows)
       if (!h) throw rpcError('Terminal not found')
       return toInfo(h)
     },
     // Runner for frequently used commands (#60) — the same cwd rule as the terminal (preparation for worktrees)
-    'commands.run': async (p) => {
-      const { projectId, command, cols, rows } = RpcMethods['commands.run'].params.parse(p)
+    'commands.run': async ({ projectId, command, cols, rows }) => {
       const { history: _h, ...rest } = requireCommands().run(mgr.cwdOfProject(projectId), command, cols, rows)
       return rest
     },
-    'commands.stop': async (p) => {
-      const { projectId, command } = RpcMethods['commands.stop'].params.parse(p)
-      requireCommands().stop(mgr.cwdOfProject(projectId), command)
-      return { ok: true as const }
-    },
-    'commands.state': async (p) => {
-      const { projectId } = RpcMethods['commands.state'].params.parse(p)
+    'commands.stop': async ({ projectId, command }) => ack(requireCommands().stop(mgr.cwdOfProject(projectId), command)),
+    'commands.state': async ({ projectId }) => {
       return { runs: requireCommands().state(mgr.cwdOfProject(projectId)) }
     },
-    'commands.log': async (p) => {
-      const { projectId, command } = RpcMethods['commands.log'].params.parse(p)
+    'commands.log': async ({ projectId, command }) => {
       return { run: requireCommands().log(mgr.cwdOfProject(projectId), command) }
     },
-    'commands.resize': async (p) => {
-      const { projectId, command, cols, rows } = RpcMethods['commands.resize'].params.parse(p)
-      requireCommands().resize(mgr.cwdOfProject(projectId), command, cols, rows)
-      return { ok: true as const }
-    },
+    'commands.resize': async ({ projectId, command, cols, rows }) => ack(requireCommands().resize(mgr.cwdOfProject(projectId), command, cols, rows)),
     'prefs.get': async () => mgr.uiPreferences(),
     'prefs.set': async (p) => {
-      const patch = RpcMethods['prefs.set'].params.parse(p).patch
+      const patch = p.patch
       const saved = mgr.setUiPreferences(patch)
       // The hub's setting governs the machines it links (#1376): they are told at once, and at every connect
       if (patch.autoCompact) void machines?.offerAutoCompact?.()
       return saved
     },
     'themes.list': async () => requireThemes().list(),
-    'themes.save': async (p) => {
-      const { id, content } = RpcMethods['themes.save'].params.parse(p)
+    'themes.save': async ({ id, content }) => {
       return requireThemes().save(id, content)
     },
-    'themes.import': async (p) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
-    'themes.resolve': async (p) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
+    'themes.import': async (p) => requireThemes().importFrom(p.path),
+    'themes.resolve': async (p) => ({ path: requireThemes().pathOf(p.id) }),
     'approvals.rules': async () => mgr.approvalRules.listApprovalRules(),
     /*
      * The session archive (#204; "trash" until #1404, kept in the method names because the protocol only grows).
@@ -907,18 +752,17 @@ export function createRpcHandler(
      * have no verb for any of it.
      */
     'trash.list': async () => mgr.trash.listTrash(),
-    'trash.read': async (p) => {
-      const { sessionId, limit, beforeSeq } = RpcMethods['trash.read'].params.parse(p)
+    'trash.read': async ({ sessionId, limit, beforeSeq }) => {
       return mgr.trash.readTrashed(sessionId, limit, beforeSeq)
     },
     'trash.restore': async (p) => {
-      const r = await mgr.trash.restoreSession(RpcMethods['trash.restore'].params.parse(p).sessionId)
+      const r = await mgr.trash.restoreSession(p.sessionId)
       // A project registered again is a project added — its apps are read the same way (`projects.add`)
       if (r.project) externalApps?.refresh()
       return r
     },
     'trash.purge': async (p) => {
-      await mgr.trash.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
+      await mgr.trash.purgeSession(p.sessionId)
       void settleDeletedProjects?.()
       return { ok: true as const }
     },
@@ -928,50 +772,38 @@ export function createRpcHandler(
       return r
     },
     // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
-    'trash.readRun': async (p) => {
-      const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)
+    'trash.readRun': async ({ runId, limit, beforeSeq }) => {
       return mgr.trash.readTrashedRun(runId, limit, beforeSeq)
     },
-    'trash.purgeRuns': async (p) => mgr.trash.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
+    'trash.purgeRuns': async (p) => mgr.trash.purgeTrashedRuns(p.runIds),
     // A session's subagent steps, to the trash without it and back (#418): the person's too, like the rest of the trash
     'subagents.usage': async () => mgr.trash.subagentUsage(),
-    'subagents.trash': async (p) => mgr.trash.trashSubagentSteps(RpcMethods['subagents.trash'].params.parse(p).sessionId),
-    'trash.restoreSubagentSteps': async (p) => {
-      await mgr.trash.restoreSubagentSteps(RpcMethods['trash.restoreSubagentSteps'].params.parse(p).sessionId)
-      return { ok: true as const }
-    },
-    'trash.purgeSubagentSteps': async (p) => {
-      const { sessionId, upTo } = RpcMethods['trash.purgeSubagentSteps'].params.parse(p)
-      await mgr.trash.purgeSubagentSteps(sessionId, upTo)
-      return { ok: true as const }
-    },
+    'subagents.trash': async (p) => mgr.trash.trashSubagentSteps(p.sessionId),
+    'trash.restoreSubagentSteps': async (p) => ack(await mgr.trash.restoreSubagentSteps(p.sessionId)),
+    'trash.purgeSubagentSteps': async ({ sessionId, upTo }) => ack(await mgr.trash.purgeSubagentSteps(sessionId, upTo)),
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
     'machines.list': async () => machines?.list() ?? [],
     'machines.add': async (p) => {
-      return requireMachines().add(RpcMethods['machines.add'].params.parse(p))
+      return requireMachines().add(p)
     },
     'machines.sshHosts': async () => requireMachines().sshHosts(),
-    'machines.probe': async (p) => requireMachines().probe(RpcMethods['machines.probe'].params.parse(p).sshTarget),
-    'machines.remove': async (p) => {
-      const { machineId } = RpcMethods['machines.remove'].params.parse(p)
+    'machines.probe': async (p) => requireMachines().probe(p.sshTarget),
+    'machines.remove': async ({ machineId }) => {
       await requireMachines().remove(machineId)
       // Its asks' cards close with it (#550 review)
       mgr.closeMachineAskCards(machineId)
       return { ok: true as const }
     },
-    'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
-    'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
-    'machines.revokeCredential': async (p) => {
-      const { machineId, credentialId } = RpcMethods['machines.revokeCredential'].params.parse(p)
+    'machines.reconnect': async (p) => requireMachines().reconnect(p.machineId),
+    'machines.disconnect': async (p) => requireMachines().disconnect(p.machineId),
+    'machines.revokeCredential': async ({ machineId, credentialId }) => {
       return requireMachines().revokeCredential(machineId, credentialId)
     },
-    'machines.setAutoReconnect': async (p) => {
-      const { machineId, autoReconnect } = RpcMethods['machines.setAutoReconnect'].params.parse(p)
+    'machines.setAutoReconnect': async ({ machineId, autoReconnect }) => {
       return requireMachines().setAutoReconnect(machineId, autoReconnect)
     },
-    'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
-    'machines.update': async (p, ctx) => {
-      const { machineId, when } = RpcMethods['machines.update'].params.parse(p)
+    'machines.install': async (p) => requireMachines().install(p.machineId),
+    'machines.update': async ({ machineId, when }, ctx) => {
       /*
        * A limited caller's update that went without a card (#1508, method-rights.ts; the transport's verdict, not judged again here)
        * stops no session it cannot see and gives up once automatic updates go off, as the hub's own catch-up does
@@ -979,21 +811,18 @@ export function createRpcHandler(
       const unasked = ctx?.covered === true
       return requireMachines().update(machineId, { when: when ?? 'idle', ...(unasked ? { unasked } : {}) })
     },
-    'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(RpcMethods['machines.cancelUpdate'].params.parse(p).machineId),
-    'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
-    'machines.uninstall': async (p) => requireMachines().uninstall(RpcMethods['machines.uninstall'].params.parse(p).machineId),
-    'machines.autostart': async (p) => {
-      const { machineId, on } = RpcMethods['machines.autostart'].params.parse(p)
+    'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(p.machineId),
+    'machines.rollback': async (p) => requireMachines().rollback(p.machineId),
+    'machines.uninstall': async (p) => requireMachines().uninstall(p.machineId),
+    'machines.autostart': async ({ machineId, on }) => {
       return requireMachines().autostart(machineId, on)
     },
-    'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
-    'machines.hubAuto': async (p) => {
-      const { machineId, allowed } = RpcMethods['machines.hubAuto'].params.parse(p)
+    'machines.activity': async (p) => ({ activity: await requireMachines().activity(p.machineId) }),
+    'machines.hubAuto': async ({ machineId, allowed }) => {
       return { state: await requireMachines().hubAuto(machineId, allowed) }
     },
     // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
-    'machines.setAsks': async (p) => {
-      const { machineId, on } = RpcMethods['machines.setAsks'].params.parse(p)
+    'machines.setAsks': async ({ machineId, on }) => {
       const machine = await requireMachines().setAsks(machineId, on)
       // Off closes what still stands: the card would only be refused once answered (#550 review)
       if (!on) mgr.closeMachineAskCards(machineId)
@@ -1003,13 +832,9 @@ export function createRpcHandler(
       const names = new Map((machines?.list() ?? []).map((m) => [m.id, m.name]))
       return mgr.machineAskConsents((id) => names.get(id))
     },
-    'machines.withdrawAsk': async (p) => {
-      const { machineId, sessionId, projectId } = RpcMethods['machines.withdrawAsk'].params.parse(p)
-      mgr.withdrawMachineAsk(machineId, sessionId, projectId)
-      return { ok: true as const }
-    },
+    'machines.withdrawAsk': async ({ machineId, sessionId, projectId }) => ack(mgr.withdrawMachineAsk(machineId, sessionId, projectId)),
     'host.hubOffer': async (p, ctx) => {
-      const offer = RpcMethods['host.hubOffer'].params.parse(p)
+      const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
       return { ok: true as const }
     },
@@ -1019,8 +844,7 @@ export function createRpcHandler(
     },
     // What a hub's orchestrator reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
     'host.sessions': async () => mgr.hostReader().sessions(),
-    'host.readSession': async (p) => {
-      const { sessionId, limit, around, tools, offset, toolLines, maxChars, before, from } = RpcMethods['host.readSession'].params.parse(p)
+    'host.readSession': async ({ sessionId, limit, around, tools, offset, toolLines, maxChars, before, from }) => {
       return mgr.hostReader().read(sessionId, limit, {
         around,
         tools: toolLines ?? tools,
@@ -1030,31 +854,24 @@ export function createRpcHandler(
         ...(from !== undefined ? { from } : {}),
       })
     },
-    'host.lastAnswer': async (p) => {
-      const { sessionId, maxChars, turn } = RpcMethods['host.lastAnswer'].params.parse(p)
+    'host.lastAnswer': async ({ sessionId, maxChars, turn }) => {
       return mgr.hostReader().lastAnswer(sessionId, maxChars, turn)
     },
-    'host.recall': async (p) => {
-      const { query, limit } = RpcMethods['host.recall'].params.parse(p)
+    'host.recall': async ({ query, limit }) => {
       return mgr.hostReader().recall(query, limit)
     },
     // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
     'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
     // Who else holds full access here (#1405): the hub's machine row reads it between links
-    'host.credentials': async (p) => serveCredentials?.(RpcMethods['host.credentials'].params.parse(p ?? {}).nonce) ?? { credentials: null },
     // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
-    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: RpcMethods['host.setHubAuto'].params.parse(p).allowed })) }),
-    'host.send': async (p) => {
-      const { sessionId, text, from, ask } = RpcMethods['host.send'].params.parse(p)
-      await mgr.sendFromHub(sessionId, text, from.name, ask)
-      return { ok: true as const }
-    },
+    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: p.allowed })) }),
+    'host.send': async ({ sessionId, text, from, ask }) => ack(await mgr.sendFromHub(sessionId, text, from.name, ask)),
     'machines.acceptVersions': async (p) =>
-      requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
-    'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
-    'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
+      requireMachines().acceptVersions(p.machineId),
+    'updates.status': async (p) => requireUpdates().check(p.force),
+    'updates.setAuto': async (p) => requireUpdates().setAuto(p.enabled),
     'updates.setAutoApply': async (p) => {
-      const enabled = RpcMethods['updates.setAutoApply'].params.parse(p).enabled
+      const enabled = p.enabled
       const status = requireUpdates().setAutoApply(enabled)
       // Automatic updates cover the linked machines too (#1508): one found older starts following now, not at its next connect
       if (enabled) machines?.followHub?.()
@@ -1065,50 +882,32 @@ export function createRpcHandler(
     'updates.apply': async () => requireUpdates().apply(),
     // A window's answer and report for an agent's "Apply now" (#665). Without the broker (tests) nothing is waiting
     'updates.answerApply': async (p, ctx) => {
-      const a = RpcMethods['updates.answerApply'].params.parse(p)
+      const a = p
       return updateApply && ctx ? updateApply.answer(ctx.client, a) : { ticket: null }
     },
     // The person's answers to the limited credential's calls (#1405). Without the service (tests) nothing ever waits
     'requests.list': async () => requests?.list() ?? [],
     'requests.answer': async (p) => {
-      const a = RpcMethods['requests.answer'].params.parse(p)
+      const a = p
       return { ok: requests?.answer(a.requestId, a.decision) ?? false }
     },
     'ui.reportCrash': async (p) => {
-      reportUiCrash(RpcMethods['ui.reportCrash'].params.parse(p))
+      reportUiCrash(p)
       return {}
     },
     'updates.reportApply': async (p, ctx) => {
-      const r = RpcMethods['updates.reportApply'].params.parse(p)
+      const r = p
       if (updateApply && ctx) updateApply.report(ctx.client, r)
       return {}
     },
-    'host.stop': async (p) => {
-      if (!stopHost) {
-        throw rpcError('This host runs under the Centralu app, which stops it: quit the app instead')
-      }
-      const { ifIdle, forUpdate } = RpcMethods['host.stop'].params.parse(p ?? {})
-      if (ifIdle) {
-        if (!stopGate) throw rpcError('This host cannot tell whether it is idle')
-        // No await from the check to the refusal: nothing can start in between (lifecycle/stop-gate.ts)
-        const running = stopGate.busy()
-        if (running) return { ok: false as const, ...running }
-        stopGate.refuse()
-      }
-      // After this answer has been written: the shutdown closes the socket it travels on
-      setTimeout(() => stopHost({ forUpdate: forUpdate === true }), 50)
-      return { ok: true as const }
-    },
-    'host.handover': async (p) => {
-      const { handover: h } = RpcMethods['host.handover'].params.parse(p)
-      handover?.(h)
-      return { ok: true as const }
-    },
+    'host.handover': async ({ handover: h }) => ack(handover?.(h)),
   }
 
-  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }): Promise<unknown> => {
+  const routes: Record<string, ((p: never, ctx?: RpcContext) => Promise<unknown>) | undefined> = { ...raw, ...handlers }
+
+  return async (method: string, params: unknown, ctx?: RpcContext): Promise<unknown> => {
     const name = method as RpcMethodName
-    const h = handlers[name]
+    const h = routes[method]
     /*
      * Also the answer to a method this protocol retired (docs/protocol.md §3.2): a window of an older build attached to
      * this host may still call one, and every caller in a released build catches the failure. Not retryable (the
@@ -1117,7 +916,12 @@ export function createRpcHandler(
     if (!h) {
       throw rpcError(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     }
-    const result = await h(params, ctx)
+    /*
+     * Parsed here, once, by the method's own schema, before anything of the handler runs: a failure is the ZodError a handler
+     * parsing for itself threw. A handler that takes no parameter (`async () =>`) never had them looked at, and still has not.
+     * The limited credential's rights were judged before this (transport/server.ts), on the parameters as sent.
+     */
+    const result: unknown = await Reflect.apply(h, undefined, [method in raw || h.length === 0 ? params : RpcMethods[name].params.parse(params), ctx])
 
     /*
      * Checks here whether what is being sent out **matches its declared shape.**
