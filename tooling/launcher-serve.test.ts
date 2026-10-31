@@ -2216,10 +2216,10 @@ describe('asking the host on the port without handing the token to anyone else (
     const signals: Array<[number, string]> = []
     try {
       const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, platform: 'linux', timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
-      expect(stopped).toMatchObject({ ok: false, wasRunning: true })
-      expect(stopped.message).toContain(`pid ${holder.pid}`)
       expect(signals).toEqual([])
       expect(holder.alive()).toBe(true)
+      expect(stopped).toMatchObject({ ok: false, wasRunning: true })
+      expect(stopped.message).toContain(`pid ${holder.pid}`)
     } finally {
       await server.close()
     }
