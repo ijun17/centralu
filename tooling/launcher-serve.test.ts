@@ -384,7 +384,7 @@ describe('the data folder and the state file', () => {
 
   /*
    * What the launchers of 0.1.0-beta.45 left on a machine: a version 1 file's token as a full credential labelled
-   * `legacy`, and while a host from before verifiers ran, `legacyHostToken`. Neither is made any more
+   * `legacy`, and while a host from before verifiers ran, `legacyHostToken`, which is not made any more
    */
   it('removes the legacy credential a version 1 file left at a hub’s or the window’s pairing, not a program’s (#1405)', () => {
     const d = tempDir()
@@ -402,11 +402,26 @@ describe('the data folder and the state file', () => {
     expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['window'])
   })
 
-  it('takes a version 1 file for no state file, which 0.1.0-beta.45 moved on at its first run', () => {
+  // A machine below the minimum (#1143) wrote version 1: its update runs the new launcher on that file, so the move stays
+  it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {
     const d = tempDir()
-    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: 'x'.repeat(43), port: 9300 }))
-    expect(readServeState(d)).toBeNull()
-    expect(() => ensureServeState(d)).toThrow(/is not a serve state file/)
+    const legacy = 'x'.repeat(43)
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: legacy, port: 9300 }))
+    const moved = ensureServeState(d)
+    expect(moved).toMatchObject({ v: 2, port: 9300 })
+    expect(moved.full).toEqual([expect.objectContaining({ label: 'legacy', verifier: verifierOf(legacy) })])
+    expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(legacy)
+    // The key is new: a hello with the old token is not what derives the limited credential
+    expect(moved.key).not.toBe(legacy)
+    pairServe(d, 'hub:mac')
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['hub:mac'])
+  })
+
+  it('drops a version 1 token at the window pairing, so a machine no hub links to does not keep it (#1405 review)', () => {
+    const d = tempDir()
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: 'y'.repeat(43), port: 9300 }))
+    pairServe(d, 'window')
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['window'])
   })
 
   it('replaces the key and withdraws every full credential only when asked, keeping the port', () => {

@@ -28,13 +28,14 @@ import { parseLinkPublicKey } from './serve-keys.mjs'
  *   host. A host from before key pairing ignores it, and a launcher from before drops it at its next write.
  *
  * The port is the one the last `serve` actually listened on, which is how `--connection`, a separate process, learns a
- * `--port` given to `serve` in a systemd unit. A full credential labelled `legacy` is the token of a version 1 file
- * (`{ token, port }`), which the launchers of 0.1.0-beta.45 moved to version 2 on first use; a hub's or the window's
- * next pairing removes it (`pairServe`). A version 1 file is not read any more: it is not a state file.
+ * `--port` given to `serve` in a systemd unit. A version 1 file (`{ token, port }`) is moved to version 2 on first
+ * use: its token becomes a full credential labelled `legacy` (a hub or window still holding it keeps working), which the
+ * next pairing removes. This is the update path for a machine below `MIN_SUPPORTED_VERSION` (#1143): version 2 first
+ * shipped in 0.1.0-beta.45, so the hub's update of an older machine (`serve --detach`) and `npm i -g` run on a version 1 file.
  */
 export const SERVE_STATE_FILE = 'serve.json'
 
-/** The label of the full credential a version 1 file's token became (0.1.0-beta.45); removed by the next pairing */
+/** The label of the full credential a version 1 file's token became; removed by the next pairing */
 export const LEGACY_LABEL = 'legacy'
 
 /** A full credential's verifier: the SHA-256 of it, as hex (the host's `serve-credentials.ts` compares the same) */
@@ -148,14 +149,20 @@ export function readServeState(dataDir, { tries = 5, sleep = sleepSync } = {}) {
 }
 
 /**
- * The state as the launcher uses it. `token` is the credential the launcher's own probes say hello with, the limited
- * credential, and `proofKey` what the host proves with to them, the key.
+ * The state as the launcher uses it. `token` is the credential the launcher's own probes say hello with, and
+ * `proofKey` what the host proves with to them: the limited credential and the key for version 2, the token for a
+ * version 1 file not moved yet.
  */
 function parseServeState(raw) {
   try {
     const v = JSON.parse(raw)
     const port = Number.isInteger(v?.port) && v.port >= 1 && v.port <= 65535 ? v.port : null
-    if (v?.v !== 2 || typeof v.key !== 'string' || v.key.length < 32) return null
+    if (v?.v !== 2) {
+      // A version 1 file, moved by `ensureServeState`: the update path from below the minimum (#1143)
+      if (typeof v?.token !== 'string' || v.token.length < 32) return null
+      return { v: 1, token: v.token, proofKey: v.token, port, key: null, full: [], keys: [] }
+    }
+    if (typeof v.key !== 'string' || v.key.length < 32) return null
     // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
     // the next write leaves it out too, and the host refuses it meanwhile
     const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(PAIRED_VIA.includes(e.via) ? { via: e.via } : {}), ...(e.replaced === true ? { replaced: true } : {}) }))
@@ -195,7 +202,7 @@ function mint() {
  * that exists but cannot be read as state is refused rather than overwritten: it may be a token
  * the client already holds, and a silent new one would lock that client out with "bad token".
  */
-export function ensureServeState(dataDir, platform = process.platform) {
+export function ensureServeState(dataDir, platform = process.platform, now = Date.now()) {
   mkdirSync(dataDir, { recursive: true })
   const file = join(dataDir, SERVE_STATE_FILE)
   if (!existsSync(file)) {
@@ -205,8 +212,18 @@ export function ensureServeState(dataDir, platform = process.platform) {
       if (e?.code !== 'EEXIST') throw e
     }
   }
-  const state = readServeState(dataDir)
+  let state = readServeState(dataDir)
   if (!state) throw noState(file)
+  // A version 1 file (#1405): its token becomes a full credential no longer written down, and a new key is drawn. Kept as
+  // the update path for a machine below `MIN_SUPPORTED_VERSION` (#1143), whose launcher wrote version 1
+  if (state.v === 1) {
+    state = changeServeState(dataDir, (s) =>
+      s.v === 1
+        ? { v: 2, key: randomBytes(32).toString('base64url'), port: s.port, full: [{ id: randomBytes(4).toString('hex'), label: LEGACY_LABEL, verifier: verifierOf(s.token), created: now }], keys: [] }
+        : s,
+      platform,
+    )
+  }
   keepPrivate(file, platform)
   return state
 }
@@ -382,7 +399,7 @@ export const PAIRED_VIA = ['pair', 'window', 'handover']
 /**
  * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one
  * credential: a hub pairing again (each link does) replaces its own, and `window` the window's. The `legacy` one a
- * version 1 file left (0.1.0-beta.45) goes with a hub's or the window's pairing: whoever held it was one of the two, which pairs now.
+ * version 1 file left goes with a hub's or the window's pairing: whoever held it was one of the two, which pairs now.
  * `via` is how it was asked for (`PAIRED_VIA`). Returns `{ token, id, state }`.
  *
  * `replaced` (#1405 review): set on the new entry only when the one of its label it takes the place of was asked for
@@ -393,7 +410,7 @@ export const PAIRED_VIA = ['pair', 'window', 'handover']
  * by itself (`hubsName`, and its own credential gone), docs/security-boundaries.md.
  */
 export function pairServe(dataDir, label, platform = process.platform, now = Date.now(), via = 'pair') {
-  ensureServeState(dataDir, platform)
+  ensureServeState(dataDir, platform, now)
   const { token, id } = mint()
   const state = changeServeState(dataDir, (s) => ({
     ...s,
