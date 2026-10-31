@@ -8,8 +8,9 @@ import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, ORCHESTRATOR_INSTRUCTIONS, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
+import { ORCHESTRATOR_INSTRUCTIONS } from './orchestrator-tools.js'
 
 /**
  * The orchestrator's housekeeping and read commands (#1219, fourth slice): renaming a session, clearing its ended
@@ -212,14 +213,7 @@ describe('who may run them', () => {
   })
 
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    for (const name of COMMANDS) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
-      for (const tier of RARE_TIERS) {
-        for (const profile of ['scoped', 'builder', 'reader'] as const) {
-          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
-        }
-      }
-    }
+    expectOnlyOrchestratorRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and changes nothing", async () => {

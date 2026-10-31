@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { AdapterCapabilities, ToolName } from '@cc/protocol'
+import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps, type ExternalAppsDeps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
@@ -106,4 +108,39 @@ export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}, 
     },
   }
   return world
+}
+
+/** A session handle that does nothing: these tests read the options the adapter received, not the session */
+export class Handle implements SessionHandle {
+  externalId = 'ext-1'
+  constructor(readonly sessionId: string) {}
+  send(_text: string) {}
+  respondApproval() {
+    return false
+  }
+  interrupt() {}
+  async dispose() {}
+}
+
+/** A fake agent that records the options each session was created with; a test that reads more of its handle overrides `handle` */
+export class CapturingAdapter implements AgentAdapter {
+  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
+  readonly capabilities: AdapterCapabilities = {
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
+  }
+  seen: CreateSessionOpts[] = []
+  constructor(readonly tool: ToolName = 'claude') {}
+  async detect() {
+    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
+  }
+  protected handle(opts: CreateSessionOpts, _emit: EventSink): SessionHandle {
+    return new Handle(opts.sessionId)
+  }
+  async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    this.seen.push(opts)
+    return this.handle(opts, emit)
+  }
+  last(): CreateSessionOpts {
+    return this.seen.at(-1)!
+  }
 }

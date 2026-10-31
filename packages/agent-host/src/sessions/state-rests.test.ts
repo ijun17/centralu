@@ -3,29 +3,18 @@
  * raised while no turn ran, must leave the session at rest, where the keeper, an update and sleep read it as idle and
  * the next start does not take it for a turn a quit stopped.
  */
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, Question, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { hostBusy } from '../idle.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 import { ASK_WINDOW_MS, CARD_RESTS_KEY } from './card-rest.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
 
 const QUESTION: Question[] = [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }]
 

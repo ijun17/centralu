@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from './adapters/contract.js'
+import type { NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import type { AgentAdapter, CreateSessionOpts, SessionHandle } from './adapters/contract.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { ExternalApps } from './apps/external/runtime.js'
@@ -11,7 +11,7 @@ import { Store } from './dev-services/store.js'
 import { attachInlineViews, type InlineLimits, type InlineViews } from './inline-views.js'
 import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
-import { FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
+import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from './temp-dir.test-helpers.js'
 import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
@@ -44,18 +44,8 @@ class Handle implements SessionHandle {
   async dispose() {}
 }
 
-class CapturingAdapter implements AgentAdapter {
-  tool: ToolName = 'claude'
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  seen: CreateSessionOpts[] = []
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, _emit: EventSink) {
-    this.seen.push(opts)
+class CapturingAdapter extends BaseAdapter {
+  protected override handle(opts: CreateSessionOpts) {
     return new Handle(opts.sessionId)
   }
 }

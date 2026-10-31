@@ -2,14 +2,12 @@
  * The turn records across a host swap (docs/plans/mailbox.md §6, §4.2): a session the keeper kept goes on in its turn under the next
  * host, whose start must not close that turn's row as lost, so that its end is recorded; the rows of everything else are.
  */
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { answerRecorder, delegationRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
 import { MailDelivery } from '../mail/delivery.js'
@@ -17,62 +15,8 @@ import { mailRelations } from '../mail/relations.js'
 import { MailService } from '../mail/service.js'
 import { takeOverFromEarlierBuild } from '../mail/adoption.js'
 import { MailTurns } from '../mail/turns.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
-
-class Handle implements SessionHandle {
-  externalId: string | null
-  sent: string[] = []
-  constructor(
-    readonly sessionId: string,
-    readonly opts: CreateSessionOpts,
-    private emit: EventSink,
-  ) {
-    this.externalId = opts.resumeExternalId ?? `ext-${sessionId}`
-  }
-  send(text: string) {
-    this.sent.push(text)
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-  }
-  answer(text: string) {
-    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
-    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
-  }
-  respondApproval() {
-    return false
-  }
-  interrupt() {}
-  async dispose() {}
-  async detach() {}
-}
-
-class Adapter implements AgentAdapter {
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true,
-  }
-  handles = new Map<string, Handle>()
-  readonly tool: ToolName = 'claude'
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    const h = new Handle(opts.sessionId, opts, emit)
-    this.handles.set(opts.sessionId, h)
-    return h
-  }
-}
-
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
+import { SessionManager } from './manager.js'
+import { Adapter, FakeProcess, processes } from './kept-host.test-helpers.js'
 
 let store: Store
 let root: string
@@ -90,7 +34,7 @@ afterEach(async () => {
 
 /** One host of the mailbox: the manager, the turn records it keeps, and the claude adapter behind it */
 function host(kept: ReadonlySet<string> = new Set()) {
-  const claude = new Adapter()
+  const claude = new Adapter(true)
   const events: NormalizedEvent[] = []
   const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
   mgr.prLookup = async () => null

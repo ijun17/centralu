@@ -329,6 +329,43 @@ describe('a session put to sleep, on the manager', () => {
     expect(await sleeper.sweep()).toEqual([a])
     expect([live(a), live(b)]).toEqual([false, true])
   })
+
+  /*
+   * A new session and the same session woken later hand the adapter the same options (#428, `launchOptions`), apart
+   * from what a wake changes: the conversation to resume and its running cost.
+   */
+
+  /** The options as plain data: functions are named, the tool bundle by the calls it offers */
+  function plain(o: CreateSessionOpts): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(o).map(([k, v]) => [
+        k,
+        typeof v === 'function' ? 'function' : k === 'orchestratorTools' && v ? Object.keys(v as object).sort() : v,
+      ]),
+    )
+  }
+
+  it('a wake starts the process with the options it was created with, and the conversation to resume', async () => {
+    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', model: 'm1', effort: 'high' })) as { id: string }
+    await mgr.send(s.id, 'hello')
+    adapter.last.emit({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'hi' })
+    adapter.last.emit({ type: 'turn_complete', sessionId: s.id })
+    const created = adapter.last.opts
+    expect(await mgr.sleepSession(s.id)).toBe(true)
+    await mgr.send(s.id, 'again')
+    const woken = adapter.last.opts
+    expect(woken).not.toBe(created)
+
+    expect(woken.resumeExternalId).toBe(`ext-${s.id}`)
+    expect(created.resumeExternalId).toBeUndefined()
+    // The conversation to resume, and the running cost its last process kept (`running-cost.test.ts`), are what a wake changes
+    const { resumeExternalId: _a, runningCost: _c, ...a } = plain(created)
+    const { resumeExternalId: _b, runningCost: _d, ...b } = plain(woken)
+    expect(b).toEqual(a)
+    expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort())
+    expect(a).toMatchObject({ sessionId: s.id, model: 'm1', effort: 'high', permissionPreset: 'normal', toolProfile: 'reader', mayRead: 'function' })
+  })
 })
 
 describe('a parent and the agents it started (start_agent, #561)', () => {

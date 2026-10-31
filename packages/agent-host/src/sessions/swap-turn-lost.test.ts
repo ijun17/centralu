@@ -1,28 +1,17 @@
-import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
-import { PassThrough } from 'node:stream'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 
 /**
  * A swap while a session's turn runs, on a tool whose adapter cannot take a running turn over (ACP: it ends the kept
  * process and opens the conversation again in a new one, #1562 review). The turn is over, and the session must say so
  * as a quit does: idle, with the quit mark and its line, not `working` forever with a Stop that does nothing.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'

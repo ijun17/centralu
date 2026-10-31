@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { RpcMethods, type AdapterCapabilities, type ExternalAppInfo, type SessionInfo, type ToolName } from '@cc/protocol'
+import { RpcMethods, type ExternalAppInfo, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { builderRole } from './app-builder.js'
@@ -12,6 +12,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { until } from '../apps/external/test-helpers.js'
 import { SessionManager } from './manager.js'
+import { CapturingAdapter } from './session-apps.test-helpers.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 
 /**
@@ -39,30 +40,21 @@ class Handle implements SessionHandle {
   async dispose() {}
 }
 
-class FakeAdapter implements AgentAdapter {
-  constructor(readonly tool: ToolName) {}
-  descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  seen: CreateSessionOpts[] = []
+class FakeAdapter extends CapturingAdapter {
+  override descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
   /** The event sink received per session — the test emits turns in place of the tool */
   sinks = new Map<string, EventSink>()
   handles = new Map<string, Handle>()
   fail = false
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
+  override async createSession(opts: CreateSessionOpts, emit: EventSink) {
     if (this.fail) throw new Error(`${this.tool} is not logged in`)
-    this.seen.push(opts)
+    return super.createSession(opts, emit)
+  }
+  protected override handle(opts: CreateSessionOpts, emit: EventSink) {
     this.sinks.set(opts.sessionId, emit)
     const h = new Handle(opts.sessionId)
     this.handles.set(opts.sessionId, h)
     return h
-  }
-  last(): CreateSessionOpts {
-    return this.seen.at(-1)!
   }
 }
 

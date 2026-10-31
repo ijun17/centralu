@@ -1,13 +1,12 @@
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handoffPrompt, SESSION_HANDOFF, type AdapterCapabilities, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { FakeProcess } from './kept-host.test-helpers.js'
 import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -16,16 +15,6 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * the orchestrator is `auto`, the note from the record by default or written by the session, the original kept and its
  * live children moved (#693). The window's own handoff is the UI store's (`handoffSession`); this is the tool's path.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
 
 class Handle implements SessionHandle {
   externalId: string | null

@@ -3,15 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { ToolName } from '@cc/protocol'
+import type { AgentAdapter, CreateSessionOpts } from '../adapters/contract.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
-import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { CapturingAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 
 /**
@@ -25,36 +25,6 @@ import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
  * those options' `apps` (session attachment) — the same door an adapter's proxy server calls
  * through.
  */
-
-class Handle implements SessionHandle {
-  externalId = 'ext-1'
-  constructor(readonly sessionId: string) {}
-  send() {}
-  respondApproval() {
-    return false
-  }
-  interrupt() {}
-  async dispose() {}
-}
-
-class CapturingAdapter implements AgentAdapter {
-  tool: ToolName = 'claude'
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  seen: CreateSessionOpts[] = []
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, _emit: EventSink) {
-    this.seen.push(opts)
-    return new Handle(opts.sessionId)
-  }
-  last(): CreateSessionOpts {
-    return this.seen.at(-1)!
-  }
-}
 
 const LEGACY_KEY = 'orchestrator_mcp_servers'
 const SERVER = { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] }

@@ -7,8 +7,8 @@ import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { MailService } from '../mail/service.js'
 import { openBy } from '../mail/mail.test-helpers.js'
@@ -20,7 +20,6 @@ import { openBy } from '../mail/mail.test-helpers.js'
  * window checks it.
  */
 const COMMANDS = ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_session', 'delete_archived', 'delete_all_archived'] as const
-type Command = (typeof COMMANDS)[number]
 
 let root: string
 let store: Store
@@ -89,26 +88,7 @@ async function keptRun() {
   await store.trash.purgeSession('a1')
 }
 
-/** The session archive card standing in a session, if one is */
-function card(sessionId: string) {
-  const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
-  const d = pending?.detail
-  return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
-}
-
-function run(orcId: string, command: Command, args: Record<string, unknown> = {}) {
-  return mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
-}
-
-/** Runs a command whose card the person answers with `decision`; the card's question and the answer */
-async function answered(orcId: string, command: Command, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) {
-  const call = run(orcId, command, args)
-  await eventually(() => !!card(orcId))
-  const question = card(orcId)!.text
-  await whileStanding?.()
-  mgr.respondApproval(orcId, card(orcId)!.requestId, decision)
-  return { question, r: await call }
-}
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
 
 describe('list_archive', () => {
   it('says the session archive is empty', async () => {
@@ -620,14 +600,7 @@ describe('delete_all_archived', () => {
 
 describe('who may run them', () => {
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    for (const name of COMMANDS) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
-      for (const tier of RARE_TIERS) {
-        for (const profile of ['scoped', 'builder', 'reader'] as const) {
-          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
-        }
-      }
-    }
+    expectOnlyOrchestratorRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and deletes nothing", async () => {

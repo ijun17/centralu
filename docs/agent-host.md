@@ -2042,7 +2042,7 @@ Implementation rules:
 `SessionManager.createSession` and the resume/wake path use it, for ordinary sessions,
 orchestrators, coordinators, worktree managers, builders, app agents and `start_agent` children.
 The two build the adapter's options in one place (`SessionStarts.launchOptions` in `sessions/session-start.ts`, #428), so an option
-added there reaches a new session and a wake alike (`sessions/launch-options.test.ts`).
+added there reaches a new session and a wake alike (`sessions/sleep.test.ts`).
 Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
 spawn or the keeper; a fresh keeper replacement therefore receives the same options.
 

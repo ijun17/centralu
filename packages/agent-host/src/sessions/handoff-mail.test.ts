@@ -1,11 +1,9 @@
-import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { Store } from '../dev-services/store.js'
@@ -17,7 +15,8 @@ import { MailTool } from '../mail/tool.js'
 import { MailTurns } from '../mail/turns.js'
 import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
 import { openBy } from '../mail/mail.test-helpers.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
+import { SessionManager } from './manager.js'
+import { Adapter, FakeProcess, processes } from './kept-host.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -26,62 +25,6 @@ import { SLOW, eventually } from '../../../../tooling/test-timing.js'
  * takes its place as owner, assignee or member, and what the original had not read waits for the successor. Wired as `main.ts`
  * wires the mailbox: the real session manager, mail service, turns, delivery and tool, with fake adapters.
  */
-
-class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  killed = false
-  kill() {
-    return true
-  }
-}
-
-class Handle implements SessionHandle {
-  externalId: string | null
-  sent: string[] = []
-  constructor(
-    readonly sessionId: string,
-    readonly opts: CreateSessionOpts,
-    private emit: EventSink,
-  ) {
-    this.externalId = opts.resumeExternalId ?? `ext-${sessionId}`
-  }
-  send(text: string) {
-    this.sent.push(text)
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-  }
-  /** The turn ends with this as its final text */
-  answer(text: string) {
-    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
-    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
-  }
-  respondApproval() {
-    return false
-  }
-  interrupt() {}
-  async dispose() {}
-  async detach() {}
-}
-
-class Adapter implements AgentAdapter {
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
-  }
-  handles = new Map<string, Handle>()
-  readonly tool: ToolName = 'claude'
-  async detect() {
-    return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    const h = new Handle(opts.sessionId, opts, emit)
-    this.handles.set(opts.sessionId, h)
-    return h
-  }
-}
-
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
 
 let store: Store
 let root: string
