@@ -119,8 +119,6 @@ export class TrashRecords {
         .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
         .run(this.nextDeletedAt(), JSON.stringify(record), sessionId).changes
       if (moved === 0) return false
-      // Both lists: this build's, and the one an older host still reads (v42)
-      this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(sessionId)
       return true
     })
@@ -383,7 +381,6 @@ export class TrashRecords {
         this.db
           .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
           .run(first + left.length - 1 - i, JSON.stringify(record), id)
-        this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(id)
         this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(id)
       }
       // The project's apps leave the grid with it: layout, like a session's panel

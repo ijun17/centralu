@@ -43,7 +43,7 @@ export type LayoutSlice = {
    * **Global, and remembered** — unlike expanded folders, which belong to their project.
    * That difference is the point: an open folder is a fact about a repo, while this is a
    * way of looking, and a way of looking belongs to the person. It sits with panelOpen and
-   * panelTab in the workspace snapshot for the same reason, and unlike a folder click it is
+   * panelLayout in the workspace snapshot for the same reason, and unlike a folder click it is
    * flipped rarely, so a write per flip costs nothing.
    */
   showIgnored: boolean

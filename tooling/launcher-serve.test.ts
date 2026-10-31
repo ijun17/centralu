@@ -32,8 +32,7 @@ import {
   ensureServeState,
   hostCommand,
   hostEnv,
-  takesTokenOnStdin,
-  tokenLine,
+  keyLine,
   launcherScript,
   ensureLauncher,
   mismatchServerVersion,
@@ -383,6 +382,27 @@ describe('the data folder and the state file', () => {
     }
   })
 
+  /*
+   * What the launchers of 0.1.0-beta.45 left on a machine: a version 1 file's token as a full credential labelled
+   * `legacy`, and while a host from before verifiers ran, `legacyHostToken`, which is not made any more
+   */
+  it('removes the legacy credential a version 1 file left at a hub’s or the window’s pairing, not a program’s (#1405)', () => {
+    const d = tempDir()
+    const legacy = { id: 'aaaaaaaa', label: 'legacy', verifier: verifierOf('x'.repeat(43)), created: 1 }
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key: 'k'.repeat(43), port: 9300, full: [legacy], legacyHostToken: 'y'.repeat(43) }))
+    // A program's own pairing leaves it: a hub that held it and has not paired yet keeps its link
+    pairServe(d, 'script')
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['legacy', 'script'])
+    // The token kept for a host from before verifiers goes at the first write: no host reads it
+    expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain('legacyHostToken')
+    pairServe(d, 'hub:mac')
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['script', 'hub:mac'])
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key: 'k'.repeat(43), port: 9300, full: [legacy] }))
+    pairServe(d, 'window')
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['window'])
+  })
+
+  // A machine below the minimum (#1143) wrote version 1: its update runs the new launcher on that file, so the move stays
   it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {
     const d = tempDir()
     const legacy = 'x'.repeat(43)
@@ -393,19 +413,15 @@ describe('the data folder and the state file', () => {
     expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(legacy)
     // The key is new: a hello with the old token is not what derives the limited credential
     expect(moved.key).not.toBe(legacy)
-    // A program's own pairing leaves it: a hub that held it and has not paired yet keeps its link
-    pairServe(d, 'script')
-    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['legacy', 'script'])
     pairServe(d, 'hub:mac')
-    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['script', 'hub:mac'])
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['hub:mac'])
   })
 
   it('drops a version 1 token at the window pairing, so a machine no hub links to does not keep it (#1405 review)', () => {
     const d = tempDir()
     writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: 'y'.repeat(43), port: 9300 }))
-    ensureServeState(d)
     pairServe(d, 'window')
-    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+    expect(readServeState(d).full.map((e: { label: string }) => e.label)).toEqual(['window'])
   })
 
   it('replaces the key and withdraws every full credential only when asked, keeping the port', () => {
@@ -595,7 +611,7 @@ describe('how the host is started', () => {
 
   /*
    * #538: a process's start environment stays readable to every process of its user while it runs (#502), and its
-   * arguments to every user. The token goes as the first line on the host's stdin, a pipe to this launcher.
+   * arguments to every user. The key goes as the first line on the host's stdin, a pipe to this launcher.
    */
   /*
    * #1223: the host writes who asked for it to its host.lock (`CC_SERVE_FROM`, which it takes out of its environment
@@ -618,34 +634,15 @@ describe('how the host is started', () => {
     expect(hostEnv({ CC_SERVE_FROM: 'stale' }, { dataDir: '/d', version: '1.0.0', hostDir: '/h' }).CC_SERVE_FROM).toBeUndefined()
   })
 
-  it('hands the token over on stdin, never in the environment or on the command line', () => {
+  it('hands the key over on stdin, never in the environment or on the command line', () => {
     const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: '/h' })
     expect(e.CC_HOST_TOKEN).toBeUndefined()
     expect(Object.values(e).some((v) => String(v).includes('secret-token') || String(v).includes('old'))).toBe(false)
     expect(e.CC_HOST_TOKEN_ON_STDIN).toBe('1')
-    expect(tokenLine('secret-token')).toBe('{"token":"secret-token"}\n')
+    expect(keyLine('secret-key')).toBe('{"key":"secret-key"}\n')
     const plan = hostCommand('/usr/bin/node', '/h/main.mjs', { port: 17175, dataDir: '/d', platform: 'linux' })
     expect(plan.args.join(' ')).not.toContain('secret-token')
     expect(plan.args).not.toContain('--token')
-  })
-
-  // Review of #1100: CENTRALU_HOST_ENTRY can point at a bundle from before #538, which reads only CC_HOST_TOKEN
-  it('gives a host bundle from before the stdin token its token in the environment, as before', () => {
-    const d = mkdtempSync(join(tmpdir(), 'cc-token-entry-'))
-    try {
-      writeFileSync(join(d, 'main.mjs'), '')
-      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1 }))
-      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(false)
-      const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: d, legacyToken: 'secret-token' })
-      expect(e.CC_HOST_TOKEN).toBe('secret-token')
-      expect(e.CC_HOST_TOKEN_ON_STDIN).toBeUndefined()
-      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1, tokenOnStdin: 1 }))
-      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(true)
-      // The source, which has no bundle-info.json, reads it from stdin
-      expect(takesTokenOnStdin(join(ROOT, 'packages/agent-host/src/main.ts'))).toBe(true)
-    } finally {
-      rmSync(d, { recursive: true, force: true })
-    }
   })
 
   it('starts the host with no display and none of the keeper’s or dev mode’s variables', () => {
@@ -1698,9 +1695,9 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     const h = await heldFolder('network', [idle])
     const fake = join(tempDir(), 'host.mjs')
     const ran = `${fake}.ran`
-    // As a bundle says it: its protocol, and that it reads the token on stdin
-    writeFileSync(join(fake, '..', 'bundle-info.json'), JSON.stringify({ protocolVersion: PROTOCOL_VERSION, tokenOnStdin: 1 }))
-    // A stand-in host: reads its token line, says it is ready on the port it was given, then ends
+    // As a bundle says its protocol
+    writeFileSync(join(fake, '..', 'bundle-info.json'), JSON.stringify({ protocolVersion: PROTOCOL_VERSION }))
+    // A stand-in host: reads its key line, says it is ready on the port it was given, then ends
     writeFileSync(
       fake,
       `import { writeFileSync } from 'node:fs'

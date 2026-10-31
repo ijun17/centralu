@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences, textSizeFromLegacyStep } from './entities.js'
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from './entities.js'
 import {
   RETIRED_THEME_TOKENS,
   THEME_TOKENS,
@@ -140,15 +140,5 @@ describe('screen preferences, field by field', () => {
       bodyFont: '',
     })
     expect(parseUiPreferences({ textSize: 0.9 }).textSize).toBe(0.925)
-  })
-
-  it('the old snapshot step maps onto the five sizes, clamped, and anything else is no size', () => {
-    expect(textSizeFromLegacyStep(0)).toBe(0.85)
-    expect(textSizeFromLegacyStep(2)).toBe(1)
-    expect(textSizeFromLegacyStep(4)).toBe(1.25)
-    expect(textSizeFromLegacyStep(99)).toBe(1.25)
-    expect(textSizeFromLegacyStep(-3)).toBe(0.85)
-    expect(textSizeFromLegacyStep('4')).toBe(null)
-    expect(textSizeFromLegacyStep(undefined)).toBe(null)
   })
 })

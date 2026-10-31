@@ -89,8 +89,7 @@ agent-host/src/
 trunk", 예전 자리의 줄에 보관). 오케스트레이터에는 `propose_worktree_session`을 대신할 것을 주지 않는다: 사람의
 저장소에 가지와 폴더를 만드는 일은 이제 프로젝트 세션의 동의 카드를 거치고, 오케스트레이터는 `send_to_session`으로 그
 세션에 닿는다. 기존 데이터: 스토어 v48이 예전 매니저의 워크트리 세션에 `askedBy` = 부모를 주어, 매니저가 그것들을
-자기가 띄운 에이전트로 가진다. `worktrees.createManager`는 이유와 함께 거절되고(옛 창을 위해 프로토콜에는 남는다),
-자리의 열은 나중의 축소 단계까지 남는다.
+자기가 띄운 에이전트로 가진다. 자리의 열은 나중의 축소 단계까지 남는다.
 
 `reader` 묶음은 읽기 전용이다. 그 도구 객체는 보내기·만들기·설정 변경을 이름으로만이 아니라
 그 자체로 거절한다. 앱이 세운 에이전트 세션(M4 D-1)은 답을 앱에 돌려주므로 이 묶음을 받지
@@ -977,7 +976,7 @@ interface AdapterCapabilities {
 
 | 도구 | 계약 | 체크 | 잡는 것 |
 |---|---|---|---|
-| Codex | `adapters/codex/protocol-contract.json` — 우리가 보내거나 읽는 모든 RPC 메서드·알림, 승인 enum 값; 그리고 `adapters/codex/generated/` — 그 알림과 요청의 params 타입과 그것이 import하는 타입, 어댑터가 이것으로 컴파일된다(#1339) | `pnpm codex:bindings --check` (설치된 CLI에서 바인딩을 재생성해 우리 이름을 대조하고, generated/를 새로 만든 것과 비교) | 메서드/알림이 프로토콜에서 사라지는 것 (변경 축 C4), 어댑터가 읽는 타입이 바뀌는 것 |
+| Codex | `adapters/codex/protocol-contract.json` — 우리가 보내거나 읽는 모든 RPC 메서드·알림, 승인 enum 값; 그리고 `adapters/codex/generated/` — 호스트가 import하는 타입과 그것이 import하는 타입, 어댑터가 이것으로 컴파일된다(#1339) | `pnpm codex:bindings --check` (설치된 CLI에서 바인딩을 재생성해 우리 이름을 대조하고, generated/를 새로 만든 것과 비교) | 메서드/알림이 프로토콜에서 사라지는 것 (변경 축 C4), 어댑터가 읽는 타입이 바뀌는 것 |
 | Claude | `scripts/claude-sdk-drift.mjs` 안의 이름 목록 — SDK export, 옵션 키, 응답 필드 — 과 런타임 모양 검사 하나: `permissionMode`를 생략하면 CLI에 `--permission-mode` 플래그가 아예 가지 않아야 한다 (`normal` 프리셋이 여기에 기댄다, #275) | `pnpm drift:claude [버전]` (`@latest` 또는 지정한 버전을 임시 폴더에 설치 — 워크스페이스는 건드리지 않는다) | 업그레이드가 우리에게 닿기 **전에** 이름이 `.d.ts`에서 사라지거나, SDK가 생략된 모드를 다시 `default`로 굳히는 것 |
 | Claude (재개) | 재개한 프로세스가 살아 있는 프로세스처럼 프롬프트 캐시를 읽는지 (#568, §4.6.1): 유휴 세션을 재우는 것이 공짜인 이유 | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (실제 모델, haiku, 임시 데이터 폴더. 깨운 턴이 캐시에서 90% 미만을 읽으면 1로 끝난다) | 재개할 때 요청을 다르게 짜는 CLI: 세션은 여전히 깨어나지만 더 느리고 비싸지고, 다른 무엇도 그것을 알려 주지 않는다 |
 | 모든 어댑터 (반대 방향, #270) | 계약의 `surface` (`adapters/contract/surface.ts`): 설치된 도구가 내놓는 것을 읽는 리더 (Claude: SDK의 stdout 메시지 유니온, `Options` 키, `Query` 메서드, CLI `--help`; Codex: 생성된 클라이언트 요청·알림·서버 요청 메서드, `--help`), 어댑터가 막거나 버리거나 우회하는 것(`limitations`, 각각 측정 근거와 함께), 마지막으로 검토한 표면(`adapters/<tool>/surface-baseline.ts`) | `pnpm drift:surface` (세션도 턴도 없이 최신 도구를 읽는다. `--record`는 기준선을 다시 쓰고, `--file-issue`는 주간 잡) | 아무도 검토하지 않은 새 명령·메시지 타입·기능, 근거가 사라졌을 수 있는 제한 (`/goal`은 CLI가 헤드리스로 돌린 뒤에도 몇 주간 거절됐다), 도구가 없앤 이름에 걸린 제한. 도구마다 이슈 하나로 남기고 잡은 초록으로 둔다 |
@@ -1793,9 +1792,7 @@ redial하는 동안, 시도 중, 설치·업데이트가 기기를 잡고 있는
 
 그동안 세션은 그 기기에서 계속 돌고, 다음 연결 때 창이 그 기기를 다시 읽으며(`machine_resync`) 세션이 한 말도 함께 읽는다. 행의
 Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치가 켜져 있든 꺼져 있든 Connect나 허브의 다음 시작까지 아무것도 시도하지
-않는다. 끊긴 기기에 설치, 업데이트, 자동 시작 변경을 하면 먼저 연결하고 그대로 둔다: 링크의 ssh로 돌기 때문이다. `machines.need`는 한 릴리스 동안
-받아서 행만 답하므로 이전 창이 실패하지 않고, `machines.setConnect`는 여전히 스위치를 정한다(`at_start`가 켬). 이 기능 이전 빌드는 열을 연결
-방식으로 읽어, 스위치가 꺼진 기기를 거기서 무언가가 필요로 할 때만 연결한다; 이전 창은 `disconnected`를 `unreachable`로 읽고 설정을 보여 주지 않는다.
+않는다. 끊긴 기기에 설치, 업데이트, 자동 시작 변경을 하면 먼저 연결하고 그대로 둔다: 링크의 ssh로 돌기 때문이다.
 
 **원격 업데이트는 턴이 끝나길 기다린다**(#1399). 원격에는 키퍼가 없어 에이전트를 새 호스트로 넘길 수 없다. 그래서 업데이트는 새 버전을 옆에 설치한 뒤,
 그쪽에서 턴이 도는 세션(working, 승인·질문 대기, 백그라운드 작업)이 없어질 때까지 15초마다 `host.activity`를 읽으며 기다리고(행의 작업은 `wait_idle`),

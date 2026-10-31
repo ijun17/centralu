@@ -36,9 +36,10 @@ export type MessageImageRefusal = z.infer<typeof MessageImageRefusal>
 
 /**
  * The largest image the host reads for the window to show: the file viewer's preview (`fs.readFile`) and a local image
- * a reply names (`messages.image`). 10 MB leaves room for the base64 and WebSocket copies of it.
+ * a reply names (`messages.image`). 10 MiB (read as "10 MB", the unit the app writes) leaves room for the base64 and
+ * WebSocket copies of it.
  */
-export const IMAGE_PREVIEW_MAX_BYTES = 10_000_000
+export const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
 /** One row of a project folder, as `fs.listDir` answers it; `path` is project-relative and POSIX-separated (paths.ts) */
 export const FsEntry = z.object({

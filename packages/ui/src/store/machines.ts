@@ -83,7 +83,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       const list = await platform.machines.list()
       set({ machines: Object.fromEntries(list.map((m) => [m.id, m])) })
     } catch {
-      /* a host from before linked machines: none */
+      /* the host did not answer: the last list stays */
     }
   },
 
@@ -148,7 +148,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     try {
       const m = await get().platform!.machines.setAutoReconnect(machineId, autoReconnect)
       // The setting is the answer's: a `machine_status` sent before it may predate the change
-      set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), autoReconnect: m.autoReconnect, connect: m.connect } } }))
+      set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), autoReconnect: m.autoReconnect } } }))
       return true
     } catch (e) {
       set({ toast: `Could not change Auto reconnect: ${(e as Error).message}` })

@@ -1504,12 +1504,11 @@ A host started with `centralu serve` on another machine is reached by the app th
     turns out to be another writer's. Left open: a writer suspended over 2 s between its last read-back and the rename,
     and a system clock set forward by over 10 s while a lock is held.
   - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
-    it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
-    (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before
-    verifiers (a rollback; `verifiers` absent from its `bundle-info.json`) knows a single token: the launcher keeps one
-    for it (`legacyHostToken`), gives it to that host and to a hub that pairs, and drops it once a host of today runs.
-    A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
-    `CC_HOST_TOKEN`.
+    it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy` (a pairing
+    under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). This
+    stays as the update path for a machine below the oldest release still served (#1143): version 2 first shipped in
+    0.1.0-beta.45, so updating an older machine runs this launcher on its version 1 file. Every host the launcher starts takes verifiers and its key on
+    stdin, so it keeps no single token for an older one; a `legacyHostToken` that release kept goes at the next write.
   - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
     can. It gets a full credential of its own, which the file names by its label. That is made loud rather than
     prevented (owner, 2026-10-21): the hub's machine row in Settings → Machines lists every full credential the machine
@@ -2204,9 +2203,8 @@ else's code that will run as the user. It gets its own confirmation, separate fr
 - **The confirmation is held by the host and bound to what was seen.** It lives in
   `app-imports.json` (0600) in the data folder, not in the app folder, so neither the app's code nor
   an archive can supply it. It is bound to the folder's exact file id (bigint stat, persisted as
-  the decimal string `inoExact`). Numeric `ino` is kept for older hosts during swaps and rollbacks
-  until a later release can remove it ("add first, remove later"). The new host compares `inoExact`
-  when present. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
+  the decimal string `inoExact`), which every host the store is still shared with compares first; a
+  record from before it (#562) has only a numeric `ino`, no longer written. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
   import mark but require fresh review. A folder that is not the one marked (recreated under the id
   outside Centralu, or unreadable) also keeps the import mark and is unconfirmed until reviewed (#838):
   it used to read as no mark, which the gate takes for the person's own app, so replacing an enabled
@@ -2542,7 +2540,7 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   that can carry script and external references, which the window would be taking on the strength of an agent's
   sentence (`<img>` does not run them, but nothing here needs it to). The project file viewer still shows a project's
   SVGs.
-- **At most 10 MB** (`IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
+- **At most 10 MB** (10 MiB, `IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
   and again on what was read, so a file that grows between the two is still refused.
 - **Only this machine.** A `file://` URL that names another host is refused, and on Windows so is any path that
   resolves to `\\…`: a UNC share (`\\server\share`, `//server/share`, and `file://server/share`, which Node turns into

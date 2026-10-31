@@ -1,4 +1,3 @@
-import { runInNewContext } from 'node:vm'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -656,20 +655,6 @@ describe('failure excerpts across runners', () => {
   it.each(summaries)('takes %s when it is the first detailed failure in log order', (first) => {
     expect(failureLineIndex(['setup', first, ...summaries.filter((line) => line !== first)])).toBe(1)
   })
-})
-
-it('keeps release bump builds out of the concurrency group cancelled by ordinary main pushes', () => {
-  const workflow = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
-  const template = /^ {2}group: (.+)$/m.exec(workflow)![1]!
-  const group = (message: string, sha: string, event = 'push', ref = 'refs/heads/main') => template.replace(/\$\{\{(.*?)\}\}/g, (_, expression: string) => String(runInNewContext(expression, {
-    github: { ref, sha, event_name: event, event: { head_commit: { message } } },
-    startsWith: (text: string, prefix: string) => text.startsWith(prefix),
-    format: (text: string, value: string) => text.replace('{0}', value),
-  })))
-  expect(group('fix(ui): one', 'a')).toBe(group('fix(ui): two', 'b'))
-  expect(group('chore(release): next (#900)', 'a')).not.toBe(group('fix(ui): two', 'b'))
-  expect(group('chore(release): next (#900)', 'a')).not.toBe(group('chore(release): later (#901)', 'b'))
-  expect(group('chore(release): next', 'a', 'pull_request', 'refs/pull/900/merge')).toBe(group('chore(release): next', 'b', 'pull_request', 'refs/pull/900/merge'))
 })
 
 /**

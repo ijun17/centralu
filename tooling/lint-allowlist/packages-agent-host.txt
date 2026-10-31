@@ -249,14 +249,14 @@ packages/agent-host/src/lifecycle/steps.ts @typescript-eslint/prefer-promise-rej
 packages/agent-host/src/lifecycle/work-job.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/lifecycle/work-job.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/links/auto-reconnect.test.ts @typescript-eslint/await-thenable 2
-packages/agent-host/src/links/autostart.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/agent-host/src/links/autostart.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/links/dev-build.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/links/install.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/links/install.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/links/linked-hubs.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/links/linked-machine-connection.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/links/linked-machine-connection.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/links/linked-machine-connection.ts @typescript-eslint/no-unsafe-type-assertion 7
+packages/agent-host/src/links/linked-machine-connection.ts @typescript-eslint/no-unsafe-type-assertion 6
 packages/agent-host/src/links/linked-machine-ops.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/links/linked-machine-ops.ts @typescript-eslint/no-unsafe-type-assertion 8
 packages/agent-host/src/links/linked-sessions.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
