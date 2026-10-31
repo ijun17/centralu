@@ -2,16 +2,12 @@
  "mid": {
   "version": 64,
   "deferred": [
-   3,
-   11,
-   13,
-   21,
    28,
    32,
    40,
    56
   ],
-  "minReader": 0
+  "minReader": 13
  },
  "userVersion": 64,
  "master": [

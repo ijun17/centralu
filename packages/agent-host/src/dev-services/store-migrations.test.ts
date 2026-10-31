@@ -1,10 +1,10 @@
 /**
- * Every migration step, run from the oldest schema there was to the newest (#428).
+ * Every migration step, run from the oldest store this host opens (v27, #1143) to the newest (#428).
  *
  * The step list is moved around as the store is split into modules, and a moved step that is dropped, doubled or put
  * out of order still compiles and still passes a test that looks at one column. So this one looks at all of it: it
- * builds the v1 schema by hand (the DDL the first commit of `schema.sql` had) with rows in it, opens it with the
- * current `Store`, and compares what comes out with a file written by the code before the split: the whole of
+ * loads a v27 store with rows in it (`store-fixtures/v27.sql`), opens it with the current `Store`, and compares what
+ * comes out with a file written by the code before the split, which ran every step from v1: the whole of
  * `sqlite_master` (the SQL text of every table, index and virtual table, whitespace included), the rows of every
  * table, `user_version`, the host's `app_settings`, and the list of steps with their flags.
  *
@@ -13,9 +13,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Store } from './store.js'
 
 const dirs: string[] = []
@@ -34,98 +35,26 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-/** The v1 schema as `schema.sql` had it in its first commit, plus rows for the steps that rewrite data */
-function v1Store(): string {
+/**
+ * The oldest store this host opens (#1143): the v1 store this test used to build by hand (the DDL of the first commit of
+ * `schema.sql`, with rows for the steps that rewrite data), migrated to v27 by the build that still had the steps
+ * before it, and kept as SQL with every rowid
+ */
+function v27Store(): string {
   const file = join(dir(), 'store.db')
   const db = new Database(file)
-  db.exec(`
-    CREATE TABLE projects (
-      id            TEXT PRIMARY KEY,
-      path          TEXT NOT NULL UNIQUE,
-      name          TEXT NOT NULL,
-      default_tool  TEXT NOT NULL DEFAULT 'claude',
-      default_model TEXT,
-      sidebar_order INTEGER NOT NULL DEFAULT 0,
-      created_at    INTEGER NOT NULL
-    );
-    CREATE TABLE sessions (
-      id            TEXT PRIMARY KEY,
-      project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      tool          TEXT NOT NULL,
-      external_id   TEXT,
-      name          TEXT NOT NULL,
-      auto_named    INTEGER NOT NULL DEFAULT 1,
-      state         TEXT NOT NULL DEFAULT 'idle',
-      archived      INTEGER NOT NULL DEFAULT 0,
-      is_orchestrator INTEGER NOT NULL DEFAULT 0,
-      last_read_seq INTEGER NOT NULL DEFAULT 0,
-      waiting_since INTEGER,
-      created_at    INTEGER NOT NULL
-    );
-    CREATE INDEX idx_sessions_project ON sessions(project_id, archived);
-    CREATE TABLE messages (
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      seq        INTEGER NOT NULL,
-      role       TEXT NOT NULL,
-      kind       TEXT NOT NULL,
-      payload    TEXT NOT NULL,
-      ts         INTEGER NOT NULL,
-      PRIMARY KEY (session_id, seq)
-    );
-    CREATE TABLE approval_rules (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      scope      TEXT NOT NULL,
-      project_id TEXT,
-      session_id TEXT,
-      matcher    TEXT NOT NULL,
-      decision   TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-    CREATE TABLE usage_facts (
-      date       TEXT NOT NULL,
-      tool       TEXT NOT NULL,
-      model      TEXT NOT NULL,
-      project_id TEXT,
-      input_tokens  INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_tokens  INTEGER NOT NULL DEFAULT 0,
-      cost_est   REAL NOT NULL DEFAULT 0,
-      PRIMARY KEY (date, tool, model, project_id)
-    );
-    CREATE TABLE workspace (
-      id         INTEGER PRIMARY KEY CHECK (id = 1),
-      layout     TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    PRAGMA user_version = 1;
-  `)
-  db.exec(`
-    INSERT INTO projects (id, path, name, default_model, sidebar_order, created_at) VALUES
-      ('p1', '/work/p1', 'one', 'opus', 1, 100), ('p2', '/work/p2', 'two', NULL, 0, 200);
-    INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, created_at) VALUES
-      ('s1', 'p1', 'claude', 'ext-1', 'first', 1, 'idle', 0, 0, 2, 300),
-      ('s2', 'p1', 'codex', NULL, 'archived one', 0, 'idle', 1, 0, 0, 400),
-      ('orc', 'p2', 'claude', NULL, 'orchestrator', 0, 'idle', 0, 1, 0, 500);
-    INSERT INTO messages (session_id, seq, role, kind, payload, ts) VALUES
-      ('s1', 1, 'user', 'text', '{"text":"hello there"}', 1),
-      ('s1', 2, 'assistant', 'text', '{"text":"one "}', 2),
-      ('s1', 3, 'assistant', 'text', '{"text":"token "}', 3),
-      ('s1', 4, 'assistant', 'text', '{"text":"per row"}', 4),
-      ('s1', 5, 'assistant', 'reasoning', '{"text":"thinking "}', 5),
-      ('s1', 6, 'assistant', 'reasoning', '{"text":"hard"}', 6),
-      ('s1', 7, 'assistant', 'tool_call', '{"id":"t1","name":"Bash","input":{"command":"ls"}}', 7),
-      ('s1', 8, 'user', 'text', '{"text":"승인을 기다립니다"}', 8),
-      ('s2', 1, 'user', 'text', '{"text":"archived words"}', 9);
-    INSERT INTO approval_rules (scope, project_id, session_id, matcher, decision, created_at) VALUES
-      ('project', 'p1', NULL, 'Bash(ls)', 'allow', 10), ('session', NULL, 's1', 'Bash(rm *)', 'deny', 11);
-    INSERT INTO usage_facts (date, tool, model, project_id, input_tokens, output_tokens) VALUES ('2026-01-01', 'claude', 'opus', 'p1', 5, 6);
-    INSERT INTO workspace (id, layout, updated_at) VALUES (1, '{"panes":[]}', 12);
-  `)
+  db.exec(readFileSync(fileURLToPath(new URL('./store-fixtures/v27.sql', import.meta.url)), 'utf8'))
   db.close()
   return file
 }
 
 type Row = Record<string, unknown>
+type Dump = {
+  userVersion: unknown
+  master: { type: string; name: string }[]
+  indexes: unknown[]
+  tables: Record<string, { columns: string[] }>
+}
 
 /** Everything about the file that a step can change, in an order that does not depend on how it was reached */
 function dump(file: string): unknown {
@@ -165,14 +94,14 @@ const stepList = (): Step[] =>
     .migrationSteps()
     .map(({ to, breaksOlderReaders, heavy, ownTransaction }) => ({ to, breaksOlderReaders, heavy, ownTransaction }))
 
-describe('the whole migration list, from v1 to the newest', () => {
-  it('turns a v1 store into exactly the store the list produced before it was split into modules', async () => {
-    const file = v1Store()
+describe('the whole migration list, from the oldest store this host opens to the newest', () => {
+  it('turns a v27 store into exactly the store the list produced before it was split into modules', async () => {
+    const file = v27Store()
     const store = new Store(file)
     const ran = store.migrationsRun
     const version = store.schemaVersion
     store.close()
-    expect(ran).toBe(version - 1)
+    expect(ran).toBe(version - 27)
 
     await expect(JSON.stringify({ steps: stepList(), version, ran, store: dump(file) }, null, 1) + '\n').toMatchFileSnapshot(
       './store-migrations.golden.json',
@@ -180,7 +109,7 @@ describe('the whole migration list, from v1 to the newest', () => {
   })
 
   it('a swap leaves the same steps for later as before, and the store they end in is the same', async () => {
-    const file = v1Store()
+    const file = v27Store()
     const swapped = new Store(file, { swap: true })
     const deferred = swapped.deferredSteps
     const mid = { version: swapped.schemaVersion, deferred, minReader: swapped.minReaderVersion }
@@ -193,5 +122,22 @@ describe('the whole migration list, from v1 to the newest', () => {
     await expect(JSON.stringify({ mid, userVersion, master }, null, 1) + '\n').toMatchFileSnapshot(
       './store-migrations-swap.golden.json',
     )
+  })
+
+  it('builds a new store exactly as the build before the v27 baseline did (#1143)', async () => {
+    const file = join(dir(), 'store.db')
+    new Store(file).close()
+    const made = dump(file) as Dump
+    await expect(JSON.stringify(made, null, 1) + '\n').toMatchFileSnapshot('./store-new.golden.json')
+
+    // The same tables, columns and indexes as a store migrated from v1; only the order of columns an ALTER added differs
+    const migrated = (JSON.parse(readFileSync(new URL('./store-migrations.golden.json', import.meta.url), 'utf8')) as { store: Dump }).store
+    const shape = (d: Dump) => ({
+      userVersion: d.userVersion,
+      objects: d.master.map((m) => `${m.type} ${m.name}`),
+      columns: Object.fromEntries(Object.entries(d.tables).map(([t, v]) => [t, [...v.columns].sort()])),
+      indexes: d.indexes,
+    })
+    expect(shape(made)).toEqual(shape(migrated))
   })
 })
