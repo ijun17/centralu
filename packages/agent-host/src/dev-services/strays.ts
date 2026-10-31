@@ -172,7 +172,7 @@ const LIST_BOUND_MS = 60_000
 function unreadable(tool: string, e: unknown): never {
   const why = isObj(e) && e.killed === true ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
   console.error(`[agent-host] the ${tool} listing of leftover processes could not be read (${why})`)
-  throw rpcError(`The running processes could not be listed (${tool}: ${why}), so nothing was stopped; try again`)
+  throw rpcError(`The running processes could not be listed (${tool}: ${why}); try again`)
 }
 
 async function psRows(run: Run): Promise<PsRow[]> {

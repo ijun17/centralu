@@ -173,7 +173,7 @@ describe('stopStrays', () => {
   it('stops nothing when the keeper could not say what it holds', async () => {
     const sent: number[] = []
     const r = stopStrays([10], ['/p'], 1, null, { find: async () => [stray(10)], kill: (pid) => void sent.push(pid), graceMs: 5 })
-    await expect(r).rejects.toThrow(/nothing was stopped/)
+    await expect(r).rejects.toThrow(/could not be listed/)
     expect(sent).toEqual([])
   })
 
@@ -226,7 +226,7 @@ describe.skipIf(!hasPs())('findStrays when a listing cannot be read', () => {
   it('fails, and says so on stderr, when ps timed out', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await expect(findStrays(['/p'], 999_999, [], answering({ ps: timedOut }))).rejects.toThrow(/nothing was stopped/)
+      await expect(findStrays(['/p'], 999_999, [], answering({ ps: timedOut }))).rejects.toThrow(/could not be listed/)
       expect(err).toHaveBeenCalledWith(expect.stringContaining('ps listing'))
     } finally {
       err.mockRestore()
@@ -236,7 +236,7 @@ describe.skipIf(!hasPs())('findStrays when a listing cannot be read', () => {
   it('fails, and says so on stderr, when lsof timed out', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await expect(findStrays(['/p'], 999_999, [], answering({ ps: () => ps, lsof: timedOut }))).rejects.toThrow(/nothing was stopped/)
+      await expect(findStrays(['/p'], 999_999, [], answering({ ps: () => ps, lsof: timedOut }))).rejects.toThrow(/could not be listed/)
       expect(err).toHaveBeenCalledWith(expect.stringContaining('lsof listing'))
     } finally {
       err.mockRestore()
