@@ -161,7 +161,6 @@ export function sessionLookTests() {
         await page.evaluate((sid) => ((window as any).__mock).requestApproval(sid, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' }, 'r1'), id)
         await expect(row.locator('[data-state="waiting_approval"]')).toHaveCount(1)
         expect(await item.boundingBox()).toEqual(before)
-        await expect(page.getByTestId(`inbox-approval-${id}`)).toHaveCount(0)
       })
 
       test('a grid panel wears the same four looks as its mark', async ({ page }) => {

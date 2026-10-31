@@ -1293,7 +1293,7 @@
 /*
  * The four looks of a session (#736): how a session's mark in the sidebar and its panel on the grid
  * say what it is doing, by line and fill alone. Colour and motion are not used, so the looks read the
- * same in a still frame, in grayscale and for someone sensitive to motion; the exact state is always
+ * same in a still frame, in grayscale and for someone sensitive to motion (the fill of a mark only eases in, 180 ms); the exact state is always
  * in the tooltip. `lookOf` (features/session/look.ts) maps a session to one of them, and writes it
  * as `data-look`.
  *
@@ -1334,13 +1334,12 @@
 }
 /* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
    the 1px goes under it (measured at 4x) */
-.cc-mark > .cc-chip {
-  transition: background-color 180ms ease-out, color 180ms ease-out;
-}
 .cc-mark > .cc-chip.cc-chip-letter {
   font-family: var(--font-sans);
   padding-top: 0;
   padding-bottom: 1px;
+  /* The fill follows the look and eases in, 180 ms, no travel (reduced motion keeps it: a colour change only) */
+  transition: background-color 180ms ease-out, color 180ms ease-out;
 }
 .cc-mark[data-look='answering'] > .cc-chip {
   border: 2px solid var(--color-ink-muted);
@@ -1349,8 +1348,9 @@
   border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
-/* Waiting on an approval (not an open question): a near-white fill, the letter dark on it */
-.cc-mark[data-state='waiting_approval'][data-look='waiting'] > .cc-chip {
+/* Waiting on an approval (not an open question): a near-white fill, the letter dark on it. A session's mark only, not
+   the count chip of a folded group (FoldSummary), which keeps the grey fill */
+.cc-mark[data-state='waiting_approval'][data-look='waiting'] > .cc-chip.cc-chip-letter {
   background-color: var(--color-mark-attention);
   color: var(--color-mark-attention-ink);
 }
