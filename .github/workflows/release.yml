@@ -28,10 +28,9 @@
 # Two things are deliberate about the triggers:
 #
 #   * A tag push is a real release. That is the whole point: the tag is the one place a human
-#     states "this one, now". While the version lives in `brand.ts`, `guard` refuses the run if
-#     the two disagree; once brand.ts carries no version (the tag scheme, #1501), the tag is the
-#     version and `guard` holds it to the previous release instead (scripts/release-guard.mjs).
-#     Under the tag scheme a manual run never publishes, whatever `dry_run` says.
+#     states "this one, now". brand.ts carries no version (the tag scheme, #1501): the tag is the
+#     version, and `guard` holds it to the previous release (scripts/release-guard.mjs).
+#     A manual run never publishes, whatever `dry_run` says.
 #   * `workflow_dispatch` exists to rehearse (`dry_run`, default true). The darwin release
 #     path has only ever run on the developer's Mac; the Linux one had never run anywhere
 #     until it did, and its first run found two mac-only assumptions in `pnpm verify`. The
@@ -55,7 +54,7 @@ on:
         type: boolean
         default: true
       version:
-        description: 'The version to rehearse (empty: the next prerelease after the newest tag). Under the brand scheme it must be the APP_VERSION the commit declares'
+        description: 'The version to rehearse (empty: the next prerelease after the newest tag).'
         type: string
         required: false
         default: ''
@@ -90,7 +89,7 @@ jobs:
       # compares against the literal "false"/"true" for that reason.
       dry_run: ${{ steps.plan.outputs.dry_run }}
       also_latest: ${{ steps.plan.outputs.also_latest }}
-      # "brand" while brand.ts declares the version, "tag" once the tag alone does (#1501)
+      # "tag": the tag alone states the version (#1501); empty when the guard stopped the run
       scheme: ${{ steps.plan.outputs.scheme }}
       # "true" only on a tag push whose tree a successful rehearsal built and verified (#1042)
       skip_verify: ${{ steps.rehearsal.outputs.skip_verify }}
@@ -106,8 +105,7 @@ jobs:
         with:
           node-version: 22
 
-      # Which version this run builds, and whether it publishes: scripts/release-guard.mjs, for both
-      # schemes (brand.ts's literal, or the tag alone). The inputs go through the environment instead
+      # Which version this run builds, and whether it publishes: scripts/release-guard.mjs. The inputs go through the environment instead
       # of pasting `${{ inputs.* }}` into a script: an expression is substituted before anything
       # parses the line, so a value carrying a quote would be executed rather than compared.
       - id: plan
@@ -190,7 +188,7 @@ jobs:
     # An expression evaluating to '' means "no environment" to GitHub.
     environment: ${{ needs.guard.outputs.dry_run == 'false' && 'npm-publish' || '' }}
     # The version the guard decided, for every step of the job, `pnpm install` included (#1501,
-    # review item 7). Nothing reads it while brand.ts declares the version; the tag scheme's stamp will.
+    # review item 7). The tag scheme's stamp reads it.
     env:
       CENTRALU_VERSION: ${{ needs.guard.outputs.version }}
 

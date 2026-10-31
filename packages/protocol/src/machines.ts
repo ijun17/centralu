@@ -152,14 +152,6 @@ export const MachineAutostart = z.object({
 })
 export type MachineAutostart = z.infer<typeof MachineAutostart>
 
-/**
- * What the older "connect mode" said (#1134): `at_start`, or `when_needed`. Replaced by `MachineInfo.autoReconnect`
- * (#1341): `at_start` is the switch on, and `when_needed` off. Still sent in `MachineInfo.connect` for one release so
- * that an older window reads the row as it did, and still accepted by `machines.setConnect`
- */
-export const MachineConnect = z.enum(['at_start', 'when_needed'])
-export type MachineConnect = z.infer<typeof MachineConnect>
-
 export const MachineInfo = z.object({
   id: MachineId,
   /** What the person calls it; shown as the group header in the sidebar */
@@ -325,11 +317,6 @@ export const MachineInfo = z.object({
    * so. Additive
    */
   credentialFileUnreadable: z.boolean().catch(false).default(false),
-  /**
-   * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
-   * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
-   */
-  connect: MachineConnect.catch('at_start').default('at_start'),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
 

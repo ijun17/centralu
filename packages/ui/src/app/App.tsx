@@ -241,7 +241,7 @@ export function App({
         React tears down the whole tree and leaves a blank white screen, and that screen is
         indistinguishable from "the app is dead".
       */}
-      <ErrorBoundary>
+      <ErrorBoundary platform={platform}>
         {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
         <div className="relative flex h-full flex-col bg-surface-floor text-ink">
           <TopBar />

@@ -52,12 +52,13 @@ const hostLog = (id: string) => {
   return existsSync(f) ? readFileSync(f, 'utf8') : ''
 }
 
+// The probe gets as long as the connect: one that ran out on a loaded machine made the app answer in the older generation, and the spec-generation test read that as the wrong era
 const make = (timing: Partial<RuntimeTiming> = {}, env?: NodeJS.ProcessEnv) => {
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projRoot, trusted }],
     dataRoot,
     reservedIds: [],
-    timing: { idleMs: 60_000, backoffBaseMs: 100, graceMs: 1_500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, ...timing },
+    timing: { idleMs: 60_000, backoffBaseMs: 100, graceMs: 1_500, probeTimeoutMs: 10_000, connectTimeoutMs: 10_000, ...timing },
     ...(env ? { env } : {}),
   })
   rt.refresh()
@@ -346,14 +347,14 @@ describe('the shutdown rule (S-5)', () => {
       // The first blow (SIGTERM) came and was held off — proof that this test is watching the second blow. The fixed
       // sleep this replaces proved neither on a loaded machine: it could end before the SIGTERM was sent, or after the
       // SIGKILL (#845)
-      await until(() => records('parent').some((r) => r.t === 'sigterm-held' && r.pid === grandchild), (x) => x, 3_000)
+      await until(() => records('parent').some((r) => r.t === 'sigterm-held' && r.pid === grandchild), (x) => x)
       expect(alive(grandchild)).toBe(true)
-      await until(() => alive(grandchild), (a) => a === false, 6_000)
+      await until(() => alive(grandchild), (a) => a === false)
     } finally {
       own.end([grandchild])
     }
-    // The test's own cap must exceed the waits (3 s and 6 s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
-  }, 15_000 * SLOW)
+    // The test's own cap must exceed its waits (a start, then up to three of `until`'s default) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
+  }, 35_000 * SLOW)
 
   /*
    * Windows (#14) has no groups. A child Node spawns without `detached` dies with the app (libuv's job), so the test
@@ -412,12 +413,12 @@ describe('the shutdown rule (S-5)', () => {
       rt.refresh()
       expect(alive(pid)).toBe(true)
       await rt.dispose()
-      await until(() => alive(pid), (a) => a === false, 6_000)
+      await until(() => alive(pid), (a) => a === false)
       expect((await first).status).not.toBe('ok')
     } finally {
       own.end([pid], { group: true })
     }
-  }, 15_000 * SLOW)
+  }, 35_000 * SLOW)
 
   /*
    * A caller about to delete the data folder (a test's cleanup, which removes it at once) waits for the trees: by default
@@ -447,7 +448,7 @@ describe('the shutdown rule (S-5)', () => {
     await Promise.all([rt.tools(ref('a1')), rt.tools(ref('a2'))])
     const pids = [starts('a1')[0]!.pid, starts('a2')[0]!.pid]
     await rt.dispose()
-    await until(() => pids.map(alive), (xs) => xs.every((x) => !x), 6_000)
+    await until(() => pids.map(alive), (xs) => xs.every((x) => !x))
   })
 })
 

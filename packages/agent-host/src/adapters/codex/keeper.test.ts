@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
 import { CodexAdapter } from './index.js'
+import { CodexSession } from './session.js'
 import { eventually } from '../../../../../tooling/test-timing.js'
 
 /**
@@ -71,6 +72,11 @@ class FakeAppServer extends EventEmitter {
       return this.reply(m.id, { result: { data: [{ id: 'turn-9', status: 'inProgress', items: [], itemsView: 'notLoaded' }], nextCursor: 'c1', backwardsCursor: null } })
     }
     this.reply(m.id, { result: {} })
+  }
+  /** Answers the requests held for `method`, and the later ones */
+  release(method: string) {
+    this.hold.delete(method)
+    for (const m of this.received.filter((r) => r.method === method)) this.answer(m)
   }
   kill(signal: NodeJS.Signals = 'SIGTERM') {
     this.kills.push(signal)
@@ -141,6 +147,43 @@ describe('codex under the keeper', () => {
       sortDirection: 'desc',
       itemsView: 'notLoaded',
     })
+  })
+
+  /*
+   * #1733 review: the thread has its id while its running turn is still looked up. A Stop then is not one for a resume still
+   * waking (#168): the message sent meanwhile is not taken back and nothing says "stopped", since the adopted turn runs on.
+   * The message goes once the lookup answers, and the next Stop stops that turn.
+   */
+  it('a Stop while the running turn is looked up keeps the message sent meanwhile; the next Stop stops the adopted turn', async () => {
+    const server = new FakeAppServer('paginated')
+    server.hold.add('thread/turns/list')
+    const events: { type: string }[] = []
+    const session = new CodexSession(
+      {
+        sessionId: 's1',
+        cwd: '/tmp',
+        permissionPreset: 'safe',
+        resumeExternalId: 'thread-1',
+        processSource: {
+          spawn: () => {
+            throw new Error('an adopted session must not spawn')
+          },
+          adopt: { process: server as unknown as AgentProcess, openCalls: [] },
+        },
+      },
+      (e) => events.push(e),
+    )
+    await eventually(() => server.received.some((m) => m.method === 'thread/turns/list'))
+    session.send('merge this in')
+    session.interrupt()
+    expect(events.some((e) => e.type === 'state_change')).toBe(false)
+    server.release('thread/turns/list')
+    await session.ready
+    await eventually(() => server.received.some((m) => m.method === 'turn/start'))
+    expect(server.received.find((m) => m.method === 'turn/start')!.params).toMatchObject({ input: [{ type: 'text', text: 'merge this in' }] })
+    session.interrupt()
+    await eventually(() => server.received.some((m) => m.method === 'turn/interrupt'))
+    expect(server.received.find((m) => m.method === 'turn/interrupt')!.params).toEqual({ threadId: 'thread-1', turnId: 'turn-9' })
   })
 
   it('an older Codex answers the resume with its turns: the running one is read from there, nothing more is asked', async () => {

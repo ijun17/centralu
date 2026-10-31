@@ -191,19 +191,9 @@ export const projectsParams = {
    */
   'projects.setCommands': z.object({ projectId: ProjectId, commands: z.array(SavedCommand) }),
   /**
-   * Creates the worktree manager slot (#76) — even when it will have no children yet.
-   *
-   * baseBranch is this project's **trunk**: both where a worktree branches off from and the
-   * baseline for measuring whether it has merged. The host never invents a default for it —
-   * which branch is the trunk differs by repository, and a wrong default only shows up once a
-   * worktree has already branched off from the wrong place. If the slot already exists, it is
-   * returned as-is and only the trunk is rewritten (this is how the trunk gets changed).
-   */
-  'worktrees.createManager': z.object({ projectId: ProjectId, baseBranch: z.string() }),
-  /**
    * Sets the project's worktree trunk (#76): where a new worktree forks from by default and what "merged" is measured
-   * against. Since the worktree manager was folded into ordinary sessions (#561 part 3), `worktrees.createManager` is
-   * refused and this is how the trunk is chosen; `ProjectInfo.worktreeManager.baseBranch` still carries it.
+   * against. Since the worktree manager was folded into ordinary sessions (#561 part 3), this is how the trunk is
+   * chosen; `ProjectInfo.worktreeManager.baseBranch` still carries it.
    */
   'worktrees.setTrunk': z.object({ projectId: ProjectId, baseBranch: z.string() }),
   /** Saves worktree provisioning settings (#69) — edited by the worktree section of the new-session window */

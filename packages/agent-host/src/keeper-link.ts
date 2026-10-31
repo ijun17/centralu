@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION, type HostBuild } from '@cc/protocol'
 import { hostBusy, type ActivitySnapshot } from './idle.js'
+import { tryParseJson } from './json-value.js'
 
 /**
  * What the host tells the keeper, and what it says about its own build (#280, option C step 1).
@@ -21,12 +22,7 @@ import { hostBusy, type ActivitySnapshot } from './idle.js'
 export function hostBuild(commit: string, sourceJson: string | undefined): HostBuild {
   const build: HostBuild = { commit, protocolVersion: PROTOCOL_VERSION }
   if (!sourceJson) return build
-  let source: unknown
-  try {
-    source = JSON.parse(sourceJson)
-  } catch {
-    return build
-  }
+  const source = tryParseJson(sourceJson)
   if (typeof source !== 'object' || source === null) return build
   const text = (k: string) => {
     const v = (source as Record<string, unknown>)[k]

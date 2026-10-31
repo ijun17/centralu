@@ -9,6 +9,7 @@ import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
  */
 
 let data = ''
+const dirs: string[] = []
 let client: (HostClient & { host: { kill: () => boolean } }) | null = null
 const seen: Json[] = []
 beforeAll(async () => {
@@ -19,9 +20,18 @@ afterAll(async () => {
   client?.ws.close()
   client?.host.kill()
   await removeTree(data)
+  for (const d of dirs) await removeTree(d)
 })
 
 describe("the smokes' host client", () => {
+  it('stops the host and returns only once it is gone', async () => {
+    const dir = tempRoot('cc-host-client-stop-')
+    dirs.push(dir)
+    const own = await openHost({ env: { CC_DATA_DIR: dir } })
+    await own.stop()
+    expect(own.host.exitCode !== null || own.host.signalCode !== null).toBe(true)
+  }, 60_000 * SLOW)
+
   it('starts the host, greets it, and resolves a call with its result', async () => {
     expect(await client?.call('projects.list', {})).toEqual([])
   })

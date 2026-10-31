@@ -26,7 +26,7 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { filesHolding, GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
+import { GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -4893,10 +4893,6 @@ describe('the integrator lands an auto-tier branch without a pull request from i
       expect(await isAncestor(repo.work, main, tip)).toBe(true)
       expect(await isAncestor(repo.work, tip, main)).toBe(false)
       await expect(isAncestor(repo.work, 'a'.repeat(40), main)).rejects.toBeInstanceOf(GitError)
-      // Nothing found is exit 1 with the trace line too; a commit that is not there is the error
-      expect(await filesHolding(repo.work, tip, ['no such text anywhere'])).toEqual([])
-      expect(await filesHolding(repo.work, tip, ['read it top down'])).toEqual(['docs/guide.md'])
-      await expect(filesHolding(repo.work, 'a'.repeat(40), ['base'])).rejects.toBeInstanceOf(GitError)
     } finally {
       vi.unstubAllEnvs()
     }

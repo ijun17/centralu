@@ -50,7 +50,7 @@ import {
   signalRefusal,
   type OsFamily,
 } from './rules.js'
-import { abortReason, asOsError, errorCode } from './errors.js'
+import { abortReason, asOsError, errnoCode } from './errors.js'
 import { copyTreeAsync, copyTreeSync } from './copy.js'
 import { runChild } from './run.js'
 
@@ -448,7 +448,7 @@ const realOsValue: Os = {
         process.kill(pid, 0)
         return true
       } catch (e) {
-        return errorCode(e) === 'EPERM'
+        return errnoCode(e) === 'EPERM'
       }
     },
     signal: (pid, signal) => {
@@ -460,7 +460,7 @@ const realOsValue: Os = {
         if (refused) throw signalError(signal, refused)
         return true
       } catch (e) {
-        if (errorCode(e) === 'ESRCH') return false
+        if (errnoCode(e) === 'ESRCH') return false
         throw asOsError(e)
       }
     },

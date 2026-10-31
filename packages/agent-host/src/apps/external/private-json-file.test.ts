@@ -304,3 +304,86 @@ describe('temp files a crashed write left behind', () => {
     expect(readFileSync(join(dataRoot, `${SECRETS_FILE}.tmp`), 'utf8')).toBe('the old host, half written')
   })
 })
+
+describe('PrivateJsonFile.create', () => {
+  /** The class with every temp name the same, so the second write finds its temp name taken */
+  async function openWithFixedTempNames(name: string) {
+    vi.resetModules()
+    vi.doMock('node:crypto', async (original) => ({ ...(await original<typeof import('node:crypto')>()), randomBytes: () => Buffer.from([1, 2, 3, 4]) }))
+    const { PrivateJsonFile } = await import('./private-json-file.js')
+    return new PrivateJsonFile<Record<string, number>>(join(dataRoot, name), { label: 'test file', empty: () => ({}), valid: (d): d is Record<string, number> => typeof d === 'object', lost: '' })
+  }
+  afterEach(() => vi.doUnmock('node:crypto'))
+
+  it('answers false for a file that is there, and leaves it as it is', async () => {
+    writeFileSync(join(dataRoot, 'a.json'), '{"kept":1}')
+    expect((await openWithFixedTempNames('a.json')).create({ new: 2 })).toBe(false)
+    expect(readFileSync(join(dataRoot, 'a.json'), 'utf8')).toBe('{"kept":1}')
+  })
+
+  it('throws when its temp name is taken, and writes no file: the caller must not read that as "there is one"', async () => {
+    writeFileSync(join(dataRoot, `b.json.${process.pid}-01020304.tmp`), 'someone else\'s')
+    const file = await openWithFixedTempNames('b.json')
+    expect(() => file.create({ new: 2 })).toThrow(/EEXIST/)
+    expect(existsSync(join(dataRoot, 'b.json'))).toBe(false)
+  })
+})
+
+describe('what the runtime keeps beside its private files', () => {
+  it('the busy book leaves no temp file when the rename fails', async () => {
+    const { BusyBook } = await import('./busy-book.js')
+    // A folder in the place of the file: the rename onto it fails after the temp file was written
+    const file = join(dataRoot, 'app-busy.json')
+    mkdirSync(join(file, 'inside'), { recursive: true })
+    new BusyBook(file).set('p1/notes', { projectId: 'p1', appId: 'notes', reason: 'merging', at: 1 })
+    expect(readdirSync(dataRoot)).toEqual(['app-busy.json', 'some-app'])
+  })
+
+  it('the busy book still never throws when a scanner holds the temp file, so removing it fails too', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({
+      ...(await original<typeof import('node:fs')>()),
+      rmSync: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }) },
+    }))
+    try {
+      const { BusyBook: Book } = await import('./busy-book.js')
+      const file = join(dataRoot, 'app-busy.json')
+      mkdirSync(join(file, 'inside'), { recursive: true })
+      expect(() => new Book(file).set('p1/notes', { projectId: 'p1', appId: 'notes', reason: 'merging', at: 1 })).not.toThrow()
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+
+  it('an app folder that cannot be read is refused by the OS code, never by the message that names the path', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({
+      ...(await original<typeof import('node:fs')>()),
+      readdirSync: () => { throw Object.assign(new Error("EACCES: permission denied, scandir '/elsewhere/secret-folder'"), { code: 'EACCES' }) },
+    }))
+    try {
+      const { IMPORT_LIMITS, stageLocal } = await import('./imports.js')
+      const src = join(dataRoot, 'src')
+      mkdirSync(src)
+      let said = ''
+      try { stageLocal(src, join(dataRoot, 'dest'), IMPORT_LIMITS) } catch (e) { said = (e as Error).message }
+      expect(said).toMatch(/^Could not read .*: EACCES$/)
+      expect(said).not.toContain('secret-folder')
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+
+  it('the import marks say why the data folder could not be listed by its code, never by the message of an error that has none', async () => {
+    vi.resetModules()
+    vi.doMock('node:fs', async (original) => ({ ...(await original<typeof import('node:fs')>()), readdirSync: () => { throw new Error('cannot list /elsewhere/secret-folder') } }))
+    try {
+      const { ImportBook: Book } = await import('./import-book.js')
+      const reason = new Book(dataRoot).doubt()
+      expect(reason).toContain('could not be listed (unknown error)')
+      expect(reason).not.toContain('secret-folder')
+    } finally {
+      vi.doUnmock('node:fs')
+    }
+  })
+})

@@ -605,14 +605,12 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
   })
 
-  it('moves nothing and gives no lines when the session is not at rest, or the host predates the check: the dialog then archives on the answer it has', async () => {
+  it('moves nothing and gives no lines when the session is not at rest: the dialog then archives on the answer it has', async () => {
     const { mock, s } = await oneSession('/tmp/archive-d')
     const asked = vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: [] })
     const deleted = vi.spyOn(mock.agents, 'deleteSession')
     expect(await useStore.getState().archiveSession(s.id, false, false)).toEqual([])
     expect(asked).toHaveBeenCalledWith(s.id, false)
-    asked.mockRejectedValue(new Error('Unknown method: agents.archiveIfAtRest'))
-    expect(await useStore.getState().archiveSession(s.id, false, false)).toEqual([])
     expect(deleted).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
@@ -642,7 +640,7 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
-  it('with the worktree deleted too, gives no lines when there is nothing to list, or the host has no such method, and moves nothing: the dialog moves it if it is still open', async () => {
+  it('with the worktree deleted too, gives no lines when there is nothing to list, and moves nothing: the dialog moves it if it is still open', async () => {
     const { mock, s } = await oneSession('/tmp/archive-w2')
     const read = vi.spyOn(mock.agents, 'archiveLosses').mockResolvedValue([])
     const deleted = vi.spyOn(mock.agents, 'deleteSession')
@@ -650,10 +648,6 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(read).toHaveBeenCalledWith(s.id)
     expect(deleted).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeDefined()
-
-    read.mockRejectedValue(new Error('Unknown method: agents.archiveLosses'))
-    expect(await useStore.getState().archiveSession(s.id, true, true)).toEqual([])
-    expect(deleted).not.toHaveBeenCalled()
   })
 
   it('with the worktree deleted too, a failed read moves nothing and says why', async () => {

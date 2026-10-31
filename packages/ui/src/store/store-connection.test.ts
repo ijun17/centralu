@@ -142,7 +142,7 @@ describe('what the window could not read is said', () => {
     expect(toast).toContain('the app list')
   })
 
-  it('a machine list that could not be read is said, while a host from before machines says nothing (#841 item 10)', async () => {
+  it('a machine list that could not be read is said (#841 item 10)', async () => {
     const mock = new MockPlatform()
     mock.machines.list = async () => {
       throw new Error('RPC timed out')
@@ -150,13 +150,6 @@ describe('what the window could not read is said', () => {
     useStore.setState({ toast: null })
     await useStore.getState().attach(mock)
     expect(useStore.getState().toast).toBe('Could not read the linked machines; shown empty or as defaults until read again')
-    const older = new MockPlatform()
-    older.machines.list = async () => {
-      throw new Error('Unknown method: machines.list. This Centralu host does not have it; the window may be from another build.')
-    }
-    useStore.setState({ toast: null })
-    await useStore.getState().attach(older)
-    expect(useStore.getState().toast).toBeNull()
   })
 
   it('a folder watch the host refuses is said once, and again only after one worked (#841)', async () => {
@@ -516,7 +509,7 @@ describe('a message sent at the instant of disconnect (#173)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {
@@ -717,7 +710,7 @@ describe('linked machines (#82)', () => {
 describe('a machine the hub says is connected is never shown away (#1611)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
   })
   const away = () => {
     const st = useStore.getState()
@@ -961,19 +954,9 @@ describe('Done on an error that nothing cleared says so (#1549)', () => {
     useStore.setState({ platform, sessions: { e: sessionInfo('e', { state: 'error', lastSeq: 4, lastReadSeq: 1 }) as never } })
   }
 
-  it('against an older host the answer is read and the toast says the error stays', async () => {
-    const platform = new MockPlatform()
-    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: false, newer: false, olderHost: true })
-    failed(platform)
-    await useStore.getState().markDone('e')
-    expect(useStore.getState().sessions.e!.lastReadSeq).toBe(4)
-    expect(useStore.getState().sessions.e!.state).toBe('error')
-    expect(useStore.getState().toast).toBe('Marked as read. This host is too old to clear an error: it stays until the host is updated')
-  })
-
   it('when a newer error exists the mark stays and the toast says so', async () => {
     const platform = new MockPlatform()
-    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: false, newer: true, olderHost: false })
+    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: false, newer: true })
     failed(platform)
     await useStore.getState().markDone('e')
     expect(useStore.getState().sessions.e!.state).toBe('error')
@@ -982,7 +965,7 @@ describe('Done on an error that nothing cleared says so (#1549)', () => {
 
   it('a cleared error says nothing', async () => {
     const platform = new MockPlatform()
-    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: true, newer: false, olderHost: false })
+    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: true, newer: false })
     failed(platform)
     useStore.setState({ toast: null })
     await useStore.getState().markDone('e')

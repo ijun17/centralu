@@ -9,6 +9,7 @@ import type { CommandRunner } from './dev-services/commands.js'
 import { findStrays, stopStrays } from './dev-services/strays.js'
 import { gitLogPath } from './dev-services/git.js'
 import { rpcError } from './rpc-error.js'
+import { createUiCrashLog } from './ui-crash-log.js'
 
 /** Internal handle → protocol shape (history is rendered as a fresh snapshot each time) */
 const toInfo = (h: TerminalHandle) => ({
@@ -34,7 +35,6 @@ import type { MailPerson } from './mail/person.js'
 import type { InlineViews } from './inline-views.js'
 import type { CredentialsReport } from './lifecycle/serve-credentials.js'
 import type {
-  GridPanel,
   HostActivity,
   HostHandover,
   HubOffer,
@@ -126,8 +126,6 @@ export type MachinesPort = {
   revokeCredential(id: string, credentialId: string): Promise<MachineInfo>
   /** Auto reconnect on or off (#1341) */
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
-  /** `machines.need` of an older window (#1134): answers the row, does nothing else (#1341) */
-  needs(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
   /** `unasked`: no one approved it, automatic updates cover it (#1508); it stops no session it cannot see */
@@ -151,17 +149,13 @@ export type MachinesPort = {
   followHub?(): void
 }
 
-/** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
-function sessionIdsOf(panels: readonly GridPanel[]): string[] {
-  return panels.flatMap((p) => (p.kind === 'session' ? [p.sessionId] : []))
-}
-
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
   { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
+  const reportUiCrash = createUiCrashLog((line) => console.error(line))
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
     return themes
@@ -714,19 +708,8 @@ export function createRpcHandler(
       const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
       return mgr.apps.callAppForSession(sessionId, server, name, args, waitMs)
     },
-    /*
-     * A request in the pre-#288 shape (no `tagged`, no `panels`) is answered in it: the sessions' ids only. An older UI
-     * that saves through `sessionIds` replaces the list with its sessions, as it always did — it cannot know the apps.
-     */
-    'grid.get': async (p) => {
-      const panels = mgr.layout.grid()
-      return RpcMethods['grid.get'].params.parse(p).tagged ? panels : sessionIdsOf(panels)
-    },
-    'grid.set': async (p) => {
-      const { panels, sessionIds } = RpcMethods['grid.set'].params.parse(p)
-      const saved = mgr.layout.setGridView(panels ?? (sessionIds ?? []).map((sessionId) => ({ kind: 'session' as const, sessionId })))
-      return panels ? saved : sessionIdsOf(saved)
-    },
+    'grid.get': async () => mgr.layout.grid(),
+    'grid.set': async (p) => mgr.layout.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
     /*
      * Not listed with no protection (#841 item 7): a keeper that could not answer made every agent it holds a stray,
      * offered to be stopped on quit. The stop refuses that case already; the list says it too.
@@ -779,10 +762,6 @@ export function createRpcHandler(
     'projects.setCommands': async (p) => {
       const { projectId, commands } = RpcMethods['projects.setCommands'].params.parse(p)
       return mgr.projectRegistry.setProjectCommands(projectId, commands)
-    },
-    'worktrees.createManager': async (p) => {
-      const { projectId, baseBranch } = RpcMethods['worktrees.createManager'].params.parse(p)
-      return mgr.createWorktreeManager(projectId, baseBranch)
     },
     'worktrees.setTrunk': async (p) => {
       const { projectId, baseBranch } = RpcMethods['worktrees.setTrunk'].params.parse(p)
@@ -990,13 +969,6 @@ export function createRpcHandler(
       const { machineId, autoReconnect } = RpcMethods['machines.setAutoReconnect'].params.parse(p)
       return requireMachines().setAutoReconnect(machineId, autoReconnect)
     },
-    // The connect mode of an older window (#1134), kept for one release (#1341): `at_start` is the switch on
-    'machines.setConnect': async (p) => {
-      const { machineId, connect } = RpcMethods['machines.setConnect'].params.parse(p)
-      return requireMachines().setAutoReconnect(machineId, connect === 'at_start')
-    },
-    // An older window's need (#1134): answers the row and does nothing else (#1341)
-    'machines.need': async (p) => requireMachines().needs(RpcMethods['machines.need'].params.parse(p).machineId),
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.update': async (p, ctx) => {
       const { machineId, when } = RpcMethods['machines.update'].params.parse(p)
@@ -1101,6 +1073,10 @@ export function createRpcHandler(
     'requests.answer': async (p) => {
       const a = RpcMethods['requests.answer'].params.parse(p)
       return { ok: requests?.answer(a.requestId, a.decision) ?? false }
+    },
+    'ui.reportCrash': async (p) => {
+      reportUiCrash(RpcMethods['ui.reportCrash'].params.parse(p))
+      return {}
     },
     'updates.reportApply': async (p, ctx) => {
       const r = RpcMethods['updates.reportApply'].params.parse(p)

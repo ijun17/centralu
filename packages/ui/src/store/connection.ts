@@ -9,19 +9,16 @@ import type {
   ToolStatus,
 } from '@cc/protocol/client'
 import {
-  appPanelId,
   isAway,
-  migrateArrangement,
   readNotifyPolicy,
   sanitizeArrangements,
   sanitizeGridPanels,
   sanitizeGridSpan,
-  sessionPanelId,
   type SessionSummary,
 } from '@cc/core'
 import type { WorkspaceSnapshot } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from './state.js'
-import { activateTab, defaultLayout, sanitizeLayout } from './panelLayout.js'
+import { sanitizeLayout } from './panelLayout.js'
 import { EMPTY_NAV } from './navHistory.js'
 import { isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
@@ -188,10 +185,9 @@ export function goodThemes(
 /**
  * Lays a stored snapshot onto the window (C-3), field by field. With `screen`, it also goes back to the screen the
  * snapshot names (the focused session, the view, the pinned app); a snapshot read late (#384, `readWorkspaceAgain`)
- * brings back the settings and the layout only, because the person is already working on some screen. Returns whether
- * the project screens' arrangements came in an older shape and need saving once.
+ * brings back the settings and the layout only, because the person is already working on some screen.
  */
-function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): boolean {
+function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): void {
   /*
    * Folded projects are restored **first of all** (#205). `focusSession` right below this
    * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
@@ -205,26 +201,7 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
     set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
   }
   // The project screens' arrangements (#203), first for the same reason as the fold above
-  const arrangements = sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels)
-  set({
-    projectPanels: Object.fromEntries(
-      Object.entries(arrangements).map(([pid, saved]) => {
-        const present = [
-          ...Object.values(get().sessions)
-            .filter((s) => s.projectId === pid)
-            .map((s) => sessionPanelId(s.id)),
-          ...get()
-            .externalApps.filter((a) => a.projectId === pid)
-            .sort(
-              (a, b) =>
-                (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId),
-            )
-            .map((a) => appPanelId(a.appId)),
-        ]
-        return [pid, migrateArrangement(present, saved)]
-      }),
-    ),
-  })
+  set({ projectPanels: sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels) })
   // What this window had seen of trusted projects' apps, and the notices not yet read (#1141); a snapshot from before has none
   const savedSeen = (snap as { appsSeen?: unknown }).appsSeen
   if (savedSeen && typeof savedSeen === 'object' && !Array.isArray(savedSeen)) {
@@ -298,16 +275,10 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    * Layout prefs come back even when the focused session is gone (#20). They used
    * to sit inside the session check above, so a snapshot whose session had been
    * deleted threw the whole arrangement away with it — but the panel's shape is a
-   * fact about the person, not about any session. (The legacy `snap.tab` field is
-   * still ignored: that tab structure was replaced by the three lanes.)
+   * fact about the person, not about any session.
    */
   if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
-  /*
-   * The arrangement survives restart, globally (#20 decision). `panelLayout` is
-   * the arrangement; `panelTab` is the pre-#20 single-tab field, kept as the
-   * fallback so a snapshot written before the arrangement existed still restores
-   * the tab that was showing.
-   */
+  // The arrangement survives restart, globally (#20 decision)
   const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
   if (savedLayout != null) {
     set({ panelLayout: sanitizeLayout(savedLayout) })
@@ -316,13 +287,6 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
     if (typeof savedSplit === 'number' && Number.isFinite(savedSplit)) {
       get().setPanelSplit(savedSplit)
     }
-  } else if (
-    snap.panelTab === 'files' ||
-    snap.panelTab === 'git' ||
-    snap.panelTab === 'history' ||
-    snap.panelTab === 'terminal'
-  ) {
-    set({ panelLayout: activateTab(defaultLayout(), snap.panelTab) })
   }
   if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
   if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
@@ -340,13 +304,11 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   // a stored `false` is a decision and outranks it.
   const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
   if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
-  // The text size used to be restored here too; it is a preference now (UiPreferences.textSize),
-  // and the host moved the snapshot's old step into it once (#312 step 5)
+  // The text size is a preference (UiPreferences.textSize, #312 step 5), not part of the snapshot
   /*
    * `foldComposer` (the "fold the message box" switch) is no longer read (owner, 2026-10-20): a grid or project panel
    * folds its composer by its own height now (SessionPane's `foldWhenShort`). A snapshot that still carries it is fine.
    */
-  return Object.values(arrangements).some((saved) => saved.panels === undefined)
 }
 
 /**
@@ -516,7 +478,6 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         platform.projects.list(),
         platform.agents.listSessions(),
         // The app must come up even if the layout cannot be read — the grid just looks empty
-        // Sanitized: a host from before apps could stand on the grid answers bare session ids, which still read as sessions
         platform.agents
           .grid()
           .then(sanitizeGridPanels)
@@ -545,17 +506,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         // already has its theme — and a folder that cannot be read just means the presets
         platform.themes.list().catch(orEmpty('the theme files', [] as ThemeFileEntry[])),
         /*
-         * The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before
-         * them has none, and says it does not know the method: that is no machine, quietly. Any other failure is a list
+         * The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A failure is a list
          * that was not read, and is said (#841 item 10): the sidebar would show no machine where one is linked
          */
-        platform.machines
-          .list()
-          .catch((e: unknown) =>
-            e instanceof Error && e.message.startsWith('Unknown method: machines.list')
-              ? ([] as MachineInfo[])
-              : orEmpty('the linked machines', [] as MachineInfo[])(),
-          ),
+        platform.machines.list().catch(orEmpty('the linked machines', [] as MachineInfo[])),
       ]).finally(watch.stop)
     set((st) => {
       // Recovery or re-attachment may have updated the window while startup reads were pending (#640).
@@ -622,11 +576,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     restoringWorkspace = true
-    let migratedProjectPanels = false
     try {
       const snap = await platform.workspace.load()
       workspaceUnread = false
-      if (snap) migratedProjectPanels = applyWorkspaceSnapshot(snap, get, set, true)
+      if (snap) applyWorkspaceSnapshot(snap, get, set, true)
     } catch (e) {
       // The app works normally even with no snapshot, but it is said, not saved over (`workspaceUnread`), and read again
       workspaceUnread = true
@@ -635,8 +588,6 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     } finally {
       restoringWorkspace = false
     }
-    // Persist migration only after the whole restore succeeds, so a restart cannot migrate newly created sessions again.
-    if (migratedProjectPanels) get().saveWorkspace()
     // History starts at the screen the restore left (#374): the steps it took to get there are not the person's
     const restored = screenOf(get())
     set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV, workspaceReady: true })
@@ -674,10 +625,6 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       appsSeen: s.appsSeen,
       appArrivals: s.appArrivals,
       panelOpen: s.panelOpen,
-      // The single-tab field predates the arrangement (#20). It keeps carrying the
-      // top group's active tab so an older build reading this snapshot still lands
-      // on the tab that was showing.
-      panelTab: s.panelLayout[0]?.active,
       panelLayout: s.panelLayout,
       panelSplit: s.panelSplit,
       panelWidth: s.panelWidth,

@@ -386,6 +386,18 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     ])
   })
 
+  it('a slash command that waited behind a compact goes as text in that message, not as a command of its own', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    h.send('/compact')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/completed', params: {} })
+    await tick()
+    expect(methods().filter((m) => m === 'thread/compact/start')).toHaveLength(1)
+    expect(state.requests.find((r) => r.method === 'turn/start')?.params?.input).toEqual([{ type: 'text', text: '/compact' }])
+  })
+
   it('if starting compact fails, the queue unblocks — a locked queue is a permanent loss', async () => {
     state.failMethods.add('thread/compact/start')
     const events: { type: string }[] = []

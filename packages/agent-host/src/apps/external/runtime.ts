@@ -1046,6 +1046,7 @@ export class ExternalApps {
           continue
         }
         void this.lifecycle.haltWhenDrained(prev, 'manifest changed')
+        this.reflector.manifestReplaced(prev.ref, prev)
       }
       held.apps.set(found.folder, newEntry(scope, found, this.deps.reservedIds))
       changed = true

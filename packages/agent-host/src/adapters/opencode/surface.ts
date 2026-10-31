@@ -2,16 +2,12 @@ import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import { asObj } from '../../json-value.js'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
-import { startToolProcess } from '../core/tool-process.js'
-import { AcpConnection } from '../acp/connection.js'
+import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
 import { findOpenCode } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
 
 const exec = promisify(execFile)
-
-const Initialized = z.looseObject({ agentCapabilities: z.unknown().optional(), authMethods: z.array(z.looseObject({ id: z.string() })).optional() })
 
 /**
  * What the installed OpenCode offers (#270), read without a session and without a login: its `--help` commands, the
@@ -27,36 +23,20 @@ async function gather(): Promise<SurfaceInputs> {
   ])
   // Measured: its help goes to stderr
   const help = shown.stdout + shown.stderr
-  const proc = startToolProcess({ command: install.command, args: [...install.args, 'acp'], cwd: process.cwd(), env: process.env })
-  const conn = new AcpConnection(proc, { onNotification: () => {}, onRequest: async () => null, onExit: () => {} }, 'opencode-surface')
-  let init: unknown
-  try {
-    init = await conn.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'centralu-surface', version: '1' } }, 60_000)
-  } finally {
-    await conn.dispose()
-  }
+  const initialize = await acpInitialize({ command: install.command, args: [...install.args, 'acp'], env: process.env }, 'opencode-surface')
   // The binary itself (a JavaScript bundle compiled in): the update kinds are string literals in it
   const names = new Set([...readFileSync(install.command).toString('latin1').matchAll(/sessionUpdate:"([a-z_]+)"/g)].flatMap((m) => (m[1] ? [m[1]] : [])))
-  return { version: version.trim(), help, initialize: JSON.stringify(init), bundle: JSON.stringify([...names].sort()) }
-}
-
-/** Keys of a capability object, flattened (`sessionCapabilities.close`), so a new one shows as a new name */
-function capabilityNames(value: unknown, prefix = ''): string[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return prefix ? [prefix] : []
-  const entries = Object.entries(asObj(value))
-  if (entries.length === 0) return prefix ? [prefix] : []
-  return entries.flatMap(([k, v]) => (typeof v === 'object' && v !== null ? capabilityNames(v, prefix ? `${prefix}.${k}` : k) : [prefix ? `${prefix}.${k}` : k]))
+  return { version: version.trim(), help, initialize, bundle: JSON.stringify([...names].sort()) }
 }
 
 export function readOpenCodeSurface(inputs: SurfaceInputs): ToolSurface {
-  const init = Initialized.parse(JSON.parse(inputs.initialize ?? '{}'))
   const commands = [...(inputs.help ?? '').matchAll(/^ {2}opencode ([a-z][\w-]*)/gm)].flatMap((m) => (m[1] ? [m[1]] : []))
   return {
     version: `opencode ${inputs.version ?? 'unknown'}`,
     offered: {
       command: [...new Set(commands)].sort(),
       message: z.array(z.string()).parse(JSON.parse(inputs.bundle ?? '[]')).sort(),
-      capability: [...capabilityNames(init.agentCapabilities), ...(init.authMethods ?? []).map((a) => `authMethods.${a.id}`)].sort(),
+      capability: acpCapabilities(inputs.initialize),
     },
   }
 }

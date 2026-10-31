@@ -5,7 +5,7 @@ import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
-import { asObj } from '../json-value.js'
+import { asObj, tryParseJson } from '../json-value.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -135,29 +135,21 @@ export const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
 type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number } }
 function readTurnSpan(raw: string | null): TurnSpan {
   if (raw === null) return {}
-  try {
-    const p = asObj(JSON.parse(raw))
-    const [l, before] = [asObj(p.latest), asObj(p.previous)]
-    const latest = typeof l.since === 'number' ? { since: l.since, ...(l.ended === true ? { ended: true as const } : {}) } : undefined
-    const previous = typeof before.since === 'number' ? { since: before.since } : undefined
-    return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}) }
-  } catch {
-    return {}
-  }
+  const p = asObj(tryParseJson(raw))
+  const [l, before] = [asObj(p.latest), asObj(p.previous)]
+  const latest = typeof l.since === 'number' ? { since: l.since, ...(l.ended === true ? { ended: true as const } : {}) } : undefined
+  const previous = typeof before.since === 'number' ? { since: before.since } : undefined
+  return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}) }
 }
 function readInputOrigins(raw: string | null): Map<string, TurnOrigin> {
   const held = new Map<string, TurnOrigin>()
   if (raw === null) return held
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return held
-    for (const entry of parsed) {
-      if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue
-      const origin = TurnOrigin.safeParse(entry[1])
-      if (origin.success) held.set(entry[0], origin.data)
-    }
-  } catch {
-    // An unreadable record says nothing: no origin is better than a wrong one
+  const parsed = tryParseJson(raw)
+  if (!Array.isArray(parsed)) return held
+  for (const entry of parsed) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue
+    const origin = TurnOrigin.safeParse(entry[1])
+    if (origin.success) held.set(entry[0], origin.data)
   }
   return held
 }

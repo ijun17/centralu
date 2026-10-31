@@ -358,13 +358,13 @@ describe('several hubs, and builds from before the reverse direction (#550)', ()
     expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: `${a.id}.h1` })
   })
 
-  it('a machine from before it: the hub’s row says to update it there while the switch is on', async () => {
+  it('a machine that does not take the offer: the hub’s row says it is told again, while the switch is on', async () => {
     const machine = await machineHost({ without: ['host.hubOffer'] })
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
     await eventually(() => !!hub.machine().asks?.note)
-    expect(hub.machine().asks).toEqual({ on: true, note: expect.stringContaining('Remote box runs a Centralu from before this: update it there') })
+    expect(hub.machine().asks).toEqual({ on: true, note: expect.stringContaining('Remote box could not be told yet (') })
     await hub.router.handle('machines.setAsks', { machineId: 'm1', on: false })
     expect(hub.machine().asks).toEqual({ on: false, note: null })
   })

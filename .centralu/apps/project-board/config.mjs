@@ -40,13 +40,10 @@ function screenOf(v) {
 }
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
 // CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
-// known intermittent failures, and how long merge_when_green may wait.
+// known intermittent failures.
 export const CI = {
   workflows: config.ci?.workflows ?? ['.github/workflows/build.yml'],
   knownFailures: config.ci?.knownFailuresIssue ?? null,
-  waitMinutes: Number(config.ci?.waitMinutes ?? 40),
-  // PROJECT_BOARD_CI_POLL_MS: for the tests only, which cannot wait 30 s between polls
-  pollMs: Number(process.env.PROJECT_BOARD_CI_POLL_MS) || Number(config.ci?.pollSeconds ?? 30) * 1000,
   // Two tiers (2026-10-18): the name of the check that passes only on a full run (build.yml's `full
   // tier` job). Set, nothing lands on a run where it did not pass: the merge queue lands such a pull
   // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
@@ -131,7 +128,7 @@ export const QUEUE = {
         ),
         // What the steps that set a job up read (#1435): the browser install takes its version from the lockfile, the system
         // libraries come from build.yml, the toolchain from its pin. A commit that changes one of these may be what fails
-        // setup, twice, so main's red is hunted when one is among the commits since the last green (path patterns as `release.versionFiles`).
+        // setup, twice, so main's red is hunted when one is among the commits since the last green.
         setupInputs: (Array.isArray(guardConf.setupInputs) ? guardConf.setupInputs : DEFAULT_SETUP_INPUTS).filter((p) => typeof p === 'string' && p),
       }
     : null,

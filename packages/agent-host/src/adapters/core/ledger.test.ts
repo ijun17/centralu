@@ -8,8 +8,9 @@ import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from './sea
 /**
  * The ledger once, on a scripted wire in memory (docs/plans/session-core.md §6.2, §7.2 PR 5): no frames, no real process.
  * The main test is model-based: random sequences of inputs, Stops, the tool's turn ends, exits and the close, run against
- * the ledger and against a small model of what it promises, for three kinds of tool: one prompt at a time (ACP), input
- * taken mid-turn (Claude and Codex, later), and a tool whose Stop ends its process and whose id comes late (`agy`, §8).
+ * the ledger and against a small model of what it promises, for two kinds of tool: one prompt at a time (ACP), and a tool
+ * whose Stop ends its process and whose id comes late (`agy`, §8). A tool that takes input mid-turn has a ledger of its own
+ * (`mid-turn-ledger.test.ts`).
  */
 
 /** A process as far as the ledger goes: ends on stdin's end, on SIGKILL, and (the `agy` measurement) on SIGINT */
@@ -42,12 +43,11 @@ class FakeProc extends EventEmitter {
   }
 }
 
-type Kind = 'acp' | 'mid' | 'agy'
+type Kind = 'acp' | 'agy'
 
 const TURNS: Record<Kind, ToolWire['turns']> = {
-  acp: { midTurnInput: false, interruptEndsProcess: false, confirmsStop: true },
-  mid: { midTurnInput: true, interruptEndsProcess: false, confirmsStop: true },
-  agy: { midTurnInput: false, interruptEndsProcess: true, confirmsStop: true },
+  acp: { interruptEndsProcess: false },
+  agy: { interruptEndsProcess: true },
 }
 
 /** A wire that writes nothing: it says what it was asked, and the test ends its turns */
@@ -236,7 +236,7 @@ class Model {
 
   private drain(): void {
     while (this.phase === 'ready' && this.queue.length) {
-      if (this.running && this.kind !== 'mid') return
+      if (this.running) return
       if (!this.procAlive) {
         // Only a tool whose Stop ends its process gets here: the next input starts a new one on the same conversation
         this.proc++
@@ -315,7 +315,7 @@ async function runAgainstModel(kind: Kind, seed: number): Promise<void> {
 }
 
 describe('the ledger against its model', () => {
-  for (const kind of ['acp', 'mid', 'agy'] as const) {
+  for (const kind of ['acp', 'agy'] as const) {
     it(`keeps what it promises for a ${kind} tool over random inputs, Stops, turn ends, exits and the close`, async () => {
       for (let seed = 1; seed <= 150; seed++) await runAgainstModel(kind, seed)
     })
@@ -342,17 +342,6 @@ describe('the ledger, case by case', () => {
     await w.session.dispose()
   })
 
-  it('starts no Stop timer for a tool that does not end its turn after a Stop (confirmsStop: false, Codex until §9.2)', async () => {
-    const w = world('acp', { stopConfirmMs: 5, turns: { confirmsStop: false } })
-    await w.session.ready
-    w.session.send('a')
-    w.session.interrupt()
-    await new Promise((r) => setTimeout(r, 40))
-    expect(w.events.filter((e) => e.type === 'notice')).toEqual([])
-    expect(w.wire.log).toContain('interrupt')
-    await w.session.dispose()
-  })
-
   it('releases the cards on a Stop, at the turn’s end, on an exit and on the close; ends the calls a closed turn left open', async () => {
     const w = world('acp')
     await w.session.ready
@@ -376,16 +365,18 @@ describe('the ledger, case by case', () => {
     expect(crashed.wire.log).toEqual(['releaseCards'])
   })
 
-  it("names the inputs the last turn took by the host's names, and accepts each as the wire writes it", async () => {
-    const w = world('mid')
+  it("names the input the last turn took by the host's name, and accepts each as the wire writes it", async () => {
+    const w = world('acp')
     await w.session.ready
     const seen: string[] = []
     w.session.send('a', { id: 'name-a' })
     void w.session.sendTracked('b', { accepted: () => seen.push('b:accepted'), complete: () => seen.push('b:complete'), fail: () => seen.push('b:fail') })
-    w.session.send('c', { id: 'name-c' })
+    expect(seen).toEqual([])
+    w.wire.end({ how: 'complete' })
+    expect(w.session.turnInputs()).toEqual(['name-a'])
     expect(seen).toEqual(['b:accepted'])
     w.wire.end({ how: 'complete' })
-    expect(w.session.turnInputs()).toEqual(['name-a', 'name-c'])
+    expect(w.session.turnInputs()).toEqual([])
     expect(seen).toEqual(['b:accepted', 'b:complete'])
     await w.session.dispose()
   })

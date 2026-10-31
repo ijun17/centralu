@@ -3,8 +3,7 @@ import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName, runsUnasked } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
-import { raceTimeout } from '../timing.js'
-import { withTimeout } from './with-timeout.js'
+import { raceTimeout, withTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
 /**

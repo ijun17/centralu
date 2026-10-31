@@ -105,7 +105,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * happened to `<data>/events` and which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that
  * version fail to start and leave a line in `host.log`. `--autostart off` and `remove` remove `<data>/autostart`, the
  * stand-in for a boot entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that
- * predates it, `FAKE_NO_REMOVE` one that predates `remove`. `FAKE_STOP_FAILS` makes `--stop` refuse. `--connection` prints a connection line with the running
+ * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse. `--connection` prints a connection line with the running
  * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
  * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
  * `FAKE_MIGRATES=<version>` plays a version whose migration only it reads: starting, it writes `needs <version>` to
@@ -142,10 +142,6 @@ if (a === 'serve --stop') {
   const running = existsSync(d + '/running') ? readFileSync(d + '/running', 'utf8') : null
   ${o.installInfo ? 'const install = installInfo(d, process.env)' : 'const install = undefined'}
   console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: running ?? V, protocolVersion: Number(process.env.FAKE_PROTOCOL || 1), dataDir: d, hostRunning: running !== null, ...(install ? { install } : {}) }))
-} else if (a === 'serve --autostart remove' && process.env.FAKE_NO_REMOVE) {
-  // A serve from before \`--autostart remove\` (#1224), where uninstall's \`off\` removed the entry
-  console.error('--autostart needs on, off or status (got "remove")')
-  process.exitCode = 2
 } else if (a === 'serve --autostart off' || a === 'serve --autostart remove') {
   log(a.slice('serve --'.length))
   if (process.env.FAKE_NO_AUTOSTART) {

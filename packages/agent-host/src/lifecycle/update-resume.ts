@@ -1,4 +1,5 @@
 import { errorMessage } from '@cc/protocol'
+import { sleepSync } from '../timing.js'
 
 /**
  * The turns an update of this machine cut (#1618, docs/agent-host.md §4.8 "Continuing the turns an update cut"). A linked
@@ -54,11 +55,6 @@ export type UpdateResumeFolder = {
  */
 export const READ_TRIES = 5
 export const READ_RETRY_MS = 200
-
-/** Blocks this thread for `ms` without spinning: the start has nothing to serve yet, and the lists are read before its first session is */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
 
 /** A list's text; a read that fails with `EBUSY` is tried again (`READ_TRIES`), each failure said */
 function readHeld(folder: UpdateResumeFolder, name: string, wait: (ms: number) => void): string | null {

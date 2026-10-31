@@ -595,13 +595,14 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000 * SLOW)
 
-    it('says why a start failed, and that a remote too old for --detach has to be started there', async () => {
+    /** A remote without `--detach` cannot have answered `--connection --pair` first (#1143): only what it said is quoted */
+    it('says why a start failed, in what the remote said', async () => {
       const at = async (how: string) => {
         const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: how, FAKE_SSH_LINE: line({ port: await freePort() }) })
         return t.startHost()
       }
       await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
-      await expect(at('old')).rejects.toThrow(/too old to be started from here: run `centralu serve` there/)
+      await expect(at('old')).rejects.toThrow('The remote did not say whether it started: unknown option for serve: --detach')
       await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
     }, 30_000 * SLOW)
 

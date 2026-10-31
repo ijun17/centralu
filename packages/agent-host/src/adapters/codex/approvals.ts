@@ -2,6 +2,7 @@ import { asObj, str } from '../../json-value.js'
 import { type ApprovalDetail } from '@cc/protocol'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { changeKindOf } from './items.js'
+import { paramsOf } from './params.js'
 
 /**
  * Turns a server's approval request into the card's detail.
@@ -40,14 +41,15 @@ export function approvalDetailFrom(
      * 'writeStdin'` is input to a terminal already running, and `reason` is why the agent asks. Dropping them drew a
      * card that read `Run ` and nothing, which a list row could then allow.
      */
-    const net = asObj(params.networkApprovalContext)
+    const p = paramsOf({ params }, 'item/commandExecution/requestApproval')
+    const net = asObj(p.networkApprovalContext)
     return {
       kind: 'command',
-      command: str(item.command) || str(params.command),
-      cwd: str(item.cwd) || str(params.cwd),
-      ...(str(params.reason) ? { reason: str(params.reason) } : {}),
+      command: str(item.command) || str(p.command),
+      cwd: str(item.cwd) || str(p.cwd),
+      ...(str(p.reason) ? { reason: str(p.reason) } : {}),
       ...(str(net.host) ? { network: { host: str(net.host), protocol: str(net.protocol) } } : {}),
-      ...(str(params.kind) === 'writeStdin' ? { stdin: true } : {}),
+      ...(str(p.kind) === 'writeStdin' ? { stdin: true } : {}),
     }
   }
   if (method === 'item/fileChange/requestApproval') return fileEditDetail(itemChanges ?? [])
