@@ -26,32 +26,22 @@
  * Every process it starts, and everything those start, is killed before it exits, pass or fail
  * (`keeper-test-processes.mjs`); a failed run prints the end of the keeper's and the host's logs.
  */
-import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { attachClient, BIN, buildKeeper, FAKE_BUNDLE, HOST_SRC, log, readyView, recordedOnce, session, startKeeper, started, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
-// The keeper executable (#440), started the way a window of this build starts it
-const BIN = join(TARGET, 'debug', 'centralu-keeper')
-const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
-const FAKE_BUNDLE = '/tmp/centralu-keeper-test/Centralu.app'
 const WITH_CLAUDE = !process.argv.includes('--no-claude')
 const WITH_CODEX = !process.argv.includes('--no-codex')
-
-const started = new Set()
-const tempDirs = []
 const heldPids = new Set()
 let failures = 0
 
-const log = (msg) => process.stdout.write(`${msg}\n`)
 function check(cond, what, detail = '') {
   if (cond) log(`  ok   ${what}`)
   else {
@@ -60,60 +50,6 @@ function check(cond, what, detail = '') {
   }
   return cond
 }
-
-function startKeeper(data) {
-  const logFd = openSync(join(data, 'keeper.log'), 'a')
-  const child = spawn(
-    BIN,
-    ['--data-dir', data, '--host-source', HOST_SRC, '--bundle-path', FAKE_BUNDLE, '--app-version', '0.0.0-test'],
-    { detached: true, stdio: ['ignore', logFd, logFd], env: { ...process.env, CC_DATA_DIR: data } },
-  )
-  started.add(child.pid)
-  return { pid: child.pid }
-}
-
-/** A stand-in for the app, attached until killed */
-function attachClient(sock) {
-  const code = `
-    const c = require('node:net').createConnection(${JSON.stringify(sock)})
-    c.on('connect', () => c.write(JSON.stringify({ op: 'attach', protocol: 1 }) + '\\n'))
-    c.on('close', () => process.exit(0))
-    setInterval(() => {}, 1 << 30)
-  `
-  const child = spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
-  started.add(child.pid)
-  return child
-}
-
-/** The host ready under a new pid, or undefined: at once if the keeper has given up on it */
-async function readyView(sock, notPid) {
-  let gaveUp = false
-  const view = await waitFor(async () => {
-    const v = await status(sock)
-    // Five failed starts take the keeper about 11 s; waiting out the minute after that only delays the report
-    if (v?.status?.state === 'failed') return (gaveUp = true)
-    return v?.status?.state === 'ready' && v.hostPid && v.hostPid !== notPid && v
-  }, 60_000, 250)
-  return gaveUp ? undefined : view
-}
-
-const session = async (host, id) => (await host.call('sessions.list', {})).find((s) => s.id === id)
-const transcript = async (host, id) => JSON.stringify(await host.call('messages.load', { sessionId: id, limit: 400 }))
-/** Each tool call and result recorded once: nothing lost or doubled across the restart */
-async function recordedOnce(host, id) {
-  const rows = await host.call('messages.load', { sessionId: id, limit: 400 })
-  const ids = (kind) => rows.filter((r) => r.kind === kind).map((r) => r.payload?.callId)
-  const calls = ids('tool_call')
-  const results = ids('tool_result')
-  const unique = (a) => new Set(a).size === a.length
-  return { ok: unique(calls) && unique(results) && calls.length === results.length && calls.length > 0, calls: calls.length, results: results.length }
-}
-const toolResults = (host, id) => host.events.filter((e) => e.type === 'tool_result' && e.sessionId === id).length
-
-const STEPS = (n) =>
-  `Run these ${n} shell commands one at a time, each as its own separate tool call, waiting for each to finish before starting the next: ` +
-  Array.from({ length: n }, (_, i) => `\`sleep 4; echo step${i + 1}\``).join(', ') +
-  '. Do not combine them. After the last one, reply with exactly DONE.'
 
 async function scenario() {
   const data = mkdtempSync('/tmp/ckc-')
@@ -264,14 +200,7 @@ const cleanup = once((threw) => {
 
 async function main() {
   if (!process.argv.includes('--no-build')) {
-    log('bundling the host (pnpm bundle:host)')
-    execFileSync('pnpm', ['bundle:host'], { cwd: ROOT, stdio: 'inherit' })
-    log(`building the binary (cargo build, CARGO_TARGET_DIR=${TARGET})`)
-    const r = spawnSync('cargo', ['build', '--manifest-path', join(ROOT, 'apps/desktop/src-tauri/Cargo.toml')], {
-      stdio: 'inherit',
-      env: { ...process.env, CARGO_TARGET_DIR: TARGET },
-    })
-    if (r.status !== 0) throw new Error('cargo build failed')
+    buildKeeper()
   }
   if (!existsSync(BIN)) throw new Error(`no binary at ${BIN}`)
   await scenario()

@@ -29,14 +29,9 @@
  *   - Foreground: the subagent's final text was not in the stream, and the Agent's tool_result
  *     body started with "[Subagent hand-back] The text below is the final report…"
  */
-import { query } from '@anthropic-ai/claude-agent-sdk'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { openClaudeProbe } from './claude-probe-kit.mjs'
 
 const FG = process.argv.includes('--fg')
-const cwd = mkdtempSync(join(tmpdir(), 'cc-subagent-'))
 
 const prompt = FG
   ? 'Call the Agent tool exactly once (subagent_type "general-purpose", description "probe fg", run_in_background false) ' +
@@ -46,37 +41,7 @@ const prompt = FG
     'with this prompt: "Run the Bash command `sleep 3; echo sub-one`, then the Bash command `echo sub-two`, then reply with one sentence saying you are done." ' +
     'Then, without waiting for it, write a 120-word paragraph about rivers. When the agent later reports back, reply with one short sentence. Do nothing else.'
 
-let open = true
-let wake: () => void = () => {}
-async function* input() {
-  yield {
-    type: 'user' as const,
-    parent_tool_use_id: null,
-    session_id: '',
-    message: { role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] },
-  }
-  while (open) await new Promise<void>((r) => (wake = r))
-}
-
-const q = query({
-  prompt: input(),
-  options: {
-    cwd,
-    // Uses the same CLI as the app (the adapter points to the user's installed copy via whichTool('claude'))
-    pathToClaudeCodeExecutable: execFileSync('which', ['claude']).toString().trim(),
-    model: 'haiku',
-    includePartialMessages: true,
-    settingSources: [],
-    permissionMode: 'default',
-    canUseTool: async (name: string, input: Record<string, unknown>) => {
-      const cmd = String(input.command ?? '')
-      if (name === 'Agent' || name === 'Task' || (name === 'Bash' && /^(sleep 3; )?echo sub-/.test(cmd))) {
-        return { behavior: 'allow' as const, updatedInput: input }
-      }
-      return { behavior: 'deny' as const, message: 'probe: not allowed' }
-    },
-  } as never,
-})
+const { cwd, q, end } = openClaudeProbe({ prefix: 'cc-subagent-', prompt, allow: /^(sleep 3; )?echo sub-/, partial: true })
 
 const t0 = Date.now()
 const ms = () => String(Date.now() - t0).padStart(6)
@@ -89,8 +54,7 @@ let results = 0
 let notified = false
 const timer = setTimeout(() => {
   console.log('!! timed out')
-  open = false
-  wake()
+  end()
   process.exit(1)
 }, 240_000)
 
@@ -147,7 +111,6 @@ for await (const msg of q) {
   }
 }
 clearTimeout(timer)
-open = false
-wake()
+end()
 console.log(`\nresult ${results} item(s) · cwd ${cwd}`)
 process.exit(0)

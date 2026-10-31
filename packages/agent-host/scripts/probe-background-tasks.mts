@@ -28,14 +28,10 @@
  *   - A shell a subagent started (`owned_by_subagent`) outlived that subagent's completion.
  *   - `close()` killed the remaining shell, and nothing was emitted for it.
  */
-import { query } from '@anthropic-ai/claude-agent-sdk'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { openClaudeProbe } from './claude-probe-kit.mjs'
 
 const mode = process.argv[process.argv.indexOf('--mode') + 1] === 'stop' ? 'stop' : 'interrupt'
-const cwd = mkdtempSync(join(tmpdir(), 'cc-bg-tasks-'))
 const SHELL = 'sleep 191; echo bg-shell-done'
 const SUB = 'sleep 192; echo bg-sub-done'
 
@@ -47,36 +43,7 @@ const prompt =
   '3. Call the Bash tool in the foreground with the command `sleep 30; echo fg-done`. ' +
   'Then reply with one word.'
 
-let open = true
-let wake: () => void = () => {}
-async function* input() {
-  yield {
-    type: 'user' as const,
-    parent_tool_use_id: null,
-    session_id: '',
-    message: { role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] },
-  }
-  while (open) await new Promise<void>((r) => (wake = r))
-}
-
-const q = query({
-  prompt: input(),
-  options: {
-    cwd,
-    pathToClaudeCodeExecutable: execFileSync('which', ['claude']).toString().trim(),
-    model: 'haiku',
-    includePartialMessages: false,
-    settingSources: [],
-    permissionMode: 'default',
-    canUseTool: async (name: string, input: Record<string, unknown>) => {
-      const cmd = String(input.command ?? '')
-      if (name === 'Agent' || name === 'Task' || (name === 'Bash' && /^sleep (191|192|30);/.test(cmd))) {
-        return { behavior: 'allow' as const, updatedInput: input }
-      }
-      return { behavior: 'deny' as const, message: 'probe: not allowed' }
-    },
-  } as never,
-})
+const { q, end } = openClaudeProbe({ prefix: 'cc-bg-tasks-', prompt, allow: /^sleep (191|192|30);/, partial: false })
 
 const t0 = Date.now()
 const ms = () => String(Date.now() - t0).padStart(6)
@@ -108,10 +75,7 @@ const act = async () => {
     if (shell) await q.stopTask(shell.task_id)
   }
   endAt = Date.now() + 25_000
-  setTimeout(() => {
-    open = false
-    wake()
-  }, 25_000)
+  setTimeout(end, 25_000)
 }
 
 const it = q[Symbol.asyncIterator]()
@@ -144,8 +108,7 @@ while (Date.now() < endAt) {
 }
 console.log(`${ms()} -- after: live=${JSON.stringify(live)} alive=${JSON.stringify(alive())}`)
 clearTimeout(timer)
-open = false
-wake()
+end()
 q.close()
 await new Promise((r) => setTimeout(r, 2000))
 console.log(`${ms()} -- after close: alive=${JSON.stringify(alive())}`)

@@ -15,39 +15,21 @@
  * configured default is used, which may be a top-tier one or one the account cannot use. The full
  * frame log is written next to the temp folder and its path printed at the end.)
  */
-import { mkdtempSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { CLIENT_INFO } from '@cc/protocol'
-import { CodexClient } from '../src/adapters/codex/client.js'
-
-const cwd = mkdtempSync(join(tmpdir(), 'cc-codex-approval-'))
-writeFileSync(join(cwd, 'notes.txt'), 'alpha\nbeta\n')
-const log = join(cwd, '..', `${cwd.split('/').pop()}.frames.jsonl`)
-const t0 = Date.now()
-const record = (dir: string, frame: unknown) => appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, dir, frame }) + '\n')
+import { openProbe } from './codex-probe-kit.mjs'
 
 let done: () => void = () => {}
 const finished = new Promise<void>((r) => (done = r))
 
-const client = new CodexClient(
-  {
-    onNotification: (n) => {
-      record('notification', n)
-      if (n.method === 'turn/completed') done()
-    },
-    onServerRequest: (r) => {
-      record('request', r)
-      // The decision is the one the adapter sends for "allow" (toCodexDecision)
-      client.respond(r.id, { decision: 'accept' })
-    },
-    onExit: () => done(),
+const { client, cwd, log } = await openProbe('cc-codex-approval-', {
+  onNotification: (n) => {
+    if (n.method === 'turn/completed') done()
   },
-  { cwd },
-)
+  onExit: () => done(),
+})
+writeFileSync(join(cwd, 'notes.txt'), 'alpha\nbeta\n')
 
-await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
-client.notify('initialized')
 const started = await client.request<{ thread?: { id?: string } }>('thread/start', {
   cwd,
   approvalPolicy: 'untrusted',
