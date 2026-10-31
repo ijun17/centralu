@@ -104,7 +104,7 @@ describe('the handoff record builder (#102)', () => {
     expect(head[0]).toBe('# Handoff · "Mea" · codex → claude')
     // The file declares for itself how far it reaches — the reader must be able to tell whether it was cut
     expect(head[1]).toContain('covers seq 1–4 of 4')
-    expect(head[1]).toContain('1.9 MB cap')
+    expect(head[1]).toContain('2.0 MB cap')
     // Touched files are lifted into the header — they have the highest value per byte, and computing them is free
     expect(head[2]).toBe('touched: packages/ui/src/api.ts')
     expect(text).toContain('[user] use port 4317')
@@ -172,12 +172,12 @@ describe('the handoff record builder (#102)', () => {
     expect(text).toMatch(/covers seq [\d,]+–5,000 of 5,000/)
   })
 
-  it('the default cap is 2MB, and an ordinary session never touches the cap', () => {
+  it('the default cap is 2 MiB, and an ordinary session never touches the cap', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `line ${i}` }))
     const text = buildHandoffRecord({ ...base, rows })
 
-    expect(RECORD_CAP).toBe(2_000_000)
+    expect(RECORD_CAP).toBe(2 * 1024 * 1024)
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(RECORD_CAP)
     expect(text).toContain('[assistant] line 1')
     expect(text).toContain('covers seq 1–500 of 500')

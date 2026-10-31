@@ -48,12 +48,12 @@ import { trustedJsonText } from './orchestrator-tools.js'
  */
 
 /**
- * The byte cap on the record file. 2MB is measured as the size that fits the most recent tens of
+ * The byte cap on the record file. 2 MiB (read as "2.0 MB") is measured as the size that fits the most recent tens of
  * thousands of rows out of a 200,000-row transcript, and it is also a size a person can search
  * through with `rg` with no strain. It is a **file** cap, not a message-envelope cap, so it limits
  * only disk and read cost, not context.
  */
-export const RECORD_CAP = 2_000_000
+export const RECORD_CAP = 2 * 1024 * 1024
 
 /**
  * How many of the most recent tool calls carry the head of their result (#1481). 40 ≈ the predecessor's last couple of
