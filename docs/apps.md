@@ -976,7 +976,7 @@ They are counted against their own ceiling (`APP_ACCESS_BUDGET_CHARS`, 900; the 
 which about 210 per tool is the name and schema envelope), not the reader set's. Claude defers all
 three behind tool search, which costs +31 input tokens per request against +263 loaded
 (`scripts/probe-reader-tools.mts`; Codex has no deferral and loads them). Measured with haiku (Claude Code
-2.1.289, `scripts/smoke-app-access.mts`: a fresh pair of scratch projects per trial with a shared app,
+2.1.289, `scripts/smoke-delegation.mjs app-access`: a fresh pair of scratch projects per trial with a shared app,
 the consent card answered "always", and a prompt naming neither the tools nor the project): in 5 of
 5 sessions the model found `find_apps` through tool search, attached the app, called its tool in the
 same turn and detached it, and on the next turn no call reached the app (one model tried the old name

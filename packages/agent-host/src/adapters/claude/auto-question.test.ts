@@ -7,7 +7,7 @@ import { answerOrCard } from '../approval-outcome.test-helpers.js'
  * model asked via AskUserQuestion no choice card appeared. This checks that the callback is now
  * passed, that it only accepts question choices, and that everything else (a request caught by
  * an `ask` rule in the settings file) is still denied the way old-style auto denied it — measured
- * in scripts/probe-auto-callback.mts. The SDK is swapped for a fake and the options the adapter
+ * by `scripts/probe-auto-callback.mts`, a probe since removed and kept in git history. The SDK is swapped for a fake and the options the adapter
  * passed are inspected directly.
  */
 type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string; message?: string }>

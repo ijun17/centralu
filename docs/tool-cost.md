@@ -601,7 +601,7 @@ the events the screen reacts to); Windows and the packaged app.
 `pnpm measure:tools --live --kinds none,reader --phases resident,selection --prompts
 packages/agent-host/scripts/measure-tools/prompts-561.json --reps 3` (Claude Code on haiku, codex-cli 0.160.0 on the
 account's default model, gpt-6.1-sol). Selection turns decline the consent card, so no child was started; the
-start itself is covered by `scripts/smoke-start-agent.mts`.
+start itself is covered by `scripts/smoke-delegation.mjs start-agent`.
 
 **Size.** The two definitions are 918 characters (`AGENT_BUDGET_CHARS` 950): `start_agent` 506, `agent_session` 412. The
 reader seat is 3,167 characters on Codex (all loaded; `RESIDENT_BUDGET_CHARS.reader` 3,250) and 1,810 resident on
