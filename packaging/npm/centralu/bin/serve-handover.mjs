@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid, pairServe, revokeServe } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
