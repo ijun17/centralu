@@ -11,7 +11,7 @@ import type { AgentAdapter, CreateSessionOpts } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
-import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-home.js'
+import { orchestratorPreamble } from './orchestrator-home.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { FakeAdapter, managerWorld, projectDirs } from './manager.test-helpers.js'
@@ -979,7 +979,7 @@ describe('the commands tier through the host (#512)', () => {
    * role, and gets the same rule as its tools' instructions instead (READER_INSTRUCTIONS), so its prompt never
    * carries the preamble.
    */
-  it("puts the preamble, on by default, at the head of the orchestrator's role and nowhere else", async () => {
+  it("puts the preamble at the head of the orchestrator's role and nowhere else", async () => {
     try {
       await mgr.orchestrator()
       expect(adapter.lastOpts?.systemPromptAppend).toMatch(/^You are an agent running inside Centralu\. Unless the person says otherwise, .*\(centralu_commands\).*\n\nYou are the central orchestrator/)
@@ -988,10 +988,8 @@ describe('the commands tier through the host (#512)', () => {
       expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('running inside Centralu')
       setRareTier('resident')
       expect(orchestratorPreamble()).not.toContain('centralu_commands')
-      setOrchestratorPreamble(false)
-      expect(orchestratorPreamble()).toBe('')
     } finally {
-      setOrchestratorPreamble(true)
+      setRareTier(DEFAULT_RARE_TIER)
     }
   })
 

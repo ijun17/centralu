@@ -1,5 +1,6 @@
 import { errorMessage, MACHINE_CHANGE, turnsRunning, type HostActivity, type MachineInfo, type MachineProbe, type RemoteShell, type SshHostList } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
+import { raceTimeout } from '../timing.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted, trustedJsonText } from './tool-answers.js'
@@ -239,7 +240,7 @@ export class MachineFlow {
            */
           const run = req.action === 'install' ? ops.install(m.id) : ops.update(m.id, { when: 'idle', ...(unasked ? { unasked } : {}) })
           const waited = ops.updateAnswerMs ?? UPDATE_ANSWER_MS
-          const r = await Promise.race([run, new Promise<null>((resolve) => setTimeout(() => resolve(null), waited).unref?.())])
+          const r = await raceTimeout(run, waited, null)
           if (!r) {
             // Answered as still under way (#1399 review): how it ends is told to the caller in its conversation, a failure too
             void run.then(

@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEntries, gitLog, gitStatusFiles, gitSummary, isRepo } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEntries, gitLog, gitLogPath, gitStatusFiles, gitSummary, isRepo } from './git.js'
 import { gitCheckout, gitCommit, gitStage } from './git-write.js'
 import { gitWorktreeDirty } from './git-worktree.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
@@ -194,6 +194,12 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     } finally {
       rmSync(plain, { recursive: true, force: true })
     }
+  })
+
+  it('a repository with no commits has an empty history, the whole repository or a path', async () => {
+    const { d } = repo()
+    expect(await gitLog(d)).toEqual([])
+    expect(await gitLogPath(d, 'sub')).toEqual({ repo: true, commits: [] })
   })
 
   it('stops at the cap with real git, and says there is more', async () => {

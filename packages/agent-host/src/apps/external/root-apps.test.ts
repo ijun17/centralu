@@ -207,7 +207,7 @@ describe('versions of a root app', () => {
     writeFileSync(join(projRoot, 'version.txt'), 'v2')
     // Past what a version may hold (64 MiB), so the copy taken before a restore fails
     writeFileSync(join(projRoot, 'big.bin'), Buffer.alloc(65 * 1024 * 1024))
-    expect(() => rt.restoreVersion(ref, v1!.id)).toThrow(/Could not keep a copy of the current files first .*so nothing was restored/)
+    expect(() => rt.restoreVersion(ref, v1!.id)).toThrow(/Could not keep a copy of the current files first \(the app folder is larger than .*so nothing was restored/)
     expect(readFileSync(join(projRoot, 'version.txt'), 'utf8')).toBe('v2')
   })
 

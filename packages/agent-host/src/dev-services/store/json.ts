@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { isObj, type Obj } from '../../json-value.js'
+import { isObj, tryParseJson, type Obj } from '../../json-value.js'
 
 /**
  * Reading JSON the store (or a setting in it) holds (#850 item 5): **a value that cannot be read fails only itself.**
@@ -11,14 +11,7 @@ import { isObj, type Obj } from '../../json-value.js'
  */
 
 /** The parsed value, or `undefined` for nothing stored or text that is not JSON */
-export function parseJson(raw: string | null | undefined): unknown {
-  if (raw === null || raw === undefined) return undefined
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return undefined
-  }
-}
+export const parseJson = (raw: string | null | undefined): unknown => (raw == null ? undefined : tryParseJson(raw))
 
 /**
  * A JSON object (not a list, not null), every field kept, as a schema: for `readJson` and `readJsonList`, where a schema

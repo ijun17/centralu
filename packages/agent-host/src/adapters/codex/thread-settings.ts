@@ -1,6 +1,8 @@
 import { asObj, str } from '../../json-value.js'
 import { type NormalizedEvent } from '@cc/protocol'
 import { noticeWords } from './notices.js'
+import { paramsOf, type Loose } from './params.js'
+import type { ThreadSettings } from './generated/v2/ThreadSettings.js'
 
 /** The thread settings a Codex model switch is measured against (#304) — Codex's own words for them. */
 export type CodexThreadSettings = { model: string | null; effort: string | null; serviceTier: string | null }
@@ -33,7 +35,7 @@ export function threadSettingsChanged(
   params: unknown,
   launched: { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null },
 ): { next: CodexThreadSettings | null; events: NormalizedEvent[] } {
-  const s = asObj(asObj(params).threadSettings)
+  const s: Loose<ThreadSettings> = asObj(paramsOf({ params }, 'thread/settings/updated').threadSettings)
   const next: CodexThreadSettings = {
     model: str(s.model) || null,
     effort: str(s.effort) || null,

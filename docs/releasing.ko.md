@@ -60,91 +60,50 @@ Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆�
 - 같은 워크플로가 **windows-x64**(#14)도 빌드해 아티팩트 두 개를 올린다: 포터블 폴더 `centralu-windows-x64`(`Centralu\centralu.exe` 옆에 `Centralu\resources\host\`)와 NSIS 설치 파일 `centralu-windows-x64-setup`(사용자별 설치, 관리자 권한 불필요). 둘 다 서명되어 있지 않다. 별도의 잡들이 `pnpm verify`의 네 부분을 돌리며, 다른 플랫폼처럼 모두 막는다: `windows tests`는 lint, 의존성 규칙, 타입을, `windows tests (vitest 1/2)`와 `(vitest 2/2)`는 단위 테스트를 `vitest --shard`로 반씩 나란히 돌린다(#1035: 한 잡일 때 16.5분으로 매 실행에서 가장 길었다). `windows tests`라는 이름은 첫 잡에 남아, 나누기 전 main의 워크플로에서 읽은 필수 집합도 그것을 찾는다(단위 테스트 단계는 #307의 W2 목록이 고쳐질 때까지 막지 않았다). npm 패키지 `@centralu/win32-x64`는 같은 폴더를 싣고, `release.yml`의 Windows 잡이 따로 다시 빌드한다(아래 [Windows](#windows-14-w3) 참고).
 - 같은 워크플로가 Playwright 시나리오(`e2e/`)를 ubuntu-24.04에서 데스크톱 앱이 그려지는 두 엔진, WebKit과 Chromium으로 돌린다. 엔진마다 나란히 도는 샤드로 나눈다(`e2e (webkit i/n)`, `e2e (chromium i/n)` 잡). CI에서 실패한 테스트는 한 번 더 돈다(Playwright `retries: 1`, 2026-10-19 오너 결정. 그 전에는 실패한 샤드 전체가 잡 안에서 다시 돌아 매번 6분쯤 들었다). 재시도에서야 통과한 테스트는 초록이 아니라 flaky이고 여전히 고칠 테스트다: `e2e/flaky-report.ts`가 그 테스트에 `::warning::`을, 샤드의 요약에 표를 남기고 `e2e report`를 돌게 한다. 샤드가 실패하거나 flaky 테스트가 있으면 `e2e report`가 엔진마다 샤드 리포트를 트레이스가 담긴 HTML 리포트 하나로 합치고(Flaky 필터가 실패한 시도를 보여 준다), 요약에 엔진별 flaky 테스트를 적고, 엔진별 폴더가 든 `e2e-report` 아티팩트로 올린다.
 - **시간 제한**(2026-10-19: e2e 샤드 하나가 35분 멈춰 머지 배치를 붙잡았다). 실제 일을 하는 잡마다 `timeout-minutes`가 있고, 값은 최근 full 실행 20번 중 가장 느린 초록 실행에 절반쯤 더한 것이다: e2e 샤드 15분(가장 느린 것 9.7), `verify` 20(10.8), Windows 단위 테스트 25(13.1). Rust 빌드는 캐시를 놓친 실행을 위해 더 둔다(번들 30, 키퍼 end to end 20). 모든 숫자는 `build.yml`의 `e2e` 잡 위 주석에 있다. 제한에 걸린 잡은 GitHub의 "has exceeded the maximum execution time" 주석과 함께 끝나고, 머지 큐는 이를 테스트 실패가 아니라 인프라 실패로 센다(한 번 다시 돌린다).
-- **Fail fast**(2026-10-19 오너 결정): 수동 실행(머지 큐의 배치, 또는 사람이 직접 `gh workflow run build.yml`)에서 `verify`가 실패하면 `fail fast` 잡이 실행의 나머지를 곧바로 취소한다. 그런 실행에서는 아무것도 머지되지 않는데, 나머지 잡이 배치와 공유 러너를 10분쯤 더 붙잡고 있었다. 그때 `verify`는 이미 끝났으므로 실행 전체는 `cancelled`로 끝나도 그 체크는 `failure`로 남는다: 큐는 그 실패한 체크로 이 실행을 이유 없이 취소된 실행과 구별하고, 다시 돌리지 않는다. 결정은 `changes`가 한다(`fail_fast`, `.github/scripts/ci-changes.mjs`): PR 실행(quick tier, 또는 릴리스 범프의 full tier), main 자신의 실행, `packages/protocol/src/brand.ts`를 바꾸거나 파일을 알 수 없는 수동 실행은 모두 잡을 끝까지 돌린다. 그래서 **릴리스 범프의 실행은 이것으로 취소되지 않는다**. 잡은 자기 실행만 id로 취소하고 concurrency 그룹은 건드리지 않는다.
-- **두 단계(tier)** (2026-10-18 오너 결정): PR은 **quick tier**만 돈다. `changes`, `verify`, Windows 단위 테스트(`windows tests (vitest i/n)`)다. 2026-10-11부터 10-18까지 `verify`를 통과하고도 실패한 PR 실행 94개 중 53개를 Windows 테스트가 잡았다. 나머지 잡은 빠지고 아무것도 보고하지 않는다. **full tier**(모든 잡)는 main 푸시, 수동 실행(`workflow_dispatch`: 사람, 또는 main guard의 bisect), 릴리스 bump PR(버전을 선언하는 `packages/protocol/src/brand.ts`를 바꾸는 PR)에서 돈다. `full tier` 잡은 full 실행에서만 통과하고 quick 실행에서는 skipped다. skipped 잡은 통과로 치므로 보드는 이 체크로 둘을 구분한다. **변경은 빠른 tier를 통과하면 랜딩한다** (#1259, 2026-10-19 오너 결정): 머지 큐는 main 위에 만든 batch(하나짜리 포함)를 수동 실행으로 돌리되 quick tier를 요청하고(입력 `tier: quick`. 릴리스 범프나 main에 있는 커밋은 그래도 full로 돈다), 그 결과로 랜딩한다. full tier는 랜딩한 뒤 main에서 돈다. **화면을 바꾸는 batch는 먼저 무거운 잡을 돌린다** (#1538, 2026-10-26 오너 결정): UI 시나리오가 볼 수 있는 변경(창, 호스트와 프로토콜의 테스트 밖 파일, 시나리오, 빌드, 시나리오가 그리거나 읽는 그 밖의 파일: `ci-changes.mjs`의 `screenFiles`가 유일한 정의이고 큐는 main에서 읽을 뿐 사본을 두지 않으며, `tooling/build-workflow.test.ts`가 `e2e/`와 `apps/web`이 import하고 읽는 파일을 훑어 이를 확인한다)이 들어 있으면 큐가 그 실행을 full tier로 시작하고(`tier: full`, `everything: false`라 파일이 영향 없는 잡은 그대로 뺀다) 실행이 끝났고 두 브라우저의 e2e 샤드가 보고되고 성공하고 시나리오를 실제로 돌린 경우(`pnpm e2e (shard …)` 단계. 건너뛴 샤드의 대역 잡도 같은 이름으로 보고한다)에만 랜딩한다(project.json `ci.screen`). 판단할 수 없는 batch나 tier가 기록되지 않은 batch(옛 보드가 만든 것)는 화면을 바꾸는 것으로 친다. 나머지 batch는 위처럼 빠른 tier 뒤에 랜딩하고 main guard가 안전망이다. 보드는 batch가 어느 tier를 돌렸는지 말한다(batch 줄, 이벤트, 세션이 받는 메시지). 실행 중에 main이 움직여서(큐 밖의 머지) 멈춘 batch의 PR은 새 main 위에서 알아서 다시 묶이며, 머리(head)당 최대 3번이다(#1548). `merge_when_green`은 여전히 quick 실행만 있는 PR을 거절하고, 큐가 같은 브랜치에서 batch를 돌리는 중이면 그렇다고 말하고 `intoBatch: true` 없이는 머지하지 않는다(릴리스 범프는 이 길로 간다). main의 full 실행이 실패하면 보드의 main guard가 마지막으로 완전히 초록이던 커밋 이후의 커밋 중 원인을 찾아, 큐 맨 앞에 revert PR을 넣고(릴리스 범프는 되돌리지 않는다) 이슈를 남긴다. 설정 단계(브라우저 설치, 체크아웃, 캐시)에서만 실패한 실행은 먼저 한 번 다시 돌리며, 러너 자신의 실패 때문에 되돌리지는 않는다. 릴리스는 여전히 완전히 초록인 커밋을 요구한다: 릴리스의 CI 관문은 그 커밋에 대한 main 자신의 push 실행만 보고, batch의 quick 실행은 증거로 쓰지 않는다(아래). PR에 full tier를 직접 돌리려면(UI 작업을 큐에 넣기 전 등) `gh workflow run build.yml --ref <branch>`.
+- **Fail fast**(2026-10-19 오너 결정): 수동 실행(머지 큐의 배치, 또는 사람이 직접 `gh workflow run build.yml`)에서 `verify`가 실패하면 `fail fast` 잡이 실행의 나머지를 곧바로 취소한다. 그런 실행에서는 아무것도 머지되지 않는데, 나머지 잡이 배치와 공유 러너를 10분쯤 더 붙잡고 있었다. 그때 `verify`는 이미 끝났으므로 실행 전체는 `cancelled`로 끝나도 그 체크는 `failure`로 남는다: 큐는 그 실패한 체크로 이 실행을 이유 없이 취소된 실행과 구별하고, 다시 돌리지 않는다. 결정은 `changes`가 한다(`fail_fast`, `.github/scripts/ci-changes.mjs`): PR 실행(quick tier), main 자신의 실행, 파일을 알 수 없는 수동 실행은 모두 잡을 끝까지 돌린다. 잡은 자기 실행만 id로 취소하고 concurrency 그룹은 건드리지 않는다.
+- **두 단계(tier)** (2026-10-18 오너 결정): PR은 **quick tier**만 돈다. `changes`, `verify`, Windows 단위 테스트(`windows tests (vitest i/n)`)다. 2026-10-11부터 10-18까지 `verify`를 통과하고도 실패한 PR 실행 94개 중 53개를 Windows 테스트가 잡았다. 나머지 잡은 빠지고 아무것도 보고하지 않는다. **full tier**(모든 잡)는 main 푸시, 수동 실행(`workflow_dispatch`: 사람, 또는 main guard의 bisect)에서 돈다. `full tier` 잡은 full 실행에서만 통과하고 quick 실행에서는 skipped다. skipped 잡은 통과로 치므로 보드는 이 체크로 둘을 구분한다. **변경은 빠른 tier를 통과하면 랜딩한다** (#1259, 2026-10-19 오너 결정): 머지 큐는 main 위에 만든 batch(하나짜리 포함)를 수동 실행으로 돌리되 quick tier를 요청하고(입력 `tier: quick`. 릴리스 범프나 main에 있는 커밋은 그래도 full로 돈다), 그 결과로 랜딩한다. full tier는 랜딩한 뒤 main에서 돈다. **화면을 바꾸는 batch는 먼저 무거운 잡을 돌린다** (#1538, 2026-10-26 오너 결정): UI 시나리오가 볼 수 있는 변경(창, 호스트와 프로토콜의 테스트 밖 파일, 시나리오, 빌드, 시나리오가 그리거나 읽는 그 밖의 파일: `ci-changes.mjs`의 `screenFiles`가 유일한 정의이고 큐는 main에서 읽을 뿐 사본을 두지 않으며, `tooling/build-workflow.test.ts`가 `e2e/`와 `apps/web`이 import하고 읽는 파일을 훑어 이를 확인한다)이 들어 있으면 큐가 그 실행을 full tier로 시작하고(`tier: full`, `everything: false`라 파일이 영향 없는 잡은 그대로 뺀다) 실행이 끝났고 두 브라우저의 e2e 샤드가 보고되고 성공하고 시나리오를 실제로 돌린 경우(`pnpm e2e (shard …)` 단계. 건너뛴 샤드의 대역 잡도 같은 이름으로 보고한다)에만 랜딩한다(project.json `ci.screen`). 판단할 수 없는 batch나 tier가 기록되지 않은 batch(옛 보드가 만든 것)는 화면을 바꾸는 것으로 친다. 나머지 batch는 위처럼 빠른 tier 뒤에 랜딩하고 main guard가 안전망이다. 보드는 batch가 어느 tier를 돌렸는지 말한다(batch 줄, 이벤트, 세션이 받는 메시지). 실행 중에 main이 움직여서(큐 밖의 머지) 멈춘 batch의 PR은 새 main 위에서 알아서 다시 묶이며, 머리(head)당 최대 3번이다(#1548). `merge_when_green`은 여전히 quick 실행만 있는 PR을 거절하고, 큐가 같은 브랜치에서 batch를 돌리는 중이면 그렇다고 말하고 `intoBatch: true` 없이는 머지하지 않는다(릴리스 범프는 이 길로 간다). main의 full 실행이 실패하면 보드의 main guard가 마지막으로 완전히 초록이던 커밋 이후의 커밋 중 원인을 찾아, 큐 맨 앞에 revert PR을 넣고(릴리스 범프는 되돌리지 않는다) 이슈를 남긴다. 설정 단계(브라우저 설치, 체크아웃, 캐시)에서만 실패한 실행은 먼저 한 번 다시 돌리며, 러너 자신의 실패 때문에 되돌리지는 않는다. 릴리스는 여전히 완전히 초록인 커밋을 요구한다: 릴리스의 CI 관문은 그 커밋에 대한 main 자신의 push 실행만 보고, batch의 quick 실행은 증거로 쓰지 않는다(아래). PR에 full tier를 직접 돌리려면(UI 작업을 큐에 넣기 전 등) `gh workflow run build.yml --ref <branch>`.
 - 첫 잡 `changes`(`.github/scripts/ci-changes.mjs`)는 tier를 정하고, full tier 안에서는 실행이 main에 더하는 파일을 보고(PR의 base 브랜치가 무엇이든 main과의 merge-base와 비교하므로, 쌓인 PR은 스택 전체로 판단한다. 이름 바꾸기는 옛 경로와 새 경로 둘 다로 센다) 영향을 줄 수 없는 잡을 뺀다. 문서만 바꾸면 `verify`, `windows tests`, WebKit UI 시나리오만 돈다. 테스트만 바꾸면 번들, keeper 종단 테스트, 콘텐츠 검증기를 건너뛴다. 창(`packages/ui`, `core`, `platform`, `apps/web`)만 바꾸면 keeper, 콘텐츠 검증기, 원격 Node의 호스트 테스트를 건너뛴다. 빌드나 CI 설정(`tsconfig*.json`, `package.json`, lockfile, vite 설정, `.github/`)을 바꾸면 모두 돈다. **main에 이미 있는 커밋은 모두 돈다.** full 실행에서 빠진 체크도 제 이름으로 보고된다(`skipped`, 또는 matrix 잡이면 이름이 같은 `…-skipped` 대역). quick 실행에서는 둘 다 돌지 않는다. 브랜치 보호나 ruleset이 필수 체크를 정한다면 `changes`와 `full tier`를 넣어야 한다. 수동 실행(`workflow_dispatch`)은 `everything`을 끄지 않는 한 모두 돌리고, 끄면 파일이 필요로 하는 것만 돌린다(여전히 full tier).
 - `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다. 태그 push는 같은 트리에서 리허설이 성공했으면 플랫폼 잡과 shim의 `pnpm verify`를 건너뛴다(#1042, 2026-10-18 오너 결정: 약 13분). `guard`가 GitHub API로 태그된 커밋과 트리가 같은 커밋에서 성공한 `release.yml`의 `workflow_dispatch` 실행을 찾는다(`scripts/release-rehearsal.mjs`). 그래서 손으로 push한 태그는 그런 리허설 없이는 아무것도 건너뛰지 않고, GitHub이 답하지 않으면 verify를 돌린다. macOS, ubuntu-22.04, arm64에서 verify가 도는 곳은 여전히 리허설이다. 그래서 거기서만 다른 것이 결과를 정하면 안 된다: `pnpm typecheck`는 tsc에 고정된 4 GB 힙을 준다(package.json). Node의 기본값은 기계 메모리의 4분의 1이라, 7 GB인 macOS 러너(0.1.0-beta.43 리허설은 macos-14, macos-15도 7 GB)에서는 tsc에 모자란다(0.1.0-beta.43 리허설이 거기서 힙이 바닥났다).
 
 브랜치 push나 머지는 여전히 아무것도 배포하지 않는다. **`v*` 태그는 이제 배포한다** — 태그가 존재하는 이유가 그것이다.
 
-### Reusing the bump PR's CI (#629)
+### The release commit (#1350)
 
-For `rehearse` and `tag`, the board can use the bump PR's green required checks while
-main's checks are pending or absent. The PR must be merged into main from
-`release.branchPrefix` plus the current version, main's head must be its single-parent
-squash merge commit, and `git rev-parse <sha>^{tree}` must match for main and the PR head.
-Even a later commit with an unchanged tree invalidates this evidence. Every required
-check on that exact PR head must be reported and green; missing, pending or failed
-checks refuse it, and so does a run that did not pass the `full tier` check, when the required
-set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
-skipped job reads as passed. `bump` still requires main's own green CI.
+The merge queue lands a change every 15 to 30 minutes, so by the time a release is checked and rehearsed, main has moved
+on. A release does not wait for main's head: the **release commit** is the newest commit of main's first-parent history
+since the newest tag whose own push run of CI is fully green, the full tier included (the board looks through the newest
+20). `rehearse` and `tag` take it by default, or a `commit` of that history with such a run, from any checkout of the
+repository (it must be clean; its branch and how far it is from main do not matter, as the tag is pushed by commit from
+GitHub's history). The gates are that commit's: its own push run of CI fully green, a successful rehearsal of the version on
+it or on its rehearsal branch at a commit with the same tree, the version untagged and after the last tag. What lands
+after it does not matter: not its CI, and not a rehearsal of main's head (only runs on the release commit itself, or on the
+rehearsal branch at a commit with the same tree, count; a run on main's head does not, even with the same tree). The notes
+and `release_status` list what merged from the last tag to the release commit as this release, and what came after it
+apart as "Not in this release". `release_status` names the release commit and how many commits behind main it is.
+When main has moved on, `rehearse` pushes the release commit to `release.branchPrefix` plus the version and runs the
+workflow there (a workflow is dispatched on a branch, not on a commit); a branch left over with another tree is refused,
+not moved. Once the tag is pushed, a branch the board made at the release commit is deleted.
 
-Main's green checks are used directly. A failing main check blocks reuse, including a
-run that was pending at rehearsal and fails before tagging: every call reads CI again.
-Both steps and `release_status` name their evidence, for example
-`CI: PR #624's run on the same tree`, or explain why main's CI is required. Status's
-next step waits for CI when neither source qualifies.
+### Release CI evidence
 
-Release CI reads only GitHub Actions check suites belonging to the configured CI
-workflow files, matching their run's commit and event: push-to-main for main, and
-pull-request runs for the PR head. PR evidence must match its number, base branch,
-head branch and commit; when GitHub drops a merged PR from the run, a unique matching
-commit-to-PR association is required. Release/rehearsal checks with the same job names
-cannot replace build checks; check names alone are not evidence of their source.
+Release CI reads only GitHub Actions check suites belonging to the configured CI workflow files, matching their run's
+commit and the push event on main: a batch's run of the same workflow (a manual run on a `queue/batch-N` branch) is not
+main's own. Release/rehearsal checks with the same job names cannot replace build checks; check names alone are not
+evidence of their source. A failing check on the commit blocks, and every call reads CI again.
 
-Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires CI on the tagged commit, using only the tagged
-commit: its **own** CI green, or, while that is pending or absent, the bump PR's run on the
-same tree (#1042, owner decision 2026-10-18). The PR evidence counts on the rules above (the
-merged bump PR for the tagged version, its squash commit the tagged commit, `git rev-parse
-<sha>^{tree}` identical for both, every required check reported and green on the PR head, the
-`full tier` check passed, the audited workflows): the tagged commit is then exactly the files
-that run tested, and main's push build (about 14 minutes) adds nothing to them. Any other tree
-waits for main's own run, as before. A failed or cancelled own run still refuses: PR evidence
-never overrides a failure. Unrelated later commits on main do not gate platform or shim approval
-and cannot strand a partially published release. Pending or absent CI with no PR evidence, and
-failed CI, refuse approval, and tagged `release_status` explains this gate before suggesting
-approval. Direct approval in GitHub's UI is outside this tool's enforcement.
+Tagging does not authorize publication. Before every `npm-publish` approval (platform jobs and the later shim job),
+`approve` requires CI on the tagged commit, using only the tagged commit: its **own** CI green. No pull request's run
+stands for it. Unrelated later commits on main do not gate platform or shim approval and cannot strand a partially
+published release. Pending or absent CI, and failed CI, refuse approval, and tagged `release_status` explains this gate
+before suggesting approval. Direct approval in GitHub's UI is outside this tool's enforcement.
 
-Generated `chore(release):` bump commits on main use a concurrency group per commit
-in `build.yml`; ordinary main pushes keep cancelling superseded ordinary builds,
-but cannot cancel a bump's build. Already-cancelled builds and other cancellations
-still refuse approval with the tagged SHA and a recovery command:
-`gh run rerun <run-id> --repo ijun17/centralu`. The tag stays on that commit. Once the
-new attempt succeeds, approval accepts it; an older cancelled attempt cannot override
-the newer success. Tagged status shows the same recovery instructions.
+A cancelled build refuses approval with the tagged SHA and a recovery command:
+`gh run rerun <run-id> --repo ijun17/centralu`. The tag stays on that commit. Once the new attempt succeeds, approval
+accepts it; an older cancelled attempt cannot override the newer success. Tagged status shows the same recovery
+instructions.
 
-`ci_status` with a ref also filters checks to the configured build workflows, so
-newer passing release checks cannot hide a failed build. PR merge checks retain their
-existing behavior.
-
-Workflow event audit (2026-10-13):
-
-| Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
-| --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `fail-fast`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps and never cancels a run on main (#1259) without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a manual run with the `tier` input `quick` (the merge queue's batch, #1259) runs the quick tier unless it is a release bump or on main, from the same history (reviewed by hand); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. `verify` fetches the newest bundle record a push to main uploaded (measuring main when none has one) and uploads its own, on every event (#1181, `.github/scripts/bundle-base.mjs`, reviewed by hand: it picks main by the run that uploaded, never by this run's event). `fail-fast` (2026-10-19) reads no event context: it runs when `verify` failed and `changes` answered `fail_fast=true`, which the script gives only to a manual run (the `everything` input) off main whose files are known and leave the version's source alone (reviewed by hand), so neither a push to main nor any pull request run, a bump's included, is cut short. | Yes: the configured CI workflow, unless branch protection specifies the set. |
-| `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
-| `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
-| `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
-| `drift.yml`: `claude-sdk`, `codex-contract`, `codex-types`, `surface` | Schedule or manual dispatch only. `surface` files or updates an issue (`issues: write`). | No. |
-| `discord-notify.yml`: `notify` | Issue, PR and discussion notifications (`pull_request_target`, not build CI). | No. |
-
-Before reusing PR evidence, the tool audits the configured `ci.workflows` files from
-main's fetched commit against the required check names. A required job with event/branch
-context (including inline shell scripts), one outside a shared push/PR workflow, or a required name it cannot
-map to an audited job requires main's own run and says why. This is conservative:
-unsupported workflow shapes do not grant an exemption. Required job conditions are unchanged; the release-bump concurrency exception above
-protects builds that may be tagged while pending.
-
-The automated event audit does not follow scripts called by workflow steps, package
-scripts, imported modules, local actions, or reusable workflows. Those need manual
-review for event-dependent behavior (including environment variables) when they
-change. A clean inline scan is not proof that called code behaves identically. If a
-required called script behaves differently on push-to-main and pull requests, wait
-for main's own green run before invoking `rehearse` or `tag`; the automated fallback
-cannot establish equivalence for that script. Publication still waits for main's
-own CI through the approval gate above, or for the same bump PR evidence on the tagged commit's
-very tree.
+`ci_status` with a ref also filters checks to the configured build workflows, so newer passing release checks cannot hide
+a failed build. PR merge checks retain their existing behavior.
 
 ## 1회성 설정
 
@@ -153,48 +112,38 @@ very tree.
 
 ## 버전 릴리스하기
 
-프로젝트 보드 앱(`.centralu/apps/project-board`)이 이 단계들을 도구로 갖고 있다(#386): `release_status`는 릴리스가 어디까지 왔고 다음이 무엇인지 말하고, `release`는 `step`으로 `bump`, `rehearse`, `tag`, `approve`를 받는다. 각 단계는 maintain이나 admin 권한이 있는 로그인만 쓸 수 있고, 먼저 모든 것을 확인하며(GitHub의 main과 같은 main에 있는 깨끗한 체크아웃, main의 CI green, 태그가 없는 버전, 태그 전에 성공한 리허설) 이유를 모두 들어 거부하고, `confirm: true` 없이는 아무것도 하지 않는다. 보드의 "Release" 대화상자가 같은 상태를 보여 준다.
-
-bump는 원격 main에서 git이 추적하는 모든 텍스트 파일을 검사한다. 확장자로 거르지 않고 e2e도 포함한다. 목록에 없는 버전 참조는 `파일:줄`로 보고한다. 정확한 현재 버전뿐 아니라 뒤에 `.local.N`이나 `+build`(점으로 구분한 빌드 식별자도 가능)가 붙은 값, 템플릿 문자열 안의 값, 따옴표 없는 값도 찾는다. 다른 프리릴리스나 메타데이터는 같은 버전으로 보지 않는다: `1.0.0-beta.21`, `1.0.0-rc`, `1.0.0+other`는 `1.0.0`을 고정한 참조가 아니다. 숫자나 영문자가 이어진 다른 버전(`beta.21`을 검사할 때의 `beta.210`)도 제외한다. `package.json`에서는 최상위 `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` 필드의 값이 `^`, `~`, `>=`, `workspace:`로 시작할 때만 의존성 범위로 보고 제외한다. 정확한 버전 핀, 패키지 자신의 `version`, 스크립트와 그 밖의 필드는 원래 줄 번호를 유지해 검사한다. 자동 치환은 여전히 `release.versionFiles`에 선언된 작은따옴표나 큰따옴표로 감싼 버전 전체만 바꾼다. 실행 코드와 테스트에서 조합하는 값은 `APP_VERSION`에서 유도한다.
-
-과거 기록과 의도적으로 고정한 버전은 `.centralu/apps/project-board/project.json`의 `release.ignore`에 명시한다. 이 경로 허용 목록은 `versionFiles`와 같은 패턴을 쓴다: `*`는 경로 한 구간 안에서, `**`는 폴더 0개 이상에 걸쳐 일치한다. 이 저장소는 `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`, `**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/*.lock`을 허용한다. 이 파일들은 `versionFiles`에도 선언되어 있을 때만 검사한다. `versionFiles`가 우선이므로 `Cargo.lock`에 있는 앱 자신의 버전은 여전히 현재 버전이어야 하고 bump 때 함께 바뀐다.
-
-과거 버전을 의도적으로 고정한 fixture는 `"fixtures/pinned-version.json"`처럼 정확한 경로를 `release.ignore`에 넣고, fixture나 테스트에서 고정한 이유를 설명한다. `tooling/project-board-release.test.ts`는 회귀 테스트에서 안정 버전과 프리릴리스 버전을 의도적으로 고정하므로 명시적으로 허용한다. 그 밖의 fixture와 테스트는 기본적으로 제외하지 않는다. 파일 전체를 건너뛰므로 예외는 좁게 둔다. `release`에 `step: "bump"`를 주고 `confirm`을 생략하면 push하거나 릴리스 PR을 열지 않고 이 검사를 실행한다. main 브랜치가 아닌 경우처럼 다른 릴리스 준비 조건에 걸린 이유도 함께 보고한다.
+프로젝트 보드 앱(`.centralu/apps/project-board`)이 이 단계들을 도구로 갖고 있다(#386): `release_status`는 릴리스가 어디까지 왔고 다음이 무엇인지 말하고, `release`는 `step`으로 `rehearse`, `tag`, `approve`를 받는다. 각 단계는 maintain이나 admin 권한이 있는 로그인만 쓸 수 있고, 먼저 모든 것을 확인하며(태그에는 깨끗한 체크아웃과 릴리스 커밋, 그 커밋의 CI green, 태그가 없는 버전, 태그 전에 성공한 리허설) 이유를 모두 들어 거부하고, `confirm: true` 없이는 아무것도 하지 않는다. 보드의 "Release" 대화상자가 같은 상태를 보여 준다.
 
 손으로 하는 단계:
 
-1. `packages/protocol/src/brand.ts`의 `APP_VERSION`을 올리고, 같은 버전을 `.centralu/apps/project-board/project.json`의 `release.versionFiles`에 있는 모든 파일에 반영한다: `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`(과 `Cargo.lock`), `apps/desktop/package.json`, 그리고 모든 `packaging/npm/*/package.json`(shim의 핀 포함). 하나라도 어긋나면 `tooling/brand.test.ts`가 실패하고, 버전을 가진 파일이 그 목록에 없으면 `tooling/project-board-release.test.ts`가 실패한다. 커밋하고 push한다 — 릴리스 스크립트는 더러운 트리에서는 실행을 거부하므로, 배포되는 것과 git에 있는 것이 서로 다를 수 없다.
-
-   보드의 `bump`는 다른 빌드가 러너 대부분(`release.runners`의 4분의 3, 여기서는 GitHub의 20)을 쓰고 있으면 경고한다: bump PR의 잡 24개가 그 뒤에서 기다리게 되고, 0.1.0-beta.26에서 5–7분이 들었다(#1035).
-
-2. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 둔다. 모든 플랫폼을 빌드하고 모든 패키지를 pack하되 아무것도 배포하지 않는다. 머지한 뒤가 아니라 bump 풀 리퀘스트의 CI가 도는 동안 그 브랜치에서 돌린다(#1035, 임계 경로에서 약 27분): main의 버전이 아직 릴리스된 버전인 동안 보드의 `rehearse`가 그렇게 한다. `guard`는 그 브랜치의 `brand.ts`에서 버전을 읽고 ref는 태그 push에서만 확인하므로 어느 브랜치에서 실행해도 리허설이 된다(`scripts/release-guard.mjs`, `tooling/release-guard.test.ts`가 돌린다). 브랜치에서의 배포는 `npm-publish` 환경의 브랜치 정책(main과 `v*`만)이 거부한다. squash는 main에 트리가 같은 새 커밋을 만들고, `tag`는 bump PR의 CI를 받아들이듯(#629) 커밋 트리가 main과 같은 bump 브랜치의 성공한 리허설을 받아들인다. 브랜치가 main에 맞춰져 있을 때만 리허설한다: 그렇지 않으면 squash가 다른 파일을 빌드하게 되므로 `rehearse`가 거부한다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.
+1. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 두고, `version`에는 최신 태그 다음 prerelease를 넣는다(비워 두면 guard가 센다). 자기 push 실행의 CI가 완전히 초록인 main의 커밋(릴리스 커밋, #1350)에서 돌린다: 모든 플랫폼을 빌드하고 모든 패키지를 pack하되 아무것도 배포하지 않는다. 보드의 `rehearse`가 그렇게 하며, main이 앞서 나갔으면 릴리스 커밋에 만든 브랜치에서 돌린다. `guard`는 ref를 태그 push에서만 확인하므로 어느 브랜치에서 실행해도 리허설이 된다(`scripts/release-guard.mjs`, `tooling/release-guard.test.ts`가 돌린다). 브랜치에서의 배포는 `npm-publish` 환경의 브랜치 정책(main과 `v*`만)이 거부한다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.
 
    각 패키지의 `npm pack` 출력을 읽는다. shim 잡은 플랫폼 패키지들이 이 버전으로 레지스트리에 없다는 노란 경고로 끝나는데, 그것은 리허설이라는 사실 그대로일 뿐 결함이 아니다.
 
-3. **태그를 단다.** 태그가 곧 릴리스다:
+2. **태그를 단다.** 태그가 곧 릴리스다:
 
    ```bash
-   git tag v0.1.0-beta.3 && git push origin v0.1.0-beta.3
+   git tag -a v0.1.0-beta.3 -m "Centralu 0.1.0-beta.3" <릴리스 커밋> && git push origin v0.1.0-beta.3
    ```
 
-   `release.yml`은 무언가를 빌드하기 전에 태그를 `APP_VERSION`과 대조한다. 그래서 잘못된 커밋에 단 태그나 버전 범프보다 앞서 나간 태그의 비용은 Rust 릴리스 빌드 네 번이 아니라 몇 초다. 고치려면: `git push --delete origin <tag>`, 수정하고, 다시 태그를 단다.
+   `release.yml`은 무언가를 빌드하기 전에 태그를 이전 릴리스와 대조한다. 그래서 잘못된 커밋에 단 태그의 비용은 Rust 릴리스 빌드 네 번이 아니라 몇 초다. 고치려면: `git push --delete origin <tag>`, 수정하고, 다시 태그를 단다.
 
-4. **승인한다.** 배포는 `npm-publish` 환경에서 대기한다. GitHub은 두 번 묻는다: 함께 대기하는 네 플랫폼 잡에 대해 한 번, 모두 성공한 뒤 shim 잡에 대해 다시 한 번. 그 두 번째 승인이 아직 무언가를 되돌릴 수 있는 마지막 순간이다.
+3. **승인한다.** 배포는 `npm-publish` 환경에서 대기한다. GitHub은 두 번 묻는다: 함께 대기하는 네 플랫폼 잡에 대해 한 번, 모두 성공한 뒤 shim 잡에 대해 다시 한 번. 그 두 번째 승인이 아직 무언가를 되돌릴 수 있는 마지막 순간이다.
 
-   보드의 `approve`는 매번 게이트를 확인한다: 태그된 커밋 자신의 CI가 green이고(그것이 아직 pending이면 트리가 똑같은 bump PR의 실행으로 대신한다, #1042), shim 앞에서는 그 실행의 다른 잡이 모두 성공했으며 모든 플랫폼·호스트 전용 패키지가 이 버전으로, 태그된 커밋(`gitHead`)에서 배포되어 레지스트리에 있어야 한다. `wait: true`(와 `confirm: true`)를 주면 그 게이트를 기다렸다가 통과하는 순간 승인한다. 사람이 나중에 알아차리기를 기다리지 않는다(#1035: 0.1.0-beta.26에서 플랫폼 앞 5–6분, shim 앞 14분). 최대 `waitMinutes`(기본 45, 많아야 60)까지 기다리고, 시간이 다 되면 아무것도 승인하지 않고 무엇을 아직 기다렸는지 말한다. 저절로 통과할 수 없는 것(실패한 CI, 실패한 플랫폼 잡, 다른 커밋의 패키지)은 `wait` 없이와 같이 곧바로 거부한다. 태그 뒤에 한 번, 플랫폼 승인 뒤에 한 번 더 부른다. 두 승인은 그대로 남는다. 게이트는 태그된 커밋의 필수 체크를 main이 아니라 그 커밋 자신의 `build.yml`에서 읽는다: main에 나중에 생긴 잡은 태그된 커밋에서 보고되지 않는다. 그 커밋의 빌드 실행이 모두 끝났는데도 빠진 필수 체크가 있으면 곧바로 거부한다. 기다리는 호출은 처음 읽은 것(버전, 태그된 커밋, 릴리스 실행)만 승인한다. 그중 하나가 바뀌거나, GitHub이 아직 대기 중인 잡을 보여 주지 않아 플랫폼과 shim을 구별할 수 없으면 승인하지 않는다. 취소된 호출은 아무것도 승인하지 않는다.
+   보드의 `approve`는 매번 게이트를 확인한다: 태그된 커밋 자신의 CI가 green이고, shim 앞에서는 그 실행의 다른 잡이 모두 성공했으며 모든 플랫폼·호스트 전용 패키지가 이 버전으로, 태그된 커밋(`gitHead`)에서 배포되어 레지스트리에 있어야 한다. `wait: true`(와 `confirm: true`)를 주면 그 게이트를 기다렸다가 통과하는 순간 승인한다. 사람이 나중에 알아차리기를 기다리지 않는다(#1035: 0.1.0-beta.26에서 플랫폼 앞 5–6분, shim 앞 14분). 최대 `waitMinutes`(기본 45, 많아야 60)까지 기다리고, 시간이 다 되면 아무것도 승인하지 않고 무엇을 아직 기다렸는지 말한다. 저절로 통과할 수 없는 것(실패한 CI, 실패한 플랫폼 잡, 다른 커밋의 패키지)은 `wait` 없이와 같이 곧바로 거부한다. 태그 뒤에 한 번, 플랫폼 승인 뒤에 한 번 더 부른다. 두 승인은 그대로 남는다. 게이트는 태그된 커밋의 필수 체크를 main이 아니라 그 커밋 자신의 `build.yml`에서 읽는다: main에 나중에 생긴 잡은 태그된 커밋에서 보고되지 않는다. 그 커밋의 빌드 실행이 모두 끝났는데도 빠진 필수 체크가 있으면 곧바로 거부한다. 기다리는 호출은 처음 읽은 것(버전, 태그된 커밋, 릴리스 실행)만 승인한다. 그중 하나가 바뀌거나, GitHub이 아직 대기 중인 잡을 보여 주지 않아 플랫폼과 shim을 구별할 수 없으면 승인하지 않는다. 취소된 호출은 아무것도 승인하지 않는다.
 
-5. 한 번도 설치한 적 없는 머신에서 확인한다: `npm i -g centralu@beta && centralu`.
+4. 한 번도 설치한 적 없는 머신에서 확인한다: `npm i -g centralu@beta && centralu`.
 
 ### 태그 방식 (#1501)
 
-릴리스마다 세 번 돌던 전체 CI(마지막 머지 뒤의 main, bump PR, bump squash 뒤의 main)가 한 번이 된다: 버전은 빌드할 때 태그에서 찍히므로 어느 파일에도 없고, bump PR도 bump 커밋도 없다. 태그는 이미 완전히 초록인 main의 커밋에 붙는다. 단계로 들어간다: 먼저 guard와 보드의 경로(두 방식을 모두 받으며, 전환 전까지 아무것도 바뀌지 않는다), 그다음 찍기와 전환, 마지막으로 옛 경로 제거. 설계와 리뷰는 #1501에 있다. **이 저장소는 전환 뒤 태그 방식이다**(`release.scheme: "tag"`, `brand.ts`가 버전을 가져온다): 위의 bump 단계는 0.1.0-beta.37까지의 릴리스를 설명하며, 옛 경로를 지울 때까지 남는다.
+릴리스마다 세 번 돌던 전체 CI(마지막 머지 뒤의 main, bump PR, bump squash 뒤의 main)가 한 번이 된다: 버전은 빌드할 때 태그에서 찍히므로 어느 파일에도 없고, bump PR도 bump 커밋도 없다. 태그는 이미 완전히 초록인 main의 커밋에 붙는다. 설계와 리뷰는 #1501에 있다. **이 저장소는 태그 방식이다**(`brand.ts`가 버전을 가져온다): 0.1.0-beta.37까지의 릴리스가 쓰던 버전 bump 경로는 없어졌다(#1143).
 
 - **빌드의 버전이 오는 곳.** git에는 버전이 없다. `scripts/app-version.mjs`가 정한다: `CENTRALU_VERSION`, 없으면 HEAD에서 닿는 최신 `v[0-9]*` 태그, 그것도 없으면 패키징 빌드는 거부한다(shallow checkout, fork). 버전을 담는 파일은 자리표시자 `0.0.0-dev`로 커밋된다(찍힌 채 커밋되면 `tooling/brand.test.ts`가 실패한다): `packages/protocol/src/version.generated.ts`(UI, 호스트, 스크립트의 `APP_VERSION`), `tauri.conf.json`, `apps/desktop/package.json`, `Cargo.toml`과 `Cargo.lock`, shim의 고정 버전을 포함한 모든 `packaging/npm/*/package.json`. `scripts/stamp-version.mjs`가 `version.generated.ts`, `tauri.conf.json`, npm 매니페스트에 버전을 쓰고, `--restore`가 자리표시자로 되돌린다. `release-npm.mts`는 `pnpm verify`를 커밋된 그대로, 자리표시자 상태에서 `CENTRALU_VERSION` 없이 돌린 뒤(가드 테스트는 자리표시자를 기대한다: 먼저 찍으면 beta.38 리허설의 모든 Linux 잡에서 17개가 실패했다) 빌드 전에 찍고(`verifyThenStamp`, `scripts/release-verify.mjs`), 그 버전으로 콘텐츠 매니페스트에 서명한다. `pnpm app`(`scripts/app-build.mts`)은 찍고, 빌드하고, 실패나 Ctrl-C에도 되돌린다. `local-update`는 버리는 클론에 찍는다. `bundle.mjs`는 그 버전 필드만 다른 트리를 dirty로 보지 않는다. Rust에는 아무것도 컴파일되어 들어가지 않는다: 창은 찍힌 `tauri.conf.json`을 실행 중에 읽고(`package_info()`) 키퍼에 `--app-version`으로 넘기며, 빌드된 호스트를 돌리는 키퍼는 이제 이것을 요구한다. `pnpm dev`, `pnpm host`, `pnpm app:dev`와 테스트는 `0.0.0-dev`로 돈다: 그런 호스트는 `dev`이고, 연결된 머신에 아무것도 설치하지 않고, "자동 업데이트"에 무엇이 저장되어 있든 릴리스를 스스로 설치하지 않으며(`installsByItself`), 업데이트 줄은 최신 릴리스를 더 새 버전으로 보여 준다. `version.generated.ts`는 처음 설계처럼 gitignore하고 설치 때 쓰는 대신 커밋된다: `pnpm pre-pr`는 설치하지 않은 worktree에서 타입 검사를 하므로, 파일이 없으면 실패한다. 찍는 스크립트는 `bundle.mjs`가 그냥 node로 돌리므로 `.mjs`다. CI의 `bundle` 잡은 태그를 가져와 가장 새 태그를 빌드 전에 찍으므로, 그 산출물은 커밋이 잘려 나온 릴리스를 담는다(태그 없는 fork는 자리표시자를 유지한다).
 
-- **어느 방식인가.** `release.yml`의 guard(`scripts/release-guard.mjs`)가 `brand.ts`를 `sourceScheme`(보드의 `versions.mjs`, `project.json`의 `release.source`)으로 읽는다: 리터럴 `APP_VERSION`이 있으면 위의 brand 방식이다. 태그 방식에는 긍정적인 근거가 필요하다: `./version.generated.js`에서 `APP_VERSION`을 가져오는 줄, 또는 파일에 `APP_VERSION`이 아예 없는 것. 그 밖의 선언(다른 따옴표, 타입 표기, 계산된 값)은 실행을 멈춘다: "tag"로 짐작하면 어떤 버전의 태그든 배포되기 때문이다. 보드는 `project.json`의 `release.scheme`을 따르며(기본 "brand", 전환하면 "tag"), 릴리스할 각 커밋을 같은 함수로 읽는다.
-- **태그 push만 배포한다.** 태그 방식에서 수동 실행은 `dry_run`이 무엇이든 언제나 리허설이다: 자유로운 버전의 수동 배포는 태그 없는 버전을 npm에 남긴다. 리허설은 `version` 입력, 없으면 최신 태그 다음 prerelease를 빌드하고, 보드가 어느 버전의 리허설인지 알 수 있도록 `rehearse <version>`이라는 이름을 갖는다(`run-name`).
+- **어느 커밋인가.** `release.yml`의 guard(`scripts/release-guard.mjs`)가 `brand.ts`를 `sourceScheme`(보드의 `versions.mjs`, `project.json`의 `release.source`)으로 읽는다. 태그 방식에는 긍정적인 근거가 필요하다: `./version.generated.js`에서 `APP_VERSION`을 가져오는 줄, 또는 파일에 `APP_VERSION`이 아예 없는 것. 리터럴 `APP_VERSION`이나 그 밖의 선언(다른 따옴표, 타입 표기, 계산된 값)은 실행을 멈춘다: "tag"로 짐작하면 어떤 버전의 태그든 배포되기 때문이다. 보드는 릴리스할 각 커밋을 같은 함수로 읽는다.
+- **태그 push만 배포한다.** 수동 실행은 `dry_run`이 무엇이든 언제나 리허설이다: 자유로운 버전의 수동 배포는 태그 없는 버전을 npm에 남긴다. 리허설은 `version` 입력, 없으면 최신 태그 다음 prerelease를 빌드하고, 보드가 어느 버전의 리허설인지 알 수 있도록 `rehearse <version>`이라는 이름을 갖는다(`run-name`).
 - **guard가 태그에 요구하는 것**(트리가 더 이상 버전을 묶지 않으므로, 손으로 push한 태그도 이것을 지나야 한다): 최신 `v[0-9]*` 태그일 것, 이전 태그가 태그된 커밋의 조상일 것, checkout이 shallow가 아닐 것(guard의 checkout은 전체 히스토리, `fetch-depth: 0`: shallow면 이전 태그가 보이지 않아 그에 대한 검사가 묻지도 않고 통과한다), 커밋이 기본 브랜치에 있을 것, 버전이 레지스트리에 있는 `centralu`의 모든 버전보다 뒤일 것, 이전 태그가 보이지 않으면 레지스트리에 `centralu`가 하나도 없을 것, 이전 버전의 `centralu`가 레지스트리에 있을 것(동시에 두 태그가 dist-tag를 두고 경쟁하지 않도록), `centralu@<version>`이 없거나 바로 이 커밋에서 배포된 것일 것(같은 릴리스의 재실행). guard의 `version`은 플랫폼과 shim 잡에 잡 수준의 `CENTRALU_VERSION`으로 전해져 `pnpm install`도 본다.
-- **보드.** `bump`는 거부한다. `release_status`, `rehearse`, `tag`는 최신 태그 다음 prerelease(또는 `version`)와, 그 태그 이후 main의 커밋 중 자기 push 실행의 CI가 전체 tier까지 완전히 초록인 가장 새로운 것(또는 `commit`)을 쓰되, `brand.ts`가 아직 버전을 선언하는 커밋은 건너뛴다(guard가 그 태그를 거부해 번호만 소모된다). 최신 태그가 아직 릴리스되지 않았으면(실행이 성공하지 않았고 shim이 레지스트리에 없으면) 둘 다 거부한다. guard도 거부할 것이기 때문이다. `tag`는 그 커밋(또는 같은 트리)에서 그 버전의 리허설이 성공했어야 하며, 메시지가 릴리스 노트인 annotated 태그를 push한다: bump PR이 없으므로 노트는 태그에 남는다(소유자 기본값, 2026-10-24: GitHub Release 없음). `approve`는 태그된 커밋 자신의 CI만 읽는다. shim의 게이트는 그대로다. 상태는 최신 태그의 릴리스 실행이 성공하거나 그 shim이 레지스트리에 올라갈 때까지 그 태그를 따른다.
+- **보드.** `release_status`, `rehearse`, `tag`는 최신 태그 다음 prerelease(또는 `version`)와, 그 태그 이후 main의 커밋 중 자기 push 실행의 CI가 전체 tier까지 완전히 초록인 가장 새로운 것(또는 `commit`)을 쓰되, `brand.ts`가 아직 버전을 선언하는 커밋은 건너뛴다(guard가 그 태그를 거부해 번호만 소모된다). 최신 태그가 아직 릴리스되지 않았으면(실행이 성공하지 않았고 shim이 레지스트리에 없으면) 둘 다 거부한다. guard도 거부할 것이기 때문이다. `tag`는 그 커밋(또는 같은 트리)에서 그 버전의 리허설이 성공했어야 하며, 메시지가 릴리스 노트인 annotated 태그를 push한다: bump PR이 없으므로 노트는 태그에 남는다(소유자 기본값, 2026-10-24: GitHub Release 없음). `approve`는 태그된 커밋 자신의 CI만 읽는다. shim의 게이트는 그대로다. 상태는 최신 태그의 릴리스 실행이 성공하거나 그 shim이 레지스트리에 올라갈 때까지 그 태그를 따른다.
 - **원격 dev 빌드**(`pnpm remote-dev`)는 그곳 작업 사본의 HEAD에서 닿는 최신 릴리스 태그에서 잘라 낸다. `app-version.mjs`가 로컬 빌드의 버전을 정하는 방식과 같다: `<tag>.local.N`. 태그가 없는 클론은 `git fetch --tags`를 안내하며 거부한다(전환 전 커밋은 자기 버전을 아직 담고 있어 그것을 쓴다). 자리표시자는 기준이 되지 않는다: `0.0.0-dev.local.N`은 모든 릴리스보다 오래된 버전이 되기 때문이다. 전환 전의 허브는 그런 작업 사본을 그냥 거부한다. 실행되는 스크립트는 허브의 것이기 때문이다.
 
 ### 잡 그래프가 보장하는 것

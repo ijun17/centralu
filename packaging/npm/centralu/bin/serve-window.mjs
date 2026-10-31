@@ -5,9 +5,9 @@
  * lock refuses.
  */
 import { join } from 'node:path'
-import { legacyHostTokenOf, pairServe, readServeState } from './serve-files.mjs'
+import { pairServe, readServeState } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { hostProvesOf, ownCredentials, probeHost, protocolVersionOf, takesVerifiers } from './serve-host.mjs'
+import { hostProvesOf, probeHost, protocolVersionOf } from './serve-host.mjs'
 import { serveFolder } from './serve-run.mjs'
 import { runDetach } from './serve-detach.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -51,7 +51,7 @@ export async function runWindow({
   const protocolVersion = protocolVersionOf(entry) ?? 0
   const probe = () => {
     const state = readServeState(dataDir)
-    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, ...ownCredentials(state, entry), protocolVersion, prove }) : Promise.resolve({ running: false })
+    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, proofKey: state.proofKey, protocolVersion, prove }) : Promise.resolve({ running: false })
   }
 
   let host = await probe()
@@ -78,8 +78,8 @@ export async function runWindow({
     )
   }
 
-  // The window's own full credential (#1405); an older installed host knows only the token kept for it
-  const token = takesVerifiers(entry) ? pairServe(dataDir, 'window', platform, Date.now(), 'window').token : legacyHostTokenOf(dataDir, platform)
+  // The window's own full credential (#1405)
+  const token = pairServe(dataDir, 'window', platform, Date.now(), 'window').token
   const state = readServeState(dataDir)
   write(`${JSON.stringify({ ready: true, port: state.port ?? DEFAULT_SERVE_PORT, token, db: join(dataDir, 'store.db') })}\n`)
 

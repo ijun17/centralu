@@ -31,7 +31,6 @@ import {
   orchestratorToolSchemas,
   profileAllows,
   runOrchestratorTool,
-  setReaderInstructions,
   toolDefsFor,
   type RareTier,
 } from './orchestrator-tools.js'
@@ -287,14 +286,7 @@ describe('the reader set', () => {
     expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2850 + COMPACT_BUDGET_CHARS)
   })
 
-  it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {
-    try {
-      setReaderInstructions(false)
-      expect(instructionsFor('reader')).toBeUndefined()
-      expect(codexToolInstructionsFor('reader')).toBeUndefined()
-    } finally {
-      setReaderInstructions(true)
-    }
+  it('gives Codex the reader instructions in its developer text', () => {
     expect(codexToolInstructionsFor('reader')).toContain(READER_INSTRUCTIONS)
   })
 
@@ -600,7 +592,6 @@ describe('callForm (#850)', () => {
     const args = { sessionId: 'w-1', card: FILL, text: FILL } as const
     expect(callForm('orchestrator', 'answer_question', args, 'commands')).toBe('centralu_run(command="answer_question", args={sessionId: "w-1", card: …, text: …})')
     expect(callForm('orchestrator', 'answer_question', args, 'resident')).toBe('answer_question(sessionId="w-1", card=…, text=…)')
-    expect(callForm('orchestrator', 'answer_question', args, 'deferred')).toBe('answer_question(sessionId="w-1", card=…, text=…)')
     expect(callForm('reader', 'read_session', { sessionId: 'w-1', around: 42 })).toBe('read_session(sessionId="w-1", around=42)')
     expect(callForm('scoped', 'answer_question', args)).toBeUndefined()
     expect(callForm('reader', 'handoff_session', { waitFor: 'h' })).toBeUndefined()
@@ -635,7 +626,7 @@ const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centra
 
 describe('arguments (#850)', () => {
   it('every tool a seat is shown has one schema to run by, and the keys it is shown are that schema\'s', () => {
-    for (const tier of ['resident', 'deferred', 'commands'] as RareTier[]) {
+    for (const tier of ['resident', 'commands'] as RareTier[]) {
       for (const profile of TOOL_PROFILES) {
         for (const def of toolDefsFor(profile, tier)) {
           const args = (TOOL_ARGS as Record<string, z.ZodObject<z.ZodRawShape>>)[def.name]

@@ -4,6 +4,7 @@ import type { StoreInspection } from './dev-services/store.js'
 import { bridgeToken } from './transport/bridge-token.js'
 import { sessionToken } from './transport/session-token.js'
 import { lineSplitter } from './transport/json-lines.js'
+import { tryParseJson } from './json-value.js'
 
 /**
  * The host's half of a blue-green swap (#280, option C step 3).
@@ -114,12 +115,7 @@ export class ControlChannel {
   }
 
   private dispatch(line: string): void {
-    let msg: unknown
-    try {
-      msg = JSON.parse(line)
-    } catch {
-      return
-    }
+    const msg = tryParseJson(line)
     if (typeof msg !== 'object' || msg === null || typeof (msg as ControlMessage).op !== 'string') return
     const m = msg as ControlMessage
     const waiting = this.waiters.get(m.op)

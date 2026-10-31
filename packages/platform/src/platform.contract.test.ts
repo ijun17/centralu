@@ -1032,20 +1032,13 @@ describe.each([
   })
 
   /**
-   * The text size moved from the workspace snapshot into the preferences (#312 step 5). The old
-   * step comes across once; after that the record has its own value, and a snapshot that still
-   * carries the old step (written by an older window) does not override a size chosen since.
-   */
-  /**
-   * The notification switches moved from the workspace snapshot into the preferences (#1306), the way the text size did.
+   * The notification switches moved from the workspace snapshot into the preferences (#1306).
    * The snapshot's come across once; after that the record is the source, and a snapshot an older window still writes does
    * not override a switch chosen since. A change carries only the switches that changed, and every change is announced.
    */
   describe('the notification switches (#1306)', () => {
     it('come across from the snapshot once, then the record is the source', async () => {
-      await h.platform.workspace.save({ textScale: 4, notifyPolicy: { approval: true, error: true, done: false, allDone: true, whenFocused: false, sound: false } } as never)
-      // Both moves in one first read: the second does not lose the first
-      expect((await h.platform.prefs.load()).textSize).toBe(1.25)
+      await h.platform.workspace.save({ notifyPolicy: { approval: true, error: true, done: false, allDone: true, whenFocused: false, sound: false } } as never)
       expect((await h.platform.prefs.load()).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false, sound: false })
       expect((await h.platform.prefs.save({ notifyPolicy: { sound: true } })).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false })
       // An older window writes its snapshot again: the record keeps the switch chosen since
@@ -1078,16 +1071,6 @@ describe.each([
       const p = await aProject()
       const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
       expect(await h.platform.agents.autoCompact(s.id)).toEqual({ controlled: true, share: 0.6, tokens: null })
-    })
-  })
-
-  describe('a fresh install with a snapshot from before #312', () => {
-    it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
-      await h.platform.workspace.save({ textScale: 4 })
-      expect((await h.platform.prefs.load()).textSize).toBe(1.25)
-      expect((await h.platform.prefs.save({ textSize: 0.925 })).textSize).toBe(0.925)
-      await h.platform.workspace.save({ textScale: 4 })
-      expect((await h.platform.prefs.load()).textSize).toBe(0.925)
     })
   })
 

@@ -1,3 +1,4 @@
+import { bytesText } from '../bytes-text.js'
 import { scriptLabel } from '../mail/script-label.js'
 import type { StoredMessage } from '@cc/protocol'
 import { trustedJsonText } from './orchestrator-tools.js'
@@ -47,12 +48,12 @@ import { trustedJsonText } from './orchestrator-tools.js'
  */
 
 /**
- * The byte cap on the record file. 2MB is measured as the size that fits the most recent tens of
+ * The byte cap on the record file. 2 MiB (read as "2.0 MB") is measured as the size that fits the most recent tens of
  * thousands of rows out of a 200,000-row transcript, and it is also a size a person can search
  * through with `rg` with no strain. It is a **file** cap, not a message-envelope cap, so it limits
  * only disk and read cost, not context.
  */
-export const RECORD_CAP = 2_000_000
+export const RECORD_CAP = 2 * 1024 * 1024
 
 /**
  * How many of the most recent tool calls carry the head of their result (#1481). 40 ≈ the predecessor's last couple of
@@ -427,7 +428,7 @@ export function buildHandoffRecord(opts: {
   const from = kept.length ? kept[0]!.seq : lastSeq
   const covers =
     `covers seq ${num(from)}–${num(lastSeq)} of ${num(lastSeq)}` +
-    ` · ${(cap / 1_000_000).toFixed(1)} MB cap` +
+    ` · ${bytesText(cap)} cap` +
     (dropped > 0 || folded ? " · earlier material stays in the app's records" : '')
   const header = `# Handoff · ${trustedJsonText(opts.name)} · ${oneLine(opts.tool)}${opts.toTool ? ` → ${oneLine(opts.toTool)}` : ''}\n${covers}\n${previousLine}${lineageText}${touchedLine}\n`
 

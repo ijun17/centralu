@@ -5,6 +5,7 @@
  */
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 
@@ -93,11 +94,37 @@ export function connect({ port, token }, { timeoutMs = 240_000, onEvent } = {}) 
   })
 }
 
-/** A host started and connected to: the client, with the host's process as `host` and its `port`; a host that does not greet is stopped */
+/**
+ * Removes a smoke's temp folder once its host is stopped. On Windows an agent process the host started can hold the folder
+ * after the host itself is gone, so a busy folder is retried for about 14 s (Node waits a little longer before each retry) and then left, said so: a folder left behind
+ * must not turn the checks' verdict into a crash.
+ */
+export function removeTemp(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 7, retryDelay: 500 })
+  } catch (e) {
+    console.warn(`temp folder left behind (${e.code}): ${dir}`)
+  }
+}
+
+/** A host started and connected to: the client, with the host's process as `host` and its `port`, and `stop` to end it; a host that does not greet is stopped */
 export async function openHost(opts = {}) {
   const started = await startHost(opts)
   try {
-    return Object.assign(await connect(started, opts), { host: started.host, port: started.port })
+    const client = await connect(started, opts)
+    const { host } = started
+    return Object.assign(client, {
+      host,
+      port: started.port,
+      /** Closes the connection and ends the host, and waits until it is gone */
+      async stop() {
+        client.ws.close()
+        if (host.exitCode !== null || host.signalCode !== null) return
+        const exited = new Promise((r) => host.once('exit', r))
+        host.kill()
+        await exited
+      },
+    })
   } catch (e) {
     started.host.kill()
     throw e

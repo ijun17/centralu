@@ -21,9 +21,14 @@ import type { TurnCompletedNotification } from './generated/v2/TurnCompletedNoti
 import type { TurnPlanUpdatedNotification } from './generated/v2/TurnPlanUpdatedNotification.js'
 import type { TurnStartedNotification } from './generated/v2/TurnStartedNotification.js'
 import type { WarningNotification } from './generated/v2/WarningNotification.js'
+import type { CommandExecutionRequestApprovalParams } from './generated/v2/CommandExecutionRequestApprovalParams.js'
+import type { FileChangePatchUpdatedNotification } from './generated/v2/FileChangePatchUpdatedNotification.js'
+import type { FileChangeRequestApprovalParams } from './generated/v2/FileChangeRequestApprovalParams.js'
+import type { McpServerElicitationRequestParams } from './generated/v2/McpServerElicitationRequestParams.js'
+import type { ThreadSettingsUpdatedNotification } from './generated/v2/ThreadSettingsUpdatedNotification.js'
 
 /**
- * The params of each notification the adapter reads, as Codex's generated types name them (#1339): the types the
+ * The params of each notification and server request the adapter reads, as Codex's generated types name them (#1339): the types the
  * adapter is compiled against (codex-bindings.mjs writes them into generated/). A field the adapter reads that Codex
  * renames or drops then fails the build where it is read.
  */
@@ -50,6 +55,11 @@ export type NotificationParams = {
   'model/rerouted': ModelReroutedNotification
   'mcpServer/startupStatus/updated': McpServerStatusUpdatedNotification
   'error': ErrorNotification
+  'item/fileChange/patchUpdated': FileChangePatchUpdatedNotification
+  'thread/settings/updated': ThreadSettingsUpdatedNotification
+  'item/commandExecution/requestApproval': CommandExecutionRequestApprovalParams
+  'item/fileChange/requestApproval': FileChangeRequestApprovalParams
+  'mcpServer/elicitation/request': McpServerElicitationRequestParams
 }
 
 /** `T`'s fields by Codex's names, each read as `unknown`: the names are checked at build, the values as they are read */

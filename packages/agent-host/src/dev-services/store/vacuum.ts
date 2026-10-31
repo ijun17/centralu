@@ -1,3 +1,4 @@
+import { bytesText } from '../../bytes-text.js'
 import type Database from 'better-sqlite3'
 import { errorMessage } from '@cc/protocol'
 import { pragmaNumber } from './rows.js'
@@ -11,8 +12,6 @@ export const VACUUM_FREE_BYTES = 16 * 1024 * 1024
 
 /** What an owed `VACUUM` did: the file's size before and after, and how long it took */
 export type VacuumDone = { before: number; after: number; ms: number }
-
-export const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)}MB`
 
 /**
  * The `app_settings` key present while a `VACUUM` a migration step queued has not run yet (#396). Written in the step's
@@ -47,13 +46,13 @@ export class OwedVacuum {
       this.db.exec('VACUUM')
     } catch (err) {
       const free = pragmaNumber(this.db, 'freelist_count') * pageSize
-      console.error(`[store] could not vacuum; ${mb(free)} stay free in the file: ${errorMessage(err)}`)
+      console.error(`[store] could not vacuum; ${bytesText(free)} stay free in the file: ${errorMessage(err)}`)
       return null
     } finally {
       writeStoreKey(this.db, VACUUM_OWED_KEY, null)
     }
     const done = { before, after: size(), ms: Date.now() - t0 }
-    if (why) console.error(`[store] vacuumed ${mb(done.before)} -> ${mb(done.after)} (${done.ms}ms): ${why}`)
+    if (why) console.error(`[store] vacuumed ${bytesText(done.before)} -> ${bytesText(done.after)} (${done.ms}ms): ${why}`)
     return done
   }
 }

@@ -217,21 +217,14 @@ describe('project trust → session (#92)', () => {
  * #288 changed the grid's RPC from bare session ids to tagged panels, by expanding it (protocol.md §4) rather than
  * bumping PROTOCOL_VERSION: a UI one build older still speaks the old shape to this host, and must keep working.
  */
-describe('the grid RPC, in both shapes (#288)', () => {
-  it('a UI from before panels saves and reads bare session ids, as it always did', async () => {
+describe('the grid RPC speaks panels only (#288, #1143)', () => {
+  it('refuses a save of bare session ids, the shape of a window before panels', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
-    const b = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
-    expect(await rpc('grid.set', { sessionIds: [b.id, a.id, 'not-a-session'] })).toEqual([b.id, a.id])
-    expect(await rpc('grid.get', {})).toEqual([b.id, a.id])
-    // and this build reads the same list as panels
-    expect(await rpc('grid.get', { tagged: true })).toEqual([
-      { kind: 'session', sessionId: b.id },
-      { kind: 'session', sessionId: a.id },
-    ])
+    await expect(rpc('grid.set', { sessionIds: [a.id] })).rejects.toThrow()
   })
 
-  it('this build saves panels and gets panels back; the old shape sees only their sessions', async () => {
+  it('saves panels and gets panels back, with or without `tagged`, which a beta.45 host needs', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
     const panels = [
@@ -239,13 +232,12 @@ describe('the grid RPC, in both shapes (#288)', () => {
       { kind: 'session', sessionId: a.id },
       { kind: 'app', projectId: null, appId: 'notes' },
     ]
-    // `sessionIds` rides along for an older host; this one takes the panels
-    expect(await rpc('grid.set', { panels, sessionIds: [a.id] })).toEqual(panels)
+    expect(await rpc('grid.set', { panels })).toEqual(panels)
     expect(await rpc('grid.get', { tagged: true })).toEqual(panels)
-    expect(await rpc('grid.get', {})).toEqual([a.id])
+    expect(await rpc('grid.get', {})).toEqual(panels)
   })
 
-  it('refuses a save that names neither panels nor session ids', async () => {
+  it('refuses a save that names no panels', async () => {
     await expect(rpc('grid.set', {})).rejects.toThrow()
   })
 
@@ -258,7 +250,7 @@ describe('the grid RPC, in both shapes (#288)', () => {
       { kind: 'app', projectId: p.id, appId: 'board', span: { cols: 2, rows: 1 } },
       { kind: 'app', projectId: null, appId: 'notes' },
     ]
-    expect(await rpc('grid.set', { panels, sessionIds: [a.id] })).toEqual(panels)
+    expect(await rpc('grid.set', { panels })).toEqual(panels)
     expect(await rpc('grid.get', { tagged: true })).toEqual(panels)
     await expect(
       rpc('grid.set', { panels: [{ kind: 'app', projectId: null, appId: 'notes', span: { cols: 9, rows: 1 } }] }),

@@ -172,12 +172,12 @@ describe('the handoff record builder (#102)', () => {
     expect(text).toMatch(/covers seq [\d,]+–5,000 of 5,000/)
   })
 
-  it('the default cap is 2MB, and an ordinary session never touches the cap', () => {
+  it('the default cap is 2 MiB, and an ordinary session never touches the cap', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `line ${i}` }))
     const text = buildHandoffRecord({ ...base, rows })
 
-    expect(RECORD_CAP).toBe(2_000_000)
+    expect(RECORD_CAP).toBe(2 * 1024 * 1024)
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(RECORD_CAP)
     expect(text).toContain('[assistant] line 1')
     expect(text).toContain('covers seq 1–500 of 500')
@@ -392,7 +392,7 @@ describe('the contents section and the cut results (#1481)', () => {
     const text = buildHandoffRecord({ ...base, rows: big, cap: 50_000, children: [{ id: 'c', name: 'K', state: 'finished' }] })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(50_000)
-    expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 0\.1 MB cap · earlier material stays/)
+    expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 49 KB cap · earlier material stays/)
     expect(text).toContain('Report at seq 401:\n    last report')
     expect(text).toContain('- "K" — finished — id: c')
     // The table still points at real lines

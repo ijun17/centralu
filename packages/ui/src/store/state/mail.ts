@@ -5,7 +5,7 @@ export type MailSlice = {
   /**
    * The mailbox as the Inbox lists it: the threads the person is in (unread first), the mail held for them to act on, and how
    * many sleeping sessions wait for their word. A copy of the host's answer, read again when `mail_changed` says something
-   * moved. Null until read, and with a host from before the mailbox (which answers "Unknown method").
+   * moved. Null until read.
    */
   mail: { threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number } | null
   /** The thread open in the Inbox, with the messages read so far (`mail.thread`); null when the list shows */

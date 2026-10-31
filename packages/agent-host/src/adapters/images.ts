@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import type { NormalizedEvent } from '@cc/protocol'
+import { bytesText } from '../bytes-text.js'
 import { asObj } from '../json-value.js'
 
 /**
@@ -89,7 +90,7 @@ export const IMAGE_MAX_BYTES = 8 * 1048576
 type ImageEvent = Extract<NormalizedEvent, { type: 'message_image' }>
 
 /** The note of an image left undrawn for its size, the same words whichever way it arrived */
-const tooLarge = (bytes: number): string => `too large (${Math.round(bytes / 1048576)}MB)`
+const tooLarge = (bytes: number): string => `too large (${bytesText(bytes)})`
 
 /**
  * An image a tool answered with inline, as base64 (#40, #843): a Claude tool result's image block, an MCP tool's

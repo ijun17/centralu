@@ -12,7 +12,7 @@ import {
 } from '@cc/protocol'
 import type { AgentAdapter, LocalUsage, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import { withTimeout } from './with-timeout.js'
+import { withTimeout } from '../timing.js'
 
 /** How long one read of a tool's model list may run, whoever waits on it (#660) */
 const MODEL_LIST_READ_MS = 60_000

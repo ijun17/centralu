@@ -383,7 +383,7 @@ Where it is stored:
 - `grid_layout`: the grid's panels (sessions and apps, store v42; spans v43; a linked machine's session in a column
   of its own, v46; a linked machine's app in columns of their own, v47).
 - `grid_panels`: the grid of session panels as v9 made it, kept for hosts older than v42 (this build copies it once
-  and afterwards only removes an archived session's row); dropped in a later contract step
+  and afterwards neither reads nor writes it); dropped in a later contract step
   ([agent-host.md](agent-host.md) §5.1).
 - `workspace`: the UI's snapshot, one row.
 - `commit_sessions`: commit attribution.

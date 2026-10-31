@@ -8,11 +8,10 @@ export type SlashCommandsHost = {
   /** A request on the session's connection */
   request<T = unknown>(method: string, params?: unknown): Promise<T>
   threadId(): string | null
-  /** An unsteerable turn (compact/review) we started is running, or no longer is (see the session's `pendingInputs`); `compact`: it is a compaction */
-  setBlockingTurn(on: boolean, compact?: boolean): void
-  /** Sends what was queued behind such a turn */
-  flushPending(): void
 }
+
+/** The request a slash command started; `blocks`: it runs a turn no message may join until it ends (`MidTurnLedger`) */
+export type SlashCommandRun = { request: Promise<unknown>; blocks?: 'compact' | 'review' }
 
 /**
  * The slash commands Codex runs as functions rather than messages (#58): `/compact`, `/review` and `/goal` go to their
@@ -23,7 +22,7 @@ export class CodexSlashCommands {
   constructor(private readonly host: SlashCommandsHost) {}
 
   /** The request a slash command started, or null when the text is a message */
-  run(text: string): Promise<unknown> | null {
+  run(text: string): SlashCommandRun | null {
     /*
      * **compact is a function, not a message** (a dogfooding observation nailed it exactly —
      * "it does not work by sending a message"). In the codex CLI, /compact runs compaction
@@ -36,15 +35,7 @@ export class CodexSlashCommands {
      * receives as-is. (No `thread/compacted` on 0.147.0, 0.153.4 or 0.160.0 — #303.)
      */
     if (text.trim() === '/compact') {
-      this.host.setBlockingTurn(true, true)
-      return this.host
-        .request('thread/compact/start', { threadId: this.host.threadId() })
-        .catch((e: unknown) => {
-          // Waiting on a turn that failed to start would lock the queue forever — unblock and flush what piled up
-          this.host.setBlockingTurn(false)
-          this.host.flushPending()
-          throw e
-        })
+      return { request: this.host.request('thread/compact/start', { threadId: this.host.threadId() }), blocks: 'compact' }
     }
     /*
      * /review is the same kind of thing (the review/start RPC). Measured: with no argument it
@@ -57,17 +48,11 @@ export class CodexSlashCommands {
      */
     if (text.trim() === '/review' || text.trim().startsWith('/review ')) {
       const instructions = text.trim().slice('/review'.length).trim()
-      this.host.setBlockingTurn(true)
-      return this.host
-        .request('review/start', {
-          threadId: this.host.threadId(),
-          target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
-        })
-        .catch((e: unknown) => {
-          this.host.setBlockingTurn(false)
-          this.host.flushPending()
-          throw e
-        })
+      const request = this.host.request('review/start', {
+        threadId: this.host.threadId(),
+        target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
+      })
+      return { request, blocks: 'review' }
     }
     /*
      * /goal is also a function (2026-09-07 — the same #58 family as /compact and /review).
@@ -83,7 +68,7 @@ export class CodexSlashCommands {
       // Its own message, not a continuation of the model's open reply (`adapterNotice`)
       const say = (line: string) => this.host.emit(adapterNotice(this.host.sessionId, line))
       if (!arg) {
-        return this.host
+        const request = this.host
           .request<{ goal: { objective?: string; status?: string } | null }>('thread/goal/get', {
             threadId: this.host.threadId(),
           })
@@ -92,11 +77,10 @@ export class CodexSlashCommands {
               r.goal ? `Goal (${r.goal.status ?? 'active'}): ${r.goal.objective ?? ''}` : 'No goal set.',
             ),
           )
+        return { request }
       }
       if (arg === 'clear') {
-        return this.host
-          .request('thread/goal/clear', { threadId: this.host.threadId() })
-          .then(() => say('Goal cleared.'))
+        return { request: this.host.request('thread/goal/clear', { threadId: this.host.threadId() }).then(() => say('Goal cleared.')) }
       }
       /*
        * **State the status the response actually gave, verbatim** (dogfooding 2026-09-08:
@@ -115,7 +99,7 @@ export class CodexSlashCommands {
         })
       const statusOf = (r: { goal?: { status?: string } }) =>
         typeof r?.goal?.status === 'string' ? r.goal.status : 'active'
-      return setGoal().then(async (first) => {
+      const request = setGoal().then(async (first) => {
         /*
          * **Setting a new goal on top of a finished one leaves it finished** (measured 2026-09-08).
          *
@@ -135,6 +119,7 @@ export class CodexSlashCommands {
         }
         say(status === 'active' ? `Goal set: ${arg}` : `Goal set (${status}): ${arg}`)
       })
+      return { request }
     }
     return null
   }

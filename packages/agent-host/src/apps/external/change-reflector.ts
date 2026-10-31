@@ -33,6 +33,8 @@ export class ChangeReflector {
   /** Timers for reflecting changes (C-4) — per app name (holdKey). Carried over even when the manifest changes and a new entry is created */
   private turnEndTimers = new Map<string, NodeJS.Timeout>()
   private quietTimers = new Map<string, NodeJS.Timeout>()
+  /** Apps whose started entry a scan replaced (new manifest) while their turn-end timer was pending — the timer finds only a never-started entry and must still start it */
+  private replacedBeforeTurnEnd = new Set<string>()
   /** A reflect in progress — an overlapping call waits on the same one */
   private reloading = new Map<string, Promise<boolean>>()
 
@@ -42,6 +44,18 @@ export class ChangeReflector {
     for (const t of [...this.turnEndTimers.values(), ...this.quietTimers.values()]) clearTimeout(t)
     this.turnEndTimers.clear()
     this.quietTimers.clear()
+    this.replacedBeforeTurnEnd.clear()
+  }
+
+  /**
+   * A scan replaced `prev`, an entry that had started, with a new entry for a changed manifest. Usually that
+   * scan is turn end's own (`rescanNow`). But a watcher's scan arriving after the builder went idle and before the
+   * turn-end timer runs does it first, and the timer then finds a new entry that has never started: without this
+   * note it would take it for an app nobody ever used and leave it stopped.
+   */
+  manifestReplaced(ref: AppRef, prev: AppEntry): void {
+    const key = this.host.holdKey(ref)
+    if (prev.life.stamp !== null && this.turnEndTimers.has(key)) this.replacedBeforeTurnEnd.add(key)
   }
 
   /**
@@ -63,6 +77,7 @@ export class ChangeReflector {
     clearTimeout(this.turnEndTimers.get(key))
     const t = setTimeout(() => {
       this.turnEndTimers.delete(key)
+      const replacedEarlier = this.replacedBeforeTurnEnd.delete(key)
       /*
        * A manifest change deferred while mid-turn is read right now (`rescan`'s `now`). Even if
        * watching missed that change, it is read here. If a new entry was created, the old process
@@ -75,7 +90,11 @@ export class ChangeReflector {
       this.host.rescanNow(ref)
       const after = this.host.find(ref)
       if (before && after && after !== before) {
-        if (before.life.stamp !== null) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
+        if (before.life.stamp !== null || replacedEarlier) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
+        return
+      }
+      if (replacedEarlier && after && after.life.stamp === null) {
+        void this.startNewManifest(after, "the builder's turn ended and the manifest had changed")
         return
       }
       void this.reloadIfChanged(ref, { startIfStopped: true, why: "the builder's turn ended and the app folder changed" })

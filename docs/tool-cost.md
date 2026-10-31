@@ -25,10 +25,7 @@ pnpm measure:tools --compare before.json after.json
 | `--prompts` | `scripts/measure-tools/prompts.json` | The fixed prompt set |
 | `--out` | a file in the system temp folder | Where the JSON goes (meta, summary, and the raw records) |
 | `--keep` | off | Keep the scratch folder (projects, data folder, `host.log`) |
-| `--rare` | `commands` | How the host exposes the orchestrator's rare commands (`CC_RARE_COMMANDS`: `commands`, the host's default since 2026-10-12, `resident`, `deferred`; §9). Runs before that date ran `resident` by default |
 | `--kinds` | all five | The session kinds the resident phase starts |
-| `--preamble` | `on` | `on` or `off`: the orchestrator's role starts with the preamble (`CC_ORCHESTRATOR_PREAMBLE`; §9 round 2, §11). Before #564 a flag, off unless given |
-| `--reader-instructions` | `on` | `on` or `off`: ordinary sessions' tool instructions (`CC_READER_INSTRUCTIONS`; §11) |
 | `--only` | every prompt | Run only these prompt ids of the set |
 
 A prompt file may set `preset` (the permission preset of every selection session) and, per orchestrator
@@ -367,7 +364,7 @@ changes.
 
 The orchestrator carries about 3,200 tokens of its own in every request, and three tools it rarely calls
 (`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
-should discover such commands like a CLI rather than carry them. A prototype behind `CC_RARE_COMMANDS`
+should discover such commands like a CLI rather than carry them. A prototype behind a switch (since removed)
 (agent-host.md §1.1, security-boundaries.md; C became the default, see the decision at the end of this section)
 gives three arms on the same prompts:
 
@@ -381,7 +378,7 @@ gives three arms on the same prompts:
 
 Claude Code 2.1.289 on haiku 4.5 (3 repetitions), codex-cli 0.160.0 on gpt-6.1-sol (2 repetitions), macOS, base
 commit 81d17084 with this change. `pnpm measure:tools --live --rare <arm> --phases resident,selection --kinds
-none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json`. The nine prompts name no
+none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json` (`--rare` is a flag since removed). The nine prompts name no
 tool: four need a rare command (an app for a project, an app of the person's own, a weekly procedure to keep, a
 browser), one needs `propose_worktree_session`, four need a core one (`list_sessions`/`read_session`,
 `send_to_session`, `recall`, `create_session`). Every repetition runs in a new orchestrator and what the run made
@@ -491,7 +488,7 @@ in the record, so a taken id is the likely cause, not a confirmed one.
 The owner asked for the same comparison on a stronger model, in Korean, and with a preamble at the head of the
 orchestrator's role, along the owner's words: "You are an agent running inside Centralu. Before doing something
 yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
-(`CC_ORCHESTRATOR_PREAMBLE=1`, `--preamble`; where the seat has no commands the last words are "MCP tools can do."
+(where the seat has no commands the last words are "MCP tools can do."
 without the name). It goes in the orchestrator's role only: Centralu offers its tools to the person's own sessions
 and does not direct them (product-spec.md §1.2, a principle withdrawn later the same day, §11), so no ordinary session
 gets it (`orchestratorRole`, tested in `manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
@@ -581,8 +578,8 @@ orchestrator was at 11,862 of its 12,000 characters resident, and is at 9,317 in
 header over its instructions).
 `RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command that wants to be resident again is a
 decision rather than headroom. The haiku numbers above stand: a seat on haiku reaches a rare command less often
-through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and `pnpm measure:tools --rare`
-defaults to the host's default (`commands`), so a run made before this date with no `--rare` measured `resident`.
+through the tier. The `resident` and `deferred` arms and the `--rare`, `--preamble` and `--reader-instructions` flags were removed
+under #1143; a run made before this date with no `--rare` measured `resident`.
 
 **`handoff_session` (#694)** joined the rare commands: its definition rides in no request, only its line in
 `centralu_commands`. What it adds to every orchestrator request is one instruction line naming it (107 characters and
@@ -694,7 +691,7 @@ sessions, which had Centralu's tools and no instructions (#320), now get one sen
 Claude Code 2.1.289 on haiku 4.5 and `claude-sonnet-5-5` (3 repetitions), codex-cli 0.160.0 on its default
 gpt-6.1-sol (2 repetitions), macOS, base commit 96267a44 (the commands tier default, #512) with this change.
 `pnpm measure:tools --live --phases resident,selection --kinds none,reader,orchestrator --prompts
-packages/agent-host/scripts/measure-tools/prompts-564.json --reader-instructions on|off --preamble on|off`, and the
+packages/agent-host/scripts/measure-tools/prompts-564.json` (with flags since removed), and the
 Korean twin `prompts-564-ko.json`. Every selection session is an ordinary one under `safe` (the agent's own tools and
 skills raise a card the measurement declines; Centralu's run, and `ask_project`'s and `attach_app`'s consent cards are
 declined too), auto memory off. The prompts name no tool and not Centralu: four where a Centralu tool plainly answers

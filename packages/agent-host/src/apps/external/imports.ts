@@ -2,6 +2,7 @@ import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFi
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
+import { errnoCode } from '../../os/errors.js'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, canonicalPath, isInside } from '../../dev-services/path-guard.js'
 import { isThisMachineHost } from '../../this-machine.js'
@@ -243,7 +244,7 @@ function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFil
     root,
     {
       unreadable: (rel, e) => {
-        throw new ImportRefused(`Could not read ${rel || root}: ${(e as Error).message}`)
+        throw new ImportRefused(`Could not read ${rel || root}: ${errnoCode(e) ?? 'unknown error'}`)
       },
       skipped: (r, isDir) => t.skip(isDir ? `${r}/` : r, 'hidden'),
       link: (r) => {

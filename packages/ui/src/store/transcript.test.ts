@@ -138,11 +138,11 @@ describe('appendChat — one copy per streamed delta (#364)', () => {
 })
 
 describe('messagesToChat — restoration', () => {
-  const call = (seq: number) => row(seq, 'tool_call', { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test' } })
-  const result = (seq: number, summary: string, ok = true) => row(seq, 'tool_result', { type: 'tool_result', callId: 'c1', ok, summary })
+  const call = (seq: number) => row(seq, 'tool_call', { type: 'tool_call', callId: `c${seq}`, summary: { tool: 'Bash', title: 'pnpm test' } })
+  const result = (seq: number, summary: string, ok = true, callId = 'c1') => row(seq, 'tool_result', { type: 'tool_result', callId, ok, summary })
 
   it('with several calls, results pair in the order they were emitted — never swapped', () => {
-    const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false)])
+    const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false, 'c2')])
     expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([
       ['first', true],
       ['second', false],

@@ -27,7 +27,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
-const RELEASE = '0.1.0-beta.20'
+const RELEASE = '0.1.0-beta.60'
 
 /**
  * Two real hosts in one process (#82): each with its own store, session manager, RPC handler and
@@ -450,12 +450,12 @@ describe('a hub linked to another host (#82)', () => {
   })
 
   it('connects to a remote on another app version when the protocol matches, naming the older side so an update is offered; another protocol is held (#689)', async () => {
-    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.1' })
-    let line = lineFor(remote.port, { version: '0.1.0-beta.1' })
+    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.50' })
+    let line = lineFor(remote.port, { version: '0.1.0-beta.50' })
     const hub = await hubHost(() => line)
     await eventually(() => status(hub) === 'connected')
     const info = hub.links.list()[0]!
-    expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.1' } })
+    expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.50' } })
     const u = await ui(hub.port)
     await expect(u.call('sessions.list')).resolves.toEqual([])
 
@@ -1719,7 +1719,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       return { state, deps: { autoUpdate: () => state.on, followRetryMs: 150 } satisfies Partial<LinkDeps>, old: OLDER }
     }
     /** An older release of the hub's own channel: versions of two channels are never ranked, so none is older */
-    const OLDER = RELEASE.includes('-') ? RELEASE.replace(/\d+$/, '0') : '0.0.1'
+    const OLDER = '0.1.0-beta.50'
 
     it('starts an update by itself once it finds the machine older, stops the turns and terminals there at once, and has the next host continue the turns', async () => {
       const a = auto()
@@ -1750,6 +1750,14 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       await new Promise((r) => setTimeout(r, 300))
       expect(ran()).toEqual([])
       expect(hub.links.followsHub('m1')).toBe(false)
+    })
+
+    it('updates by itself a machine below the minimum supported version, whose link is held until then (#1143)', async () => {
+      const a = auto()
+      const { hub, ran } = await waiting({ deps: a.deps, old: '0.1.0-beta.44' })
+      await eventually(() => ran().includes('prune'))
+      expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+      await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE && status(hub) === 'connected')
     })
 
     it('starts when automatic updates go on, for a machine already connected', async () => {
@@ -3331,7 +3339,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
    */
   it("continues a child's turn that the hub's own update cut, once, and its parent hears it was cut and continued, then one report", async () => {
     const NODE = '24.21.0'
-    const OLDER = RELEASE.includes('-') ? RELEASE.replace(/\d+$/, '0') : '0.0.1'
+    const OLDER = '0.1.0-beta.50'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const remoteStore = new Store()

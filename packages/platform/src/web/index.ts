@@ -67,11 +67,6 @@ export type WebPlatformOptions = {
  */
 const on = (machine?: MachineRef) => (machine ? { machine } : {})
 
-/** A grid list from either shape `grid.get` / `grid.set` answer in: panels, or a pre-#288 host's bare session ids */
-function asPanels(list: readonly (GridPanel | string)[]): GridPanel[] {
-  return list.map((x) => (typeof x === 'string' ? { kind: 'session', sessionId: x } : x))
-}
-
 class WebAgentPort implements AgentPort {
   constructor(private rpc: RpcClient) {}
   createSession(params: CreateSessionParams) {
@@ -114,18 +109,13 @@ class WebAgentPort implements AgentPort {
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
   }
-  /*
-   * The grid in panels (#288). A host from before them ignores `tagged` and answers bare session ids, and saves the
-   * `sessionIds` sent next to `panels` (it strips the field it does not know) — both read here as session panels, so a
-   * UI and a host one build apart keep working (protocol.md §3).
-   */
-  async grid() {
-    return asPanels(await this.rpc.call('grid.get', { tagged: true }))
+  // The grid in panels (#288); `tagged` for a host up to 0.1.0-beta.45, which answers bare session ids without it
+  grid() {
+    return this.rpc.call('grid.get', { tagged: true })
   }
 
-  async setGridView(panels: GridPanel[]) {
-    const sessionIds = panels.flatMap((p) => (p.kind === 'session' ? [p.sessionId] : []))
-    return asPanels(await this.rpc.call('grid.set', { panels, sessionIds }))
+  setGridView(panels: GridPanel[]) {
+    return this.rpc.call('grid.set', { panels })
   }
 
   models(tool: ToolName, machine?: MachineRef) {
@@ -216,16 +206,8 @@ class WebAgentPort implements AgentPort {
   async markRead(sessionId: string, seq: number) {
     await this.rpc.call('sessions.markRead', { sessionId, seq })
   }
-  async clearError(sessionId: string, seq: number) {
-    try {
-      const r = await this.rpc.call('sessions.clearError', { sessionId, seq })
-      return { cleared: r.cleared, newer: r.newer, olderHost: false }
-    } catch (e) {
-      // A host from before Done cleared an error can still read the answer
-      if (!(e instanceof Error && e.message.startsWith('Unknown method: sessions.clearError'))) throw e
-      await this.markRead(sessionId, seq)
-      return { cleared: false, newer: false, olderHost: true }
-    }
+  clearError(sessionId: string, seq: number) {
+    return this.rpc.call('sessions.clearError', { sessionId, seq })
   }
   listSessions() {
     return this.rpc.call('sessions.list', {})
@@ -481,12 +463,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         // Leased to this window's connection (#392): a reload or a closed window lets the host close it
         const params = { appId, projectId, ...(machine ? { machine } : {}), lease: true }
         const v = recover && openKey
-          ? await rpc.call('apps.recoverView', { ...params, openKey }).catch((e: unknown) => {
-              if (e instanceof Error && e.message.startsWith('Unknown method: apps.recoverView')) {
-                throw new Error('The original app open could not be recovered on this older host — the home tool may or may not have run; check before opening again', { cause: e })
-              }
-              throw e
-            })
+          ? await rpc.call('apps.recoverView', { ...params, openKey })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
         // Checked as `callTool`'s and `reopenInlineView`'s results are: a result the screen cannot read is a failed one, not a crash there
         return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read' }) }
@@ -766,6 +743,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       answerApply: (a) => rpc.call('updates.answerApply', a),
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
+    diagnostics: { reportCrash: (r) => rpc.call('ui.reportCrash', r).then(() => undefined) },
     requests: {
       list: () => rpc.call('requests.list', {}),
       answer: (requestId, decision) => rpc.call('requests.answer', { requestId, decision }),

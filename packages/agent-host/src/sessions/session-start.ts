@@ -32,7 +32,7 @@ import type { SessionTools } from './session-tools.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueries } from './tool-queries.js'
 import { codeIntelligenceKey, codeIntelligenceOff } from './tool-profiles.js'
-import { withTimeout } from './with-timeout.js'
+import { withTimeout } from '../timing.js'
 import { worktreeSetupNotice, type WorktreeSessions } from './worktree-sessions.js'
 
 /**

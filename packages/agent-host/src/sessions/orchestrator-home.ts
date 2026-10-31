@@ -4,31 +4,23 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { dataRoot } from '../data-dir.js'
 import { commandsFor } from './orchestrator-tools.js'
 
-let preamble = true
-
 /**
  * A preamble at the head of the orchestrator's role: the product rule (product-spec.md §1.2, #564), unless the person
  * says otherwise, use what Centralu offers before doing a thing another way. Measured in #512's round 2 (33 to 55
- * tokens a request, no regression) and on by default since #564; `CC_ORCHESTRATOR_PREAMBLE=0` turns it off for
- * measurement. Ordinary sessions get the same rule as their tools' instructions (READER_INSTRUCTIONS), not here:
- * their prompt carries no role.
+ * tokens a request, no regression). Ordinary sessions get the same rule as their tools' instructions
+ * (READER_INSTRUCTIONS), not here: their prompt carries no role.
+ *
+ * It names centralu_commands only where the seat has it.
  */
-export function setOrchestratorPreamble(on: boolean): void {
-  preamble = on
-}
-
-/** The preamble as this host's tier words it: it names centralu_commands only where the seat has it */
 export function orchestratorPreamble(): string {
-  if (!preamble) return ''
   return commandsFor('orchestrator').length
     ? "You are an agent running inside Centralu. Unless the person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or using another tool."
     : "You are an agent running inside Centralu. Unless the person says otherwise, use Centralu's MCP tools before doing something yourself or using another tool."
 }
 
-/** The orchestrator's role as its session is given it: the preamble, when on, then the role */
+/** The orchestrator's role as its session is given it: the preamble, then the role */
 export function orchestratorRole(): string {
-  const head = orchestratorPreamble()
-  return head ? `${head}\n\n${ORCHESTRATOR_ROLE}` : ORCHESTRATOR_ROLE
+  return `${orchestratorPreamble()}\n\n${ORCHESTRATOR_ROLE}`
 }
 
 /**

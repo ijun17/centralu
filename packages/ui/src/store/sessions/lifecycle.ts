@@ -341,13 +341,11 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
    * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1512, #1589, #1595). Null: it is done
    * (archived, the toast offers Undo; or failed, the toast says why). Lines: not moved, and these are what the archive would lose
    * and Undo does not bring back; the dialog shows them and its next Archive is `deleteSession`. No lines: not moved because the
-   * session is not at rest, or the host predates the check; the dialog then moves it with `deleteSession` if it is still open,
-   * as it did before #1521 (the person's answer is enough).
+   * session is not at rest; the dialog then moves it with `deleteSession` if it is still open (the person's answer is enough).
    *
    * With the worktree kept the host's own check decides and moves (`agents.archiveIfAtRest`, read then move). With the worktree
    * deleted too that check cannot be used (it never removes one), so only the losses are read (`agents.archiveLosses`); none means
-   * no lines, and the dialog moves the session with `deleteSession` if it is still open. A host without that method lists nothing,
-   * as after #1590.
+   * no lines, and the dialog moves the session with `deleteSession` if it is still open.
    */
   async archiveSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
@@ -355,13 +353,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     if (!platform || !s) return null
     const place = windowPlaceOf(get(), sessionId)
     try {
-      if (deleteWorktree) {
-        const lost = await platform.agents.archiveLosses(sessionId).catch((e) => {
-          if (/unknown method/i.test(errorMessage(e))) return []
-          throw e
-        })
-        return lost
-      }
+      if (deleteWorktree) return await platform.agents.archiveLosses(sessionId)
       const r = await platform.agents.archiveIfAtRest(sessionId, deleteExternal)
       if (r.archived) {
         announceArchived(set, get, sessionId, s.name, place)
@@ -369,10 +361,8 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       }
       if (r.asks.length > 0) return r.asks
     } catch (e) {
-      if (!/unknown method/i.test(errorMessage(e))) {
-        set({ toast: `Could not archive: ${errorMessage(e)}` })
-        return null
-      }
+      set({ toast: `Could not archive: ${errorMessage(e)}` })
+      return null
     }
     return []
   },
@@ -452,7 +442,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const s = get().sessions[sessionId]
     const platform = get().platform
     if (s?.state !== 'error' || !platform) return get().markRead(sessionId)
-    let result: { cleared: boolean; newer: boolean; olderHost: boolean }
+    let result: { cleared: boolean; newer: boolean }
     try {
       result = await platform.agents.clearError(sessionId, s.lastSeq)
     } catch (e) {
@@ -466,8 +456,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
      */
     set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
     // Done that cleared nothing says why, instead of seeming to do nothing
-    if (result.olderHost) set({ toast: 'Marked as read. This host is too old to clear an error: it stays until the host is updated' })
-    else if (result.newer) set({ toast: 'A newer error arrived. It stays marked' })
+    if (result.newer) set({ toast: 'A newer error arrived. It stays marked' })
   },
 
   /*

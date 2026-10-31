@@ -71,7 +71,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
     try {
       await platform.git.cancel(projectId)
     } catch (e) {
-      // A host from before #1007 has no such call: the write goes on, and Cancel can be pressed again
+      // The write goes on, and Cancel can be pressed again
       setCancelling(false)
       setToast((e as Error).message)
     }

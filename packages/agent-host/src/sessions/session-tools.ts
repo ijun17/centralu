@@ -90,12 +90,7 @@ export class SessionTools {
   private orchestratorToolsFor(sessionId: string): OrchestratorTools {
     return {
       ...this.host.orchestratorToolsFor(sessionId),
-      findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
-      attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
-      detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
-      // The mailbox (#1347): it owns the threads `send_to_session` opens (slice 3); it runs the tool as a command
-      mail: (args) => this.host.mailTool(sessionId, args),
-      compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
+      ...this.appAndMailTools(sessionId),
       // A session may have asked for the turn the orchestrator is in (#1447): its steps that change something ask the person first
       whenAsked: (call, signal, run) => this.host.whenAsked(sessionId, call, signal, run, (text) => ({ text, isError: true })),
     }
@@ -144,11 +139,19 @@ export class SessionTools {
       createProject: async () => ({ ok: false as const, error }),
       checkApp: async () => ({ ok: false, text: error }),
       createApp: refuse,
-      // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
+      ...this.appAndMailTools(sessionId),
+    }
+  }
+
+  /**
+   * What both seats share: another project's apps on demand (#371 part A, #1205), the one thing the reader seat may change and only
+   * for itself; the mailbox (#1347), whose tool runs as a command; and `compact_self` (#1451)
+   */
+  private appAndMailTools(sessionId: string): Pick<OrchestratorTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
+    return {
       findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
-      // The mailbox (#1347): the ordinary session's alone, whose seat the tool is defined for
       mail: (args) => this.host.mailTool(sessionId, args),
       compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
     }
