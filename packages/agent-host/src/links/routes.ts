@@ -109,6 +109,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.send': session(),
   // Who the hub's own waits owe a report to: a linked session's is asked of the hub, not of its machine (#1377)
   'agents.reportOwed': HUB,
+  // The host the window talks to logs it: a crash in this window is that host's to know, not a linked machine's
+  'ui.reportCrash': HUB,
   'agents.respondApproval': session(),
   'agents.answerQuestion': session(),
   'agents.interrupt': session(),

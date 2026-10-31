@@ -23,6 +23,7 @@ export const hostResults = {
   'updates.apply': UpdateStatus,
   'updates.answerApply': z.object({ ticket: z.string().nullable() }),
   'updates.reportApply': z.object({}),
+  'ui.reportCrash': z.object({}),
   'requests.list': z.array(HostRequest),
   'requests.answer': z.object({ ok: z.boolean() }),
   'machines.list': z.array(MachineInfo),
