@@ -310,6 +310,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'updates.answerApply': 'window',
   /** The window's report on an apply it was handed (`update_apply_go` carries the ticket to every client) */
   'updates.reportApply': 'window',
+  /** A window's crash report for the host log: a line written, nothing changed */
+  'ui.reportCrash': 'window',
 
   // Linked machines
   'machines.list': 'everyday',
