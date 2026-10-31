@@ -156,7 +156,7 @@ describe('a hook in front of every tool call of a session’s request', () => {
     const withApps = w.hookWithApps(['app-board'])
     expect(await w.hook('mcp__centralu__read_session')).toEqual({})
     // (allowed here, so the CLI puts no card of its own before the one the call raises, naming the session)
-    expect(await withApps('mcp__app-board__merge_when_green')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
+    expect(await withApps('mcp__app-board__queue_merge')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
     expect(await w.hook('AskUserQuestion', { questions: [] })).toEqual({})
     expect(w.turn.asked).toEqual([])
     // ...but the gate is told, as the person’s answer is read in a request’s turn

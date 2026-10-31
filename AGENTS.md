@@ -75,7 +75,7 @@ real-environment cases) and record in Verified who reviewed and what they found
 commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull request template
 and its **Not exercised** field, and updating documents in the same pull request. When your
 session has the project board app's tools, they carry these rules as code: `open_pr`, `comment`,
-`file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `merge_when_green`, `queue_merge` (many
+`file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `queue_merge` (many
 PRs or a stack), `mark_ready` (without merge rights), `release`; use them instead of `gh` by hand
 (`help` says which for what). A change whose tier is auto (docs, fixture data, UI assets) needs no
 PR of yours: push its branch and hand it over with `integrate`, which lands it.

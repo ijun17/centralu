@@ -616,7 +616,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     if (!renew()) return { yielded: true }
     await markDraft(repo, item.pr)
     Object.assign(pr, { isDraft: true, mergeStateStatus: 'DRAFT' })
-    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was ready for review; turned back into a draft: a record handed over with integrate stays one until the queue squashes it, so nothing else (merge_when_green, an older board, a merge by hand) can land it unjudged.` })
+    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was ready for review; turned back into a draft: a record handed over with integrate stays one until the queue squashes it, so nothing else (an older board, a merge by hand) can land it unjudged.` })
   }
   // A draft that the session queuing it opened itself (open_pr noted which session, opened.mjs) is ready as far as that
   // session is concerned: it queued it to land. Marked ready here, as `mark_ready` would be, instead of asking it to.

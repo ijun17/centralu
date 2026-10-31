@@ -361,22 +361,6 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   return { do: 'wait', patch: { uncleanSince: { pr: step.pr, at: since } } }
 }
 
-/**
- * What `merge_when_green` says when the queue has a batch running whose tree a merge to the default branch outside the
- * queue would invalidate (#1548): the batch was built on the default branch as it is, and lands each member only while
- * the default branch still has the tree it had; so the batch stops before it lands, and its members are batched again
- * (MOVED_CAP times at most), the run it spent lost. Null when there is none: another repository, a pull request not
- * into the default branch, or a batch with nothing left to land. `pr` is the pull request being merged.
- */
-export function mergeWarning(q, { repo, pr, baseRefName, defaultBranch, ref }) {
-  if (baseRefName !== defaultBranch) return null
-  const b = (q.batches ?? []).find((x) => BATCH_ACTIVE.has(x.state) && String(x.repo).toLowerCase() === String(repo).toLowerCase() && (x.landed ?? 0) < x.members.length)
-  if (!b) return null
-  const prs = (b.steps?.length ? b.steps : b.members).map((s) => s.pr)
-  const own = prs.includes(pr) ? ` It is itself a member of that batch.` : ''
-  return `The merge queue has batch ${b.branch} (${refList(b, prs, ref)}) running on ${defaultBranch} as it is now.${own} Merging ${ref(repo, pr)} here moves ${defaultBranch} under it: the batch stops before it lands, its pull requests are batched again on the new ${defaultBranch} (at most ${MOVED_CAP} times each), and the CI run spent on it is lost. To avoid that, queue ${ref(repo, pr)} with queue_merge instead, or merge it when the batch has landed (merge_queue shows it).`
-}
-
 /** One line for a batch in answers and on the screen. */
 export function batchLine(b, ref) {
   const prs = (b.steps.length ? b.steps : b.members).map((s) => s.pr)

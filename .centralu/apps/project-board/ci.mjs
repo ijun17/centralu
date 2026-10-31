@@ -1,4 +1,4 @@
-// The decisions behind ci_status and merge_when_green, as pure functions: no gh, no IO, so the tests
+// The decisions behind ci_status and the queue, as pure functions: no gh, no IO, so the tests
 // can run every case (tooling/project-board-ci.test.ts). github.mjs reads; ci-tools.mjs asks these.
 //
 // Why this exists (#386): on 2026-10-05 a merge script read "no checks reported yet" as "nothing
@@ -274,32 +274,6 @@ export const NO_PERMISSION = Object.freeze({
   reason:
     "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and merging is the maintainer's act (#386). Mark it ready for review instead (mark_ready); the maintainer merges.",
 })
-
-/**
- * The merge decision, in order: who is asking, what state the PR is in, what CI says, whether GitHub
- * can merge it. `action` is `merge`, `wait` (try again later) or
- * `refuse` (stop; `reason` says why).
- */
-export function decideMerge({ permissions, pr, checks, fullTier = null }) {
-  if (!canMerge(permissions)) return NO_PERMISSION
-  if (pr.state !== 'OPEN') return { action: 'refuse', kind: 'state', reason: `PR #${pr.number} is ${String(pr.state).toLowerCase()}, not open.` }
-  if (pr.isDraft) return { action: 'refuse', kind: 'draft', reason: `PR #${pr.number} is a draft. Mark it ready for review first.` }
-  if (checks.verdict === 'failing') return { action: 'refuse', kind: 'failing', reason: 'A required check failed.' }
-  // Two tiers: a quick run is green on what it reports, and waiting brings nothing more
-  if (ranTier(checks, fullTier) === 'quick') return { action: 'refuse', kind: 'quick-tier', reason: quickTierReason(`PR #${pr.number}`, pr.headRefName) }
-  if (checks.verdict === 'none') return { action: 'wait', kind: 'none', reason: 'No checks are reported for its head commit yet, and no checks is not green.' }
-  if (checks.verdict === 'pending') {
-    const waiting = checks.rows.filter((r) => r.state === 'pending' || r.state === 'missing')
-    const named = waiting.map((r) => `${r.name}${r.state === 'missing' ? ' (not reported yet)' : ''}`).join(', ')
-    return { action: 'wait', kind: 'pending', reason: `Required checks still to pass: ${named}.` }
-  }
-  if (checks.verdict !== 'green') return { action: 'refuse', kind: 'internal', reason: `Unknown CI verdict ${checks.verdict}.` }
-  // Green on a required set that does not name the full tier's check (branch protection): it must still have run
-  if (ranTier(checks, fullTier) !== 'full') return { action: 'wait', kind: 'pending', reason: `The full tier's check "${fullTier}" has not passed yet.` }
-  if (pr.mergeable === 'CONFLICTING') return { action: 'refuse', kind: 'conflict', reason: `PR #${pr.number} has conflicts with ${pr.baseRefName}. Rebase it first.` }
-  if (pr.mergeable !== 'MERGEABLE') return { action: 'wait', kind: 'mergeable', reason: 'GitHub has not worked out yet whether it can be merged.' }
-  return { action: 'merge', kind: 'green', reason: 'Every required check is reported and passed, and GitHub can merge it.' }
-}
 
 // --- The squash commit's message ------------------------------------------------------------------
 

@@ -39,14 +39,14 @@ function screenOf(v) {
   return names && judge && steps && inputs ? { judge, checks: names, steps, inputs } : false
 }
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
-// CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
+// CI (ci_status, the queue): which workflows hold the required checks, the issue that lists
 // known intermittent failures.
 export const CI = {
   workflows: config.ci?.workflows ?? ['.github/workflows/build.yml'],
   knownFailures: config.ci?.knownFailuresIssue ?? null,
   // Two tiers (2026-10-18): the name of the check that passes only on a full run (build.yml's `full
   // tier` job). Set, nothing lands on a run where it did not pass: the merge queue lands such a pull
-  // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
+  // request through a batch.
   // PROJECT_BOARD_CI_FULL_TIER: for the tests only, which run the queue without tiers too (empty: none)
   fullTier: fullTierOf(process.env.PROJECT_BOARD_CI_FULL_TIER ?? config.ci?.fullTier),
   // What a change lands after, with two tiers (#1259, the owner's decision of 2026-10-19): `quick`, its own quick

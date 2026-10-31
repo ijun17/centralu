@@ -173,8 +173,7 @@ the e2e shards of both browsers too when the batch holds a change to the screen 
 decision of 2026-10-26: `screenFiles` in `.github/scripts/ci-changes.mjs`); the full tier then runs on
 main, after it landed. So, unless your change reaches the screen, nothing has run the UI scenarios, the
 bundles or the keeper on it before it is on main: run `pnpm verify` locally anyway, all of it, before
-you push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
-run was quick.) Runs on main are never cancelled by a newer push, and the queue holds landing while
+you push, and `pnpm e2e` for anything the UI shows. Runs on main are never cancelled by a newer push, and the queue holds landing while
 too many of them are unfinished. When main's full run fails, the board's main guard finds the commit
 that broke it among those since main was last fully green (after rerunning once a job that failed in the runner's own setup, a browser install say, and
 only if it fails again inside the test steps; an infrastructure failure is reported and never reverted), leaving out what it already reverted and
