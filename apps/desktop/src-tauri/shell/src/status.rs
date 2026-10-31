@@ -13,13 +13,12 @@
 //!
 //! Written to a temporary file and renamed, so a reader sees the old status or the new one.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
+
+use centralu_keeper_core::keeper::source::write_private;
 
 use crate::run::Started;
 use crate::{keys, Refusal, SHELL_VERSION};
@@ -60,28 +59,15 @@ pub fn body(nonce: Option<&str>, outcome: &Result<Started, Refusal>) -> Value {
 /// Best effort: a status that cannot be written leaves the window to its timeout, and the line in
 /// keeper.log still says what happened.
 pub fn write(data: &Path, nonce: Option<&str>, outcome: &Result<Started, Refusal>) {
-    let mut bytes = serde_json::to_vec_pretty(&body(nonce, outcome)).unwrap_or_default();
-    bytes.push(b'\n');
-    let target = path(data);
-    let tmp = data.join(format!(".{STATUS_FILE}.{}", std::process::id()));
-    let written = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
-        .and_then(|()| fs::rename(&tmp, &target));
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
+    let bytes = serde_json::to_vec_pretty(&body(nonce, outcome)).unwrap_or_default();
+    let _ = write_private(&path(data), &bytes);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Reason;
+    use std::fs;
 
     #[test]
     fn a_refusal_carries_its_reason_code_and_sentence() {
@@ -112,9 +98,7 @@ mod tests {
     #[test]
     fn the_file_is_replaced_whole_and_private() {
         use std::os::unix::fs::PermissionsExt;
-        let d = std::env::temp_dir().join(format!("cc-shell-status-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
+        let d = centralu_keeper_core::keeper::test_support::temp_path("shell-status");
         write(&d, Some("a"), &Err(Refusal::new(Reason::Content, "x")));
         write(&d, Some("b"), &Err(Refusal::new(Reason::Copy, "y")));
         let v: Value = serde_json::from_slice(&fs::read(path(&d)).unwrap()).unwrap();

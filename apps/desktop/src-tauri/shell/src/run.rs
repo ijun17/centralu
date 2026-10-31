@@ -1,9 +1,7 @@
 //! One start: verify, copy (or verify the copy already there), refuse a downgrade, start the keeper
 //! from the copy, wait for it to answer.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -77,9 +75,7 @@ impl Started {
 
 /// Appends one line to `<data>/keeper.log`, where the keeper and the host write too.
 pub fn log(data: &Path, msg: &str) {
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(keeper::log_path(data)) {
-        let _ = writeln!(f, "[shell] {msg}");
-    }
+    keeper::log_line(data, "shell", msg);
 }
 
 pub fn run(a: &Args, env: &Env) -> Result<Started, Refusal> {

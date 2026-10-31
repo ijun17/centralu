@@ -42,3 +42,4 @@ base64 = "0.22"
 # on, and tooling/keeper-executable.test.ts checks both: the keeper people run trusts
 # packaging/shell/keys.json and nothing else, as the shell does.
 test-key = []
+test-support = []

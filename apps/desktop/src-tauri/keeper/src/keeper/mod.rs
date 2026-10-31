@@ -53,6 +53,8 @@ pub mod window_peer;
 pub mod server;
 pub mod source;
 pub mod swap;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -166,6 +168,15 @@ pub fn socket_path(data: &Path) -> PathBuf {
 /// and the window add to them.
 pub fn log_path(data: &Path) -> PathBuf {
     data.join("keeper.log")
+}
+
+/// Appends `[tag] msg` to `keeper.log`, for whoever is not the keeper's own stderr (the shell, the window).
+pub fn log_line(data: &Path, tag: &str, msg: &str) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(log_path(data)) {
+        let _ = writeln!(f, "[{tag}] {msg}");
+    }
 }
 
 /// For the window, which links this crate and not the verifier: the one way to write hex and a

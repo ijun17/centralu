@@ -18,9 +18,6 @@
 pub mod install;
 pub mod start;
 
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -176,9 +173,7 @@ pub fn start_keeper(
 /// A `[window]` line in `<data>/keeper.log`, where the shell, the keeper and the host write too.
 pub fn log(data: &Path, msg: &str) {
     eprintln!("[window] {msg}");
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(crate::keeper::log_path(data)) {
-        let _ = writeln!(f, "[window] {msg}");
-    }
+    crate::keeper::log_line(data, "window", msg);
 }
 
 /// The world as it is: the keeper's socket, `/usr/bin/open`, the status file.

@@ -5,16 +5,7 @@ use serde_json::json;
 use std::cell::RefCell;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static N: AtomicUsize = AtomicUsize::new(0);
-
-fn temp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("cc-shell-start-{name}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
+use centralu_keeper_core::keeper::test_support::temp_path as temp;
 
 /// The window's `Contents/Resources` carrying shell `version` (with `exe` as its executable).
 fn resources(version: u64, exe: &str, pinned: bool) -> PathBuf {
