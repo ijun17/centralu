@@ -3,22 +3,6 @@ import { Button } from '../components/Button.jsx'
 import { APP_VERSION } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
 
-/**
- * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
- * "it said there was an error and then went blank").
- *
- * When React has nowhere to catch an exception thrown during render, it unmounts the whole tree —
- * the screen goes blank white. In that state there is nothing the person can tell: not what
- * crashed, not whether there is a way back. This app is a window that stays open all day, so that
- * blank screen reads directly as "the app is dead".
- *
- * So this catches it and says exactly three things: what crashed (the message), where (the first
- * lines of the stack), and the way out (reload). It does not recover automatically — if the same
- * render crashes again, all that is left is a flicker, and what went wrong never becomes visible.
- *
- * The one reason this is a class component: hooks have no equivalent of this spot
- * (componentDidCatch).
- */
 /** The host cuts each field too; this keeps a long stack from making it refuse the whole report */
 const REPORT_FIELD_MAX = 20_000
 const cut = (s: string) => s.slice(0, REPORT_FIELD_MAX)
@@ -43,6 +27,22 @@ export function reportCrash(platform: Platform | null | undefined, thrown: unkno
   }
 }
 
+/**
+ * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
+ * "it said there was an error and then went blank").
+ *
+ * When React has nowhere to catch an exception thrown during render, it unmounts the whole tree —
+ * the screen goes blank white. In that state there is nothing the person can tell: not what
+ * crashed, not whether there is a way back. This app is a window that stays open all day, so that
+ * blank screen reads directly as "the app is dead".
+ *
+ * So this catches it and says exactly three things: what crashed (the message), where (the first
+ * lines of the stack), and the way out (reload). It does not recover automatically — if the same
+ * render crashes again, all that is left is a flicker, and what went wrong never becomes visible.
+ *
+ * The one reason this is a class component: hooks have no equivalent of this spot
+ * (componentDidCatch).
+ */
 export class ErrorBoundary extends Component<{ children: ReactNode; platform: Platform }, { error: Error | null }> {
   override state: { error: Error | null } = { error: null }
 
