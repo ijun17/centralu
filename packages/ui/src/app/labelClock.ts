@@ -85,16 +85,6 @@ export function nextResetTick(at: number, now: number): number | null {
   return Math.min(remaining % step || 1, remaining)
 }
 
-export function formatAgo(when: number, now: number): string {
-  const min = Math.floor((now - when) / MINUTE)
-  if (min < 1) return 'just now'
-  if (min < 60) return `${min}m ago`
-  const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour}h ago`
-  const day = Math.floor(hour / 24)
-  return day < 30 ? `${day}d ago` : `${Math.floor(day / 30)}mo ago`
-}
-
 /** Visible windows keep advancing even when another app has focus (for example, on a second monitor). */
 export function watchLabelVisibility(
   clock: LabelClock,

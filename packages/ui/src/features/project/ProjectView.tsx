@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, type DragEvent } from 'react'
-import { appPanelId, arrangePanels, columnsFor, isUnread, parsePanelId, rowsFor, sessionPanelId, withPanel, withOrder } from '@cc/core'
-import { externalAppKey, useStore } from '../../store/store.js'
+import { appKeyOf, appPanelId, arrangePanels, columnsFor, isUnread, parsePanelId, rowsFor, sessionPanelId, withOrder, withPanel } from '@cc/core'
+import { useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
 import { useProjectApps } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
@@ -88,7 +88,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     snapshotScroll()
     const p = parsePanelId(id)
     // An app's panel is its pinned view: taking it off the screen closes the view, teardown first
-    if (p?.kind === 'app') void dismissPinned(externalAppKey(projectId, p.id))
+    if (p?.kind === 'app') void dismissPinned(appKeyOf(projectId, p.id))
     arrange(projectId, withPanel(present, saved, id, false))
   }
   const startDrag = (id: string, e: DragEvent<HTMLElement>) => {
@@ -258,7 +258,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     <AppPanel
                       app={appsById.get(p.id)}
                       appId={p.id}
-                      viewKey={externalAppKey(projectId, p.id)}
+                      viewKey={appKeyOf(projectId, p.id)}
                       dragged={dragging === id}
                       onDragStart={(e) => startDrag(id, e)}
                       onOpen={() => openApp(projectId, p.id)}

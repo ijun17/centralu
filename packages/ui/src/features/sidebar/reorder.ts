@@ -15,7 +15,7 @@ export const SESSION_MIME = 'application/x-cc-session'
  */
 export const PANEL_MIME = 'application/x-cc-panel'
 /**
- * An app, dragged from its sidebar row or its grid panel; the data is its key (`externalAppKey`). Its own
+ * An app, dragged from its sidebar row or its grid panel; the data is its key (`appKeyOf`). Its own
  * type rather than the session's, so nothing that takes a session takes an app unless it says so —
  * the grid and the project screen do (#288, #203).
  */

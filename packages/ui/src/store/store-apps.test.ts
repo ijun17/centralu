@@ -7,10 +7,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { sessionGridPanel } from '@cc/core'
+import { appKeyOf, sessionGridPanel } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
-import { externalAppKey, gridAppViewKey, gridScreenAppKeys, registerPinnedFrame, useStore } from './store.js'
+import { gridAppViewKey, gridScreenAppKeys, registerPinnedFrame, useStore } from './store.js'
 import { appInfo, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
@@ -34,11 +34,11 @@ describe('an external app\'s change signal (M4 B-5)', () => {
     mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
     mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
     mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: null } as NormalizedEvent)
-    await vi.waitFor(() => expect(useStore.getState().externalAppChanges[externalAppKey(null, 'notes')]).toBe(1))
+    await vi.waitFor(() => expect(useStore.getState().externalAppChanges[appKeyOf(null, 'notes')]).toBe(1))
 
     expect(useStore.getState().externalAppChanges).toEqual({ 'p1/notes': 2, '_user/notes': 1 })
     // The `notes` app of two different projects are two different apps — their keys never collide
-    expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
+    expect(appKeyOf('p2', 'notes')).not.toBe(appKeyOf('p1', 'notes'))
   })
 
   it('a run signal (M4 D-6) only bumps the runs panel\'s counter — the counter the view listens to stays untouched', async () => {
@@ -54,7 +54,7 @@ describe('an external app\'s change signal (M4 B-5)', () => {
   it('keeps the view instance that caused the change beside the counter — only when it came from a view; null when there is no session, app or owner', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
-    const key = externalAppKey('p1', 'notes')
+    const key = appKeyOf('p1', 'notes')
     const say = (cause?: Record<string, unknown>) =>
       mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', ...(cause ? { cause } : {}) } as NormalizedEvent)
     const seen = () => [useStore.getState().externalAppChanges[key], useStore.getState().externalAppChangedBy[key]]
@@ -151,7 +151,7 @@ describe('apps on the grid (#288)', () => {
     useStore.getState().ensureGridAppView(pid, 'slider')
     useStore.getState().ensureGridAppView(pid, 'slider')
     useStore.getState().ensurePinnedView(pid, 'slider')
-    expect(keys()).toEqual([gridAppViewKey(pid, 'slider'), externalAppKey(pid, 'slider')])
+    expect(keys()).toEqual([gridAppViewKey(pid, 'slider'), appKeyOf(pid, 'slider')])
     for (const k of keys()) await useStore.getState().startPinnedView(k)
     expect(mock.openedViews).toEqual([
       { appId: 'slider', projectId: pid },
@@ -176,7 +176,7 @@ describe('apps on the grid (#288)', () => {
     })
 
     await useStore.getState().setGridPanels([sessionGridPanel('ga-s1')])
-    await vi.waitFor(() => expect(keys()).toEqual([externalAppKey(pid, 'slider')]))
+    await vi.waitFor(() => expect(keys()).toEqual([appKeyOf(pid, 'slider')]))
     off()
     expect(order).toEqual(['teardown, 0 closed'])
     expect(mock.closedViews).toEqual([gridView.instanceId])
@@ -439,9 +439,9 @@ describe('pinned views claimed back after a reconnect (#392)', () => {
     useStore.getState().ensurePinnedView('p1', 'kept')
     useStore.getState().ensurePinnedView('p1', 'lost')
     useStore.getState().ensurePinnedView('p1', 'never')
-    await useStore.getState().startPinnedView(externalAppKey('p1', 'kept'))
-    await useStore.getState().startPinnedView(externalAppKey('p1', 'lost'))
-    const of = (appId: string) => useStore.getState().pinnedViews.find((p) => p.key === externalAppKey('p1', appId))!
+    await useStore.getState().startPinnedView(appKeyOf('p1', 'kept'))
+    await useStore.getState().startPinnedView(appKeyOf('p1', 'lost'))
+    const of = (appId: string) => useStore.getState().pinnedViews.find((p) => p.key === appKeyOf('p1', appId))!
     const kept = of('kept').instanceId!
     const lost = of('lost').instanceId!
     // The window was away longer than the host waited: it closed the view it no longer saw claimed

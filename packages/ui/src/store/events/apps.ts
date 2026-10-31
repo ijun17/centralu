@@ -1,7 +1,7 @@
 import type { NormalizedEvent } from '@cc/protocol/client'
+import { appKeyOf } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
-import { externalAppKey } from '../appKeys.js'
-import { applyAppView, capInlineViews, codeStampOf } from '../apps.js'
+import { applyAppView, capInlineViews, codeStampOf, patchInlineView } from '../apps.js'
 
 /**
  * External apps' events: their state, runs, list and capability questions (app-wide, before the
@@ -16,7 +16,7 @@ export function appEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): bool
    * notification.
    */
   if (e.type === 'external_app_state_changed') {
-    const key = externalAppKey(e.projectId, e.appId)
+    const key = appKeyOf(e.projectId, e.appId)
     const by = e.cause?.kind === 'view' ? (e.cause.instanceId ?? null) : null
     set((s) => ({
       externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 },
@@ -27,7 +27,7 @@ export function appEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): bool
 
   // An external app's run history changed (M4 D-6) — only counted. That app's runs panel re-reads on this count's change. The view never hears this
   if (e.type === 'external_app_runs_changed') {
-    const key = externalAppKey(e.projectId, e.appId)
+    const key = appKeyOf(e.projectId, e.appId)
     set((s) => ({ externalAppRunChanges: { ...s.externalAppRunChanges, [key]: (s.externalAppRunChanges[key] ?? 0) + 1 } }))
     return true
   }
@@ -63,10 +63,7 @@ export function appViewEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
     if (e.phase === 'open') {
       // The code this view was opened with (C-4) — if the list's fingerprint differs from this, it is stale HTML (`followAppCode`)
       const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId, get().sessions[sessionId]?.machine)
-      set((s) => {
-        const cur = s.inlineViews[sessionId]?.[e.callId]
-        return cur?.state === 'live' ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [e.callId]: { ...cur, codeStamp } } } } : {}
-      })
+      patchInlineView(set, sessionId, e.callId, { codeStamp }, true)
       capInlineViews(get, sessionId, e.callId)
     }
     return true

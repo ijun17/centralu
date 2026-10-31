@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DAY, HOUR, LabelClock, MINUTE, formatAgo, nextAgeTick, nextWaitingTick, nextResetTick, watchLabelVisibility } from './labelClock.js'
+import { formatAgo } from '@cc/core'
+import { DAY, HOUR, LabelClock, MINUTE, nextAgeTick, nextWaitingTick, nextResetTick, watchLabelVisibility } from './labelClock.js'
 import { formatElapsed, nextElapsedTick } from '../features/session/elapsed.js'
 import { formatWaiting } from '../components/primitives.jsx'
 

@@ -1,7 +1,7 @@
 import { appKeyOf, appPanelId, arrangePanels, sessionPanelId } from '@cc/core'
 import type { AppState } from './state.js'
 import type { Screen } from './navHistory.js'
-import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+import { gridAppViewKey, isApp } from './appKeys.js'
 
 /**
  * Which screen the person is on, read from the store's state: the project screen and what it shows,
@@ -114,7 +114,7 @@ export function projectScreenAppKeys(
       s.projectPanels[pid],
     ),
   )
-  return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => externalAppKey(pid, a.appId))
+  return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => appKeyOf(pid, a.appId))
 }
 
 /**
@@ -152,7 +152,7 @@ export function returnsToPanel(
   if (
     s.view !== 'app' ||
     !s.focusedApp ||
-    externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key
+    appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key
   )
     return false
   return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)

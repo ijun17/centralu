@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
+import { appKeyOf } from '@cc/core'
 import type { ExternalAppInfo } from '@cc/protocol/client'
-import { externalAppKey, isApp, useStore } from './store.js'
+import { isApp, useStore } from './store.js'
 
 /**
  * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
@@ -30,7 +31,7 @@ export type AppStatusView = {
 
 export type ExternalCatalogApp = {
   kind: 'external'
-  /** `externalAppKey` — an app is uniquely identified by (project, id) */
+  /** `appKeyOf` — an app is uniquely identified by (project, id) */
   key: string
   appId: string
   /** null means a user-folder app */
@@ -120,7 +121,7 @@ export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
      * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
      */
     key:
-      info.machine && !info.projectId ? `${info.machine}:${externalAppKey(null, info.appId)}` : externalAppKey(info.projectId, info.appId),
+      info.machine && !info.projectId ? `${info.machine}:${appKeyOf(null, info.appId)}` : appKeyOf(info.projectId, info.appId),
     appId: info.appId,
     projectId: info.projectId,
     title: info.name ?? info.appId,

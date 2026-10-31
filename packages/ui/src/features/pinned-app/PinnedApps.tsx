@@ -1,6 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
+import { appKeyOf } from '@cc/core'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
+import { gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -70,7 +71,7 @@ const OUT_OF_SIGHT = 'absolute inset-y-0 -left-[200vw] flex w-full min-h-0 min-w
 export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
   const showing = useStore((s) => s.view === 'app')
-  const focusedKey = useStore((s) => (s.focusedApp ? externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) : null))
+  const focusedKey = useStore((s) => (s.focusedApp ? appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) : null))
   /*
    * The views laid over panels: the project screen's apps, or the grid's (#288). Only one of the two screens shows at a
    * time, so at most one of these lists is not empty. Joined into one string: a selector that returns a new array on

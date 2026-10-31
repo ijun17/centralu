@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { appKeyOf } from '@cc/core'
 import type { ProjectInfo } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
-import { externalAppKey, useStore } from '../../../store/store.js'
+import { useStore } from '../../../store/store.js'
 import { useIsProjectSelected } from '../../../store/selectors.js'
 import { Tooltip } from '../../../components/primitives.jsx'
 import { IconButton } from '../../../components/IconButton.jsx'
@@ -77,7 +78,7 @@ export function ProjectHeader({
   // The app's own screen is the one showing: the mark is lit, as an open app row's mark is
   const appShown = useStore(
     (s) =>
-      !!rootApp && s.view === 'app' && !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === rootApp.key,
+      !!rootApp && s.view === 'app' && !!s.focusedApp && appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === rootApp.key,
   )
   // A chain its view started waits on the person (M4 D-4): the mark says so, as the app row's "asks you" did
   const appAsks = useStore((s) => !!rootApp && s.appQuestions.some((q) => q.origin.appId === rootApp.appId && (q.origin.projectId ?? null) === projectId))

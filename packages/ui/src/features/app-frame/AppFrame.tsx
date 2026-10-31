@@ -1,10 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { appKeyOf } from '@cc/core'
 import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
 import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol/client'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { Button } from '../../components/Button.jsx'
-import { externalAppKey, useStore } from '../../store/store.js'
+import { useStore } from '../../store/store.js'
 import { viewReconnect } from '../../store/viewReconnect.js'
 import { DragRelay } from './dragRelay.js'
 import { activeTheme, readHostStyles } from './hostStyles.js'
@@ -232,8 +233,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
 ) {
   const platform = usePlatform()
   const scale = useStore((s) => s.prefs.textSize)
-  const heard = useStore((s) => s.externalAppChanges[externalAppKey(projectId, appId)])
-  const heardBy = useStore((s) => s.externalAppChangedBy[externalAppKey(projectId, appId)] ?? null)
+  const heard = useStore((s) => s.externalAppChanges[appKeyOf(projectId, appId)])
+  const heardBy = useStore((s) => s.externalAppChangedBy[appKeyOf(projectId, appId)] ?? null)
   const signal = changeSignal ?? heard
   const by = changeSignal === undefined ? heardBy : null
   const iframeRef = useRef<HTMLIFrameElement>(null)

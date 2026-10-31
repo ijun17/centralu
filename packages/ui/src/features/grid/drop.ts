@@ -20,7 +20,7 @@ export function gridTakes(types: readonly string[]): boolean {
 
 /**
  * The panel a drop stands for, or null when it is nothing the grid can show: a session that is not
- * live, or an app the list does not have (`apps` is keyed by `externalAppKey`). Decided from the
+ * live, or an app the list does not have (`apps` is keyed by `appKeyOf`). Decided from the
  * data, because a drop can arrive without a dragover that said yes (a script, a race) — and the
  * grid never adds an app by itself, nor one it cannot draw.
  */

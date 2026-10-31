@@ -21,7 +21,7 @@ export { EMPTY_DRAFT } from './state.js'
 import type { CommandRun } from './state/projects.js'
 export type { CommandRun } from './state/projects.js'
 export type { AppState, Draft, InlineView, PinnedView } from './state.js'
-export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+export { gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
 export {
   gridScreenAppKeys,

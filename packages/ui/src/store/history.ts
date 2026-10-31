@@ -1,7 +1,7 @@
-import { SUBAGENT_STEPS_PAGE, type StoredMessage } from '@cc/protocol/client'
+import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergeBySeq, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
-import { RECOVERY_RETRY_MS } from './connection.js'
+import { retryLadder } from './connection.js'
 import { inlineViewsFromHistory, mergeInlineHistory, syncInlineViews } from './apps.js'
 import { omitKey } from './patch.js'
 import { bumpChatKeysAbove, messagesToChat } from './transcript.js'
@@ -34,26 +34,23 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
      * and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing read it again
      * until the app was reopened. Without the cursor, opening the conversation reads it again too.
      */
-    let msgs: StoredMessage[]
-    for (let attempt = 0; ; attempt++) {
-      const held = get().history[sessionId]
-      try {
-        msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
-        break
-      } catch {
+    let held: AppState['history'][string] | undefined
+    const msgs = await retryLadder(
+      () => {
+        held = get().history[sessionId]
+        return platform.agents.loadMessages(sessionId, HISTORY_PAGE)
+      },
+      () => get().platform === platform && !!get().sessions[sessionId],
+      () =>
         // A cursor some other read set meanwhile is a successful read, and stays
         set((s) => {
           if (!held || s.history[sessionId] !== held) return {}
           const { [sessionId]: _dropped, ...history } = s.history
           return { history }
-        })
-        const wait = RECOVERY_RETRY_MS[attempt]
-        // Even if history fails to load, a new conversation is still possible, so the last failure is not shown
-        if (wait === undefined) return
-        await new Promise((r) => setTimeout(r, wait))
-        if (get().platform !== platform || !get().sessions[sessionId]) return
-      }
-    }
+        }),
+    )
+    // Even if history fails to load, a new conversation is still possible, so the last failure is not shown
+    if (!msgs) return
     try {
       const items = messagesToChat(msgs)
       bumpChatKeysAbove(items)

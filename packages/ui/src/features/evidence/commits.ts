@@ -12,7 +12,7 @@ import type { GitCommit } from '@cc/protocol/client'
  */
 export const COMMIT_LIMIT = 100
 
-export { formatAgo as commitAgo } from '../../app/labelClock.js'
+export { formatAgo as commitAgo } from '@cc/core'
 
 /**
  * Whether the author's name is worth the space it takes.

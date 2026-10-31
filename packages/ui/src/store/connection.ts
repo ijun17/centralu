@@ -69,6 +69,32 @@ let workspaceUnread = false
  */
 export const RECOVERY_RETRY_MS = [1_000, 5_000, 30_000] as const
 
+/**
+ * Calls `read` until it succeeds, waiting the `RECOVERY_RETRY_MS` steps between tries. `failed` runs after every failure
+ * and `gaveUp` once the steps run out; `keepGoing` is asked after each wait. Null when it stopped without a read.
+ */
+export async function retryLadder<T>(
+  read: () => Promise<T>,
+  keepGoing: () => boolean,
+  failed?: () => void,
+  gaveUp?: () => void,
+): Promise<T | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await read()
+    } catch {
+      failed?.()
+    }
+    const wait = RECOVERY_RETRY_MS[attempt]
+    if (wait === undefined) {
+      gaveUp?.()
+      return null
+    }
+    await new Promise((r) => setTimeout(r, wait))
+    if (!keepGoing()) return null
+  }
+}
+
 /** Bumped by every reconnect recovery, so the retries of an older one stop once a newer one runs */
 let recoveryGeneration = 0
 
@@ -687,38 +713,29 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      * gap unrecovered until the next reconnect: no session created or deleted meanwhile, no conversation re-read.
      * A newer recovery, a drop (the reconnect recovers again) or a new platform ends the retries.
      */
-    let fresh: SessionInfo[] | null = null
     let asked: Record<string, SessionSummary> = {}
     const watch = watchLiveEvents()
+    let listed: SessionInfo[] | null
     try {
-      for (let attempt = 0; ; attempt++) {
-        asked = get().sessions
-        watch.touched.clear()
-        fresh = await platform.agents.listSessions().catch(() => null)
-        if (fresh) break
-        const wait = RECOVERY_RETRY_MS[attempt]
-        if (wait === undefined) {
+      listed = await retryLadder(
+        () => {
+          asked = get().sessions
+          watch.touched.clear()
+          return platform.agents.listSessions()
+        },
+        () => generation === recoveryGeneration && get().platform === platform && get().connection === 'connected',
+        undefined,
+        () => {
           // Said, not dropped (#841 item 9): the sidebar may miss what changed while the host was away
           if (generation === recoveryGeneration && get().platform === platform) {
-            set({
-              toast:
-                'Could not catch up after reconnecting: the session list may be out of date until the next reconnect',
-            })
+            set({ toast: 'Could not catch up after reconnecting: the session list may be out of date until the next reconnect' })
           }
-          return
-        }
-        await new Promise((r) => setTimeout(r, wait))
-        if (
-          generation !== recoveryGeneration ||
-          get().platform !== platform ||
-          get().connection !== 'connected'
-        )
-          return
-      }
+        },
+      )
     } finally {
       watch.stop()
     }
-    const listed = fresh
+    if (!listed) return
 
     /*
      * **The new host's list is merged in, never discarded.**

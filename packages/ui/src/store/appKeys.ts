@@ -2,22 +2,9 @@ import type { ExternalAppInfo } from '@cc/protocol/client'
 import { appKeyOf } from '@cc/core'
 
 /**
- * How the store names an external app and its views: the app's key (`externalAppKey`), whether a
+ * How the store names an external app and its views: the app's key (`appKeyOf`), whether a
  * listed app is the one named (`isApp`), and the key of its view on the grid (`gridAppViewKey`).
  */
-
-/**
- * The key for one external app. An app is identified by (project, id) — the `notes` app of two
- * different projects are two different apps. `_user` is the user-folder app; it matches the
- * host's scope name and never collides with a project id (a UUID).
- */
-export function externalAppKey(projectId: string | null | undefined, appId: string, machine?: string | null): string {
-  /*
-   * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
-   * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
-   */
-  return appKeyOf(projectId, appId, machine)
-}
 
 /**
  * Whether an app in the list is the one (project, id, machine) names. `machine` matters only for a user-folder app
@@ -30,7 +17,7 @@ export function isApp(a: ExternalAppInfo, projectId: string | null | undefined, 
 
 /**
  * The key of an app's view on the grid (#288) — a pinned view of its own, apart from the app's
- * pinned view (`externalAppKey`) that the app view and its project screen share.
+ * pinned view (`appKeyOf`) that the app view and its project screen share.
  *
  * Owner decision (2026-10-04): the same app can stand in more than one place at once, and each
  * place is its own view while the app's process is shared. The grid and the project screen are
