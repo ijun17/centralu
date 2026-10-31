@@ -140,7 +140,7 @@ intermittent failures (#368), and how long a merge may wait.
   same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
   ("Not merged: …", `outcome: 'batch-running'`, `isError`: it is not a success an agent could read as merged): merging here moves the default branch under the batch, which then stops
   before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
-  `intoBatch: true` merges anyway (a release bump goes through here; the answer then says it again). A call that only waits
+  `intoBatch: true` merges anyway (the answer then says it again). A call that only waits
   carries the same note.
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
@@ -509,8 +509,7 @@ has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of 
 default 4: the owner's, 2026-10-19, this repository's too).
 
 - **Which**: active items in CI whose own CI was read on their head, not sent back from a batch on
-  that head (`batchless`), not a fork's (its head would run CI in this repository's branch) and not a
-  release bump (its CI is the release's evidence), in one repository, those fixed after a conflict
+  that head (`batchless`), not a fork's (its head would run CI in this repository's branch), in one repository, those fixed after a conflict
   first (`front`), then in the order they were queued; a stack is one item, so one member. With two
   tiers, **every ready item** (2026-10-19): its own quick run passed, still runs, waits for a runner
   or has not reported yet, but not one whose own CI failed (its poll handles that). Without tiers,
@@ -597,8 +596,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
 GitHub Actions was the bottleneck: a full run of `build.yml` is about 24 jobs, the free plan runs 20
 at once, and every push of every pull request started one. The owner chose two tiers: a pull
 request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests, the macOS tests); the **full
-tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
-bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
+tier** (every job) runs on main and on a manual run (a batch's dispatch, or a person's)
+(`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
 alone is green on what it reports. On while `project.json` has `ci.fullTier`, the name of the check
 that passes on a full run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it
 passed, `quick` when it finished otherwise, null while not reported).
@@ -607,7 +606,7 @@ passed, `quick` when it finished otherwise, null while not reported).
 2026-10-19), nothing lands that has not passed the full tier on what lands. With `quick` (this
 repository's since the owner's decision of 2026-10-19), a change lands after the **fast tier**: its
 own quick run, then its batch's run of the quick tier on what lands (the batch's dispatch asks for
-`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
+`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a commit on main).
 No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
 rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
 run and the full tier's check is not asked for. That run is judged as a pull request's own quick run is
@@ -623,9 +622,9 @@ green batch queue/batch-98 stopped with "never reported" (2026-10-19). The main 
 the required set: it judges main's runs and its probes by their conclusion, and both are full runs.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
-  a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
+  a full run a person started on its branch), or a batch's. A head whose own run
   finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
-  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
+  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, batches
   off): from a branch of this repository, the queue starts the full tier on its branch itself, once per
   head (`workflow_dispatch` of the CI workflows, no inputs; `fullDispatch` on the item; #1509 item 4), and
   lands it when that run is green; attention `full-tier` only when no full run has reported in 15 minutes
@@ -791,8 +790,7 @@ looked into).
   branch `revert/<sha>`): the reverse of its change applied to the default branch's tip in a temporary
   index from the checkout (nothing in the checkout moves) and pushed. It is **queued at the front**
   (`front`), for the session that queued the culprit (owner, author and notice address of its merged
-  item), and lands through the fast tier like any change. **A release bump is never reverted** (a
-  subject `chore(release): …`, or a change to project.json `release.source`); nor is anything when
+  item), and lands through the fast tier like any change. Nothing is reverted when
   the reverse no longer applies (later commits changed the same lines) or there is no checkout: then
   the issue says to fix or revert it by hand. Either way, an issue with the failure (the run, the
   failed jobs, the first failing line, the candidates, how the culprit was found and what the queue

@@ -89,13 +89,12 @@ script rehearses by default and why nothing publishes automatically.
   (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
   94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
   is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
-  run (`workflow_dispatch`: a person, or the main guard's bisect) and on a release bump's pull
-  request (one that changes `packages/protocol/src/brand.ts`, where the version is declared). Its
+  run (`workflow_dispatch`: a person, or the main guard's bisect). Its
   `full tier` job passes on a full run only and is skipped on a quick one: that is how the board
   tells the two apart, since a skipped job counts as passed and a quick run alone looks green.
   **A change lands after the fast tier** (#1259, owner decision 2026-10-19): the merge queue lands a
   pull request through a batch built on main whose manual run asks for the quick tier (input
-  `tier: quick`; a release bump or a commit on main still runs in full), a batch of one included, and
+  `tier: quick`; a commit on main still runs in full), a batch of one included, and
   the full tier runs on main once it has landed. **A batch that changes the screen runs the heavy jobs
   first** (#1538, owner decision 2026-10-26): when it holds a change the UI scenarios can see (the window, the
   host and the protocol outside their tests, the scenarios, the build, and the other files the scenarios render
@@ -110,9 +109,8 @@ script rehearses by default and why nothing publishes automatically.
   session gets). A batch that stops only because main moved while it ran (a merge outside the queue) is
   batched again on the new main by itself, up to 3 times per head (#1548). `merge_when_green` still refuses a
   head whose own run was quick, and, while the queue has a batch running on the same branch, says so and merges
-  nothing unless called with `intoBatch: true` (a release bump goes through it). When main's full run fails, the board's main guard finds the culprit among the commits
-  since the last fully green one, reverts it in a pull request at the front of the queue (never a
-  release bump) and files an issue. A run that failed only in a setup step (a browser install, a
+  nothing unless called with `intoBatch: true`. When main's full run fails, the board's main guard finds the culprit among the commits
+  since the last fully green one, reverts it in a pull request at the front of the queue and files an issue. A run that failed only in a setup step (a browser install, a
   checkout, a cache) is rerun once first and never reverted for the runner's failure. A release still needs a fully green commit: the release's CI gate
   reads main's own push run on that exact commit, never a batch's quick run on it (below). To run the full tier
   on a pull request yourself (before queueing UI work, say):
@@ -191,10 +189,8 @@ script rehearses by default and why nothing publishes automatically.
   and the shared runners about 10 minutes more. `verify` has ended by then, so its check stays
   `failure` while the run ends `cancelled`: that failed check is how the queue tells this from a
   run cancelled for nothing, and it does not rerun it. `changes` decides (`fail_fast`,
-  `.github/scripts/ci-changes.mjs`): a pull request's run (quick tier, or a release bump's full
-  one), main's own runs, and a manual run that changes `packages/protocol/src/brand.ts` or whose
-  files are not known all keep every job to its end, so **a release bump's run is never
-  cancelled by it**. The job cancels its own run by id and leaves the concurrency groups alone.
+  `.github/scripts/ci-changes.mjs`): a pull request's run (quick tier), main's own runs, and a manual run whose
+  files are not known all keep every job to its end. The job cancels its own run by id and leaves the concurrency groups alone.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below. A tag push skips `pnpm verify` in its platform jobs
@@ -463,7 +459,7 @@ signing key exists only as a GitHub secret. That is harmless only while the shel
 is unpinned (the window never opens one); once `shell.lock` pins a shell, a publish with a throwaway key
 stops before anything is published, so a darwin release has to come from `release.yml`.
 
-Linux and Windows have to come from CI first (`release.yml` with `dry_run` off), because the second command refuses to
+Linux and Windows have to come from CI first (`release.yml` on a tag push: a manual run never publishes), because the second command refuses to
 publish the shim while any pinned platform package is missing from the registry at this
 version.
 
