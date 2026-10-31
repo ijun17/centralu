@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
-import { openHost } from './host-client.mjs'
+import { openHost, removeTemp } from './host-client.mjs'
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 
 const cwd = mkdtempSync(join(tmpdir(), 'cc-schema-'))
@@ -19,7 +19,10 @@ const cwd = mkdtempSync(join(tmpdir(), 'cc-schema-'))
 execSync('git init -q && git commit -q --allow-empty -m init', { cwd })
 writeFileSync(join(cwd, 'a.txt'), 'hello\n')
 
-const { host, ws, call: rpc } = await openHost({ timeoutMs: 30000 })
+// Some of the cases write: into the store, which is in memory, and under the data folder, which is this temporary one
+const data = mkdtempSync(join(tmpdir(), 'cc-schema-data-'))
+const client = await openHost({ timeoutMs: 30000, env: { CC_DATA_DIR: data } })
+const { call: rpc } = client
 
 // ── First create what checking needs ────────────────────────────────
 const project = (await rpc('projects.add', { path: cwd })) as { id: string }
@@ -41,7 +44,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'requests.list': {},
   'projects.add': { path: cwd },
   'projects.reorder': { orderedIds: [P] },
-  'projects.setCommands': { projectId: P, commands: ['echo for the check'] },
+  'projects.setCommands': { projectId: P, commands: [{ command: 'echo for the check' }] },
   'projects.gitStatus': { projectId: P },
   'sessions.list': {},
   'sessions.reorder': { projectId: P, orderedIds: [S] },
@@ -53,7 +56,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.account': { tool: 'claude' },
   'agents.commands': { sessionId: S },
   'agents.listExternalSessions': { projectId: P, tool: 'claude', limit: 3 },
-  'agents.switchTool': { sessionId: S, tool: 'codex' },
+  'agents.switchTool': { sessionId: S, tool: 'claude' },
   'agents.updateSettings': { sessionId: S, model: null, effort: null, permissionPreset: 'normal' },
   'sessions.rename': { sessionId: S, name: 'for the check' },
   'sessions.markRead': { sessionId: S, seq: 0 },
@@ -104,10 +107,83 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'apps.permissions': { appId: 'no-such-app', projectId: P },
   'apps.forgetPermission': { appId: 'no-such-app', projectId: P, capability: 'agent:claude' },
   'apps.usage': { appId: 'no-such-app', projectId: P },
+  // Reads that need nothing, or only the project or session made above
+  'agents.mcpProposals': {},
+  'agents.skillProposals': {},
+  'agents.orchestratorSkills': {},
+  'agents.sleepPolicy': {},
+  'agents.versions': {},
+  'agents.reportOwed': { sessionId: S },
+  'agents.archiveLosses': { sessionId: S },
+  'agents.worktreeStatus': { sessionId: S },
+  'usage.history': { from: '2020-01-01T00:00:00Z', to: '2100-01-01T00:00:00Z', groupBy: 'day', by: 'tool' },
+  'subagents.usage': {},
+  'orchestrator.peek': {},
+  'git.ignoredEntries': { projectId: P },
+  'projects.inspect': { path: cwd },
+  'projects.origin': { projectId: P },
+  'projects.deleteOutlook': { projectId: P },
+  'processes.strays': {},
+  'commands.state': { projectId: P },
+  'apps.list': {},
+  'apps.runs': { appId: 'no-such-app', projectId: P },
+  'apps.reach': { sessionId: S, appId: 'no-such-app', projectId: P },
+  'projectConsents.list': {},
+  'updates.status': {},
+  'machines.list': {},
+  'machines.sshHosts': {},
+  'machines.askConsents': {},
+  'host.activity': {},
+  'host.sessions': {},
+  'host.hubAuto': {},
+  'host.readSession': { sessionId: S },
+  'host.recall': { query: 'the check' },
+  'host.lastAnswer': { sessionId: S },
+  'mail.list': {},
+  'prefs.get': {},
+  'themes.list': {},
+  // Writes into the temporary store that the checks after them do not read
+  'projects.setAgentInstructions': { projectId: P, text: '' },
+  'projects.setWorktreeSetup': { projectId: P, setup: null },
+  'orchestrator.configure': { tool: 'claude' },
+  'git.cancel': { projectId: P },
+  'fs.resolve': { projectId: P, path: 'a.txt' },
+  'agents.exportHandoffRecord': { sessionId: S },
+  'agents.exportHandoffNote': { sessionId: S, afterSeq: 0 },
+  'themes.resolve': { id: 'no-such-theme' },
+  'prefs.set': { patch: {} },
+  'agents.setAutoApplyVersions': { enabled: false },
+  'agents.setSleepPolicy': { afterMinutes: null },
+  'projects.createPreview': { name: 'check' },
+  'agents.autoCompact': { sessionId: S },
+  'host.setHubAuto': { allowed: false },
+  'updates.setAuto': { enabled: false },
+  'updates.setAutoApply': { enabled: false },
+  // Last: it restarts the project's idle sessions in the background, as agents.restartSession does
+  'projects.setTrusted': { projectId: P, trusted: true },
 }
+
+/** Several methods left out for one reason */
+const skipped = (why: string, methods: string[]) => Object.fromEntries(methods.map((m) => [m, why]))
 
 /** What cannot be called, and why — leaving it out silently would read as "everything was checked" */
 const SKIP: Record<string, string> = {
+  ...skipped('needs a linked machine, which a headless host does not have (machines.test.ts, links.test.ts)', [
+    ...['add', 'probe', 'remove', 'reconnect', 'disconnect', 'setAutoReconnect', 'setConnect', 'need', 'acceptVersions', 'install', 'update', 'cancelUpdate', 'rollback', 'uninstall', 'autostart', 'activity', 'hubAuto', 'setAsks', 'withdrawAsk'].map((m) => `machines.${m}`),
+    'host.hubOffer',
+  ]),
+  ...skipped('installs, signs in, updates, or ends the host, an agent tool or a process for real', [
+    'agents.installTool', 'agents.cancelInstallTool', 'agents.signIn', 'agents.cancelSignIn', 'agents.applyVersions', 'updates.apply', 'updates.answerApply', 'updates.reportApply', 'host.stop', 'host.handover', 'processes.stop', 'commands.stop',
+  ]),
+  ...skipped('destructive, or writes outside the temporary store', [
+    'agents.archiveIfAtRest', 'agents.deleteAgentChild', 'agents.deleteOrchestratorSkill', 'trash.purgeRuns', 'trash.purgeSubagentSteps', 'trash.restoreSubagentSteps', 'fs.move', 'fs.importFile', 'projects.delete', 'projects.create', 'worktrees.createManager', 'worktrees.setTrunk', 'themes.save', 'themes.import',
+  ]),
+  ...skipped('needs something that does not exist here: a pending proposal, a running task, a failed turn, an image, a subagent run, a running command, an open app view, a shared app, a consent, a mail thread', [
+    'agents.resolveMcpProposal', 'agents.resolveSkillProposal', 'agents.stopBackgroundTask', 'messages.image', 'sessions.clearError', 'messages.subagent', 'messages.subagentTrashed', 'trash.readRun', 'subagents.trash', 'commands.log', 'commands.resize', 'apps.viewFrame', 'apps.recoverView', 'apps.readResource', 'apps.invoke', 'apps.restart', 'apps.setShared', 'projectConsents.revoke', 'host.send',
+    ...['thread', 'reply', 'close', 'reassign', 'unblock', 'held', 'resume', 'wake'].map((m) => `mail.${m}`),
+  ]),
+  'fs.watch': 'a stream of changes, not a call with an answer',
+  'host.credentials': 'hands out a credential, which only a limited call asks for (links.test.ts)',
   'agents.respondApproval': 'needs a pending approval request (covered by smoke.mjs)',
   'machines.revokeCredential': 'needs a linked machine with another full credential (links.test.ts)',
   'requests.answer': 'needs a host request, which only a limited call raises while a window shows them (host-requests.test.ts)',
@@ -226,8 +302,8 @@ if (failed.length) {
 console.log('\n── Not checked, and why ──')
 for (const [m, why] of Object.entries(SKIP)) console.log(`  ${m}: ${why}`)
 
-ws.close()
-host.kill()
+await client.stop()
+removeTemp(data)
 // A call failure counts as a failure too — if the schema could not even be checked and this
 // exits 0, CI reads it as "everything is fine." Neither a mismatch nor a call failure is left green.
 process.exit(bad.length || failed.length ? 1 : 0)
