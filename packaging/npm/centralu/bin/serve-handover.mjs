@@ -5,7 +5,7 @@
  */
 import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
+import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
 import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
 
@@ -34,10 +34,9 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   if (!state) return { ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` }
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry) ?? 0
-  const prove = hostProvesOf(entry)
   // The limited credential is enough to probe and to stop it (#1405, `host.stop` is everyday)
   const own = { token: state.token, proofKey: state.proofKey }
-  const probe = () => probeHost({ port, ...own, protocolVersion: installed, prove })
+  const probe = () => probeHost({ port, ...own, protocolVersion: installed })
   const first = await probe()
   if (!heldHere(first, dataDir, undefined, state.port != null)) {
     // The folder is held, but not by a serve (#1722): the app's or the keeper's host, whatever answered on the port
@@ -54,8 +53,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const launcherPid = mayKill && launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle, forUpdate })
-  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, ...own, protocolVersion: asked.protocolVersion, prove, ifIdle, forUpdate })
+  let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, ifIdle, forUpdate })
+  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, ...own, protocolVersion: asked.protocolVersion, ifIdle, forUpdate })
   // `ifIdle` and it has work running (#1224): it was left as it is
   if (asked.busy) return { ok: false, wasRunning: true, busy: true, message: asked.message }
   let how = 'asked'
@@ -136,7 +135,6 @@ export async function moveIntoSignIn({
   const state = readServeState(dataDir)
   if (!state) return false
   const port = state.port ?? DEFAULT_SERVE_PORT
-  const prove = hostProvesOf(entry)
   const protocolVersion = existing.protocolVersion ?? protocolVersionOf(entry) ?? 0
   const own = { token: state.token, proofKey: state.proofKey }
   /*
@@ -145,14 +143,14 @@ export async function moveIntoSignIn({
    * it. Before, a full one made for this call went to whatever answered that proof, which a reader of serve.json can. A
    * host from #1405 to key pairing refuses it (`link`): no note on the row while this waits, and the move goes on
    */
-  const sayHandover = (h) => askHostRpc({ port, ...own, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
+  const sayHandover = (h) => askHostRpc({ port, ...own, protocolVersion, method: 'host.handover', params: { handover: h } })
   const report = (handover) => (tell ?? sayHandover)(handover)
   const pid = lockHolderPid(dataDir)
   say(`the host running for ${dataDir}${pid ? ` (pid ${pid})` : ''} runs in a network logon (started over ssh), where Git cannot use the credentials saved in Windows; moving it into this Windows sign-in once nothing runs there`)
   const t0 = now()
   let waiting = false
   for (;;) {
-    if (!(await probeHost({ port, ...own, protocolVersion, prove })).running) return true
+    if (!(await probeHost({ port, ...own, protocolVersion })).running) return true
     const r = await stop()
     if (r.ok) {
       say(`stopped it${r.how && r.how !== 'asked' ? ` (${r.how})` : ''}; starting the host in this sign-in`)

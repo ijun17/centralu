@@ -1,6 +1,6 @@
 /**
  * The host `centralu serve` runs: how it is started, and talking to a running one over its own socket
- * (a hello with the token, a proof first where the host gives one, `host.stop`).
+ * (a proof, then a hello with the token, `host.stop`).
  */
 import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -35,10 +35,10 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped, hostKey, keyId }) {
+export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, stopped, hostKey, keyId }) {
   /*
-   * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
-   * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
+   * The options this serve takes that an older one refuses (#1223): a hub up to 0.1.0-beta.45's adds `--from <its name>`
+   * to `--detach` only when the line says so, since an older serve answers an option it does not know with an error. `window`: the
    * desktop window on Windows uses this serve's host through `--window` only when it is listed (#1223 review)
    */
   /*
@@ -69,8 +69,8 @@ export function connectionLine({ port, token, credential, limited, others, versi
     ...(install ? { install } : {}),
     ...(autostart ? { autostart } : {}),
     ...(detach ? { detach } : {}),
-    // The running host proves it holds the token before the hub sends it (#838); absent: the hub sends hello as before
-    ...(proof ? { proof: true } : {}),
+    // The running host proves it holds the token before the hub sends it (#838): every host from 0.1.0-beta.45 on does
+    proof: true,
     // The person stopped the host here, and when (#1143, `readStopped`); absent: an older serve, or no such stop
     ...(stopped ? { stopped } : {}),
     takes,
@@ -211,20 +211,6 @@ function mismatchProtocolOf(error) {
 }
 
 /**
- * Whether the installed host answers a `prove` (#838): a bundle says so in `bundle-info.json` (`hostProof`), a host run
- * from source has `transport/host-proof.ts`. The connection line's `proof` is this, not a live answer: a program another
- * account put on the port could otherwise answer the probe so as to make the line say no, and the hub send the token.
- */
-export function hostProvesOf(entry) {
-  try {
-    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).hostProof === 1
-  } catch {
-    // not a bundle; try the source below
-  }
-  return existsSync(join(dirname(entry), 'transport', 'host-proof.ts'))
-}
-
-/**
  * Whether the host at `entry` takes a hub's key hello (#1711): a bundle says so in `bundle-info.json` (`keyPairing`), a
  * host run from source has `transport/link-proof.ts`. `--pair-key` reports a key derived from serve.json only for a host
  * started next that will sign with it (docs/plans/key-pairing.md §4.2)
@@ -309,20 +295,19 @@ function proofOf(token, nonce) {
 }
 
 /**
- * Opens a socket to the host and says hello with the token, the way `probeHost` and `askHostToStop` do. With `prove`
- * (the installed host can, `hostProvesOf`), the host first proves it holds the token (#838), and the token goes out only
- * then: whatever else listens on the port (another account's program, while the host is down) never sees it.
+ * Opens a socket to the host and says hello with the token, the way `probeHost` and `askHostToStop` do. The host first
+ * proves it holds the token (#838), and the token goes out only then: whatever else listens on the port (another
+ * account's program, while the host is down) never sees it.
  * `on.message(m, ws)` gets every frame after the hello; `on.unproven()` runs when the proof did not come, `on.gone()`
  * when the socket failed or closed.
  */
-function helloSocket({ port, token, proofKey, protocolVersion, prove, WebSocketImpl, on }) {
+function helloSocket({ port, token, proofKey, protocolVersion, WebSocketImpl, on }) {
   const ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
-  const nonce = prove ? randomBytes(24).toString('base64url') : null
+  const nonce = randomBytes(24).toString('base64url')
   // Proving only once the socket is open: a port where nothing listens is gone, not unproven
   let proving = false
   const hello = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: protocolVersion ?? 0 }))
   ws.onopen = () => {
-    if (!prove) return hello()
     proving = true
     ws.send(JSON.stringify({ kind: 'prove', nonce }))
   }
@@ -350,17 +335,17 @@ function helloSocket({ port, token, proofKey, protocolVersion, prove, WebSocketI
  * Whether a host that holds this token answers on the port: a real hello, not a TCP connect, so a
  * stranger's program on the same port does not count, and the answer carries the running host's
  * own protocol and version (which differ from the installed package's after an `npm i -g` the
- * host was not restarted for). With `prove` the host proves it holds the token first (#838).
+ * host was not restarted for). The host proves it holds the token first (#838).
  *
  * `{ running, protocolVersion?, version?, unproven? }`. `unproven`: something answered on the port but did not prove
- * it holds the token, so it was not sent: another program, or a host from before #838 still running after an update
+ * it holds the token, so it was not sent: another program, or a host still on its old key after `--rotate-token`
  * (`heldHere` tells those apart by the data folder's lock). Node 22.4+ has a global WebSocket; on an older 22 this falls
  * back to a TCP connect and reports only `running`.
  */
-export function probeHost({ port, token, proofKey, protocolVersion, prove = false, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
+export function probeHost({ port, token, proofKey, protocolVersion, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return tcpProbe(port, timeoutMs)
   return helloExchange({
-    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, WebSocketImpl, timeoutMs,
     timedOut: { running: false },
     failed: () => ({ running: false }),
     on: (done) => ({
@@ -432,10 +417,10 @@ const HOST_LOGONS = ['interactive', 'network', 'batch', 'service']
  * One call to a running host (`method` with `params`), as `askHostToStop` makes it: a hello with the token, then the
  * call. Its result, or null when it did not answer or refused. For `host.handover` (#1224)
  */
-export function askHostRpc({ port, token, proofKey, protocolVersion, prove = false, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostRpc({ port, token, proofKey, protocolVersion, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve(null)
   return helloExchange({
-    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, WebSocketImpl, timeoutMs,
     timedOut: null,
     failed: () => null,
     on: (done) => ({
@@ -457,11 +442,10 @@ export function askHostRpc({ port, token, proofKey, protocolVersion, prove = fal
  * `ifIdle` (#1224): only if nothing runs there, checked and acted on by the host in one step; `{ ok: false, busy: true }`
  * when something does. `forUpdate` (#1618): a hub's update stops it, and the host lists the turns it ends for the next one.
  */
-export function askHostToStop({ port, token, proofKey, protocolVersion, prove = false, ifIdle = false, forUpdate = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, proofKey, protocolVersion, ifIdle = false, forUpdate = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
-  // With `prove`, the token goes out only to a host that proved it holds it (#838)
   return helloExchange({
-    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, WebSocketImpl, timeoutMs,
     timedOut: { ok: false, message: 'no answer in time' },
     failed: (e) => ({ ok: false, message: e.message }),
     on: (done) => ({

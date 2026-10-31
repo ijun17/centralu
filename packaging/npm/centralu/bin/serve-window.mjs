@@ -7,7 +7,7 @@
 import { join } from 'node:path'
 import { pairServe, readServeState } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { hostProvesOf, probeHost, protocolVersionOf } from './serve-host.mjs'
+import { probeHost, protocolVersionOf } from './serve-host.mjs'
 import { serveFolder } from './serve-run.mjs'
 import { runDetach } from './serve-detach.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -47,11 +47,10 @@ export async function runWindow({
   misses = 3,
 }) {
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
-  const prove = hostProvesOf(entry)
   const protocolVersion = protocolVersionOf(entry) ?? 0
   const probe = () => {
     const state = readServeState(dataDir)
-    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, proofKey: state.proofKey, protocolVersion, prove }) : Promise.resolve({ running: false })
+    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, proofKey: state.proofKey, protocolVersion }) : Promise.resolve({ running: false })
   }
 
   let host = await probe()
