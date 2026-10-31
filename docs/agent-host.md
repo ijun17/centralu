@@ -743,7 +743,7 @@ that turn opens. The tool runs inputs in the order they were given, so a turn th
 before it, and all of them leave the host's store (a CLI that runs several notes as one turn names only the last); so do
 those a turn's end says it took in. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
 `turnStartInputs`; a note sent into a one-reply turn about 2.3 s after its task still reached the turn's end and ran as the next turn, measured); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
-just after a turn ended or queued behind a compact or review (`flushPending`), gives its `turn/start` the input's id as the
+just after a turn ended or queued behind a compact or review (`MidTurnLedger`), gives its `turn/start` the input's id as the
 client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
 `working` for that turn that names it; a message that joined a turn already running shows after the turn's first item and
 names nothing. The hub holds the rows of the messages its caller gave the child that the tool may run as a turn of its own
