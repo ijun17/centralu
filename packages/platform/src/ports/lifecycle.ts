@@ -43,7 +43,7 @@ export interface UpdatePort {
 /** What a window tells the host about its own failures */
 export interface DiagnosticsPort {
   /** The screen crashed (the error boundary caught it): the host writes it to its log. Fire and forget; never rejects */
-  reportCrash(r: { message: string; stack: string; componentStack: string }): Promise<void>
+  reportCrash(r: { message: string; stack: string; componentStack: string; version?: string }): Promise<void>
 }
 
 /**

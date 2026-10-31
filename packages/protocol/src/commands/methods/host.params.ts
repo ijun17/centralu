@@ -74,6 +74,8 @@ export const hostParams = {
     message: z.string().max(20_000),
     stack: z.string().max(20_000).default(''),
     componentStack: z.string().max(20_000).default(''),
+    /** The build the window runs, to tell windows of a mixed host swap apart */
+    version: z.string().max(100).optional(),
   }),
   /**
    * The host requests waiting for the person (#1405, `HostRequest`), oldest first: what a window shows after it

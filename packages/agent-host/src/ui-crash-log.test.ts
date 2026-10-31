@@ -21,6 +21,16 @@ describe('the line a window writes to the host log when its screen crashed', () 
     expect(body.componentStack).toBe(crash.componentStack)
   })
 
+  it('keeps U+2028, U+2029 and U+0085 from breaking the line, and carries the window build', () => {
+    const lines: string[] = []
+    const breaks = String.fromCharCode(0x2028, 0x2029, 0x85)
+    createUiCrashLog((l) => lines.push(l))({ ...crash, message: `a${breaks}b`, version: '0.1.0-beta.45' })
+    expect(lines[0]).not.toMatch(new RegExp(`[${breaks}\n]`))
+    const body = JSON.parse(lines[0]!.slice('[ui-crash] '.length)) as Record<string, string>
+    expect(body.message).toBe(`a${breaks}b`)
+    expect(body.version).toBe('0.1.0-beta.45')
+  })
+
   it('writes a few lines a minute, counts the rest, and says how many it left out on the next line after the window', () => {
     const lines: string[] = []
     let t = 1_000

@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '../components/Button.jsx'
-import { useStore } from '../store/store.js'
+import { APP_VERSION } from '@cc/protocol/client'
+import type { Platform } from '@cc/platform/ports'
 
 /**
  * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
@@ -18,7 +19,31 @@ import { useStore } from '../store/store.js'
  * The one reason this is a class component: hooks have no equivalent of this spot
  * (componentDidCatch).
  */
-export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+/** The host cuts each field too; this keeps a long stack from making it refuse the whole report */
+const REPORT_FIELD_MAX = 20_000
+const cut = (s: string) => s.slice(0, REPORT_FIELD_MAX)
+
+/**
+ * Tells the host's log what crashed, where it outlives a reload (the console does not). Nothing waits for it and nothing
+ * comes back from it: a report that itself threw would be a second crash on the screen that just crashed.
+ */
+export function reportCrash(platform: Platform | null | undefined, thrown: unknown, componentStack: string | null | undefined): void {
+  try {
+    const error = thrown instanceof Error ? thrown : null
+    void platform?.diagnostics
+      .reportCrash({
+        message: cut(error ? error.message : String(thrown)),
+        stack: cut(error?.stack ?? ''),
+        componentStack: cut(componentStack ?? ''),
+        version: APP_VERSION,
+      })
+      .catch(() => {})
+  } catch {
+    // A platform without the call, or a port that throws at once: the console line is all there is
+  }
+}
+
+export class ErrorBoundary extends Component<{ children: ReactNode; platform: Platform }, { error: Error | null }> {
   override state: { error: Error | null } = { error: null }
 
   static getDerivedStateFromError(error: Error): { error: Error } {
@@ -28,18 +53,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // Also logs to the console — during development this is what catches the eye first
     console.error('[centralu] render crashed', error, info.componentStack)
-    /*
-     * And to the host's log, where it outlives a reload (the console does not). Nothing waits for it and nothing can
-     * come back from it: a crash report that itself throws would be a second crash on the screen that just crashed.
-     */
-    try {
-      void useStore
-        .getState()
-        .platform?.diagnostics.reportCrash({ message: error.message, stack: error.stack ?? '', componentStack: info.componentStack ?? '' })
-        .catch(() => {})
-    } catch {
-      // No platform yet, or a port without the call: the console line above is all there is
-    }
+    reportCrash(this.props.platform, error, info.componentStack)
   }
 
   override render(): ReactNode {

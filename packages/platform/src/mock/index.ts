@@ -126,7 +126,7 @@ export class MockPlatform implements Platform {
   readonly updates = this.updatesMock.updates
   readonly requests = this.hostRequestsMock.requests
   /** For tests: the crashes this window reported to the host, in order */
-  readonly crashReports: { message: string; stack: string; componentStack: string }[] = []
+  readonly crashReports: { message: string; stack: string; componentStack: string; version?: string }[] = []
   readonly diagnostics: DiagnosticsPort = { reportCrash: async (r) => void this.crashReports.push(r) }
   readonly relaunch = this.keeperMock.relaunch
   readonly background = this.keeperMock.background
