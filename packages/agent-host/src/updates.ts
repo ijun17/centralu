@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
+import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
 
@@ -187,7 +187,8 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
 function menuEntryVersion(entry: string): string | null {
   const app = /^Exec="([^"]+)"/m.exec(readFileSync(entry, 'utf8'))?.[1]
   if (!app) return null
-  const version = (JSON.parse(readFileSync(join(dirname(app), 'package.json'), 'utf8')) as { version?: unknown }).version
+  const pkg: unknown = JSON.parse(readFileSync(join(dirname(app), 'package.json'), 'utf8'))
+  const version = typeof pkg === 'object' && pkg !== null && 'version' in pkg ? pkg.version : null
   return typeof version === 'string' && version.trim() ? version.trim() : null
 }
 
@@ -724,7 +725,7 @@ export class UpdateService {
       await this.deps.run(this.deps.node, [launcher, 'install'])
       console.error(`[updates] the installed copy at ${copy} moved from ${was ?? 'an unreadable version'} to ${to}, this host's version`)
     } catch (e) {
-      console.error(`[updates] could not bring the installed copy at ${copy} to ${to}: ${(e as Error).message}; tried again at the next host start`)
+      console.error(`[updates] could not bring the installed copy at ${copy} to ${to}: ${errorMessage(e)}; tried again at the next host start`)
     }
   }
 
