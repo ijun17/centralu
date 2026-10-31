@@ -564,6 +564,17 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     expect(needs.data.items).toEqual(['#101 Worktree management — Needs decision · High · Host', '#113 Narrow-window reading — Needs decision · Medium · UI · answered, not recorded yet'])
   })
 
+  it('refuses an option meant for another view, so an old list_needs_decision call is not answered with the answers', async () => {
+    runtime()
+    const area = await call('list_owner_answers', { area: 'UI' }, agent)
+    expect(area.isError).toBe(true)
+    expect(area.text).toBe('Not listed: area is for view "items", not for view "answers".')
+    const all = await call('list_owner_answers', { view: 'items', all: true, refresh: true }, agent)
+    expect(all.text).toBe('Not listed: all is for view "answers", refresh is for view "summaries", not for view "items".')
+    const detail = await call('list_owner_answers', { view: 'summaries', detail: 'full' })
+    expect(detail.data).toMatchObject({ ok: false })
+  })
+
   it('lets the owner delete an answer while it is not recorded', async () => {
     runtime()
     await call('save_answer', { item: 113, text: KOREAN })

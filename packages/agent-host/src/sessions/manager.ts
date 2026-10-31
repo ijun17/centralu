@@ -1156,7 +1156,6 @@ export class SessionManager {
         m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
-        if (adopted) this.adoptedProcesses.add(adopted)
         // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached
         if (adopted?.takesOverTurn === false && inTurn(m.state)) this.turnLostInSwap(m)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
@@ -2246,7 +2245,6 @@ export class SessionManager {
       tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.toolProfileOf(...a),
       canReadMail: (...a) => self.canReadMail(...a),
-      readsMail: (...a) => self.readsMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools
@@ -2332,28 +2330,14 @@ export class SessionManager {
     return (this.seatHost ??= own)
   }
 
-  /** The processes this host took over from an earlier one: they were started with the tools that host gave them, which may not include mail */
-  private readonly adoptedProcesses = new WeakSet<SessionHandle>()
-
   /**
    * Whether the session's seat has the mail tool (§9.1): `reader` and `orchestrator`. This is the receive rule (who may be written to, and who
-   * is woken by mail), and it does not look at the process: a process the keeper handed over after a swap is still the session's, and
-   * mail is for the session, so it is mailed and woken as before
+   * is woken by mail, and told of a child's report by mail), and it does not look at the process: a process the keeper handed over after a
+   * swap is still the session's, and mail is for the session
    */
   canReadMail(sessionId: string): boolean {
     const profile = this.toolProfileOf(sessionId)
     return profile === 'reader' || profile === 'orchestrator'
-  }
-
-  /**
-   * Whether the process running the session is known to have the mail tool: its seat has it, and the process was not kept from an earlier host
-   * (which keeps the tools it started with, perhaps of a build before mail). Only for choosing how a report is told: a process in doubt is told
-   * by the relayed message, which any process takes. Never for the receive rule
-   */
-  readsMail(sessionId: string): boolean {
-    if (!this.canReadMail(sessionId)) return false
-    const handle = this.handles.get(sessionId)
-    return !(handle && this.adoptedProcesses.has(handle))
   }
 
   /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the orchestrator's `centralu_run` */

@@ -107,9 +107,7 @@ script rehearses by default and why nothing publishes automatically.
   no recorded tier (an older board's), counts as changing the screen. The other batches land after the fast tier as above, and the
   main guard stays the net for them. The board says which tier a batch ran (its line, its events, the message a
   session gets). A batch that stops only because main moved while it ran (a merge outside the queue) is
-  batched again on the new main by itself, up to 3 times per head (#1548). `merge_when_green` still refuses a
-  head whose own run was quick, and, while the queue has a batch running on the same branch, says so and merges
-  nothing unless called with `intoBatch: true`. When main's full run fails, the board's main guard finds the culprit among the commits
+  batched again on the new main by itself, up to 3 times per head (#1548). When main's full run fails, the board's main guard finds the culprit among the commits
   since the last fully green one, reverts it in a pull request at the front of the queue and files an issue. A run that failed only in a setup step (a browser install, a
   checkout, a cache) is rerun once first and never reverted for the runner's failure. A release still needs a fully green commit: the release's CI gate
   reads main's own push run on that exact commit, never a batch's quick run on it (below). To run the full tier

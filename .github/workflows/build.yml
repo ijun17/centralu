@@ -25,18 +25,16 @@ on:
       # The merge queue's batches ask for the quick tier (#1259): a change lands after the fast tier, and
       # the full tier runs on main once it has landed (.github/scripts/ci-changes.mjs)
       tier:
-        description: Which tier a manual run is (quick is the merge queue's batch; a release bump or a commit on main still runs in full)
+        description: Which tier a manual run is (quick is the merge queue's batch; a commit on main still runs in full)
         type: choice
         options: [full, quick]
         default: full
 
-# Ordinary pushes to a branch supersede earlier work. A release bump can be tagged while its
-# build still runs, so its commit gets a separate group: a later merge must not cancel the
-# build that publication will wait for (#633). A push to main is never cancelled by the next
+# Ordinary pushes to a branch supersede earlier work. A running main run is never cancelled by a newer push
 # (#1259): changes land after the fast tier, and each main commit's full run is how the merge
 # queue's main guard finds what broke main; the queue holds landing while too many are unfinished.
 concurrency:
-  group: build-${{ github.ref }}${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(release):') && format('-release-{0}', github.sha) || '' }}
+  group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -47,8 +45,7 @@ jobs:
   # A draft pull request (a stack's lower, #1066) runs `changes` alone, and every other job skips.
   #
   # The quick tier, on a pull request: `changes`, `verify`, the Windows unit tests and the macOS tests. The full tier,
-  # every job: a push to main, a manual run (the merge queue's batches; a person on a branch) and a
-  # release bump's pull request (it changes the file that declares the version). The merge queue lands
+  # every job: a push to main, a manual run (the merge queue's batches; a person on a branch). The merge queue lands
   # nothing on the quick tier alone: only from a full run on what lands, which the `full tier` job
   # passing says (skipped on a quick run). Inside the full tier, documents run only `verify`, the
   # `windows tests` jobs and the WebKit UI scenarios; tests skip the bundles, the keeper and the
@@ -416,8 +413,7 @@ jobs:
   # cancels the rest of the run at once. Nothing lands from a run whose `verify` failed, and its e2e shards kept the
   # batch, and the runners every other run waits for, another 10 minutes before the queue heard. Which runs:
   # `changes` says (`fail_fast`, .github/scripts/ci-changes.mjs): a manual run, never a pull request's (quick tier
-  # keeps every job to its end), never main's, never one that changes the version (a release bump's run is never cut
-  # short, docs/releasing.md).
+  # keeps every job to its end), never main's.
   #
   # Its own job, after `verify` has ended, not a step inside it: `verify`'s check stays `failure`, which is how the
   # queue tells this run, `cancelled` as a whole, from one cancelled for nothing (no rerun for a test failure). This

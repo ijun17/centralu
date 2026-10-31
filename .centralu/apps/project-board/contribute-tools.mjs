@@ -147,7 +147,7 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   const list = await privateWords()
   const problems = [...subject.problems.map((p) => `Title: ${p}`), ...filled.problems, ...publicTextProblems(title, list, 'The title'), ...publicTextProblems(filled.body, list, 'The description')]
   const warnings = [...subject.warnings.map((w) => `Title: ${w}`), ...filled.warnings]
-  // The squash commit's subject is "Title (#N)" (merge_when_green): it has to fit too
+  // The squash commit's subject is "Title (#N)" (the queue's squash): it has to fit too
   const squashLength = [...String(title)].length + ' (#9999)'.length
   if (squashLength > conventions.subjectMax) warnings.push(`Merged, the subject "${title} (#N)" will be about ${squashLength} characters, over ${conventions.subjectMax}.`)
   warnings.push(...alsoWarn)

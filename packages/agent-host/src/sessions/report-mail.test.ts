@@ -247,38 +247,6 @@ describe('an owner whose seat cannot read mail', () => {
   })
 })
 
-describe('a process kept from an earlier host', () => {
-  it('whose relayed notice could not be sent is woken by the mailbox, and is not told again by a notice kept for its next message: one report', async () => {
-    const { parent, child } = await parentAndChild()
-    const handles = (w.mgr as unknown as { handles: Map<string, object> }).handles
-    ;(w.mgr as unknown as { adoptedProcesses: WeakSet<object> }).adoptedProcesses.add(handles.get(parent)!)
-    const failOnce = vi.spyOn(handleOf(parent)!, 'send').mockImplementationOnce(() => {
-      throw new Error('the process is gone')
-    })
-    await turnEnds(child, 'all merged')
-    expect(failOnce).toHaveBeenCalled()
-    // Nothing was kept for its next message; the report waits for the mailbox's wake
-    const [report] = reportsIn(threadOf(parent))
-    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: null })
-    await w.mgr.send(parent, 'an ordinary message of the person’s')
-    expect(oldReports(parent, child)).toEqual([])
-  })
-
-  it('is told the old way: its tools are the ones it started with, which may not include mail', async () => {
-    const { parent, child } = await parentAndChild()
-    expect(w.mgr.readsMail(parent)).toBe(true)
-    expect(w.mgr.canReadMail(parent)).toBe(true)
-    const handles = (w.mgr as unknown as { handles: Map<string, object> }).handles
-    ;(w.mgr as unknown as { adoptedProcesses: WeakSet<object> }).adoptedProcesses.add(handles.get(parent)!)
-    expect(w.mgr.readsMail(parent)).toBe(false)
-    // Only how the report is told: the receive rule stays on the seat (the mailbox still writes to it and wakes it)
-    expect(w.mgr.canReadMail(parent)).toBe(true)
-    await turnEnds(child, 'all merged')
-    expect(oldReports(parent, child)).toHaveLength(1)
-    expect(w.store.mail.receiptsOf(reportsIn(threadOf(parent))[0]!.id)[0]).toMatchObject({ deliveredAt: expect.any(Number) })
-  })
-})
-
 describe('work handed on', () => {
   /** The parent's child hands a part of its work on to a child of its own, without waiting */
   async function handOn() {

@@ -30,7 +30,7 @@ describe("the project board's writes and the cards they raise", () => {
   const routine = ['comment', 'file_issue', 'open_pr', 'set_item_fields', 'add_item', 'mark_ready', 'rebase_stack']
   // The owner's call (2026-10-24): "never merge your own pull request" stays a card, and every comment of the gh login
   // is one login, so the owner's own comments cannot be told from the session's
-  const merges = ['merge_when_green', 'queue_merge', 'integrate']
+  const merges = ['queue_merge', 'integrate']
 
   it('declares the bookkeeping writes local, and the host honours it', () => {
     for (const name of local) {

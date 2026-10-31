@@ -166,21 +166,20 @@ pnpm e2e         # Playwright scenarios
 CI runs in two tiers ([docs/releasing.md](docs/releasing.md#what-ci-does)). A pull request runs
 the **quick tier**: `pnpm verify` on Linux and the unit tests on Windows. Everything else (the UI
 scenarios in both engines, the bundles, the keeper, the host's tests on the remotes' Node) is the
-**full tier**, which runs on main and on a release bump. A change lands after the **fast tier**
+**full tier**, which runs on main. A change lands after the **fast tier**
 (#1259, the owner's decision of 2026-10-19): the merge queue (`queue_merge`) lands a pull request
 through a batch built on main that runs the quick tier on what lands, a batch of one included, and
 the e2e shards of both browsers too when the batch holds a change to the screen (#1538, the owner's
 decision of 2026-10-26: `screenFiles` in `.github/scripts/ci-changes.mjs`); the full tier then runs on
 main, after it landed. So, unless your change reaches the screen, nothing has run the UI scenarios, the
 bundles or the keeper on it before it is on main: run `pnpm verify` locally anyway, all of it, before
-you push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
-run was quick.) Runs on main are never cancelled by a newer push, and the queue holds landing while
+you push, and `pnpm e2e` for anything the UI shows. Runs on main are never cancelled by a newer push, and the queue holds landing while
 too many of them are unfinished. When main's full run fails, the board's main guard finds the commit
 that broke it among those since main was last fully green (after rerunning once a job that failed in the runner's own setup, a browser install say, and
 only if it fails again inside the test steps; an infrastructure failure is reported and never reverted), leaving out what it already reverted and
 the reverts (the only one, or by running the full tier on candidates: a suspect by the failed job's
-paths is confirmed that way too), reverts it in a pull request queued at the front of the merge queue
-(never a release bump), files an issue with the failure and tells the session that queued it: fix it
+paths is confirmed that way too), reverts it in a pull request queued at the front of the merge queue,
+files an issue with the failure and tells the session that queued it: fix it
 on a new branch and queue it again. A release still needs a fully green commit of main. To run the
 full tier on your branch before queueing it (UI work, a change to the keeper or the bundles):
 

@@ -48,10 +48,12 @@ import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
 import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, keeperProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { missingIcoImages } from './icon-check.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const ICON_ICO = join(ROOT, 'apps/desktop/src-tauri/icons/icon.ico')
 const BUNDLE_ROOT = join(ROOT, 'apps/desktop/src-tauri/target/release/bundle')
 const MAIN_PKG = join(ROOT, 'packaging/npm/centralu')
 
@@ -576,6 +578,11 @@ const TARGETS: Record<string, Target | undefined> = {
       const machine = pe.readUInt16LE(at + 4)
       if (machine !== 0x8664) fail(`not x86-64: PE machine 0x${machine.toString(16)}`)
       console.log('  PE32+ x86-64')
+
+      // (d) the window's icon, the taskbar's and the Start menu's: every image of the repository's icon.ico (#1736)
+      const missing = missingIcoImages(readFileSync(ICON_ICO), readFileSync(exe))
+      if (missing.length) fail(`centralu.exe lacks image(s) ${missing.join(', ')} of ${ICON_ICO}: it was built with another icon`)
+      console.log('  icon.ico embedded')
     },
   },
 }
