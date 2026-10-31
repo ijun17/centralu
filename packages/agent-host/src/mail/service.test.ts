@@ -181,6 +181,28 @@ describe('which kind a sender may post (§3.2)', () => {
     expect(mail.read(thread.id, PERSON, { peek: true }).participants.map((p) => p.address)).toContain(PERSON)
   })
 
+  it('a stranger to a thread is refused as not_participant by every method that acts in it, and an unknown thread comes before a bad address', () => {
+    const { mail } = setup()
+    const { thread } = openBy(mail, assignInput())
+    const id = thread.id
+    const asStranger: Record<string, () => unknown> = {
+      post: () => mail.post(id, S3, { kind: 'note', body: 'x' }),
+      read: () => mail.read(id, S3),
+      handled: () => mail.handled(id, S3),
+      update: () => mail.update(id, S3, { next: 'x' }),
+      addBlocker: () => mail.addBlocker(id, S3, { kind: 'text', text: 'x' }),
+      resolveBlocker: () => mail.resolveBlocker(id, S3, 1),
+      // These two said not_allowed ("only the owner gives work", "gains a member from its owner...") for a stranger
+      assign: () => mail.assign(id, S3, { assignee: S2, body: 'you do it' }),
+      addMember: () => mail.addMember(id, S3, S2),
+    }
+    for (const [method, call] of Object.entries(asStranger)) expect(refusedFor(call), method).toBe('not_participant')
+    // The thread is looked up before the address is read, whichever method is called
+    expect(refusedFor(() => mail.read('missing', 'not an address'))).toBe('not_found')
+    expect(refusedFor(() => mail.handled('missing', 'not an address'))).toBe('not_found')
+    expect(refusedFor(() => mail.post('missing', 'not an address', { kind: 'note', body: 'x' }))).toBe('not_found')
+  })
+
   it('a message posted twice under one dedupe key is stored once and says so; the second sends no receipt', () => {
     const { mail, records } = setup()
     const { thread } = openBy(mail, assignInput())
@@ -397,7 +419,8 @@ describe('how a thread’s state moves (§3.3)', () => {
     const { thread } = openBy(mail, assignInput())
     mail.update(thread.id, S2, { state: 'running' })
     expect(refusedFor(() => mail.assign(thread.id, S2, { assignee: S3, body: 'you do it' }))).toBe('not_allowed')
-    expect(refusedFor(() => mail.assign(thread.id, APP, { assignee: S3, body: 'you do it' }))).toBe('kind_not_allowed')
+    // An app outside the thread is a stranger before anything about its kind
+    expect(refusedFor(() => mail.assign(thread.id, APP, { assignee: S3, body: 'you do it' }))).toBe('not_participant')
     expect(refusedFor(() => mail.assign(thread.id, S1, { assignee: S1, body: 'me' }))).toBe('bad_value')
 
     const moved = mail.assign(thread.id, S1, { assignee: S3, body: 'you do it' })

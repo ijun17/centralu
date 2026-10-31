@@ -8,6 +8,7 @@ import type { ChildRunResult } from '../adapters/contract.js'
 import type { AgentConsents } from './agent-consents.js'
 import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
+import type { DelegationWaits } from './delegation-waits.js'
 import { gigabytes, type MemoryShortfall } from './memory-gate.js'
 import { FILL, namedCall } from './tool-seats.js'
 import { ASK_THE_PERSON, ORCHESTRATOR_PLACE, agentStartPending, agentStartPersonText, orchestratorPlace, type StartProgress } from './start-agent-terms.js'
@@ -25,9 +26,7 @@ function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
 }
 
 /** What a standing request reaches of the delegation flow (`DelegationFlow`): the answer for a child that started */
-export type StandingRequestDelegations = {
-  agentWorking(d: Delegation, arm?: boolean, observing?: boolean): ChildRunResult
-}
+export type StandingRequestDelegations = Pick<DelegationWaits, 'agentWorking'>
 
 /** What a standing request reaches of the rest of start_agent (`AgentStartFlow`): the child's start, the card read as consent */
 export type StandingRequestSteps = Pick<AgentConsents, 'agentConsentFrom'> & {

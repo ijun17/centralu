@@ -581,11 +581,8 @@ export class MailService {
     rejectUnknown(input, POST_KEYS, 'post')
     return this.run(() => {
       const now = this.now()
-      const thread = this.mustThread(threadId)
-      const sender = this.party(caller)
+      const { thread, party: sender, standing } = this.stand(threadId, caller)
       if (sender.kind === 'centralu') throw refuse('not_allowed', 'Centralu posts with postAsCentralu')
-      const standing = this.standing(thread, caller)
-      if (!standing) throw refuse('not_participant', `${caller} is not in thread ${threadId}`)
       // A retry of a post that was stored gets that post, also when the thread has been closed since: it was not lost
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
@@ -663,12 +660,10 @@ export class MailService {
     rejectUnknown(input, ASSIGN_KEYS, 'assign')
     return this.run(() => {
       const now = this.now()
-      const thread = this.mustThread(threadId)
-      const by = this.party(caller)
+      const { thread, party: by, standing } = this.stand(threadId, caller)
       const assignee = this.party(input.assignee)
       if (assignee.kind === 'centralu') throw refuse('bad_address', 'Centralu cannot be given work')
       if (by.kind === 'app') throw refuse('kind_not_allowed', 'an app does not give work')
-      const standing = this.standing(thread, caller)
       if (standing !== 'owner' && standing !== 'person' && standing !== 'centralu') throw refuse('not_allowed', 'only the owner gives work in a thread')
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
@@ -707,11 +702,9 @@ export class MailService {
   addMember(threadId: string, by: string, address: string): ThreadRow {
     return this.run(() => {
       const now = this.now()
-      const thread = this.mustThread(threadId)
-      this.party(by)
+      const { thread, standing } = this.stand(threadId, by)
       const added = this.party(address)
       if (added.kind === 'centralu') throw refuse('bad_address', 'Centralu cannot be in a thread: it only sends')
-      const standing = this.standing(thread, by)
       if (standing !== 'owner' && standing !== 'assignee' && standing !== 'person' && standing !== 'centralu') {
         throw refuse('not_allowed', 'a thread gains a member from its owner, its assignee or the person')
       }
@@ -732,10 +725,7 @@ export class MailService {
    * after where the reader left off (marked read, unless it only peeks). An app never gets `facts` (§9.4)
    */
   read(threadId: string, reader: string, opts: ReadOptions = {}): ThreadView {
-    const party = this.party(reader)
-    const thread = this.mustThread(threadId)
-    const standing = this.standing(thread, reader)
-    if (!standing) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
+    const { thread, party } = this.stand(threadId, reader)
     const position = this.records.readPosition(thread.id, reader)
     const after = opts.after ?? (opts.all ? 0 : position)
     const tailed = opts.tail !== undefined
@@ -780,9 +770,7 @@ export class MailService {
 
   /** The reader's acknowledgement (§7.6): its receipts up to `upTo` (all by default) are handled, and read with them */
   handled(threadId: string, reader: string, upTo?: number): number {
-    this.party(reader)
-    const thread = this.mustThread(threadId)
-    if (!this.standing(thread, reader)) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
+    const { thread } = this.stand(threadId, reader)
     return this.records.markHandled(thread.id, reader, upTo ?? Number.MAX_SAFE_INTEGER, this.now())
   }
 
@@ -810,10 +798,7 @@ export class MailService {
     let afterClose: (() => void) | undefined
     const result = this.run(() => {
       const now = this.now()
-      const thread = this.mustThread(threadId)
-      this.party(by)
-      const standing = this.standing(thread, by)
-      if (!standing) throw refuse('not_participant', `${by} is not in thread ${threadId}`)
+      const { thread, standing } = this.stand(threadId, by)
       if (!mayEditTask(standing)) throw refuse('not_allowed', 'a member of a thread posts in it; the task is not theirs to change')
       this.assertWritable(thread)
 
@@ -936,10 +921,7 @@ id: ${sessionIdOf(assignee)}` : ''
     rejectUnknown(input, BLOCKER_KEYS, 'blocker')
     return this.run(() => {
       const now = this.now()
-      const thread = this.mustThread(threadId)
-      this.party(by)
-      const standing = this.standing(thread, by)
-      if (!standing) throw refuse('not_participant', `${by} is not in thread ${threadId}`)
+      const { thread, standing } = this.stand(threadId, by)
       if (!mayEditTask(standing)) throw refuse('not_allowed', 'a member of a thread cannot block it')
       this.assertWritable(thread)
       if (!BLOCKER_KINDS.includes(input.kind)) throw refuse('bad_value', `unknown blocker kind ${String(input.kind)}`)
@@ -986,10 +968,7 @@ id: ${sessionIdOf(assignee)}` : ''
   /** Resolves a blocker. The last one resolving restores the state the thread had before it was blocked (§3.3) */
   resolveBlocker(threadId: string, by: string, n: number): ThreadRow {
     return this.run(() => {
-      const thread = this.mustThread(threadId)
-      this.party(by)
-      const standing = this.standing(thread, by)
-      if (!standing) throw refuse('not_participant', `${by} is not in thread ${threadId}`)
+      const { thread, standing } = this.stand(threadId, by)
       if (!mayEditTask(standing)) throw refuse('not_allowed', 'a member of a thread cannot unblock it')
       this.assertWritable(thread)
       return this.resolveInner(thread, n, by)
@@ -1935,6 +1914,15 @@ id: ${sessionIdOf(assignee)}` : ''
       throw refuse('not_local', `${address} is on another host: mail across machines is not built yet`)
     }
     return party
+  }
+
+  /** The thread, the party `by` and what it is in the thread: the guard every method that acts in a thread starts with, so one cause gets one code whichever method is called */
+  private stand(threadId: string, by: string): { thread: ThreadRow; party: Party; standing: Standing } {
+    const thread = this.mustThread(threadId)
+    const party = this.party(by)
+    const standing = this.standing(thread, by)
+    if (!standing) throw refuse('not_participant', `${by} is not in thread ${threadId}`)
+    return { thread, party, standing }
   }
 
   private mustThread(id: string): ThreadRow {

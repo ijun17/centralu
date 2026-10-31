@@ -12,6 +12,7 @@ import type {
 } from '@cc/protocol'
 import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
 import type { DelegationHost } from './delegation-host.js'
+import type { DelegationWaits } from './delegation-waits.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
 import { AgentStartGates } from './agent-start-gates.js'
 import { AgentConsents } from './agent-consents.js'
@@ -63,9 +64,8 @@ function startAgentLate(progress: StartProgress): ChildRunResult {
 }
 
 /** What start_agent reaches of the rest of the delegation flow (`DelegationFlow`): the child's run, its wait, its answers */
-export type StartAgentDelegations = {
+export type StartAgentDelegations = Pick<DelegationWaits, 'agentWorking'> & {
   startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent?: boolean, joinedTurn?: boolean): Delegation
-  agentWorking(d: Delegation, arm?: boolean, observing?: boolean): ChildRunResult
   awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing?: boolean, boundMs?: number): Promise<ChildRunResult>
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined
   /** start_agent on a linked machine (#1038) */
