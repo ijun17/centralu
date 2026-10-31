@@ -956,7 +956,10 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       const revoked = await cli(d, ['--revoke', String(paired.credential)])
       expect(revoked.code).toBe(0)
       // And says what the host does with a connection open with it (#1405 review: it said such a one stays)
-      expect(revoked.stderr).toContain('closes a connection already open with it within a second')
+      expect(revoked.stderr).toContain(
+        `withdrew ${String(paired.credential)}. A running host refuses its next hello with it and closes a connection already open with it within a second.
+`,
+      )
       await expect(hello(port, String(paired.token))).rejects.toThrow(/closed 4001/)
 
       const second = serve(d, [])
@@ -977,6 +980,16 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000 * SLOW,
   )
+
+  it('--revoke of an id nothing has says so, names the file and where the ids are listed, and exits 1', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const revoked = await cli(d, ['--revoke', 'deadbeef'])
+    expect(revoked.code).toBe(1)
+    expect(revoked.line).toMatchObject({ v: 1, revoked: false, id: 'deadbeef' })
+    expect(revoked.stderr).toContain(`no credential deadbeef in ${join(d, SERVE_STATE_FILE)}; --connection lists them under others.
+`)
+  })
 
   /*
    * #1405 review: the host's main.ts hands HostServer the hook that records each full hello, and hands
