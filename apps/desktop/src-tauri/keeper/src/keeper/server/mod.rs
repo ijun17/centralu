@@ -77,7 +77,7 @@ use self::start::{missing_option, EXIT_USAGE};
 pub(super) use self::switch::{begin_switch, host_dirs_in_use};
 pub(super) use self::windows::{adopt_window, WINDOW_WRITE_TIMEOUT};
 // What the moved parts name as `super::…` (the keeper module itself).
-use super::{appimage, data_dir, exe, prepare_default_dir};
+use super::{appimage, data_dir, exe};
 use self::host::*;
 use self::switch::*;
 use self::windows::*;

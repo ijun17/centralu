@@ -41,7 +41,7 @@ agent-host/src/
 ├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ os.ts                # what differs between OSes, asked by name (architecture.md §2)
-├─ data-dir.ts          # locating and migrating the data directory
+├─ data-dir.ts          # locating the data directory
 ├─ idle.ts              # the one rule for "is anything running a person would lose" (#352)
 ├─ updates.ts           # update checks, installing, "apply automatically when idle"; update-apply.ts: an agent's apply (#665)
 ├─ agent-versions.ts    # moving sessions to a newly installed agent CLI (#297); cli-version.ts finds the version
@@ -2331,10 +2331,6 @@ was never told of the earlier (#368). Before, pushes were blocking writes under 
 so a window that stopped reading held every push, request and host status for up to 5 s at each change. A keeper
 handoff lets every writer send what it queued, then stops them before the windows' sockets change hands.
 
-**The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
-pre-rename folder to the new name by the same rule as `data-dir.ts`: the host leaves a legacy folder alone once
-the new one exists, so creating `~/.centralu` first (for `keeper.log` or the socket) would strand the data.
-
 **One keeper per data folder.** `flock` on `<data>/keeper.lock`, released by the OS however the keeper ends.
 A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
 predecessor holds the lock but does not answer (on its way out) waits up to 15 s for it.
@@ -3844,8 +3840,11 @@ step against:
    column, and the next start, finding it, skipped the rest of the step for good. `VACUUM` cannot run in a
    transaction, so a step queues it for after its commit and records in that commit that it is owed (a `vacuum_owed`
    row in `app_settings`, deleted once the vacuum has run or failed; `vacuumAfterStep`). A host stopped during the
-   vacuum leaves the row, and the next open vacuums, or, in a swap, `runDeferred` does. v10 switches `foreign_keys`,
-   which SQLite ignores inside a transaction, and commits on its own (`ownTransaction`), as one unit by itself.
+   vacuum leaves the row, and the next open vacuums, or, in a swap, `runDeferred` does.
+7. **New stores start from v27 (#1143).** Steps v2 to v27 are one step now, which makes of a new store what they
+   made, in their order, so it ends with the same tables, columns and SQL as before (`store-new.golden.json`). A
+   store between v1 and v26 is refused before anything touches it ("too old for this one to update", exit 1); every
+   store in use was past v27 when they went. The table below still lists the steps a store at v27 went through.
 
 | Steps | What they do | Older build |
 |---|---|---|

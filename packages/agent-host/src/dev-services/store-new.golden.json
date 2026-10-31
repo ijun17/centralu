@@ -1,0 +1,1332 @@
+{
+ "userVersion": 64,
+ "master": [
+  {
+   "type": "index",
+   "name": "idx_app_run_records_app",
+   "tbl_name": "app_run_records",
+   "sql": "CREATE INDEX idx_app_run_records_app ON app_run_records(app_id, project_id, started_at)"
+  },
+  {
+   "type": "index",
+   "name": "idx_app_runs_app",
+   "tbl_name": "app_runs",
+   "sql": "CREATE INDEX idx_app_runs_app ON app_runs(app_id, project_id, created_at)"
+  },
+  {
+   "type": "index",
+   "name": "idx_app_runs_parent",
+   "tbl_name": "app_runs",
+   "sql": "CREATE INDEX idx_app_runs_parent ON app_runs(parent_run_id)"
+  },
+  {
+   "type": "index",
+   "name": "idx_sessions_project",
+   "tbl_name": "sessions",
+   "sql": "CREATE INDEX idx_sessions_project ON sessions(project_id)"
+  },
+  {
+   "type": "index",
+   "name": "idx_usage_buckets_session",
+   "tbl_name": "usage_buckets",
+   "sql": "CREATE INDEX idx_usage_buckets_session ON usage_buckets(session_id)"
+  },
+  {
+   "type": "index",
+   "name": "idx_usage_readings_at",
+   "tbl_name": "usage_readings",
+   "sql": "CREATE INDEX idx_usage_readings_at ON usage_readings(at)"
+  },
+  {
+   "type": "index",
+   "name": "mail_messages_dedupe",
+   "tbl_name": "mail_messages",
+   "sql": "CREATE INDEX mail_messages_dedupe ON mail_messages(sender, dedupe_key) WHERE dedupe_key IS NOT NULL"
+  },
+  {
+   "type": "index",
+   "name": "mail_participants_address",
+   "tbl_name": "mail_participants",
+   "sql": "CREATE INDEX mail_participants_address ON mail_participants(address)"
+  },
+  {
+   "type": "index",
+   "name": "mail_receipts_pending",
+   "tbl_name": "mail_receipts",
+   "sql": "CREATE INDEX mail_receipts_pending ON mail_receipts(recipient, due_at) WHERE delivered_at IS NULL"
+  },
+  {
+   "type": "index",
+   "name": "mail_threads_state",
+   "tbl_name": "mail_threads",
+   "sql": "CREATE INDEX mail_threads_state ON mail_threads(state, updated_at)"
+  },
+  {
+   "type": "index",
+   "name": "mail_turns_open",
+   "tbl_name": "mail_turns",
+   "sql": "CREATE INDEX mail_turns_open ON mail_turns(thread_id) WHERE ended_at IS NULL"
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_agent_start_requests_1",
+   "tbl_name": "agent_start_requests",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_permissions_1",
+   "tbl_name": "app_permissions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_run_failures_1",
+   "tbl_name": "app_run_failures",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_run_messages_1",
+   "tbl_name": "app_run_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_run_records_1",
+   "tbl_name": "app_run_records",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_run_subagent_messages_1",
+   "tbl_name": "app_run_subagent_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_runs_1",
+   "tbl_name": "app_runs",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_settings_1",
+   "tbl_name": "app_settings",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_command_cache_1",
+   "tbl_name": "command_cache",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_commit_sessions_1",
+   "tbl_name": "commit_sessions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_delegated_turns_1",
+   "tbl_name": "delegated_turns",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_grid_layout_1",
+   "tbl_name": "grid_layout",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_grid_panels_1",
+   "tbl_name": "grid_panels",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_linked_machines_1",
+   "tbl_name": "linked_machines",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_linked_machines_2",
+   "tbl_name": "linked_machines",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_machine_ask_consents_1",
+   "tbl_name": "machine_ask_consents",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_machine_headers_1",
+   "tbl_name": "machine_headers",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_blockers_1",
+   "tbl_name": "mail_blockers",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_1",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_2",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_3",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_participants_1",
+   "tbl_name": "mail_participants",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_receipts_1",
+   "tbl_name": "mail_receipts",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_threads_1",
+   "tbl_name": "mail_threads",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_turns_1",
+   "tbl_name": "mail_turns",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_messages_1",
+   "tbl_name": "messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_project_consents_1",
+   "tbl_name": "project_consents",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_projects_1",
+   "tbl_name": "projects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_projects_2",
+   "tbl_name": "projects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_queued_requests_1",
+   "tbl_name": "queued_requests",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_report_marks_1",
+   "tbl_name": "report_marks",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_sessions_1",
+   "tbl_name": "sessions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_subagent_messages_1",
+   "tbl_name": "subagent_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_usage_buckets_1",
+   "tbl_name": "usage_buckets",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_usage_local_totals_1",
+   "tbl_name": "usage_local_totals",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_usage_readings_1",
+   "tbl_name": "usage_readings",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "subagent_messages_trash",
+   "tbl_name": "subagent_messages",
+   "sql": "CREATE INDEX subagent_messages_trash ON subagent_messages(session_id, trashed_at, parent_call_id)"
+  },
+  {
+   "type": "table",
+   "name": "agent_start_requests",
+   "tbl_name": "agent_start_requests",
+   "sql": "CREATE TABLE agent_start_requests (\n              request_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              request           TEXT NOT NULL,\n              asked_at          INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_permissions",
+   "tbl_name": "app_permissions",
+   "sql": "CREATE TABLE app_permissions (\n              app_key    TEXT NOT NULL,\n              project_id TEXT,\n              capability TEXT NOT NULL,\n              text       TEXT NOT NULL,\n              decision   TEXT NOT NULL,\n              uses_stamp TEXT NOT NULL,\n              decided_at INTEGER NOT NULL,\n              PRIMARY KEY (app_key, capability)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_run_failures",
+   "tbl_name": "app_run_failures",
+   "sql": "CREATE TABLE app_run_failures (\n              run_id     TEXT PRIMARY KEY,\n              project_id TEXT,\n              app_id     TEXT NOT NULL,\n              args       TEXT NOT NULL,\n              result     TEXT,\n              created_at INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_run_messages",
+   "tbl_name": "app_run_messages",
+   "sql": "CREATE TABLE app_run_messages (\n              run_id  TEXT NOT NULL,\n              seq     INTEGER NOT NULL,\n              role    TEXT NOT NULL,\n              kind    TEXT NOT NULL,\n              payload TEXT NOT NULL,\n              ts      INTEGER NOT NULL,\n              PRIMARY KEY (run_id, seq)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_run_records",
+   "tbl_name": "app_run_records",
+   "sql": "CREATE TABLE app_run_records (\n              run_id       TEXT PRIMARY KEY,\n              project_id   TEXT,\n              project_name TEXT,\n              app_id       TEXT NOT NULL,\n              app_name     TEXT NOT NULL,\n              session_id   TEXT NOT NULL,\n              session_name TEXT NOT NULL,\n              tool         TEXT NOT NULL,\n              status       TEXT NOT NULL,\n              duration_ms  INTEGER,\n              tokens_in    INTEGER,\n              tokens_out   INTEGER,\n              request      TEXT NOT NULL,\n              answer       TEXT NOT NULL,\n              output       TEXT,\n              started_at   INTEGER NOT NULL,\n              kept_at      INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_run_subagent_messages",
+   "tbl_name": "app_run_subagent_messages",
+   "sql": "CREATE TABLE app_run_subagent_messages (\n              run_id         TEXT NOT NULL,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (run_id, parent_call_id, seq)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_runs",
+   "tbl_name": "app_runs",
+   "sql": "CREATE TABLE app_runs (\n              id                TEXT PRIMARY KEY,\n              project_id        TEXT,\n              app_id            TEXT NOT NULL,\n              tool              TEXT NOT NULL,\n              caller_kind       TEXT NOT NULL,\n              caller_session_id TEXT,\n              parent_run_id     TEXT,\n              status            TEXT NOT NULL,\n              duration_ms       INTEGER,\n              args_digest       TEXT NOT NULL,\n              args_summary      TEXT NOT NULL,\n              error             TEXT,\n              created_at        INTEGER NOT NULL\n            , kind TEXT NOT NULL DEFAULT 'tool', session_id TEXT, tokens_in INTEGER, tokens_out INTEGER, request TEXT, answer TEXT, output TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "app_settings",
+   "tbl_name": "app_settings",
+   "sql": "CREATE TABLE app_settings (\n    key   TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n  )"
+  },
+  {
+   "type": "table",
+   "name": "approval_rules",
+   "tbl_name": "approval_rules",
+   "sql": "CREATE TABLE approval_rules (\n  id         INTEGER PRIMARY KEY AUTOINCREMENT,\n  scope      TEXT NOT NULL,\n  project_id TEXT,\n  session_id TEXT,\n  matcher    TEXT NOT NULL,\n  decision   TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "command_cache",
+   "tbl_name": "command_cache",
+   "sql": "CREATE TABLE command_cache (\n              tool TEXT NOT NULL,\n              cwd TEXT NOT NULL,\n              commands TEXT NOT NULL,\n              updated_at INTEGER NOT NULL,\n              PRIMARY KEY (tool, cwd)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "commit_sessions",
+   "tbl_name": "commit_sessions",
+   "sql": "CREATE TABLE commit_sessions (\n  project_id TEXT NOT NULL,\n  sha        TEXT NOT NULL,\n  session_id TEXT NOT NULL,\n  ts         INTEGER NOT NULL,\n  PRIMARY KEY (project_id, sha)\n)"
+  },
+  {
+   "type": "table",
+   "name": "delegated_turns",
+   "tbl_name": "delegated_turns",
+   "sql": "CREATE TABLE delegated_turns (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              started_at        INTEGER NOT NULL,\n              told_cards        TEXT NOT NULL DEFAULT '',\n              turn_id           TEXT NOT NULL DEFAULT ''\n            )"
+  },
+  {
+   "type": "table",
+   "name": "grid_layout",
+   "tbl_name": "grid_layout",
+   "sql": "CREATE TABLE grid_layout (\n                panel_key  TEXT PRIMARY KEY,\n                kind       TEXT NOT NULL CHECK (kind IN ('session', 'app')),\n                session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,\n                project_id TEXT,\n                app_id     TEXT,\n                position   INTEGER NOT NULL\n              , span_cols INTEGER, span_rows INTEGER, remote_session_id TEXT, remote_app_id TEXT, app_machine TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "grid_panels",
+   "tbl_name": "grid_panels",
+   "sql": "CREATE TABLE grid_panels (\n              session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,\n              position   INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "linked_machines",
+   "tbl_name": "linked_machines",
+   "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , connect TEXT, asks INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+   "type": "table",
+   "name": "machine_ask_consents",
+   "tbl_name": "machine_ask_consents",
+   "sql": "CREATE TABLE machine_ask_consents (\n              machine_id   TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,\n              session_id   TEXT NOT NULL,\n              session_name TEXT NOT NULL,\n              project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              decided_at   INTEGER NOT NULL,\n              PRIMARY KEY (machine_id, session_id, project_id)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "machine_headers",
+   "tbl_name": "machine_headers",
+   "sql": "CREATE TABLE machine_headers (\n              machine_id TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,\n              kind       TEXT NOT NULL CHECK (kind IN ('session', 'project')),\n              item_id    TEXT NOT NULL,\n              info       TEXT NOT NULL,\n              position   INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (machine_id, kind, item_id)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_blockers",
+   "tbl_name": "mail_blockers",
+   "sql": "CREATE TABLE mail_blockers (\n              thread_id   TEXT NOT NULL,\n              n           INTEGER NOT NULL,\n              kind        TEXT NOT NULL,\n              ref         TEXT,\n              text        TEXT NOT NULL,\n              resolved_at INTEGER,\n              PRIMARY KEY (thread_id, n)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_messages",
+   "tbl_name": "mail_messages",
+   "sql": "CREATE TABLE mail_messages (\n              id          TEXT PRIMARY KEY,\n              thread_id   TEXT NOT NULL,\n              seq         INTEGER NOT NULL,\n              home_seq    INTEGER,\n              sender      TEXT NOT NULL,\n              kind        TEXT NOT NULL,\n              urgent      INTEGER NOT NULL DEFAULT 0,\n              needs_owner INTEGER NOT NULL DEFAULT 0,\n              wake        TEXT,\n              reply_to    TEXT,\n              body        TEXT NOT NULL,\n              facts       TEXT NOT NULL DEFAULT '{}',\n              dedupe_key  TEXT,\n              created_at  INTEGER NOT NULL,\n              UNIQUE (thread_id, seq),\n              UNIQUE (thread_id, sender, dedupe_key)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_participants",
+   "tbl_name": "mail_participants",
+   "sql": "CREATE TABLE mail_participants (\n              thread_id TEXT NOT NULL,\n              address   TEXT NOT NULL,\n              role      TEXT NOT NULL,\n              joined_at INTEGER NOT NULL,\n              left_at   INTEGER,\n              read_seq  INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (thread_id, address)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_receipts",
+   "tbl_name": "mail_receipts",
+   "sql": "CREATE TABLE mail_receipts (\n              message_id   TEXT NOT NULL,\n              recipient    TEXT NOT NULL,\n              due_at       INTEGER NOT NULL,\n              attempt_at   INTEGER,\n              delivered_at INTEGER,\n              read_at      INTEGER,\n              handled_at   INTEGER,\n              held         TEXT,\n              attempts     INTEGER NOT NULL DEFAULT 0,\n              last_error   TEXT,\n              PRIMARY KEY (message_id, recipient)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_threads",
+   "tbl_name": "mail_threads",
+   "sql": "CREATE TABLE mail_threads (\n              id          TEXT PRIMARY KEY,\n              home        TEXT NOT NULL,\n              project_id  TEXT,\n              subject     TEXT NOT NULL,\n              origin      TEXT NOT NULL,\n              depth       INTEGER NOT NULL DEFAULT 0,\n              parent_id   TEXT,\n              follows     TEXT,\n              state       TEXT NOT NULL,\n              outcome     TEXT,\n              owner       TEXT NOT NULL,\n              assignee    TEXT,\n              next_step   TEXT,\n              links       TEXT NOT NULL DEFAULT '{}',\n              rev         INTEGER NOT NULL DEFAULT 0,\n              pinned_at   INTEGER,\n              created_at  INTEGER NOT NULL,\n              updated_at  INTEGER NOT NULL,\n              state_since INTEGER NOT NULL,\n              done_at     INTEGER\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_turns",
+   "tbl_name": "mail_turns",
+   "sql": "CREATE TABLE mail_turns (\n              session_id TEXT NOT NULL,\n              turn_seq   INTEGER NOT NULL,\n              thread_id  TEXT,\n              started_by TEXT NOT NULL,\n              started_at INTEGER NOT NULL,\n              ended_at   INTEGER,\n              outcome    TEXT,\n              PRIMARY KEY (session_id, turn_seq)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "messages",
+   "tbl_name": "messages",
+   "sql": "CREATE TABLE messages (\n  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n  seq        INTEGER NOT NULL,\n  role       TEXT NOT NULL,\n  kind       TEXT NOT NULL,\n  payload    TEXT NOT NULL,\n  ts         INTEGER NOT NULL,\n  PRIMARY KEY (session_id, seq)\n)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts",
+   "tbl_name": "messages_fts",
+   "sql": "CREATE VIRTUAL TABLE messages_fts USING fts5(\n          body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'\n        )"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_config",
+   "tbl_name": "messages_fts_config",
+   "sql": "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_content",
+   "tbl_name": "messages_fts_content",
+   "sql": "CREATE TABLE 'messages_fts_content'(id INTEGER PRIMARY KEY, c0, c1, c2)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_data",
+   "tbl_name": "messages_fts_data",
+   "sql": "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_docsize",
+   "tbl_name": "messages_fts_docsize",
+   "sql": "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_idx",
+   "tbl_name": "messages_fts_idx",
+   "sql": "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+  },
+  {
+   "type": "table",
+   "name": "project_consents",
+   "tbl_name": "project_consents",
+   "sql": "CREATE TABLE project_consents (\n              from_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              to_project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              kind            TEXT NOT NULL,\n              decided_at      INTEGER NOT NULL,\n              PRIMARY KEY (from_project_id, to_project_id, kind)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "projects",
+   "tbl_name": "projects",
+   "sql": "CREATE TABLE projects (\n  id            TEXT PRIMARY KEY,\n  path          TEXT NOT NULL UNIQUE,\n  name          TEXT NOT NULL,\n  default_tool  TEXT NOT NULL DEFAULT 'claude',\n  -- The default model and effort per tool (#107): {\"codex\":{\"model\":\"gpt-5.6\",\"effort\":\"high\"}, ...}.\n  -- This is where the scalars default_model/default_effort used to be — a model name is a tool's\n  -- own vocabulary, so remembering a single one with no tool attached meant a session for a\n  -- different tool inherited that name and died on its first turn.\n  default_models TEXT,\n  sidebar_order INTEGER NOT NULL DEFAULT 0,\n  created_at    INTEGER NOT NULL\n, commands TEXT NOT NULL DEFAULT '[]', worktree_setup TEXT, worktree_manager TEXT, trusted INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+   "type": "table",
+   "name": "queued_requests",
+   "tbl_name": "queued_requests",
+   "sql": "CREATE TABLE queued_requests (\n              id                TEXT PRIMARY KEY,\n              session_id        TEXT NOT NULL,\n              caller_session_id TEXT NOT NULL,\n              via               TEXT NOT NULL,\n              text              TEXT NOT NULL,\n              queued_at         INTEGER NOT NULL,\n              delivering_at     INTEGER\n            , opened_by_auto INTEGER)"
+  },
+  {
+   "type": "table",
+   "name": "report_marks",
+   "tbl_name": "report_marks",
+   "sql": "CREATE TABLE report_marks (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              marked_at         INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "sessions",
+   "tbl_name": "sessions",
+   "sql": "CREATE TABLE sessions (\n  id            TEXT PRIMARY KEY,\n  -- The orchestrator does not belong to any project (one per app, crossing all projects).\n  -- Making this NOT NULL would force it to hang off some project, and deleting that project\n  -- would kill it too via CASCADE.\n  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n  tool          TEXT NOT NULL,\n  external_id   TEXT,\n  name          TEXT NOT NULL,\n  auto_named    INTEGER NOT NULL DEFAULT 1,\n  state         TEXT NOT NULL DEFAULT 'idle',\n  is_orchestrator INTEGER NOT NULL DEFAULT 0,\n  last_read_seq INTEGER NOT NULL DEFAULT 0,\n  waiting_since INTEGER,\n  created_at    INTEGER NOT NULL\n, touched_paths TEXT NOT NULL DEFAULT '[]', model TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal', imported_from TEXT, effort TEXT, sidebar_order INTEGER NOT NULL DEFAULT 0, worktree_path TEXT, worktree_branch TEXT, cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, verbosity TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "sqlite_sequence",
+   "tbl_name": "sqlite_sequence",
+   "sql": "CREATE TABLE sqlite_sequence(name,seq)"
+  },
+  {
+   "type": "table",
+   "name": "subagent_messages",
+   "tbl_name": "subagent_messages",
+   "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL, trashed_at INTEGER,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "usage_buckets",
+   "tbl_name": "usage_buckets",
+   "sql": "CREATE TABLE usage_buckets (\n              hour           INTEGER NOT NULL,\n              session_id     TEXT NOT NULL,\n              project_id     TEXT NOT NULL DEFAULT '',\n              tool           TEXT NOT NULL,\n              model          TEXT NOT NULL DEFAULT '',\n              machine        TEXT NOT NULL DEFAULT '',\n              requests       INTEGER NOT NULL DEFAULT 0,\n              input          INTEGER NOT NULL DEFAULT 0,\n              cache_read     INTEGER NOT NULL DEFAULT 0,\n              cache_write    INTEGER NOT NULL DEFAULT 0,\n              cache_write_5m INTEGER NOT NULL DEFAULT 0,\n              cache_write_1h INTEGER NOT NULL DEFAULT 0,\n              output         INTEGER NOT NULL DEFAULT 0,\n              rebuilds       INTEGER NOT NULL DEFAULT 0,\n              causes         TEXT NOT NULL DEFAULT '{}', rebuild_tokens INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (hour, session_id, project_id, tool, model, machine)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "usage_local_totals",
+   "tbl_name": "usage_local_totals",
+   "sql": "CREATE TABLE usage_local_totals (\n              tool   TEXT PRIMARY KEY,\n              at     INTEGER NOT NULL,\n              totals TEXT NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "usage_readings",
+   "tbl_name": "usage_readings",
+   "sql": "CREATE TABLE usage_readings (\n              tool       TEXT NOT NULL,\n              account    TEXT NOT NULL,\n              window_id  TEXT NOT NULL,\n              scope      TEXT NOT NULL DEFAULT '',\n              label      TEXT NOT NULL DEFAULT '',\n              at         INTEGER NOT NULL,\n              percent    REAL NOT NULL,\n              resets_at  INTEGER,\n              PRIMARY KEY (tool, account, window_id, scope, at)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "workspace",
+   "tbl_name": "workspace",
+   "sql": "CREATE TABLE workspace (\n  id         INTEGER PRIMARY KEY CHECK (id = 1),\n  layout     TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+  }
+ ],
+ "indexes": [
+  {
+   "name": "idx_app_run_records_app",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 3,
+     "name": "app_id"
+    },
+    {
+     "seqno": 1,
+     "cid": 1,
+     "name": "project_id"
+    },
+    {
+     "seqno": 2,
+     "cid": 15,
+     "name": "started_at"
+    }
+   ]
+  },
+  {
+   "name": "idx_app_runs_app",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 2,
+     "name": "app_id"
+    },
+    {
+     "seqno": 1,
+     "cid": 1,
+     "name": "project_id"
+    },
+    {
+     "seqno": 2,
+     "cid": 12,
+     "name": "created_at"
+    }
+   ]
+  },
+  {
+   "name": "idx_app_runs_parent",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 6,
+     "name": "parent_run_id"
+    }
+   ]
+  },
+  {
+   "name": "idx_sessions_project",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 1,
+     "name": "project_id"
+    }
+   ]
+  },
+  {
+   "name": "idx_usage_buckets_session",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 1,
+     "name": "session_id"
+    }
+   ]
+  },
+  {
+   "name": "idx_usage_readings_at",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 5,
+     "name": "at"
+    }
+   ]
+  },
+  {
+   "name": "mail_messages_dedupe",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 4,
+     "name": "sender"
+    },
+    {
+     "seqno": 1,
+     "cid": 12,
+     "name": "dedupe_key"
+    }
+   ]
+  },
+  {
+   "name": "mail_participants_address",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 1,
+     "name": "address"
+    }
+   ]
+  },
+  {
+   "name": "mail_receipts_pending",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 1,
+     "name": "recipient"
+    },
+    {
+     "seqno": 1,
+     "cid": 2,
+     "name": "due_at"
+    }
+   ]
+  },
+  {
+   "name": "mail_threads_state",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 8,
+     "name": "state"
+    },
+    {
+     "seqno": 1,
+     "cid": 17,
+     "name": "updated_at"
+    }
+   ]
+  },
+  {
+   "name": "mail_turns_open",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 2,
+     "name": "thread_id"
+    }
+   ]
+  },
+  {
+   "name": "subagent_messages_trash",
+   "list": [
+    {
+     "seqno": 0,
+     "cid": 0,
+     "name": "session_id"
+    },
+    {
+     "seqno": 1,
+     "cid": 7,
+     "name": "trashed_at"
+    },
+    {
+     "seqno": 2,
+     "cid": 1,
+     "name": "parent_call_id"
+    }
+   ]
+  }
+ ],
+ "foreignKeys": {
+  "agent_start_requests": [],
+  "app_permissions": [],
+  "app_run_failures": [],
+  "app_run_messages": [],
+  "app_run_records": [],
+  "app_run_subagent_messages": [],
+  "app_runs": [],
+  "app_settings": [],
+  "approval_rules": [],
+  "command_cache": [],
+  "commit_sessions": [],
+  "delegated_turns": [],
+  "grid_layout": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "sessions",
+    "from": "session_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "grid_panels": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "sessions",
+    "from": "session_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "linked_machines": [],
+  "machine_ask_consents": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "projects",
+    "from": "project_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   },
+   {
+    "id": 1,
+    "seq": 0,
+    "table": "linked_machines",
+    "from": "machine_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "machine_headers": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "linked_machines",
+    "from": "machine_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "mail_blockers": [],
+  "mail_messages": [],
+  "mail_participants": [],
+  "mail_receipts": [],
+  "mail_threads": [],
+  "mail_turns": [],
+  "messages": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "sessions",
+    "from": "session_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "messages_fts": [],
+  "messages_fts_config": [],
+  "messages_fts_content": [],
+  "messages_fts_data": [],
+  "messages_fts_docsize": [],
+  "messages_fts_idx": [],
+  "project_consents": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "projects",
+    "from": "to_project_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   },
+   {
+    "id": 1,
+    "seq": 0,
+    "table": "projects",
+    "from": "from_project_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "projects": [],
+  "queued_requests": [],
+  "report_marks": [],
+  "sessions": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "projects",
+    "from": "project_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "subagent_messages": [
+   {
+    "id": 0,
+    "seq": 0,
+    "table": "sessions",
+    "from": "session_id",
+    "to": "id",
+    "on_update": "NO ACTION",
+    "on_delete": "CASCADE",
+    "match": "NONE"
+   }
+  ],
+  "usage_buckets": [],
+  "usage_local_totals": [],
+  "usage_readings": [],
+  "workspace": []
+ },
+ "tables": {
+  "agent_start_requests": {
+   "columns": [
+    "request_id TEXT notnull=0 default=null pk=1",
+    "caller_session_id TEXT notnull=1 default=null pk=0",
+    "request TEXT notnull=1 default=null pk=0",
+    "asked_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_permissions": {
+   "columns": [
+    "app_key TEXT notnull=1 default=null pk=1",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "capability TEXT notnull=1 default=null pk=2",
+    "text TEXT notnull=1 default=null pk=0",
+    "decision TEXT notnull=1 default=null pk=0",
+    "uses_stamp TEXT notnull=1 default=null pk=0",
+    "decided_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_run_failures": {
+   "columns": [
+    "run_id TEXT notnull=0 default=null pk=1",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "app_id TEXT notnull=1 default=null pk=0",
+    "args TEXT notnull=1 default=null pk=0",
+    "result TEXT notnull=0 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_run_messages": {
+   "columns": [
+    "run_id TEXT notnull=1 default=null pk=1",
+    "seq INTEGER notnull=1 default=null pk=2",
+    "role TEXT notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default=null pk=0",
+    "payload TEXT notnull=1 default=null pk=0",
+    "ts INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_run_records": {
+   "columns": [
+    "run_id TEXT notnull=0 default=null pk=1",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "project_name TEXT notnull=0 default=null pk=0",
+    "app_id TEXT notnull=1 default=null pk=0",
+    "app_name TEXT notnull=1 default=null pk=0",
+    "session_id TEXT notnull=1 default=null pk=0",
+    "session_name TEXT notnull=1 default=null pk=0",
+    "tool TEXT notnull=1 default=null pk=0",
+    "status TEXT notnull=1 default=null pk=0",
+    "duration_ms INTEGER notnull=0 default=null pk=0",
+    "tokens_in INTEGER notnull=0 default=null pk=0",
+    "tokens_out INTEGER notnull=0 default=null pk=0",
+    "request TEXT notnull=1 default=null pk=0",
+    "answer TEXT notnull=1 default=null pk=0",
+    "output TEXT notnull=0 default=null pk=0",
+    "started_at INTEGER notnull=1 default=null pk=0",
+    "kept_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_run_subagent_messages": {
+   "columns": [
+    "run_id TEXT notnull=1 default=null pk=1",
+    "parent_call_id TEXT notnull=1 default=null pk=2",
+    "seq INTEGER notnull=1 default=null pk=3",
+    "role TEXT notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default=null pk=0",
+    "payload TEXT notnull=1 default=null pk=0",
+    "ts INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_runs": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "app_id TEXT notnull=1 default=null pk=0",
+    "tool TEXT notnull=1 default=null pk=0",
+    "caller_kind TEXT notnull=1 default=null pk=0",
+    "caller_session_id TEXT notnull=0 default=null pk=0",
+    "parent_run_id TEXT notnull=0 default=null pk=0",
+    "status TEXT notnull=1 default=null pk=0",
+    "duration_ms INTEGER notnull=0 default=null pk=0",
+    "args_digest TEXT notnull=1 default=null pk=0",
+    "args_summary TEXT notnull=1 default=null pk=0",
+    "error TEXT notnull=0 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default='tool' pk=0",
+    "session_id TEXT notnull=0 default=null pk=0",
+    "tokens_in INTEGER notnull=0 default=null pk=0",
+    "tokens_out INTEGER notnull=0 default=null pk=0",
+    "request TEXT notnull=0 default=null pk=0",
+    "answer TEXT notnull=0 default=null pk=0",
+    "output TEXT notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "app_settings": {
+   "columns": [
+    "key TEXT notnull=0 default=null pk=1",
+    "value TEXT notnull=1 default=null pk=0"
+   ],
+   "rows": [
+    {
+     "key": "min_reader_version",
+     "value": "56"
+    }
+   ]
+  },
+  "approval_rules": {
+   "columns": [
+    "id INTEGER notnull=0 default=null pk=1",
+    "scope TEXT notnull=1 default=null pk=0",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "session_id TEXT notnull=0 default=null pk=0",
+    "matcher TEXT notnull=1 default=null pk=0",
+    "decision TEXT notnull=1 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "command_cache": {
+   "columns": [
+    "tool TEXT notnull=1 default=null pk=1",
+    "cwd TEXT notnull=1 default=null pk=2",
+    "commands TEXT notnull=1 default=null pk=0",
+    "updated_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "commit_sessions": {
+   "columns": [
+    "project_id TEXT notnull=1 default=null pk=1",
+    "sha TEXT notnull=1 default=null pk=2",
+    "session_id TEXT notnull=1 default=null pk=0",
+    "ts INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "delegated_turns": {
+   "columns": [
+    "session_id TEXT notnull=0 default=null pk=1",
+    "caller_session_id TEXT notnull=1 default=null pk=0",
+    "started_at INTEGER notnull=1 default=null pk=0",
+    "told_cards TEXT notnull=1 default='' pk=0",
+    "turn_id TEXT notnull=1 default='' pk=0"
+   ],
+   "rows": []
+  },
+  "grid_layout": {
+   "columns": [
+    "panel_key TEXT notnull=0 default=null pk=1",
+    "kind TEXT notnull=1 default=null pk=0",
+    "session_id TEXT notnull=0 default=null pk=0",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "app_id TEXT notnull=0 default=null pk=0",
+    "position INTEGER notnull=1 default=null pk=0",
+    "span_cols INTEGER notnull=0 default=null pk=0",
+    "span_rows INTEGER notnull=0 default=null pk=0",
+    "remote_session_id TEXT notnull=0 default=null pk=0",
+    "remote_app_id TEXT notnull=0 default=null pk=0",
+    "app_machine TEXT notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "grid_panels": {
+   "columns": [
+    "session_id TEXT notnull=0 default=null pk=1",
+    "position INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "linked_machines": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "name TEXT notnull=1 default=null pk=0",
+    "ssh_target TEXT notnull=1 default=null pk=0",
+    "shell TEXT notnull=1 default='posix' pk=0",
+    "wsl_distro TEXT notnull=0 default=null pk=0",
+    "command TEXT notnull=0 default=null pk=0",
+    "slot INTEGER notnull=1 default=null pk=0",
+    "added_at INTEGER notnull=1 default=null pk=0",
+    "accepted_versions TEXT notnull=0 default=null pk=0",
+    "connect TEXT notnull=0 default=null pk=0",
+    "asks INTEGER notnull=1 default=0 pk=0"
+   ],
+   "rows": []
+  },
+  "machine_ask_consents": {
+   "columns": [
+    "machine_id TEXT notnull=1 default=null pk=1",
+    "session_id TEXT notnull=1 default=null pk=2",
+    "session_name TEXT notnull=1 default=null pk=0",
+    "project_id TEXT notnull=1 default=null pk=3",
+    "decided_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "machine_headers": {
+   "columns": [
+    "machine_id TEXT notnull=1 default=null pk=1",
+    "kind TEXT notnull=1 default=null pk=2",
+    "item_id TEXT notnull=1 default=null pk=3",
+    "info TEXT notnull=1 default=null pk=0",
+    "position INTEGER notnull=1 default=0 pk=0"
+   ],
+   "rows": []
+  },
+  "mail_blockers": {
+   "columns": [
+    "thread_id TEXT notnull=1 default=null pk=1",
+    "n INTEGER notnull=1 default=null pk=2",
+    "kind TEXT notnull=1 default=null pk=0",
+    "ref TEXT notnull=0 default=null pk=0",
+    "text TEXT notnull=1 default=null pk=0",
+    "resolved_at INTEGER notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "mail_messages": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "thread_id TEXT notnull=1 default=null pk=0",
+    "seq INTEGER notnull=1 default=null pk=0",
+    "home_seq INTEGER notnull=0 default=null pk=0",
+    "sender TEXT notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default=null pk=0",
+    "urgent INTEGER notnull=1 default=0 pk=0",
+    "needs_owner INTEGER notnull=1 default=0 pk=0",
+    "wake TEXT notnull=0 default=null pk=0",
+    "reply_to TEXT notnull=0 default=null pk=0",
+    "body TEXT notnull=1 default=null pk=0",
+    "facts TEXT notnull=1 default='{}' pk=0",
+    "dedupe_key TEXT notnull=0 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "mail_participants": {
+   "columns": [
+    "thread_id TEXT notnull=1 default=null pk=1",
+    "address TEXT notnull=1 default=null pk=2",
+    "role TEXT notnull=1 default=null pk=0",
+    "joined_at INTEGER notnull=1 default=null pk=0",
+    "left_at INTEGER notnull=0 default=null pk=0",
+    "read_seq INTEGER notnull=1 default=0 pk=0"
+   ],
+   "rows": []
+  },
+  "mail_receipts": {
+   "columns": [
+    "message_id TEXT notnull=1 default=null pk=1",
+    "recipient TEXT notnull=1 default=null pk=2",
+    "due_at INTEGER notnull=1 default=null pk=0",
+    "attempt_at INTEGER notnull=0 default=null pk=0",
+    "delivered_at INTEGER notnull=0 default=null pk=0",
+    "read_at INTEGER notnull=0 default=null pk=0",
+    "handled_at INTEGER notnull=0 default=null pk=0",
+    "held TEXT notnull=0 default=null pk=0",
+    "attempts INTEGER notnull=1 default=0 pk=0",
+    "last_error TEXT notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "mail_threads": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "home TEXT notnull=1 default=null pk=0",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "subject TEXT notnull=1 default=null pk=0",
+    "origin TEXT notnull=1 default=null pk=0",
+    "depth INTEGER notnull=1 default=0 pk=0",
+    "parent_id TEXT notnull=0 default=null pk=0",
+    "follows TEXT notnull=0 default=null pk=0",
+    "state TEXT notnull=1 default=null pk=0",
+    "outcome TEXT notnull=0 default=null pk=0",
+    "owner TEXT notnull=1 default=null pk=0",
+    "assignee TEXT notnull=0 default=null pk=0",
+    "next_step TEXT notnull=0 default=null pk=0",
+    "links TEXT notnull=1 default='{}' pk=0",
+    "rev INTEGER notnull=1 default=0 pk=0",
+    "pinned_at INTEGER notnull=0 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0",
+    "updated_at INTEGER notnull=1 default=null pk=0",
+    "state_since INTEGER notnull=1 default=null pk=0",
+    "done_at INTEGER notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "mail_turns": {
+   "columns": [
+    "session_id TEXT notnull=1 default=null pk=1",
+    "turn_seq INTEGER notnull=1 default=null pk=2",
+    "thread_id TEXT notnull=0 default=null pk=0",
+    "started_by TEXT notnull=1 default=null pk=0",
+    "started_at INTEGER notnull=1 default=null pk=0",
+    "ended_at INTEGER notnull=0 default=null pk=0",
+    "outcome TEXT notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "messages": {
+   "columns": [
+    "session_id TEXT notnull=1 default=null pk=1",
+    "seq INTEGER notnull=1 default=null pk=2",
+    "role TEXT notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default=null pk=0",
+    "payload TEXT notnull=1 default=null pk=0",
+    "ts INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "messages_fts": {
+   "columns": [
+    "body  notnull=0 default=null pk=0",
+    "session_id  notnull=0 default=null pk=0",
+    "seq  notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "project_consents": {
+   "columns": [
+    "from_project_id TEXT notnull=1 default=null pk=1",
+    "to_project_id TEXT notnull=1 default=null pk=2",
+    "kind TEXT notnull=1 default=null pk=3",
+    "decided_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "projects": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "path TEXT notnull=1 default=null pk=0",
+    "name TEXT notnull=1 default=null pk=0",
+    "default_tool TEXT notnull=1 default='claude' pk=0",
+    "default_models TEXT notnull=0 default=null pk=0",
+    "sidebar_order INTEGER notnull=1 default=0 pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0",
+    "commands TEXT notnull=1 default='[]' pk=0",
+    "worktree_setup TEXT notnull=0 default=null pk=0",
+    "worktree_manager TEXT notnull=0 default=null pk=0",
+    "trusted INTEGER notnull=1 default=0 pk=0"
+   ],
+   "rows": []
+  },
+  "queued_requests": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "session_id TEXT notnull=1 default=null pk=0",
+    "caller_session_id TEXT notnull=1 default=null pk=0",
+    "via TEXT notnull=1 default=null pk=0",
+    "text TEXT notnull=1 default=null pk=0",
+    "queued_at INTEGER notnull=1 default=null pk=0",
+    "delivering_at INTEGER notnull=0 default=null pk=0",
+    "opened_by_auto INTEGER notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "report_marks": {
+   "columns": [
+    "session_id TEXT notnull=0 default=null pk=1",
+    "caller_session_id TEXT notnull=1 default=null pk=0",
+    "marked_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "sessions": {
+   "columns": [
+    "id TEXT notnull=0 default=null pk=1",
+    "project_id TEXT notnull=0 default=null pk=0",
+    "tool TEXT notnull=1 default=null pk=0",
+    "external_id TEXT notnull=0 default=null pk=0",
+    "name TEXT notnull=1 default=null pk=0",
+    "auto_named INTEGER notnull=1 default=1 pk=0",
+    "state TEXT notnull=1 default='idle' pk=0",
+    "is_orchestrator INTEGER notnull=1 default=0 pk=0",
+    "last_read_seq INTEGER notnull=1 default=0 pk=0",
+    "waiting_since INTEGER notnull=0 default=null pk=0",
+    "created_at INTEGER notnull=1 default=null pk=0",
+    "touched_paths TEXT notnull=1 default='[]' pk=0",
+    "model TEXT notnull=0 default=null pk=0",
+    "permission_preset TEXT notnull=1 default='normal' pk=0",
+    "imported_from TEXT notnull=0 default=null pk=0",
+    "effort TEXT notnull=0 default=null pk=0",
+    "sidebar_order INTEGER notnull=1 default=0 pk=0",
+    "worktree_path TEXT notnull=0 default=null pk=0",
+    "worktree_branch TEXT notnull=0 default=null pk=0",
+    "cwd TEXT notnull=0 default=null pk=0",
+    "context_used INTEGER notnull=0 default=null pk=0",
+    "context_window INTEGER notnull=0 default=null pk=0",
+    "context_exactness TEXT notnull=0 default=null pk=0",
+    "verbosity TEXT notnull=0 default=null pk=0",
+    "service_tier TEXT notnull=0 default=null pk=0",
+    "parent_session_id TEXT notnull=0 default=null pk=0",
+    "worktree_base TEXT notnull=0 default=null pk=0",
+    "scope_session_ids TEXT notnull=0 default=null pk=0",
+    "role_append TEXT notnull=0 default=null pk=0",
+    "app_id TEXT notnull=0 default=null pk=0",
+    "deleted_at INTEGER notnull=0 default=null pk=0",
+    "trash TEXT notnull=0 default=null pk=0",
+    "asked_by_session_id TEXT notnull=0 default=null pk=0",
+    "forked_from_session_id TEXT notnull=0 default=null pk=0",
+    "interruption TEXT notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "subagent_messages": {
+   "columns": [
+    "session_id TEXT notnull=1 default=null pk=1",
+    "parent_call_id TEXT notnull=1 default=null pk=2",
+    "seq INTEGER notnull=1 default=null pk=3",
+    "role TEXT notnull=1 default=null pk=0",
+    "kind TEXT notnull=1 default=null pk=0",
+    "payload TEXT notnull=1 default=null pk=0",
+    "ts INTEGER notnull=1 default=null pk=0",
+    "trashed_at INTEGER notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "usage_buckets": {
+   "columns": [
+    "hour INTEGER notnull=1 default=null pk=1",
+    "session_id TEXT notnull=1 default=null pk=2",
+    "project_id TEXT notnull=1 default='' pk=3",
+    "tool TEXT notnull=1 default=null pk=4",
+    "model TEXT notnull=1 default='' pk=5",
+    "machine TEXT notnull=1 default='' pk=6",
+    "requests INTEGER notnull=1 default=0 pk=0",
+    "input INTEGER notnull=1 default=0 pk=0",
+    "cache_read INTEGER notnull=1 default=0 pk=0",
+    "cache_write INTEGER notnull=1 default=0 pk=0",
+    "cache_write_5m INTEGER notnull=1 default=0 pk=0",
+    "cache_write_1h INTEGER notnull=1 default=0 pk=0",
+    "output INTEGER notnull=1 default=0 pk=0",
+    "rebuilds INTEGER notnull=1 default=0 pk=0",
+    "causes TEXT notnull=1 default='{}' pk=0",
+    "rebuild_tokens INTEGER notnull=1 default=0 pk=0"
+   ],
+   "rows": []
+  },
+  "usage_local_totals": {
+   "columns": [
+    "tool TEXT notnull=0 default=null pk=1",
+    "at INTEGER notnull=1 default=null pk=0",
+    "totals TEXT notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "usage_readings": {
+   "columns": [
+    "tool TEXT notnull=1 default=null pk=1",
+    "account TEXT notnull=1 default=null pk=2",
+    "window_id TEXT notnull=1 default=null pk=3",
+    "scope TEXT notnull=1 default='' pk=4",
+    "label TEXT notnull=1 default='' pk=0",
+    "at INTEGER notnull=1 default=null pk=5",
+    "percent REAL notnull=1 default=null pk=0",
+    "resets_at INTEGER notnull=0 default=null pk=0"
+   ],
+   "rows": []
+  },
+  "workspace": {
+   "columns": [
+    "id INTEGER notnull=0 default=null pk=1",
+    "layout TEXT notnull=1 default=null pk=0",
+    "updated_at INTEGER notnull=1 default=null pk=0"
+   ],
+   "rows": []
+  }
+ }
+}

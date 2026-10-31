@@ -129,35 +129,6 @@ pub fn data_dir_with(dev: bool) -> PathBuf {
     PathBuf::from(home).join(if dev { ".centralu-dev" } else { ".centralu" })
 }
 
-/// Moves the pre-rename data folder to its new name before anything creates the new one.
-///
-/// The host does the same move (`data-dir.ts`), but it leaves both alone when the new folder
-/// already exists. If the keeper created `~/.centralu` for its socket first, the host would find
-/// it there and never move the real data — the exact trap `data-dir.ts` records for an empty
-/// `orchestrator/` folder. So the keeper moves it first, by the same rule.
-pub fn migrate_legacy(home: &Path, dev: bool) -> Option<(PathBuf, PathBuf)> {
-    let from = home.join(if dev { ".control-center-dev" } else { ".control-center" }); // legacy-name
-    let to = home.join(if dev { ".centralu-dev" } else { ".centralu" });
-    if !from.exists() || to.exists() {
-        return None;
-    }
-    std::fs::rename(&from, &to).ok().map(|_| (from, to))
-}
-
-/// Runs `migrate_legacy` when `data` is the default folder (no `CC_DATA_DIR`), before anything
-/// creates it. Both the app (which creates the folder for `keeper.log` before launching the
-/// keeper) and the keeper call this. Returns what was moved, for the log.
-pub fn prepare_default_dir(data: &Path, dev: bool) -> Option<(PathBuf, PathBuf)> {
-    if std::env::var("CC_DATA_DIR").map(|d| !d.trim().is_empty()).unwrap_or(false) {
-        return None;
-    }
-    let home = PathBuf::from(std::env::var("HOME").ok()?);
-    if data != home.join(if dev { ".centralu-dev" } else { ".centralu" }) {
-        return None;
-    }
-    migrate_legacy(&home, dev)
-}
-
 pub fn socket_path(data: &Path) -> PathBuf {
     data.join("keeper.sock")
 }
@@ -458,23 +429,5 @@ mod tests {
         let mut i = quiet(600);
         i.stopping = true;
         assert_eq!(idle_decision(i, DEFAULT_IDLE), None);
-    }
-
-    /// A test's or a person's own CC_DATA_DIR is never treated as the default folder.
-    #[test]
-    fn only_the_default_folder_takes_part_in_the_legacy_move() {
-        assert_eq!(prepare_default_dir(Path::new("/tmp/cc-not-the-default"), false), None);
-    }
-
-    #[test]
-    fn the_legacy_folder_is_moved_before_the_new_one_exists() {
-        let home = std::env::temp_dir().join(format!("cc-keeper-home-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(home.join(".control-center")).unwrap(); // legacy-name
-        std::fs::write(home.join(".control-center/store.db"), "x").unwrap(); // legacy-name
-        assert!(migrate_legacy(&home, false).is_some());
-        assert!(home.join(".centralu/store.db").is_file());
-        assert!(migrate_legacy(&home, false).is_none(), "nothing left to move");
-        let _ = std::fs::remove_dir_all(&home);
     }
 }

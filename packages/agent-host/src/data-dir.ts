@@ -1,53 +1,16 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
+import { DATA_DIR, DATA_DIR_DEV } from '@cc/protocol'
 import { HOST_PLATFORM, modesGuardFiles, type Platform } from './os.js'
 import { canonicalPath } from './dev-services/path-guard.js'
-
-/**
- * Moves the pre-rename data folder to its new name (`~/.control-center` → `~/.centralu`). (legacy-name)
- *
- * **Call exactly once, before opening the DB.** Moving it after opening leaves the open file
- * handle out of sync with the path.
- *
- * This is a `rename`, not a copy — on the same filesystem it completes instantly, and **there is
- * no state where it gets interrupted halfway and leaves half of it behind.** This property matters
- * because a real-world DB of 24MB comes with a folder that also carries WAL and SHM files. A copy
- * would create a state of "a conversation history moved only halfway."
- *
- * @returns true if it actually moved something
- */
-export function migrateLegacyDataDir(from: string, to: string): boolean {
-  /*
-   * **Leave both alone if both exist.**
-   *
-   * The new folder already existing means either the move already happened or this is a fresh
-   * start. Merging the two is not ours to decide — we do not know which conversation history is
-   * the real one. The old folder is left in place so the user can go look at it directly.
-   */
-  if (!existsSync(from) || existsSync(to)) return false
-  try {
-    renameSync(from, to)
-    return true
-  } catch {
-    // Even if the move fails, the app still has to start — it starts empty with the new folder,
-    // and the old one is left behind undamaged.
-    // (This happens when they are on different filesystems, or there is no permission. Better than
-    // dying silently.)
-    return false
-  }
-}
 
 /**
  * The root of the data folder — attachments, the orchestrator home, and worktrees all live under
  * this.
  *
  * **Why it can be overridden by an environment variable:** otherwise tests would write into the
- * user's real home. We actually hit this — a single `pnpm verify` created
- * `~/.centralu/orchestrator`, and that empty folder then tripped the "leave it alone if the new
- * folder already exists" safeguard, **blocking the move of the real data.** Being blocked silently
- * is the worse failure.
+ * user's real home.
  *
  * At startup, the host pins this value as its own data folder (dev and prod diverge here).
  */
@@ -56,11 +19,9 @@ export function dataRoot(): string {
 }
 
 /**
- * Which folder this host keeps its data in (#973), and which legacy folder (if any) is moved into it first.
+ * Which folder this host keeps its data in (#973).
  *
- * One rule: `CC_DATA_DIR` when it is set, else `~/.centralu` (`~/.centralu-dev` when `CC_DEV=1`). The legacy folder
- * is moved only into the default folder: a folder the person or a test chose is theirs, and moving the real
- * `~/.control-center` into a temporary folder would take the conversations out of the home folder. (legacy-name)
+ * One rule: `CC_DATA_DIR` when it is set, else `~/.centralu` (`~/.centralu-dev` when `CC_DEV=1`).
  *
  * Before this the host built the folder from the home folder alone and overwrote `CC_DATA_DIR` with it, so
  * `CC_DATA_DIR=/tmp/x pnpm host` opened the real `~/.centralu/store.db`.
@@ -68,14 +29,10 @@ export function dataRoot(): string {
 export function chooseDataDir(
   env: { CC_DATA_DIR?: string; CC_DEV?: string } = process.env,
   home: string = homedir(),
-): { dir: string; legacy: string | null } {
-  if (env.CC_DATA_DIR) return { dir: env.CC_DATA_DIR, legacy: null }
+): string {
+  if (env.CC_DATA_DIR) return env.CC_DATA_DIR
   // Packaged when run from the bundled output, dev when run from source (the supervisor tells this)
-  const isDev = env.CC_DEV === '1'
-  return {
-    dir: join(home, isDev ? DATA_DIR_DEV : DATA_DIR),
-    legacy: join(home, isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod),
-  }
+  return join(home, env.CC_DEV === '1' ? DATA_DIR_DEV : DATA_DIR)
 }
 
 /** The files directly in the data folder that hold conversations, tokens or their traces: the store and the host's logs */

@@ -208,8 +208,6 @@ impl KeeperLink {
     /// Starts a keeper the way the plan says (`mode`, never `Direct` or `Attach` here).
     fn launch_keeper(&self, mode: StartMode) -> std::io::Result<()> {
         let me = std::env::current_exe()?;
-        // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
-        let _ = crate::keeper::prepare_default_dir(&self.data, self.dev_data);
         let _ = std::fs::create_dir_all(&self.data);
         let mode = match mode {
             StartMode::ThroughShell { allow_unpinned } => {

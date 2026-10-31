@@ -1,6 +1,5 @@
 import type { MigrationHost, MigrationStep } from './context.js'
-import { StepsV2ToV12 } from './v02-v12.js'
-import { StepsV13ToV27 } from './v13-v27.js'
+import { BaselineV27 } from './v27-baseline.js'
 import { StepsV28ToV40 } from './v28-v40.js'
 import { StepsV41ToV47 } from './v41-v47.js'
 import { StepsV48ToV54 } from './v48-v54.js'
@@ -50,8 +49,7 @@ import { StepsV62 } from './v62.js'
  */
 export function migrationSteps(host: MigrationHost): MigrationStep[] {
   return [
-    ...new StepsV2ToV12(host).steps(),
-    ...new StepsV13ToV27(host).steps(),
+    ...new BaselineV27(host).steps(),
     ...new StepsV28ToV40(host).steps(),
     ...new StepsV41ToV47(host).steps(),
     ...new StepsV48ToV54(host).steps(),

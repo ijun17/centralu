@@ -1,8 +1,8 @@
 /**
  * Writes a store through the `Store` API of the checkout given as the argument, and prints it as SQL (#845).
  *
- * How `v20.sql`, `v39.sql` and `v47.sql` were made, from the last commit whose newest step was that version
- * (60eb2fbd, 759b802a, 58cc91d4):
+ * How `v39.sql` and `v47.sql` were made, from the last commit whose newest step was that version
+ * (759b802a, 58cc91d4):
  *
  *   git worktree add --detach /tmp/old <commit>
  *   (cd /tmp/old && pnpm install --frozen-lockfile)

@@ -1,9 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { VacuumDone } from '../vacuum.js'
 
-// The host's own settings table (v16), named here for the steps as it always was
-export { APP_SETTINGS_DDL } from '../store-keys.js'
-
 /** One step of the migration list. The rule the two flags serve is written above the list in `migrationSteps` */
 export interface MigrationStep {
   to: number
@@ -11,11 +8,6 @@ export interface MigrationStep {
   breaksOlderReaders: boolean
   /** Rewrites or re-indexes every message, or `VACUUM`s the file: too long to run while another host waits (#280) */
   heavy?: true
-  /**
-   * The step commits on its own instead of inside the runner's transaction: it switches `foreign_keys`, which SQLite
-   * ignores inside a transaction. Such a step must be one unit by itself, and safe to run again.
-   */
-  ownTransaction?: true
   run: () => void
 }
 
