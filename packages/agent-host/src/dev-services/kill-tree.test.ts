@@ -2,8 +2,8 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { collectOrphansWindows, killTargets, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -377,7 +377,22 @@ describe('leftovers of an ended process on Windows', () => {
     expect(await collectOrphansWindows(root, os)).toEqual([200, 300])
     expect(ended).toEqual([200, 300])
     const broken = { listProcesses: () => Promise.reject(new Error('powershell missing')), taskkill: () => {} }
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(await collectOrphansWindows(root, broken)).toEqual([])
+    // Said in the host log, so a starved machine's miss is not silent (#1773)
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('may still run'))
+    logged.mockRestore()
+  })
+
+  // #1773: PowerShell took over 10 s to answer on a starved machine, and the listing given up on left the leftovers running
+  it('waits for a table that a starved machine takes 20 s to give, and ends the leftovers in it', async () => {
+    const ended: number[] = []
+    const run = (async (_exe: string, _args: readonly string[], o: { timeout: number }) => {
+      if (o.timeout < 20_000) throw Object.assign(new Error('Command failed'), { killed: true, signal: 'SIGTERM' })
+      return { stdout: '200 100 1500\n' }
+    }) as unknown as Parameters<typeof leftoverOs>[0]
+    expect(await collectOrphansWindows(root, { ...leftoverOs(run), taskkill: (pid: number) => void ended.push(pid) })).toEqual([200])
+    expect(ended).toEqual([200])
   })
 
   it('a taskkill that fails (already ended by the one before it) is not reported and does not stop the rest', async () => {
