@@ -82,7 +82,6 @@ Two query strings, and `demo` implies `mock`:
 | `?mock=1` | The mock platform, **empty**. No projects, no sessions; nothing answers. This is the door E2E drives. |
 | `?demo` | The same mock with a scene already in it: two projects, four sessions in different states (working, waiting on approval, asking a question, done), a conversation with tool cards and a plan, git changes and history, weekly usage. Send a message and a scripted reply streams back. |
 | `?demo=grid` | The scene, opened in the grid with four panels — one of them working, so it wears the answering look. |
-| `?demo=empty` | Replies, but no scene. For building a first-run screen without deleting a seeded one. |
 
 The scene is re-seeded on every load, so an edit that reloads the page does not cost you
 the setup. Ids are stable across reloads (`mock-session-1`, …), which is why the layout
