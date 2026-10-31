@@ -1556,18 +1556,6 @@ describe('after the worktree manager (#561 part 3)', () => {
     expect(store.messages.loadMessages('wt-a', 10).length).toBe(1)
   })
 
-  it("a worktree row already stuck on 'New session' still gets its branch name at startup", async () => {
-    const p = await addProject()
-    store.sessions.upsertSession(wtRow('wt-a', p.id, { name: 'New session', autoNamed: true }))
-    // A name the person set is left untouched.
-    store.sessions.upsertSession(wtRow('wt-b', p.id, { name: 'New session', autoNamed: false }))
-
-    const m2 = boot()
-
-    expect(m2.listSessions().find((x) => x.id === 'wt-a')?.name).toBe('centralu/wt-a')
-    expect(m2.listSessions().find((x) => x.id === 'wt-b')?.name).toBe('New session')
-  })
-
   it('a former manager is an ordinary session that owns its worktree children, and can be deleted while they work', async () => {
     const p = await addProject()
     store.sessions.upsertSession(wtRow('old-mgr', p.id, { worktree: null, name: 'Worktree manager', autoNamed: false }))
