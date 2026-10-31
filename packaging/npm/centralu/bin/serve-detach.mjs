@@ -7,7 +7,7 @@ import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, withLivePort } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -132,7 +132,7 @@ export async function runDetach({
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
   const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
   const answered = async (already, as = how) => {
-    const d = await describe({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
+    const d = await describe({ env, dataDir, state: withLivePort(dataDir, ensureServeState(dataDir, platform)), entry, version })
     if (!d?.hostRunning) return false
     write(`${connectionLine({ ...d, detach: { ok: true, how: as, already } })}\n`)
     return true

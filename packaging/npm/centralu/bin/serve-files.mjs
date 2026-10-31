@@ -540,6 +540,16 @@ export function readServePid(dataDir) {
   }
 }
 
+/**
+ * `state` with the port of a launcher that runs on `--port 0` (serve.pid): that one is not recorded, so the next start
+ * does not inherit a port the system picked, and whoever looks for the running host (`--connection`, `--stop`,
+ * `--detach`) is told where it is here. serve.json itself is not changed.
+ */
+export function withLivePort(dataDir, state) {
+  const pid = state ? readServePid(dataDir) : null
+  return pid && pid.port > 0 && pid.port !== state.port && isAlive(pid.pid) ? { ...state, port: pid.port } : state
+}
+
 export function removeServePid(dataDir, pid) {
   if (readServePid(dataDir)?.pid !== pid) return
   try {

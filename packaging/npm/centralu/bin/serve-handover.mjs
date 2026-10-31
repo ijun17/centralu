@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid, withLivePort } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
@@ -30,7 +30,7 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * ended as any is, and lists nothing.
  */
 export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
-  const state = readServeState(dataDir)
+  const state = withLivePort(dataDir, readServeState(dataDir))
   if (!state) return { ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` }
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry) ?? 0
@@ -132,7 +132,7 @@ export async function moveIntoSignIn({
 }) {
   if (platform !== 'win32' || existing?.logon !== 'network') return false
   if ((await logonOf()) !== 'interactive') return false
-  const state = readServeState(dataDir)
+  const state = withLivePort(dataDir, readServeState(dataDir))
   if (!state) return false
   const port = state.port ?? DEFAULT_SERVE_PORT
   const protocolVersion = existing.protocolVersion ?? protocolVersionOf(entry) ?? 0

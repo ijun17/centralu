@@ -5,7 +5,7 @@
  * lock refuses.
  */
 import { join } from 'node:path'
-import { pairServe, readServeState } from './serve-files.mjs'
+import { pairServe, readServeState, withLivePort } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { probeHost, protocolVersionOf } from './serve-host.mjs'
 import { serveFolder } from './serve-run.mjs'
@@ -49,7 +49,7 @@ export async function runWindow({
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry) ?? 0
   const probe = () => {
-    const state = readServeState(dataDir)
+    const state = withLivePort(dataDir, readServeState(dataDir))
     return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, proofKey: state.proofKey, protocolVersion }) : Promise.resolve({ running: false })
   }
 
@@ -79,7 +79,7 @@ export async function runWindow({
 
   // The window's own full credential (#1405)
   const token = pairServe(dataDir, 'window', platform, Date.now(), 'window').token
-  const state = readServeState(dataDir)
+  const state = withLivePort(dataDir, readServeState(dataDir))
   write(`${JSON.stringify({ ready: true, port: state.port ?? DEFAULT_SERVE_PORT, token, db: join(dataDir, 'store.db') })}\n`)
 
   return await new Promise((resolve) => {

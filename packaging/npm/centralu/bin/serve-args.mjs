@@ -6,6 +6,7 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
 
   centralu serve                  Start the host in the foreground, on 127.0.0.1 only
   centralu serve --port <n>       ... on that port (kept for the next start; default ${DEFAULT_SERVE_PORT})
+  centralu serve --port 0         ... on a free port the system picks, for this run only
   centralu serve --detach         Start it in the background, outside this session; return once it answers
   centralu serve --stop           Ask the running host to stop, and wait until it has
   centralu serve --window         What the Centralu window on Windows runs here: start the host if
@@ -127,7 +128,7 @@ export function parseServeArgs(argv) {
     else if (a === '--port' || a.startsWith('--port=')) {
       const raw = a === '--port' ? argv[++i] : a.slice('--port='.length)
       const n = parsePort(raw)
-      if (n === null) return { error: `--port needs a port number between 1 and 65535 (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
+      if (n === null) return { error: `--port needs a port number between 1 and 65535, or 0 for a free one (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
       port = n
     } else if (a === '--from' || a.startsWith('--from=')) {
       const raw = a === '--from' ? argv[++i] : a.slice('--from='.length)
@@ -161,5 +162,5 @@ export function parseServeArgs(argv) {
 function parsePort(raw) {
   if (typeof raw !== 'string' || !/^\d{1,5}$/.test(raw)) return null
   const n = Number(raw)
-  return n >= 1 && n <= 65535 ? n : null
+  return n <= 65535 ? n : null
 }

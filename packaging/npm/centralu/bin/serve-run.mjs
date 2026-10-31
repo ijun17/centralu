@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, withLivePort } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
@@ -97,6 +97,7 @@ export async function printConnection({ env, home, entry, version, cliPath, pair
     paired = { token: made.token, id: made.id }
     say(`made a full credential for ${JSON.stringify(pair)} (${made.id}); serve --revoke ${made.id} withdraws it`)
   }
+  state = withLivePort(dataDir, state)
   const d = await describe({ env, dataDir, state, entry, version, paired, keyPaired: keyLine })
   if (!d) {
     say(`cannot read the protocol version of the host at ${entry}`)
@@ -119,7 +120,7 @@ export async function printConnection({ env, home, entry, version, cliPath, pair
  *   null. A slow old host never gets a key line, and no line reports a key the running host does not sign with.
  */
 async function signingHostKey({ dataDir, state, entry, keyId, hubKey, probeKey }) {
-  const port = state.port ?? DEFAULT_SERVE_PORT
+  const port = withLivePort(dataDir, state).port ?? DEFAULT_SERVE_PORT
   const probe = await probeKey({ port, keyId, hubKey })
   if (probe.outcome === 'signed') return probe.hostKey
   if (probe.outcome !== 'none' || !takesKeyHellos(entry)) return null
@@ -147,11 +148,13 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT
-  const existing = await probeHost({ port: recorded, token: state.token, proofKey: state.proofKey, protocolVersion })
+  // A `--port 0` host listens elsewhere: found by serve.pid, which only this probe trusts (a stale one must not pick the port)
+  const running = withLivePort(dataDir, state).port ?? DEFAULT_SERVE_PORT
+  const existing = await probeHost({ port: running, token: state.token, proofKey: state.proofKey, protocolVersion })
   // A host the hub's ssh started before anyone signed in moves into this sign-in, once idle (#1224, serve-handover.mjs)
   if (heldHere(existing, dataDir, undefined, state.port != null) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
     const pid = lockHolderPid(dataDir)
-    say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${recorded}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
+    say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${running}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
     return 1
   }
 
@@ -199,21 +202,27 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
       }
     })
   }
-  if (child.pid) {
+  // `port` is 0 for `--port 0` until the host says which one it got
+  const writePid = (onPort) => {
     try {
-      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid: child.pid, port })}\n`)
+      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid: child.pid, port: onPort })}\n`)
     } catch (e) {
       say(`could not write ${SERVE_PID_FILE}: ${e.message}`)
     }
   }
+  // Only a launcher whose host is up owns serve.pid: one the lock refused must not hide the host that holds it
   createInterface({ input: child.stdout }).on('line', (line) => {
     const p = readyPort(line)
     if (p === null || ready) return
     ready = true
-    try {
-      recordServePort(dataDir, p, platform)
-    } catch (e) {
-      say(`could not record the port in ${join(dataDir, SERVE_STATE_FILE)}: ${e.message}`)
+    if (child.pid) writePid(p)
+    // `--port 0` is for this run only: the system's pick would be the next start's, in the ephemeral range serve keeps out of
+    if (askedPort !== 0) {
+      try {
+        recordServePort(dataDir, p, platform)
+      } catch (e) {
+        say(`could not record the port in ${join(dataDir, SERVE_STATE_FILE)}: ${e.message}`)
+      }
     }
     say(`listening on 127.0.0.1:${p} (Centralu ${version}, protocol ${protocolVersion ?? 'unknown'}, data ${dataDir})`)
     if (logFd === null) say(`from your computer: ssh -N -L ${p}:127.0.0.1:${p} <this machine>, or let the app connect over SSH`)
