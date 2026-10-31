@@ -152,7 +152,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
       h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
     }
     const controller = new AbortController()
-    const run = mgr.runAppAgent({ app: { appId: 'notes', projectId }, appName: 'App notes', tool: 'claude', prompt: 'Summarize.' }, { signal: controller.signal, progress: () => {} })
+    const run = mgr.appSessions.runAppAgent({ app: { appId: 'notes', projectId }, appName: 'App notes', tool: 'claude', prompt: 'Summarize.' }, { signal: controller.signal, progress: () => {} })
     run.catch(() => {})
     await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
     controller.abort()

@@ -121,7 +121,7 @@ describe('projects.create', () => {
 
   it('is refused without a parent on a host that was given no default location — a test never writes in a real home', async () => {
     const bare = new SessionManager(store, new Map(), () => {})
-    await expect(bare.createProject('x')).rejects.toThrow(/no default location/)
+    await expect(bare.projectCreation.createProject('x')).rejects.toThrow(/no default location/)
     await bare.disposeAll()
   })
 

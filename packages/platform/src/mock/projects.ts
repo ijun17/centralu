@@ -70,7 +70,7 @@ export class ProjectsMock {
   /** The record of trust turned on and off — tests check "it only asks, it does not send" (M4) */
   readonly trustCalls: { projectId: string; trusted: boolean }[] = []
   readonly projects: ProjectPort = {
-    /** The same rule as the real thing (manager.reorderProjects, #999): a project missing from the list stays at the end, as it was */
+    /** The same rule as the real thing (ProjectRegistry.reorderProjects, #999): a project missing from the list stays at the end, as it was */
     reorder: async (orderedIds: string[]) => {
       this.projectStore.list = putInOrder(this.projectStore.list, orderedIds)
       return [...this.projectStore.list]
@@ -210,7 +210,7 @@ export class ProjectsMock {
         const label = c.label?.trim()
         return [{ command, ...(label ? { label } : {}) }]
       })
-      // The Run menu of every other window reads them, as the host tells it (manager.setProjectCommands, #719)
+      // The Run menu of every other window reads them, as the host tells it (ProjectRegistry.setProjectCommands, #719)
       if (was !== JSON.stringify(p.commands)) this.emit({ type: 'projects_changed' })
       return [...p.commands]
     },

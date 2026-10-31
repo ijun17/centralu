@@ -46,7 +46,7 @@ describe('the dead-agent handoff record (#78)', () => {
 
     // Summary extraction fails (adapter not implemented) -> the raw-text path: what came before the pivot is
     // included too.
-    let out = await mgr.exportHandoffRecord(s.id, 'claude')
+    let out = await mgr.handoffNotes.exportHandoffRecord(s.id, 'claude')
     expect(out.text).toContain('[user] Old question')
     expect(out.text).toContain('[user] Question after compaction')
     expect(out.text).toContain('[104] Bash ls')
@@ -68,13 +68,13 @@ describe('the dead-agent handoff record (#78)', () => {
       asked.push(ext)
       return 'Original compact summary text pulled from the rollout. '.repeat(30)
     }
-    out = await mgr.exportHandoffRecord(s.id)
+    out = await mgr.handoffNotes.exportHandoffRecord(s.id)
     expect(asked).toEqual(['ext-1'])
     expect(out.text).toContain('Original compact summary text pulled from the rollout')
     expect(out.text).not.toContain('Old question')
     expect(out.text).toContain('Question after compaction')
 
-    await expect(mgr.exportHandoffRecord('nope')).rejects.toThrow(/Session not found/)
+    await expect(mgr.handoffNotes.exportHandoffRecord('nope')).rejects.toThrow(/Session not found/)
   })
 })
 
@@ -95,7 +95,7 @@ describe('the contents of a handoff record (#1481)', () => {
       { sessionId: orig.id, seq: 102, role: 'assistant', kind: 'text', payload: { text: 'State: the parser is done.' }, ts: 2 },
     ])
 
-    const out = await mgr.exportHandoffRecord(orig.id)
+    const out = await mgr.handoffNotes.exportHandoffRecord(orig.id)
 
     expect(out.text).toContain(`previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): ${join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${earlier}.md`)}`)
     expect(out.text).toContain('Report at seq 102:\n    State: the parser is done.')
@@ -116,7 +116,7 @@ describe('the handoff lineage in a note (#1487)', () => {
     handoffFrom(mid.id, grand.id)
     handoffFrom(orig.id, mid.id)
     const line = lineageLine([orig.id, mid.id, grand.id])
-    expect((await mgr.exportHandoffRecord(orig.id)).text).toContain(line)
+    expect((await mgr.handoffNotes.exportHandoffRecord(orig.id)).text).toContain(line)
 
     const before = store.messages.loadMessages(orig.id, 1).at(-1)?.seq ?? 0
     await rpc('agents.send', { sessionId: orig.id, text: 'write the note' })
@@ -147,7 +147,7 @@ describe('the handoff lineage in a note (#1487)', () => {
     // A predecessor deleted for good ends the list there
     await store.trash.trashSession(mid.id, { projectId: p.id, projectName: null, projectPath: null, removeExternal: false, removeWorktree: false })
     await store.trash.purgeSession(mid.id)
-    expect((await mgr.exportHandoffRecord(orig.id)).text).toContain(lineageLine([orig.id]))
+    expect((await mgr.handoffNotes.exportHandoffRecord(orig.id)).text).toContain(lineageLine([orig.id]))
   })
 })
 
@@ -200,7 +200,7 @@ describe("a handoff note does not race its reader (#106)", () => {
     })
 
     await mgr.trashSession(dying.id)
-    await mgr.purgeSession(dying.id)
+    await mgr.trash.purgeSession(dying.id)
     expect(existsSync(note(dying.id))).toBe(true)
   })
 
@@ -220,7 +220,7 @@ describe("a handoff note does not race its reader (#106)", () => {
       return claimed()
     })
     try {
-      await mgr.purgeSession(other.id)
+      await mgr.trash.purgeSession(other.id)
       // A sweep that asks per note may never need the claims for this one (it is still live when judged);
       // the session archive then lands after the sweep, which must keep the note just the same
       await (trashing ??= mgr.trashSession(handing.id))
@@ -245,9 +245,9 @@ describe("a handoff note does not race its reader (#106)", () => {
     await mgr.trashSession(heir.id)
     // Both in the session archive: either could be restored and ask for the note, so it stays (#204)
     expect(existsSync(note(dying.id))).toBe(true)
-    await mgr.purgeSession(dying.id)
+    await mgr.trash.purgeSession(dying.id)
     expect(existsSync(note(dying.id))).toBe(true)
-    await mgr.purgeSession(heir.id)
+    await mgr.trash.purgeSession(heir.id)
     expect(existsSync(note(dying.id))).toBe(false)
   })
 
@@ -263,7 +263,7 @@ describe("a handoff note does not race its reader (#106)", () => {
     await vi.waitFor(() => expect(existsSync(note('gone-session'))).toBe(false))
     expect(existsSync(note(s.id))).toBe(true)
 
-    await mgr.purgeSession(s.id)
+    await mgr.trash.purgeSession(s.id)
     expect(existsSync(note(s.id))).toBe(false)
   })
 
@@ -347,7 +347,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
     rmSync(join(repo, '.centralu', 'handoff'))
     linkDir(outside, join(repo, '.centralu', 'handoff'))
     await mgr.trashSession(s.id)
-    await mgr.purgeSession(s.id)
+    await mgr.trash.purgeSession(s.id)
     expect(repoFiles()).toEqual([true, true])
     expect(readdirSync(outside)).toEqual(['NOTES.md'])
   })

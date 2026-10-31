@@ -202,19 +202,19 @@ export class SessionManager {
   /** A project's git panel, file tree and file operations (dev-services/project-files.ts); the RPC router calls it directly */
   readonly files: ProjectFiles
   /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
-  private readonly toolRegistry: ToolRegistry
+  readonly toolRegistry: ToolRegistry
   /** The remembered "always allow" answers: written, read for a launch, listed in Settings (approval-rules.ts) */
-  private readonly approvalRules: ApprovalRules
+  readonly approvalRules: ApprovalRules
   /** The registered projects: rows, folders, trust, `ProjectInfo` and the settings kept on them (project-registry.ts) */
-  private readonly projectRegistry: ProjectRegistry
+  readonly projectRegistry: ProjectRegistry
   /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
   private readonly launchInputs: LaunchInputs
   /** The sidebar order of sessions and the grid's panels (session-layout.ts) */
-  private readonly layout: SessionLayout
+  readonly layout: SessionLayout
   /** A linked machine's events and work owed there, and what a hub reads of and sends to this host (linked-host.ts) */
   private readonly linkedHost: LinkedHost
   /** What is changed on a session: settings, name, read mark, background tasks, CLI move notices (session-settings.ts) */
-  private readonly sessionSettings: SessionSettings
+  readonly sessionSettings: SessionSettings
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -239,9 +239,9 @@ export class SessionManager {
   /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
   private readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
-  private readonly merges: MergeChecks
+  readonly merges: MergeChecks
   /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
-  private readonly projectCreation: ProjectCreation
+  readonly projectCreation: ProjectCreation
   private readonly machineFlow: MachineFlow
   /** The orchestrator's get_preferences and set_preferences (preferences-flow.ts) */
   private readonly preferencesFlow: PreferencesFlow
@@ -260,15 +260,15 @@ export class SessionManager {
   /** The quiet notices that tell a growing session to call `compact_self` (#1492, context-nudges.ts) */
   private readonly contextNudges: ContextNudges
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
-  private readonly consents: ProjectConsents
+  readonly consents: ProjectConsents
   /** The screen's preferences and workspace layout (ui-preferences.ts) */
-  private readonly prefs: UiPreferenceStore
+  readonly prefs: UiPreferenceStore
   /** The external app runtime as the sessions meet it: attached apps, on-demand access, the broker (session-app-wiring.ts) */
-  private readonly apps: SessionAppWiring
+  readonly apps: SessionAppWiring
   /** The tools a session receives: its profile, its bundle, the reader's set (session-tools.ts) */
   private readonly tools: SessionTools
   /** A handoff's note: written, read by a successor, swept when nobody owns it (handoff-notes.ts) */
-  private readonly handoffNotes: HandoffNotes
+  readonly handoffNotes: HandoffNotes
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** A linked machine's sessions asking this computer's projects (#550) */
@@ -276,21 +276,21 @@ export class SessionManager {
   /** This computer's name as a linked machine's session reads it (#550); main.ts gives the host name */
   private hubName: () => string = () => 'this computer'
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
-  private readonly externals: ExternalConversations
+  readonly externals: ExternalConversations
   /** What a session's events leave in the store: streamed messages, rows, images (session-record.ts) */
-  private readonly record: SessionRecord
+  readonly record: SessionRecord
   /** What the host asks a tool outside a turn: commands, usage, models (tool-queries.ts) */
-  private readonly toolQueries: ToolQueries
+  readonly toolQueries: ToolQueries
   /** The sessions an external app owns: its builder and the agents it asks for (app-sessions.ts) */
-  private readonly appSessions: AppSessions
+  readonly appSessions: AppSessions
   /** A session's way to the session archive and back: delete, list, restore, purge (session-trash.ts) */
-  private readonly trash: SessionTrash
+  readonly trash: SessionTrash
   /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
   private readonly restartPolicy: RestartPolicy
   /** A worktree session's worktree: made for a new session, taken apart on cleanup (worktree-sessions.ts) */
-  private readonly worktrees: WorktreeSessions
+  readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
-  private readonly hostCards: HostCards
+  readonly hostCards: HostCards
   /** The orchestrator's steps that ask the person when a session asked for the turn (#1447) */
   private readonly askedGate: AskedGate
   /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
@@ -298,7 +298,7 @@ export class SessionManager {
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
   private readonly starts: SessionStarts
   /** What a session's tool says, received and settled, and what goes into its conversation (session-events.ts) */
-  private readonly events: SessionEvents
+  readonly events: SessionEvents
   /**
    * Session currently being resumed -> its promise.
    *
@@ -320,7 +320,7 @@ export class SessionManager {
    */
   private leaving = new Map<string, string>()
   /** The central orchestrator: its making, its proposals and skills, the bridge's door to its tools (orchestrator-slot.ts) */
-  private readonly orchestratorSlot: OrchestratorSlot
+  readonly orchestratorSlot: OrchestratorSlot
   /**
    * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
    * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
@@ -409,7 +409,7 @@ export class SessionManager {
     this.sessionSettings = new SessionSettings(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
-    this.usageRecorder = new UsageRecorder(store.usage, { accountOf: async (tool) => (await this.accountFor(tool)).fingerprint ?? '' })
+    this.usageRecorder = new UsageRecorder(store.usage, { accountOf: async (tool) => (await this.toolRegistry.accountFor(tool)).fingerprint ?? '' })
     this.startUsageHistory()
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
@@ -466,7 +466,7 @@ export class SessionManager {
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
     const compactSetting = () => autoCompactOf(this.uiPreferences())
-    const compactNotice = (id: string, text: string) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
+    const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
     this.selfCompaction = new SelfCompaction({
       sessions: () => this.listSessions(),
       session: (id) => this.meta.get(id),
@@ -639,11 +639,6 @@ export class SessionManager {
     throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
   }
 
-  /** `ProjectCreation.inspectFolder` (project-creation.ts): `projects.inspect` (#1220) */
-  inspectFolder(...a: Parameters<ProjectCreation['inspectFolder']>): ReturnType<ProjectCreation['inspectFolder']> {
-    return this.projectCreation.inspectFolder(...a)
-  }
-
   /** The linked machines as `machines.list` answers (#1220), for the orchestrator's list_machines; none until wired */
   private machineList: () => MachineInfo[] = () => []
 
@@ -674,16 +669,6 @@ export class SessionManager {
   /** `ProjectCreation.useProjectsHome` (project-creation.ts), kept on the manager for its callers */
   useProjectsHome(...a: Parameters<ProjectCreation['useProjectsHome']>): ReturnType<ProjectCreation['useProjectsHome']> {
     return this.projectCreation.useProjectsHome(...a)
-  }
-
-  /** `ProjectCreation.projectCreatePreview` (project-creation.ts), kept on the manager for its callers */
-  projectCreatePreview(...a: Parameters<ProjectCreation['projectCreatePreview']>): ReturnType<ProjectCreation['projectCreatePreview']> {
-    return this.projectCreation.projectCreatePreview(...a)
-  }
-
-  /** `ProjectCreation.createProject` (project-creation.ts), kept on the manager for its callers */
-  createProject(...a: Parameters<ProjectCreation['createProject']>): ReturnType<ProjectCreation['createProject']> {
-    return this.projectCreation.createProject(...a)
   }
 
   /**
@@ -806,39 +791,9 @@ export class SessionManager {
     return this.launches.refreshLaunchSettings(projectId, true)
   }
 
-  /** `ProjectRegistry.setProjectCommands` (project-registry.ts), kept on the manager for its callers */
-  setProjectCommands(...a: Parameters<ProjectRegistry['setProjectCommands']>): ReturnType<ProjectRegistry['setProjectCommands']> {
-    return this.projectRegistry.setProjectCommands(...a)
-  }
-
-  /** `ProjectRegistry.setWorktreeSetup` (project-registry.ts), kept on the manager for its callers */
-  setWorktreeSetup(...a: Parameters<ProjectRegistry['setWorktreeSetup']>): ReturnType<ProjectRegistry['setWorktreeSetup']> {
-    return this.projectRegistry.setWorktreeSetup(...a)
-  }
-
   /** `ProjectRegistry.setAgentInstructions` (project-registry.ts), kept on the manager for its callers */
   setAgentInstructions(...a: Parameters<ProjectRegistry['setAgentInstructions']>): ReturnType<ProjectRegistry['setAgentInstructions']> {
     return this.projectRegistry.setAgentInstructions(...a)
-  }
-
-  /** `ProjectRegistry.reorderProjects` (project-registry.ts), kept on the manager for its callers */
-  reorderProjects(...a: Parameters<ProjectRegistry['reorderProjects']>): ReturnType<ProjectRegistry['reorderProjects']> {
-    return this.projectRegistry.reorderProjects(...a)
-  }
-
-  /** `SessionLayout.reorderSessions` (session-layout.ts), kept on the manager for its callers */
-  reorderSessions(...a: Parameters<SessionLayout['reorderSessions']>): ReturnType<SessionLayout['reorderSessions']> {
-    return this.layout.reorderSessions(...a)
-  }
-
-  /** `SessionLayout.grid` (session-layout.ts), kept on the manager for its callers */
-  grid(...a: Parameters<SessionLayout['grid']>): ReturnType<SessionLayout['grid']> {
-    return this.layout.grid(...a)
-  }
-
-  /** `SessionLayout.setGridView` (session-layout.ts), kept on the manager for its callers */
-  setGridView(...a: Parameters<SessionLayout['setGridView']>): ReturnType<SessionLayout['setGridView']> {
-    return this.layout.setGridView(...a)
   }
 
   /** `SessionLayout.useLinkedSessions` (session-layout.ts), kept on the manager for its callers */
@@ -931,11 +886,6 @@ export class SessionManager {
     return this.projectRegistry.listProjects(...a)
   }
 
-  /** `ProjectRegistry.projectGitStatus` (project-registry.ts), kept on the manager for its callers */
-  projectGitStatus(...a: Parameters<ProjectRegistry['projectGitStatus']>): ReturnType<ProjectRegistry['projectGitStatus']> {
-    return this.projectRegistry.projectGitStatus(...a)
-  }
-
   listSessions(): SessionInfo[] {
     return [...this.meta.values()].map((s) => {
       const live = this.handles.has(s.id)
@@ -1010,7 +960,7 @@ export class SessionManager {
         }
       },
       note: (id, text) => {
-        if (this.meta.has(id)) this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
+        if (this.meta.has(id)) this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
       },
     }
   }
@@ -1062,7 +1012,7 @@ export class SessionManager {
       }
       for (const t of tasks) {
         try {
-          await this.stopBackgroundTask(c.helperId, t.id)
+          await this.sessionSettings.stopBackgroundTask(c.helperId, t.id)
         } catch {
           // Not stoppable from here: the tool ends it with its process
         }
@@ -1109,11 +1059,6 @@ export class SessionManager {
   /** Active sessions running in the same directory (the basis for FR-2's concurrent-session warning) */
   activeSessionsIn(projectId: string): SessionInfo[] {
     return this.listSessions().filter((s) => s.projectId === projectId)
-  }
-
-  /** `ExternalConversations.listExternalSessions` (external-conversations.ts), kept on the manager for its callers */
-  listExternalSessions(...a: Parameters<ExternalConversations['listExternalSessions']>): ReturnType<ExternalConversations['listExternalSessions']> {
-    return this.externals.listExternalSessions(...a)
   }
 
   /** `SessionStarts.createSession` (session-start.ts), kept on the manager for its callers */
@@ -1169,7 +1114,7 @@ export class SessionManager {
     const text = this.projectRegistry.projectTrusted(m.projectId)
       ? "Restarted the agent to apply this project's new trust: it now reads the project's own settings and instruction files (CLAUDE.md, AGENTS.md)."
       : "Restarted the agent to apply this project's removed trust: it now reads only your own settings, not the project's files."
-    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'restart', text })
+    this.events.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'restart', text })
   }
 
   /**
@@ -1383,78 +1328,8 @@ export class SessionManager {
     return this.trash.trashSession(...a)
   }
 
-  /** `SessionTrash.archiveIfAtRest` (session-trash.ts, #1512): `agents.archiveIfAtRest` */
-  archiveIfAtRest(...a: Parameters<SessionTrash['archiveIfAtRest']>): ReturnType<SessionTrash['archiveIfAtRest']> {
-    return this.trash.archiveIfAtRest(...a)
-  }
-
-  /** `SessionTrash.archiveLosses` (session-trash.ts, #1595): `agents.archiveLosses` */
-  archiveLosses(...a: Parameters<SessionTrash['archiveLosses']>): ReturnType<SessionTrash['archiveLosses']> {
-    return this.trash.archiveLosses(...a)
-  }
-
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
-
-  /** `SessionTrash.listTrash` (session-trash.ts), kept on the manager for its callers */
-  listTrash(...a: Parameters<SessionTrash['listTrash']>): ReturnType<SessionTrash['listTrash']> {
-    return this.trash.listTrash(...a)
-  }
-
-  /** `SessionTrash.readTrashed` (session-trash.ts), kept on the manager for its callers */
-  readTrashed(...a: Parameters<SessionTrash['readTrashed']>): ReturnType<SessionTrash['readTrashed']> {
-    return this.trash.readTrashed(...a)
-  }
-
-  /** `SessionTrash.restoreSession` (session-trash.ts), kept on the manager for its callers */
-  restoreSession(...a: Parameters<SessionTrash['restoreSession']>): ReturnType<SessionTrash['restoreSession']> {
-    return this.trash.restoreSession(...a)
-  }
-
-  /** `SessionTrash.purgeSession` (session-trash.ts), kept on the manager for its callers */
-  purgeSession(...a: Parameters<SessionTrash['purgeSession']>): ReturnType<SessionTrash['purgeSession']> {
-    return this.trash.purgeSession(...a)
-  }
-
-  /** `SessionTrash.readTrashedRun` (session-trash.ts), kept on the manager for its callers */
-  readTrashedRun(...a: Parameters<SessionTrash['readTrashedRun']>): ReturnType<SessionTrash['readTrashedRun']> {
-    return this.trash.readTrashedRun(...a)
-  }
-
-  /** `SessionTrash.purgeTrashedRuns` (session-trash.ts), kept on the manager for its callers */
-  purgeTrashedRuns(...a: Parameters<SessionTrash['purgeTrashedRuns']>): ReturnType<SessionTrash['purgeTrashedRuns']> {
-    return this.trash.purgeTrashedRuns(...a)
-  }
-
-  /** `SessionTrash.emptyTrash` (session-trash.ts), kept on the manager for its callers */
-  emptyTrash(...a: Parameters<SessionTrash['emptyTrash']>): ReturnType<SessionTrash['emptyTrash']> {
-    return this.trash.emptyTrash(...a)
-  }
-
-  /** `SessionTrash.subagentUsage` (session-trash.ts, #418), kept on the manager for its callers */
-  subagentUsage(...a: Parameters<SessionTrash['subagentUsage']>): ReturnType<SessionTrash['subagentUsage']> {
-    return this.trash.subagentUsage(...a)
-  }
-
-  /** `SessionTrash.trashSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
-  trashSubagentSteps(...a: Parameters<SessionTrash['trashSubagentSteps']>): ReturnType<SessionTrash['trashSubagentSteps']> {
-    return this.trash.trashSubagentSteps(...a)
-  }
-
-  /** `SessionTrash.restoreSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
-  restoreSubagentSteps(...a: Parameters<SessionTrash['restoreSubagentSteps']>): ReturnType<SessionTrash['restoreSubagentSteps']> {
-    return this.trash.restoreSubagentSteps(...a)
-  }
-
-  /** `SessionTrash.purgeSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
-  purgeSubagentSteps(...a: Parameters<SessionTrash['purgeSubagentSteps']>): ReturnType<SessionTrash['purgeSubagentSteps']> {
-    return this.trash.purgeSubagentSteps(...a)
-  }
-
-  /** `SessionTrash.subagentTrashed` (session-trash.ts, #418), kept on the manager for its callers */
-  subagentTrashed(...a: Parameters<SessionTrash['subagentTrashed']>): ReturnType<SessionTrash['subagentTrashed']> {
-    return this.trash.subagentTrashed(...a)
-  }
 
   /** `SessionSettings.updateSettings` (session-settings.ts), kept on the manager for its callers */
   updateSettings(...a: Parameters<SessionSettings['updateSettings']>): ReturnType<SessionSettings['updateSettings']> {
@@ -1489,16 +1364,11 @@ export class SessionManager {
   private handleSink(): { sink: EventSink; own: (h: SessionHandle) => void } {
     let handle: SessionHandle | null = null
     return {
-      sink: (e) => this.onEvent(e, handle),
+      sink: (e) => this.events.onEvent(e, handle),
       own: (h) => {
         handle = h
       },
     }
-  }
-
-  /** `SessionEvents.onEvent` (session-events.ts), kept on the manager for its callers */
-  private onEvent(...a: Parameters<SessionEvents['onEvent']>): ReturnType<SessionEvents['onEvent']> {
-    return this.events.onEvent(...a)
   }
 
   /** A queued note not yet taken, on the delegation's wait or an observer's own reader (#646): the session is not between turns */
@@ -1510,11 +1380,6 @@ export class SessionManager {
 
   /** The rest an adapter's card raised between turns was raised in (`CardRests`, card-rest.ts), written to the store */
   private cardRests: CardRests
-
-  /** `SessionRecord.saveAttachment` (session-record.ts), kept on the manager for its callers */
-  saveAttachment(...a: Parameters<SessionRecord['saveAttachment']>): ReturnType<SessionRecord['saveAttachment']> {
-    return this.record.saveAttachment(...a)
-  }
 
   /**
    * Sends a message.
@@ -1544,7 +1409,7 @@ export class SessionManager {
     if (!from && !fromScript) this.appSessions.noteTookPart(sessionId, 'wrote')
     // Only the person chooses what a message means for a report the session owes (#1377)
     const chosen = from || fromScript ? 'ask' : intent
-    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, chosen, fromScript)
+    await this.events.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, chosen, fromScript)
     /*
      * A person's message never closes a delegation report (#1377): its turn is theirs, and not reported, or the work's,
      * when they chose to add it. Only "take it over" closes it, and tells the caller once. After the delivery, so a
@@ -1572,7 +1437,7 @@ export class SessionManager {
    * recorded in the conversation as a message the app sent, and reaches the agent wrapped as the app's text.
    */
   async sendFromApp(sessionId: string, text: string, app: AppMessageSource, place: AppViewPlace = 'inline'): Promise<void> {
-    return this.deliver(sessionId, text, undefined, undefined, false, app, place)
+    return this.events.deliver(sessionId, text, undefined, undefined, false, app, place)
   }
 
   /**
@@ -1584,12 +1449,7 @@ export class SessionManager {
   async appNotice(sessionId: string, text: string, app: AppMessageSource): Promise<void> {
     if (this.handingOver || this.disposing) throw new Error('Centralu is restarting; post it again in a moment')
     if (!this.meta.has(sessionId) || this.trash.trashing.has(sessionId)) throw new Error('that session is gone')
-    return this.deliver(sessionId, text, undefined, undefined, false, app, 'notice')
-  }
-
-  /** `SessionEvents.deliver` (session-events.ts), kept on the manager for its callers */
-  private deliver(...a: Parameters<SessionEvents['deliver']>): ReturnType<SessionEvents['deliver']> {
-    return this.events.deliver(...a)
+    return this.events.deliver(sessionId, text, undefined, undefined, false, app, 'notice')
   }
 
   /**
@@ -1729,7 +1589,7 @@ export class SessionManager {
       // again
       const after = this.meta.get(sessionId)
       if (after?.state === 'waiting_approval' && !after.pendingApproval && after.pendingQuestions.length === 0) {
-        this.onEvent({ type: 'state_change', sessionId, state: 'working' })
+        this.events.onEvent({ type: 'state_change', sessionId, state: 'working' })
       }
       return
     }
@@ -1789,16 +1649,6 @@ export class SessionManager {
     }
   }
 
-  /** `ToolQueries.listCommands` (tool-queries.ts), kept on the manager for its callers */
-  listCommands(...a: Parameters<ToolQueries['listCommands']>): ReturnType<ToolQueries['listCommands']> {
-    return this.toolQueries.listCommands(...a)
-  }
-
-  /** `ToolQueries.usageFor` (tool-queries.ts), kept on the manager for its callers */
-  usageFor(...a: Parameters<ToolQueries['usageFor']>): ReturnType<ToolQueries['usageFor']> {
-    return this.toolQueries.usageFor(...a)
-  }
-
   /**
    * Usage over time (docs/agent-host.md §6.2): the figures an earlier run of this host stored come back into the
    * cache ledger, and the recorder starts writing this run's. A store that cannot be read costs the history only.
@@ -1813,7 +1663,7 @@ export class SessionManager {
     }
     this.usageRecorder.start(
       () => [...new Set([...this.handles.keys()].map((id) => this.meta.get(id)?.tool).filter((t): t is ToolName => t !== undefined))],
-      (tool) => this.usageFor(tool),
+      (tool) => this.toolQueries.usageFor(tool),
     )
   }
 
@@ -1826,16 +1676,6 @@ export class SessionManager {
       { from: Date.parse(p.from), to: Date.parse(p.to), groupBy: p.groupBy, by: p.by, ...(p.tool ? { tool: p.tool } : {}) },
       { session: (id) => this.meta.get(id)?.name ?? this.store.trash.trashedSession(id)?.session.name, project: (id) => projects.get(id) },
     )
-  }
-
-  /** `ToolRegistry.accountFor` (tool-registry.ts), kept on the manager for its callers */
-  accountFor(...a: Parameters<ToolRegistry['accountFor']>): ReturnType<ToolRegistry['accountFor']> {
-    return this.toolRegistry.accountFor(...a)
-  }
-
-  /** `ToolQueries.listModels` (tool-queries.ts), kept on the manager for its callers */
-  listModels(...a: Parameters<ToolQueries['listModels']>): ReturnType<ToolQueries['listModels']> {
-    return this.toolQueries.listModels(...a)
   }
 
   /** A project's working directory. Used by the terminal to decide its own key (cwd) */
@@ -1870,16 +1710,6 @@ export class SessionManager {
     return derived
   }
 
-  /** `ProjectRegistry.folderRoots` (project-registry.ts), kept on the manager for its callers */
-  folderRoots(...a: Parameters<ProjectRegistry['folderRoots']>): ReturnType<ProjectRegistry['folderRoots']> {
-    return this.projectRegistry.folderRoots(...a)
-  }
-
-  /** `WorktreeSessions.deleteHubChild` (worktree-sessions.ts, #1161 item 3): `agents.deleteAgentChild` */
-  deleteHubChild(...a: Parameters<WorktreeSessions['deleteHubChild']>): ReturnType<WorktreeSessions['deleteHubChild']> {
-    return this.worktrees.deleteHubChild(...a)
-  }
-
   /** Where a session's agent compacts the next time its process starts, as the launch decides it (`agents.autoCompact`, #1376) */
   autoCompactFor(sessionId: string): { controlled: boolean; share: number; tokens: number | null } {
     return autoCompactPlan(autoCompactOf(this.uiPreferences()), this.modelWindows, this.sessionOf(sessionId))
@@ -1901,39 +1731,9 @@ export class SessionManager {
     return { ...m.worktree, ...state }
   }
 
-  /** `HandoffNotes.exportHandoffRecord` (handoff-notes.ts), kept on the manager for its callers */
-  exportHandoffRecord(...a: Parameters<HandoffNotes['exportHandoffRecord']>): ReturnType<HandoffNotes['exportHandoffRecord']> {
-    return this.handoffNotes.exportHandoffRecord(...a)
-  }
-
-  /** `HandoffNotes.exportHandoffNote` (handoff-notes.ts), kept on the manager for its callers */
-  exportHandoffNote(...a: Parameters<HandoffNotes['exportHandoffNote']>): ReturnType<HandoffNotes['exportHandoffNote']> {
-    return this.handoffNotes.exportHandoffNote(...a)
-  }
-
-  /** `ProjectRegistry.gitTrust` (project-registry.ts), kept on the manager for its callers */
-  gitTrust(...a: Parameters<ProjectRegistry['gitTrust']>): ReturnType<ProjectRegistry['gitTrust']> {
-    return this.projectRegistry.gitTrust(...a)
-  }
-
-  /** `ProjectFiles.gitIgnoredEntries` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitIgnoredEntries(...a: Parameters<ProjectFiles['gitIgnoredEntries']>): ReturnType<ProjectFiles['gitIgnoredEntries']> {
-    return this.files.gitIgnoredEntries(...a)
-  }
-
   /** `ProjectFiles.forgetWatchHolder` (dev-services/project-files.ts), kept on the manager for its callers */
   forgetWatchHolder(...a: Parameters<ProjectFiles['forgetWatchHolder']>): ReturnType<ProjectFiles['forgetWatchHolder']> {
     return this.files.forgetWatchHolder(...a)
-  }
-
-  /** `UiPreferenceStore.saveWorkspace` (ui-preferences.ts), kept on the manager for its callers */
-  saveWorkspace(...a: Parameters<UiPreferenceStore['saveWorkspace']>): ReturnType<UiPreferenceStore['saveWorkspace']> {
-    return this.prefs.saveWorkspace(...a)
-  }
-
-  /** `UiPreferenceStore.loadWorkspace` (ui-preferences.ts), kept on the manager for its callers */
-  loadWorkspace(...a: Parameters<UiPreferenceStore['loadWorkspace']>): ReturnType<UiPreferenceStore['loadWorkspace']> {
-    return this.prefs.loadWorkspace(...a)
   }
 
   /** `UiPreferenceStore.uiPreferences` (ui-preferences.ts), kept on the manager for its callers */
@@ -1946,16 +1746,6 @@ export class SessionManager {
     return this.prefs.setUiPreferences(...a)
   }
 
-  /** `ApprovalRules.listApprovalRules` (approval-rules.ts), kept on the manager for its callers */
-  listApprovalRules(...a: Parameters<ApprovalRules['listApprovalRules']>): ReturnType<ApprovalRules['listApprovalRules']> {
-    return this.approvalRules.listApprovalRules(...a)
-  }
-
-  /** `ApprovalRules.deleteApprovalRule` (approval-rules.ts), kept on the manager for its callers */
-  deleteApprovalRule(...a: Parameters<ApprovalRules['deleteApprovalRule']>): ReturnType<ApprovalRules['deleteApprovalRule']> {
-    return this.approvalRules.deleteApprovalRule(...a)
-  }
-
   /**
    * Search for the command palette. The store now returns the whole body, so **it is cut down to one
    * line right here** (the palette only ever shows one line). The orchestrator's recall cuts a much
@@ -1965,16 +1755,6 @@ export class SessionManager {
     return this.store
       .messages.searchMessages(query, limit)
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
-  }
-
-  /** `SessionSettings.stopBackgroundTask` (session-settings.ts), kept on the manager for its callers */
-  stopBackgroundTask(...a: Parameters<SessionSettings['stopBackgroundTask']>): ReturnType<SessionSettings['stopBackgroundTask']> {
-    return this.sessionSettings.stopBackgroundTask(...a)
-  }
-
-  /** `SessionSettings.clearBackgroundTasks` (session-settings.ts), kept on the manager for its callers */
-  clearBackgroundTasks(...a: Parameters<SessionSettings['clearBackgroundTasks']>): ReturnType<SessionSettings['clearBackgroundTasks']> {
-    return this.sessionSettings.clearBackgroundTasks(...a)
   }
 
   /**
@@ -2136,7 +1916,7 @@ export class SessionManager {
    */
   private endTurnWithProcess(sessionId: string): void {
     const m = this.meta.get(sessionId)
-    if (m && inTurn(m.state)) this.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
+    if (m && inTurn(m.state)) this.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
   /**
@@ -2223,7 +2003,7 @@ export class SessionManager {
         self.usageRecorder.forget(id)
         self.cacheLedger.forget(id)
       },
-      usageFor: (...a) => self.usageFor(...a),
+      usageFor: (...a) => self.toolQueries.usageFor(...a),
       get modelWindows() {
         return self.modelWindows
       },
@@ -2263,7 +2043,7 @@ export class SessionManager {
       get delegationFlow() {
         return self.delegationFlow
       },
-      deliver: (...a) => self.deliver(...a),
+      deliver: (...a) => self.events.deliver(...a),
       deliverReport: (...a) => self.reports.deliverReport(...a),
       dropOpenedByAuto: (...a) => self.queue.dropOpenedByAuto(...a),
       get disposing() {
@@ -2276,9 +2056,9 @@ export class SessionManager {
         return self.endpoint
       },
       enqueue: (...a) => self.queue.enqueue(...a),
-      ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
-      exportHandoffNote: (...a) => self.exportHandoffNote(...a),
-      exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
+      ensureProjectAccess: (...a) => self.consents.ensureProjectAccess(...a),
+      exportHandoffNote: (...a) => self.handoffNotes.exportHandoffNote(...a),
+      exportHandoffRecord: (...a) => self.handoffNotes.exportHandoffRecord(...a),
       get externals() {
         return self.externals
       },
@@ -2373,7 +2153,7 @@ export class SessionManager {
         return self.linkedReader
       },
       linkedTasksRunning: (...a) => self.linkedReports.ownTasksRunning(...a),
-      listCommands: (...a) => self.listCommands(...a),
+      listCommands: (...a) => self.toolQueries.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
       migrateApprovedMcpServers: (...a) => self.orchestratorSlot.proposals.migrateApprovedMcpServers(...a),
@@ -2391,7 +2171,7 @@ export class SessionManager {
       openSession: (...a) => self.openSession(...a),
       orchestratorMemory: (...a) => self.launchInputs.orchestratorMemory(...a),
       orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
-      onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
+      onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.events.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
       pauseReport: (...a) => self.reports.pauseReport(...a),
       pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
@@ -2438,7 +2218,7 @@ export class SessionManager {
       requireHandle: (...a) => self.requireHandle(...a),
       requireAppAccess: (...a) => self.apps.requireAppAccess(...a),
       respondApproval: (...a) => self.respondApproval(...a),
-      runAppAgent: (...a) => self.runAppAgent(...a),
+      runAppAgent: (...a) => self.appSessions.runAppAgent(...a),
       appNotice: (...a) => self.appNotice(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
@@ -2467,7 +2247,7 @@ export class SessionManager {
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
-      stopBackgroundTask: (...a) => self.stopBackgroundTask(...a),
+      stopBackgroundTask: (...a) => self.sessionSettings.stopBackgroundTask(...a),
       stopWatchingReconnect: (...a) => self.interruptions.stopWatchingReconnect(...a),
       get store() {
         return self.store
@@ -2486,7 +2266,7 @@ export class SessionManager {
       toolRefusal: (...a) => self.toolRefusal(...a),
       refusal: (...a) => self.toolRegistry.refusal(...a),
       trashSession: (...a) => self.trashSession(...a),
-      purgeSession: (...a) => self.purgeSession(...a),
+      purgeSession: (...a) => self.trash.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
       agentRunEnded: (...a) => self.appSessions.agentRunEnded(...a),
       get trashing() {
@@ -2579,8 +2359,8 @@ export class SessionManager {
       handoffWait: (callerId, handle, signal) => this.handoffFlow.wait(callerId, handle, signal),
       usageHistory: (p) => this.usageHistory(p),
       builderRefOf: (m) => this.appSessions.builderRefOf(m),
-      checkApp: (ref) => this.checkApp(ref),
-      createApp: (params) => this.createApp(params),
+      checkApp: (ref) => this.appSessions.checkApp(ref),
+      createApp: (params) => this.appSessions.createApp(params),
     })
   }
 
@@ -2642,49 +2422,9 @@ export class SessionManager {
     return orchestratorToolsFor(this.seat(), orchestratorId, scopeIds, ownProject, hubView)
   }
 
-  /** `AppSessions.createApp` (app-sessions.ts), kept on the manager for its callers */
-  createApp(...a: Parameters<AppSessions['createApp']>): ReturnType<AppSessions['createApp']> {
-    return this.appSessions.createApp(...a)
-  }
-
-  /** `AppSessions.commitImport` (app-sessions.ts): an import brought in as a project of its own (#1141) */
-  commitImport(...a: Parameters<AppSessions['commitImport']>): ReturnType<AppSessions['commitImport']> {
-    return this.appSessions.commitImport(...a)
-  }
-
-  /** `AppSessions.builderOf` (app-sessions.ts), kept on the manager for its callers */
-  builderOf(...a: Parameters<AppSessions['builderOf']>): ReturnType<AppSessions['builderOf']> {
-    return this.appSessions.builderOf(...a)
-  }
-
-  /** `AppSessions.createAppBuilder` (app-sessions.ts), kept on the manager for its callers */
-  createAppBuilder(...a: Parameters<AppSessions['createAppBuilder']>): ReturnType<AppSessions['createAppBuilder']> {
-    return this.appSessions.createAppBuilder(...a)
-  }
-
   /** `AppSessions.builderBusy` (app-sessions.ts), kept on the manager for its callers */
   builderBusy(...a: Parameters<AppSessions['builderBusy']>): ReturnType<AppSessions['builderBusy']> {
     return this.appSessions.builderBusy(...a)
-  }
-
-  /** `AppSessions.checkApp` (app-sessions.ts), kept on the manager for its callers */
-  checkApp(...a: Parameters<AppSessions['checkApp']>): ReturnType<AppSessions['checkApp']> {
-    return this.appSessions.checkApp(...a)
-  }
-
-  /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
-  ensureProjectAccess(...a: Parameters<ProjectConsents['ensureProjectAccess']>): ReturnType<ProjectConsents['ensureProjectAccess']> {
-    return this.consents.ensureProjectAccess(...a)
-  }
-
-  /** `ProjectConsents.projectConsents` (project-consents.ts), kept on the manager for its callers */
-  projectConsents(...a: Parameters<ProjectConsents['projectConsents']>): ReturnType<ProjectConsents['projectConsents']> {
-    return this.consents.projectConsents(...a)
-  }
-
-  /** `ProjectConsents.revokeProjectConsent` (project-consents.ts), kept on the manager for its callers */
-  revokeProjectConsent(...a: Parameters<ProjectConsents['revokeProjectConsent']>): ReturnType<ProjectConsents['revokeProjectConsent']> {
-    return this.consents.revokeProjectConsent(...a)
   }
 
   /** The caller's own preset, read at the boundary, never its project's or parent's preset. */
@@ -2725,49 +2465,9 @@ export class SessionManager {
     })
   }
 
-  /** `HostCards.appQuestionList` (host-cards.ts), kept on the manager for its callers */
-  appQuestionList(...a: Parameters<HostCards['appQuestionList']>): ReturnType<HostCards['appQuestionList']> {
-    return this.hostCards.appQuestionList(...a)
-  }
-
-  /** `HostCards.answerAppQuestion` (host-cards.ts), kept on the manager for its callers */
-  answerAppQuestion(...a: Parameters<HostCards['answerAppQuestion']>): ReturnType<HostCards['answerAppQuestion']> {
-    return this.hostCards.answerAppQuestion(...a)
-  }
-
-  /** `AppSessions.runAppAgent` (app-sessions.ts), kept on the manager for its callers */
-  runAppAgent(...a: Parameters<AppSessions['runAppAgent']>): ReturnType<AppSessions['runAppAgent']> {
-    return this.appSessions.runAppAgent(...a)
-  }
-
   /** `OrchestratorSlot.mcpProposals` (orchestrator-slot.ts), kept on the manager for its callers */
   mcpProposals(...a: Parameters<OrchestratorSlot['mcpProposals']>): ReturnType<OrchestratorSlot['mcpProposals']> {
     return this.orchestratorSlot.mcpProposals(...a)
-  }
-
-  /** `OrchestratorSlot.skillProposals` (orchestrator-slot.ts), kept on the manager for its callers */
-  skillProposals(...a: Parameters<OrchestratorSlot['skillProposals']>): ReturnType<OrchestratorSlot['skillProposals']> {
-    return this.orchestratorSlot.skillProposals(...a)
-  }
-
-  /** `OrchestratorSlot.orchestratorSkills` (orchestrator-slot.ts), kept on the manager for its callers */
-  orchestratorSkills(...a: Parameters<OrchestratorSlot['orchestratorSkills']>): ReturnType<OrchestratorSlot['orchestratorSkills']> {
-    return this.orchestratorSlot.orchestratorSkills(...a)
-  }
-
-  /** `OrchestratorSlot.resolveSkillProposal` (orchestrator-slot.ts), kept on the manager for its callers */
-  resolveSkillProposal(...a: Parameters<OrchestratorSlot['resolveSkillProposal']>): ReturnType<OrchestratorSlot['resolveSkillProposal']> {
-    return this.orchestratorSlot.resolveSkillProposal(...a)
-  }
-
-  /** `OrchestratorSlot.deleteOrchestratorSkill` (orchestrator-slot.ts), kept on the manager for its callers */
-  deleteOrchestratorSkill(...a: Parameters<OrchestratorSlot['deleteOrchestratorSkill']>): ReturnType<OrchestratorSlot['deleteOrchestratorSkill']> {
-    return this.orchestratorSlot.deleteOrchestratorSkill(...a)
-  }
-
-  /** `OrchestratorSlot.resolveMcpProposal` (orchestrator-slot.ts), kept on the manager for its callers */
-  resolveMcpProposal(...a: Parameters<OrchestratorSlot['resolveMcpProposal']>): ReturnType<OrchestratorSlot['resolveMcpProposal']> {
-    return this.orchestratorSlot.resolveMcpProposal(...a)
   }
 
   /** `OrchestratorSlot.runOrchestratorTool` (orchestrator-slot.ts), kept on the manager for its callers */
@@ -2810,21 +2510,6 @@ export class SessionManager {
     return this.apps.useExternalApps(...a)
   }
 
-  /** `SessionAppWiring.appReach` (session-app-wiring.ts), kept on the manager for its callers */
-  appReach(...a: Parameters<SessionAppWiring['appReach']>): ReturnType<SessionAppWiring['appReach']> {
-    return this.apps.appReach(...a)
-  }
-
-  /** `SessionAppWiring.appSessionTools` (session-app-wiring.ts), kept on the manager for its callers */
-  appSessionTools(...a: Parameters<SessionAppWiring['appSessionTools']>): ReturnType<SessionAppWiring['appSessionTools']> {
-    return this.apps.appSessionTools(...a)
-  }
-
-  /** `SessionAppWiring.callAppForSession` (session-app-wiring.ts), kept on the manager for its callers */
-  callAppForSession(...a: Parameters<SessionAppWiring['callAppForSession']>): ReturnType<SessionAppWiring['callAppForSession']> {
-    return this.apps.callAppForSession(...a)
-  }
-
   /** `SessionAppWiring.sessionAppsHub` (session-app-wiring.ts), kept on the manager for its callers */
   sessionAppsHub(...a: Parameters<SessionAppWiring['sessionAppsHub']>): ReturnType<SessionAppWiring['sessionAppsHub']> {
     return this.apps.sessionAppsHub(...a)
@@ -2835,16 +2520,6 @@ export class SessionManager {
     return this.apps.recordAppView(...a)
   }
 
-  /** `SessionAppWiring.setAppShared` (session-app-wiring.ts), kept on the manager for its callers */
-  setAppShared(...a: Parameters<SessionAppWiring['setAppShared']>): ReturnType<SessionAppWiring['setAppShared']> {
-    return this.apps.setAppShared(...a)
-  }
-
-  /** `ProjectRegistry.setWorktreeTrunk` (project-registry.ts), kept on the manager for its callers */
-  setWorktreeTrunk(...a: Parameters<ProjectRegistry['setWorktreeTrunk']>): ReturnType<ProjectRegistry['setWorktreeTrunk']> {
-    return this.projectRegistry.setWorktreeTrunk(...a)
-  }
-
   /**
    * PR status checker (#76, stage 3). Kept as a field because gh is a network call, and a test cannot
    * measure it — a test swaps this field out instead. prPollMs is also a field for the same reason (a test
@@ -2852,21 +2527,6 @@ export class SessionManager {
    */
   prLookup: (projectCwd: string, branch: string, signal?: AbortSignal) => Promise<BranchPr | 'unavailable' | null> = gitBranchPr
   prPollMs = 120_000
-
-  /** `MergeChecks.refreshMergedWorktrees` (merge-checks.ts), kept on the manager for its callers */
-  refreshMergedWorktrees(...a: Parameters<MergeChecks['refreshMergedWorktrees']>): ReturnType<MergeChecks['refreshMergedWorktrees']> {
-    return this.merges.refreshMergedWorktrees(...a)
-  }
-
-  /** `OrchestratorSlot.orchestratorPeek` (orchestrator-slot.ts), kept on the manager for its callers */
-  orchestratorPeek(...a: Parameters<OrchestratorSlot['orchestratorPeek']>): ReturnType<OrchestratorSlot['orchestratorPeek']> {
-    return this.orchestratorSlot.orchestratorPeek(...a)
-  }
-
-  /** `OrchestratorSlot.configureOrchestrator` (orchestrator-slot.ts), kept on the manager for its callers */
-  configureOrchestrator(...a: Parameters<OrchestratorSlot['configureOrchestrator']>): ReturnType<OrchestratorSlot['configureOrchestrator']> {
-    return this.orchestratorSlot.configureOrchestrator(...a)
-  }
 
   /** `OrchestratorSlot.orchestrator` (orchestrator-slot.ts), kept on the manager for its callers */
   orchestrator(...a: Parameters<OrchestratorSlot['orchestrator']>): ReturnType<OrchestratorSlot['orchestrator']> {
@@ -2891,18 +2551,8 @@ export class SessionManager {
     const newer = m.state === 'error' && m.lastSeq > seq
     const cleared = m.state === 'error' && !newer
     if (cleared) this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
-    this.markRead(sessionId, seq)
+    this.sessionSettings.markRead(sessionId, seq)
     return { cleared, newer }
-  }
-
-  /** `SessionSettings.markRead` (session-settings.ts), kept on the manager for its callers */
-  markRead(...a: Parameters<SessionSettings['markRead']>): ReturnType<SessionSettings['markRead']> {
-    return this.sessionSettings.markRead(...a)
-  }
-
-  /** `SessionRecord.messageImage` (session-record.ts), kept on the manager for its callers */
-  messageImage(...a: Parameters<SessionRecord['messageImage']>): ReturnType<SessionRecord['messageImage']> {
-    return this.record.messageImage(...a)
   }
 
   /** `SessionRecord.loadSubagentMessages` (session-record.ts), kept on the manager for its callers */

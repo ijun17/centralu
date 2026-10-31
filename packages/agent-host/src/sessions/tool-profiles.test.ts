@@ -159,7 +159,7 @@ describe('through the manager: the same profile under either tool and any preset
   it('the orchestrator is the orchestrator under either tool', async () => {
     for (const tool of ['claude', 'codex'] as const) {
       const { mgr, adapters } = world()
-      mgr.configureOrchestrator(tool)
+      mgr.orchestratorSlot.configureOrchestrator(tool)
       const o = await mgr.orchestrator()
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('orchestrator')
       expect(mgr.toolProfileOf(o.id)).toBe('orchestrator')

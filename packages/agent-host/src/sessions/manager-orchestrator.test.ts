@@ -683,16 +683,16 @@ describe('the orchestrator', () => {
    */
   it('peek does not create — it is born on the first question, with the tool chosen on the intro screen (#63)', async () => {
     // Just opening the screen creates nothing (lazy start).
-    expect(mgr.orchestratorPeek()).toBeNull()
+    expect(mgr.orchestratorSlot.orchestratorPeek()).toBeNull()
 
-    mgr.configureOrchestrator('codex')
+    mgr.orchestratorSlot.configureOrchestrator('codex')
     const orc = await mgr.orchestrator()
     expect(orc.tool).toBe('codex')
     // A codex orchestrator gets its tool wiring too — the same stdio bridge path #13 laid down.
     expect(codexAdapter.lastOpts?.orchestratorTools).toBeDefined()
 
     // Once born, peek gives back the same session — there is no second orchestrator.
-    expect(mgr.orchestratorPeek()?.id).toBe(orc.id)
+    expect(mgr.orchestratorSlot.orchestratorPeek()?.id).toBe(orc.id)
   })
 
   it('create_session — creates by project name, and refuses a request with no name', async () => {
@@ -893,19 +893,19 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
       why: 'a repeated request',
     })
     // Proposal stage — no effect yet.
-    expect(mgr.orchestratorSkills()).toEqual([])
+    expect(mgr.orchestratorSlot.orchestratorSkills()).toEqual([])
     expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('weekly-report')
 
-    await mgr.resolveSkillProposal('weekly-report', true)
-    expect(mgr.orchestratorSkills()).toEqual([
+    await mgr.orchestratorSlot.resolveSkillProposal('weekly-report', true)
+    expect(mgr.orchestratorSlot.orchestratorSkills()).toEqual([
       { name: 'weekly-report', content: 'Every Friday: go through the sessions and write a summary of the week.' },
     ])
     // The restarted process's role prompt now carries the skill.
     expect(adapter.lastOpts?.systemPromptAppend).toContain('### weekly-report')
     expect(adapter.lastOpts?.systemPromptAppend).toContain('summary of the week')
 
-    await mgr.deleteOrchestratorSkill('weekly-report')
-    expect(mgr.orchestratorSkills()).toEqual([])
+    await mgr.orchestratorSlot.deleteOrchestratorSkill('weekly-report')
+    expect(mgr.orchestratorSlot.orchestratorSkills()).toEqual([])
     expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('weekly-report')
   })
 
@@ -921,7 +921,7 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
     await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'notify-skill', content: 'procedure' })
     expect(changed()).toBe(before + 1)
 
-    await mgr.resolveSkillProposal('notify-skill', false)
+    await mgr.orchestratorSlot.resolveSkillProposal('notify-skill', false)
     expect(changed()).toBe(before + 2)
     // A refused proposal saved nothing, so it announces nothing
     await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'empty-skill', content: '   ' })
@@ -937,10 +937,10 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
     expect(long.isError).toBe(true)
 
     await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'dup-skill', content: 'procedure' })
-    await mgr.resolveSkillProposal('dup-skill', true)
+    await mgr.orchestratorSlot.resolveSkillProposal('dup-skill', true)
     const again = await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'dup-skill', content: 'a different procedure' })
     expect(again.isError).toBe(true)
-    expect(mgr.orchestratorSkills().find((s) => s.name === 'dup-skill')?.content).toBe('procedure')
+    expect(mgr.orchestratorSlot.orchestratorSkills().find((s) => s.name === 'dup-skill')?.content).toBe('procedure')
   })
 })
 
@@ -962,8 +962,8 @@ describe('the commands tier through the host (#512)', () => {
     const skill = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'propose_skill', args: { name: 'weekly-report', content: 'Every Friday: summarise the week.' } })
     expect(skill.isError).toBeFalsy()
     expect(skill.text).toMatch(/An approval card appeared on screen/)
-    expect(mgr.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
-    expect(mgr.orchestratorSkills()).toEqual([])
+    expect(mgr.orchestratorSlot.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
+    expect(mgr.orchestratorSlot.orchestratorSkills()).toEqual([])
 
     const server = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'propose_mcp_server', args: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] } })
     expect(server.isError).toBeFalsy()
@@ -971,7 +971,7 @@ describe('the commands tier through the host (#512)', () => {
 
     // By its own name the command is no longer a tool of the seat
     await expect(mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'other', content: 'x' })).rejects.toThrow(/Not a tool of this session/)
-    expect(mgr.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
+    expect(mgr.orchestratorSlot.skillProposals().map((p) => p.name)).toEqual(['weekly-report'])
   })
 
   /*
@@ -1003,7 +1003,7 @@ describe('the commands tier through the host (#512)', () => {
     const p = await addProject()
     const s = await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' }) as SessionInfo
     await expect(mgr.runOrchestratorTool(s.id, 'centralu_run', { command: 'propose_skill', args: { name: 'x', content: 'y' } })).rejects.toThrow(/Not a tool of this session/)
-    expect(mgr.skillProposals()).toEqual([])
+    expect(mgr.orchestratorSlot.skillProposals()).toEqual([])
   })
 })
 

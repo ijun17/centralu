@@ -112,7 +112,7 @@ async function proposeAndApprove(name: string, server = SERVER, why?: string) {
   const orc = await mgr.orchestrator()
   const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name, ...server, ...(why ? { why } : {}) })
   expect(r.isError).toBeFalsy()
-  return { orc, resolved: await mgr.resolveMcpProposal(name, true) }
+  return { orc, resolved: await mgr.orchestratorSlot.resolveMcpProposal(name, true) }
 }
 
 /*
@@ -133,7 +133,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     expect(userApps()).toEqual([])
 
     const before = adapter.seen.length
-    expect(await mgr.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
+    expect(await mgr.orchestratorSlot.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
     expect(mgr.mcpProposals()).toEqual([])
 
     // A headless app: only a server command, no home. The app stands without starting (it starts the first time it is needed)
@@ -165,7 +165,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
     const before = adapter.seen.length
-    await mgr.resolveMcpProposal('figma', false)
+    await mgr.orchestratorSlot.resolveMcpProposal('figma', false)
     expect(mgr.mcpProposals()).toEqual([])
     expect(userApps()).toEqual([])
     expect(adapter.seen.length).toBe(before)
@@ -188,7 +188,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'taken', command: 'npx', args: ['-y', 'x'] })
     plantApp(join(dataRoot, 'apps'), 'taken', { server: SERVER })
-    const r = await mgr.resolveMcpProposal('taken', true)
+    const r = await mgr.orchestratorSlot.resolveMcpProposal('taken', true)
     expect(r.ok).toBe(false)
     expect(r.error).toContain('taken')
     expect(readManifest('taken').server).toEqual(SERVER)

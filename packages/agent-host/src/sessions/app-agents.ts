@@ -5,7 +5,7 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  * An agent an app has assigned (M4 D-1) — what gets sent to the session, and what gets read as
  * its answer once the session finishes.
  *
- * Standing the session up and waiting for it is the manager's job (`SessionManager.runAppAgent`).
+ * Standing the session up and waiting for it is the manager's job (`AppSessions.runAppAgent`).
  * The frame around the text it sends is the same one used for in-conversation UI messages
  * (`app-messages.ts`'s `appMessageFrame`). What lives here is only what comes after: waiting for the
  * turn's outcome; the rule for picking the final answer out of the record is `turnAnswer` (turn-answer.ts).

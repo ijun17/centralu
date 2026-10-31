@@ -37,7 +37,7 @@ describe('auto Centralu boundaries (#603)', () => {
     expect(await start(id)).toMatchObject({ ok: true, state: 'working' })
     for (const access of ['delegate', 'apps'] as const) {
       expect(
-        await w.mgr.ensureProjectAccess(
+        await w.mgr.consents.ensureProjectAccess(
           id,
           w.target.id,
           access,
@@ -47,7 +47,7 @@ describe('auto Centralu boundaries (#603)', () => {
       ).toEqual({ ok: true })
     }
     expect(w.events.filter((e) => e.type === 'approval_request')).toEqual([])
-    expect(w.mgr.projectConsents()).toEqual([])
+    expect(w.mgr.consents.projectConsents()).toEqual([])
     expect(log.mock.calls.flat().join('\n')).toContain('agent_start allowed')
     expect(log.mock.calls.flat().join('\n')).toContain('target not trusted')
   })
@@ -67,7 +67,7 @@ describe('auto Centralu boundaries (#603)', () => {
         expect(w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval).toBeFalsy()
       }
       for (const access of ['delegate', 'apps'] as const) {
-        const call = w.mgr.ensureProjectAccess(id, w.target.id, access, { text: 'check' })
+        const call = w.mgr.consents.ensureProjectAccess(id, w.target.id, access, { text: 'check' })
         await w.until(() => !!w.card(id))
         w.mgr.respondApproval(id, w.card(id)!.requestId, 'deny')
         expect((await call).ok).toBe(false)
@@ -269,9 +269,9 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it('reads changes to the caller preset and never remembers an auto consent', async () => {
     const id = await session()
-    expect(await w.mgr.ensureProjectAccess(id, w.target.id, 'apps', { text: 'x' })).toEqual({ ok: true })
+    expect(await w.mgr.consents.ensureProjectAccess(id, w.target.id, 'apps', { text: 'x' })).toEqual({ ok: true })
     await w.mgr.updateSettings(id, { permissionPreset: 'safe' })
-    const call = w.mgr.ensureProjectAccess(id, w.target.id, 'apps', { text: 'x' })
+    const call = w.mgr.consents.ensureProjectAccess(id, w.target.id, 'apps', { text: 'x' })
     await w.until(() => !!w.card(id))
     w.mgr.respondApproval(id, w.card(id)!.requestId, 'deny')
     expect((await call).ok).toBe(false)

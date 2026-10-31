@@ -380,8 +380,8 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('auto')
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
-    const real = mgr.exportHandoffRecord.bind(mgr)
-    const spy = vi.spyOn(mgr, 'exportHandoffRecord').mockImplementation(async (...a) => {
+    const real = mgr.handoffNotes.exportHandoffRecord.bind(mgr.handoffNotes)
+    const spy = vi.spyOn(mgr.handoffNotes, 'exportHandoffRecord').mockImplementation(async (...a) => {
       await gate
       return real(...a)
     })

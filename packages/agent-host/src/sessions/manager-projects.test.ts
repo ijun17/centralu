@@ -283,7 +283,7 @@ describe('reordering within a project does not disturb the global order', () => 
     const b2 = await mk(p2)
 
     // Reverse the order only within p1.
-    const after = mgr.reorderSessions(p1.id, [a2, a1]).map((s) => s.id)
+    const after = mgr.layout.reorderSessions(p1.id, [a2, a1]).map((s) => s.id)
 
     // Only p1's slots (1st and 3rd) change; p2 stays the same.
     expect(after).toEqual([a2, b1, a1, b2])
@@ -300,7 +300,7 @@ describe('reordering within a project does not disturb the global order', () => 
     // What a module reaching the manager's sessions holds, taken before the reorder
     const held = (mgr as unknown as { meta: Map<string, SessionInfo> }).meta
 
-    mgr.reorderSessions(p1.id, [a2, a1])
+    mgr.layout.reorderSessions(p1.id, [a2, a1])
 
     expect([...held.keys()]).toEqual([a2, a1])
     expect((mgr as unknown as { meta: Map<string, SessionInfo> }).meta).toBe(held)

@@ -533,7 +533,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
       return { number: 7, state: 'merged', url: 'u', headOid: 'abc' }
     }
 
-    await mgr.refreshMergedWorktrees(p.id)
+    await mgr.merges.refreshMergedWorktrees(p.id)
     expect(mgr.listSessions().every((x) => typeof x.id === 'string')).toBe(true)
     expect(internals.meta.has(s.id)).toBe(false)
   })

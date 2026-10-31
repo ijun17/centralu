@@ -203,14 +203,14 @@ describe('a user-folder app becomes a project in place', () => {
     expect(store.sessions.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
     expect(store.trash.isTrashed('trashed')).toBe(true)
     // This same host, which loaded the session before the move, finds it as the app's builder under the new key
-    expect(mgr.builderOf({ projectId: project()!.id, appId: 'notes' })?.id).toBe('builder')
+    expect(mgr.appSessions.builderOf({ projectId: project()!.id, appId: 'notes' })?.id).toBe('builder')
     expect(mgr.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
     // And the windows hear of the move
     expect(emitted).toContainEqual(expect.objectContaining({ type: 'session_created', sessionId: 'builder', session: expect.objectContaining({ projectId: project()!.id }) }))
     // Its handle, live across the move, is still given its own app, now the project's root app
     expect(liveBuilder!.current().map((x) => x.server)).toEqual(['app-notes'])
     // So asking for its builder stands no second one up
-    expect(await mgr.createAppBuilder({ projectId: project()!.id, appId: 'notes' })).toMatchObject({ id: 'builder' })
+    expect(await mgr.appSessions.createAppBuilder({ projectId: project()!.id, appId: 'notes' })).toMatchObject({ id: 'builder' })
     expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ [OLD]: 'builder', [newKey()]: 'builder' })
   })
 
@@ -442,7 +442,7 @@ describe('a deleted project gives its folder back', () => {
     expect(adopted().notes).toBeDefined()
     expect(trashed()).toEqual([])
     // And it does: the project comes back under its id, with its root app
-    const { project: back } = await mgr.restoreSession('builder')
+    const { project: back } = await mgr.trash.restoreSession('builder')
     expect(back).toMatchObject({ id: pid, path: appDir() })
     rt.refresh()
     expect(rt.list().find((a) => a.appId === 'notes')).toMatchObject({ projectId: pid, root: true })

@@ -3880,7 +3880,7 @@ there in the same pull request.
 
 ## 6. Usage and limits (FR-9)
 
-**We ask the tool, we do not read its files.** `agents.usage` → `SessionManager.usageFor(tool)`
+**We ask the tool, we do not read its files.** `agents.usage` → `ToolQueries.usageFor(tool)`
 → the adapter's optional `listUsage()`, which calls the tool's own API (the Claude SDK for one,
 `app-server` for the other). An adapter that cannot answer throws, and the manager degrades
 with the reason attached rather than showing a confident wrong number.

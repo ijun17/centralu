@@ -1012,7 +1012,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     a.failExternalDelete = true
     const { m, r, s } = await setupWith(a)
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
-    await expect(m.purgeSession(s.id)).rejects.toThrow(/refused/)
+    await expect(m.trash.purgeSession(s.id)).rejects.toThrow(/refused/)
     expect(((await r('trash.list', {})) as { sessions: { id: string }[] }).sessions.map((x) => x.id)).toEqual([s.id])
     expect(store.messages.loadMessages(s.id, 10)).toBeDefined() // The conversation is unchanged too.
   })
@@ -1031,7 +1031,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     await r('agents.createSession', {
       projectId: s.projectId, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', permissionPreset: 'normal',
     })
-    await m.purgeSession(s.id)
+    await m.trash.purgeSession(s.id)
     expect(a.deletedExternals).toEqual([])
   })
 })
