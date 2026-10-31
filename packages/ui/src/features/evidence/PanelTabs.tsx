@@ -282,12 +282,6 @@ function TabGroup({
 }
 
 /**
- * The pointer decides left/right the way the sidebar decides top/bottom (reorder.ts
- * `dropsBefore`): the boundary at the middle gives each outcome half the button, so
- * the hand can predict which side it gets.
- */
-
-/**
  * The collapsed tabs (`…`).
  *
  * They only collapsed for lack of room; they have not disappeared — this is where they can be

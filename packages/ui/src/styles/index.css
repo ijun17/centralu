@@ -948,8 +948,7 @@
  * The exit counterpart of cc-hang — settles back down into the spot it rose from and disappears.
  * Used for closing the settings menu (a menu that unfolds upward) (user request, 2026-09-06:
  * moving only on open and cutting off abruptly on close made it unreadable where it went). An
- * exit animation only shows if unmount is delayed, so the caller handles finishing it itself, via
- * animationend (or a timer as a fallback for reduced motion).
+ * exit animation only shows if unmount is delayed, so the caller keeps it mounted for `LEAVE_MS` (usePresence).
  */
 @keyframes cc-hang-out {
   from {
