@@ -596,7 +596,7 @@ default 4: the owner's, 2026-10-19, this repository's too).
 
 GitHub Actions was the bottleneck: a full run of `build.yml` is about 24 jobs, the free plan runs 20
 at once, and every push of every pull request started one. The owner chose two tiers: a pull
-request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests); the **full
+request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests, the macOS tests); the **full
 tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
 bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
 alone is green on what it reports. On while `project.json` has `ci.fullTier`, the name of the check
@@ -614,7 +614,7 @@ run and the full tier's check is not asked for. That run is judged as a pull req
 (`quickGreen`): every run finished, nothing it reported failed or is pending, the full tier's check
 skipped; and more strictly, since it decides a landing (`quickLanded`), every run concluded well and
 **each check named in `ci.quickChecks`** (this repository's: `changes`, `verify`, `windows tests (vitest
-*)`; `*` for any run of characters) was reported and succeeded, every check its name matches: a quick
+*)`, `macos tests`; `*` for any run of characters) was reported and succeeded, every check its name matches: a quick
 check never reported (a renamed job, one a broken `changes` switched off, a shard GitHub never created)
 or skipped does not land, it is left to `decideRun` (missing-check). The list is checked at start: with
 `landTier` "quick" and no names, the app does not start (an error, not "anything goes"). The required set is the whole workflow's, whose full-tier jobs a quick run never reports (a
