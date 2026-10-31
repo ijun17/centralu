@@ -9,7 +9,8 @@ import { addSessionPanels, newSession, setup } from './project-screen.js'
  *   idle       a thin grey line
  *   answering  a light grey (ink-muted) solid line
  *   stopped    a thick white dashed line on grey (error, limited, an unread interruption)
- *   waiting    a thick white solid line on grey (an approval, an open question)
+ *   waiting    a thick white solid line on grey (an approval, an open question); an approval fills the chip near-white
+ *              (`mark-attention`) with a dark letter, #1740
  */
 
 type Look = 'idle' | 'answering' | 'stopped' | 'waiting'
@@ -63,6 +64,9 @@ async function colours(page: Page) {
     clear: 'rgba(0, 0, 0, 0)',
     floor: await token(page, '--color-surface-floor'),
     selected: await token(page, '--color-surface-selected'),
+    attention: await token(page, '--color-mark-attention'),
+    attentionInk: await token(page, '--color-mark-attention-ink'),
+    ink: await token(page, '--color-ink'),
     lineStrong: await token(page, '--color-line-strong'),
   }
 }
@@ -120,7 +124,9 @@ export function sessionLookTests() {
           await expect(chip, name).toHaveCSS('border-top-width', want.width)
           await expect(chip, name).toHaveCSS('border-top-style', want.style)
           await expect(chip, name).toHaveCSS('border-top-color', c[want.line])
-          await expect(chip, name).toHaveCSS('background-color', c[want.chip])
+          const approval = patch.state === 'waiting_approval'
+          await expect(chip, name).toHaveCSS('background-color', approval ? c.attention : c[want.chip])
+          await expect(chip, name).toHaveCSS('color', approval ? c.attentionInk : c.ink)
           await expectStill(mark)
         }
       })
@@ -142,6 +148,20 @@ export function sessionLookTests() {
         await expect(mark).toHaveAttribute('aria-label', /Error/)
         await patchSession(page, id, { state: 'waiting_approval' })
         await expect(mark).toHaveAttribute('aria-label', /approval/i)
+      })
+
+      // #1740: a session waiting on an approval has no line of its own under its row, so its row keeps its height
+      test('a session entering the waiting state keeps its row where it was', async ({ page }) => {
+        await setup(page, ['/tmp/alpha'])
+        await useScheme(page, scheme)
+        const id = await newSession(page, 'alpha')
+        const row = page.getByTestId(`session-row-${id}`)
+        const item = row.locator('xpath=ancestor::li[1]') // the list item, where a second line would have stood
+        const before = await item.boundingBox()
+        await page.evaluate((sid) => ((window as any).__mock).requestApproval(sid, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' }, 'r1'), id)
+        await expect(row.locator('[data-state="waiting_approval"]')).toHaveCount(1)
+        expect(await item.boundingBox()).toEqual(before)
+        await expect(page.getByTestId(`inbox-approval-${id}`)).toHaveCount(0)
       })
 
       test('a grid panel wears the same four looks as its mark', async ({ page }) => {

@@ -104,6 +104,9 @@
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
+  /* The session mark that waits on an approval: a near-white fill and the letter on it, see .cc-mark */
+  --color-mark-attention: #f2f2f2;
+  --color-mark-attention-ink: #111111;
   --color-ink: #ededed; /* body text */
   --color-ink-muted: #a8a8a8; /* secondary */
   --color-ink-faint: #707070; /* background information */
@@ -390,6 +393,8 @@
   --color-line-strong: #bdbdbd;
 
   --color-ink-signal: #111111;
+  --color-mark-attention: #fafafa;
+  --color-mark-attention-ink: #111111;
   --color-ink: #2a2a2a;
   --color-ink-muted: #5a5a5a;
   --color-ink-faint: #7a7a7a;
@@ -466,6 +471,8 @@
 
   --color-ink-signal: #ffffff;
   --color-ink: #f0f0f0;
+  --color-mark-attention: #f5f5f5;
+  --color-mark-attention-ink: #000000;
   --color-ink-muted: #c8c8c8;
   --color-ink-faint: #9e9e9e;
 
@@ -506,6 +513,8 @@
   --color-line-strong: #4a4a4a;
 
   --color-ink-signal: #000000;
+  --color-mark-attention: #ffffff;
+  --color-mark-attention-ink: #000000;
   --color-ink: #121212;
   --color-ink-muted: #3a3a3a;
   --color-ink-faint: #595959;
@@ -1325,6 +1334,9 @@
 }
 /* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
    the 1px goes under it (measured at 4x) */
+.cc-mark > .cc-chip {
+  transition: background-color 180ms ease-out, color 180ms ease-out;
+}
 .cc-mark > .cc-chip.cc-chip-letter {
   font-family: var(--font-sans);
   padding-top: 0;
@@ -1336,6 +1348,11 @@
 .cc-mark[data-look='waiting'] > .cc-chip {
   border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
+}
+/* Waiting on an approval (not an open question): a near-white fill, the letter dark on it */
+.cc-mark[data-state='waiting_approval'][data-look='waiting'] > .cc-chip {
+  background-color: var(--color-mark-attention);
+  color: var(--color-mark-attention-ink);
 }
 .cc-mark[data-look='stopped'] > .cc-chip {
   border: 2px dashed var(--color-ink-signal);

@@ -3,7 +3,6 @@ import { useStore } from '../../../store/store.js'
 import { useSelectedSessionId } from '../../../store/selectors.js'
 import { SESSION_MIME } from '../reorder.js'
 import { INDENT, GUIDE, ROW_PAD } from '../layout.js'
-import { approvalLine } from '../rows/SessionRow.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
 
 /**
@@ -51,7 +50,6 @@ export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] 
           <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
-        {approvalLine(s, null, () => focusSession(s.id))}
       </li>
     )
   })

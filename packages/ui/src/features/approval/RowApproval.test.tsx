@@ -45,7 +45,7 @@ function render(session: SessionSummary | null, props: { settled?: boolean; keys
   state = { sessions: session ? { [session.id]: session } : {}, approvalsInFlight: {} }
   const html = renderToStaticMarkup(
     <PlatformProvider platform={platform}>
-      <RowApproval sessionId="s1" place="inbox" onOpen={() => {}} {...props} />
+      <RowApproval sessionId="s1" onOpen={() => {}} {...props} />
     </PlatformProvider>,
   )
   return { html, text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() }
