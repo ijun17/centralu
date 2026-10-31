@@ -142,7 +142,7 @@ async function startAgent() {
 
 async function askProject() {
   const CALLEE = process.env.CALLEE ?? 'claude'
-  const CALLER = process.env.CALLER ?? 'claude'
+  const CALLER = process.env.CALLER === 'codex' ? 'codex' : 'claude'
   const log = logger('ask')
   const root = scratch('cc-ask-')
   const consumer = join(root, 'consumer')
@@ -346,7 +346,7 @@ async function reader() {
 }
 
 const CASES = { 'start-agent': startAgent, 'ask-project': askProject, 'app-access': appAccess, reader }
-const run = CASES[process.argv[2]]
+const run = Object.hasOwn(CASES, process.argv[2] ?? '') ? CASES[process.argv[2]] : null
 if (!run) {
   console.error(`Usage: node packages/agent-host/scripts/smoke-delegation.mjs <${Object.keys(CASES).join('|')}>`)
   process.exit(2)

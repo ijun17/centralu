@@ -744,7 +744,7 @@ instruction sent at rest in the gap between a turn and the one run for a note be
 that turn opens. The tool runs inputs in the order they were given, so a turn that names an input has taken every one given
 before it, and all of them leave the host's store (a CLI that runs several notes as one turn names only the last); so do
 those a turn's end says it took in. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
-`turnStartInputs`); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
+`turnStartInputs`; a note sent into a one-reply turn about 2.3 s after its task still reached the turn's end and ran as the next turn, measured); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
 just after a turn ended or queued behind a compact or review (`flushPending`), gives its `turn/start` the input's id as the
 client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
 `working` for that turn that names it; a message that joined a turn already running shows after the turn's first item and
@@ -4036,7 +4036,7 @@ nothing was reported. The idle time behind the rebuilds put down to expiry is sh
 (`expiredIdleMs`, the shortest and longest in the window).
 
 Measured with `scripts/probe-cache-causes.mts`, a probe since removed (git history keeps it) (live, haiku, CLI 2.1.289 through SDK 0.3.263, a
-subscriber's login, 2026-10-12): the API reported `1h` for the SDK session's writes, and `5m` under
+subscriber's login, claude.ai connectors and auto memory off, 2026-10-12): the API reported `1h` for the SDK session's writes, and `5m` under
 `FORCE_PROMPT_CACHING_5M`. A switch to sonnet read 0 and wrote 23,266 of 23,268 tokens, named
 `model_change`. A new session under the forced five minutes wrote all 16,794, named `cold_start`;
 without it, the first request read 12,973 tokens another session had cached, so no rebuild. After
