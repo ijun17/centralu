@@ -308,6 +308,16 @@ const firstLine = (e) =>
 // Failures that say nothing about the thing asked for: gh cannot reach GitHub at all, or may not for now.
 export const FATAL = new Set(['network', 'auth', 'gh-missing', 'rate'])
 
+/** Runs a gh call; whatever fails but a rate limit, a login or the network is GitHub's refusal, said as `GitHub refused <what>: <its first line>`. */
+async function refusing(what, call) {
+  try {
+    return await call()
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}`)
+  }
+}
+
 /** Refuses anything but owner/name before it reaches a REST path. */
 export function checkRepo(repo) {
   if (!REPO.test(String(repo))) throw new GitHubError('input', `"${repo}" is not a repository; give owner/name.`)
@@ -523,12 +533,7 @@ export async function mergePr(repo, number, sha, subject, body) {
 /** Marks a draft pull request ready for review (mark_ready). */
 export async function markReady(repo, number) {
   checkRepo(repo)
-  try {
-    await runGh(['pr', 'ready', String(number), '-R', repo], { cwd: tmpdir() })
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused to mark ${repo}#${number} ready for review: ${firstLine(e)}`)
-  }
+  await refusing(`to mark ${repo}#${number} ready for review`, () => runGh(['pr', 'ready', String(number), '-R', repo], { cwd: tmpdir() }))
 }
 
 /**
@@ -537,12 +542,7 @@ export async function markReady(repo, number) {
  */
 export async function markDraft(repo, number) {
   checkRepo(repo)
-  try {
-    await runGh(['pr', 'ready', String(number), '--undo', '-R', repo], { cwd: tmpdir() })
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused to turn ${repo}#${number} into a draft: ${firstLine(e)}`)
-  }
+  await refusing(`to turn ${repo}#${number} into a draft`, () => runGh(['pr', 'ready', String(number), '--undo', '-R', repo], { cwd: tmpdir() }))
 }
 
 /** Deletes a branch of the repository on GitHub. Returns null, or the reason GitHub gave. */
@@ -562,12 +562,7 @@ export async function deleteBranch(repo, branch) {
 /** Starts a completed run again: all of its jobs, or only the failed ones. GitHub answers nothing. */
 export async function rerunRun(repo, runId, { failedOnly = false } = {}) {
   checkRepo(repo)
-  try {
-    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/${failedOnly ? 'rerun-failed-jobs' : 'rerun'}`])
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused to rerun run ${runId}: ${firstLine(e)}`)
-  }
+  await refusing(`to rerun run ${runId}`, () => runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/${failedOnly ? 'rerun-failed-jobs' : 'rerun'}`]))
 }
 
 /** Closes a pull request with a comment (never its branch: that is deleted on its own, through the API). */
@@ -940,22 +935,12 @@ export async function approveDeployments(repo, runId, environmentIds, comment) {
 /** Cancels an unneeded workflow run. GitHub keeps any jobs that already completed. */
 export async function cancelWorkflowRun(repo, runId) {
   checkRepo(repo)
-  try {
-    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/cancel`])
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused to cancel run ${runId}: ${firstLine(e)}`)
-  }
+  await refusing(`to cancel run ${runId}`, () => runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/cancel`]))
 }
 
 /** Starts a workflow_dispatch run of `workflow` on `ref` with `inputs` (strings). GitHub answers nothing. */
 export async function dispatchWorkflow(repo, workflow, ref, inputs) {
   checkRepo(repo)
   if (!WORKFLOW.test(String(workflow))) throw new GitHubError('input', `"${workflow}" is not a workflow file name.`)
-  try {
-    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/workflows/${workflow}/dispatches`, '--input', '-'], { input: JSON.stringify({ ref, inputs }) })
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused to start ${workflow}: ${firstLine(e)}`)
-  }
+  await refusing(`to start ${workflow}`, () => runGh(['api', '-X', 'POST', `repos/${repo}/actions/workflows/${workflow}/dispatches`, '--input', '-'], { input: JSON.stringify({ ref, inputs }) }))
 }

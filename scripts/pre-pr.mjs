@@ -46,7 +46,7 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { isMain } from './is-main.mjs'
 import { tierOfChange, unjudged } from './tier.mjs'
 
 // --- What a path is ------------------------------------------------------------------------------
@@ -885,4 +885,4 @@ function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main()
+if (isMain(import.meta.url)) main()

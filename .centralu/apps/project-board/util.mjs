@@ -1,3 +1,6 @@
+import { renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { systemNow } from './clock.mjs'
+
 // Small helpers the board app's modules share: waiting, a bounded fan-out, and words in answers (pure).
 
 /** Sleeps, or stops early when the call is cancelled. Answers false when cancelled. */
@@ -8,6 +11,45 @@ export function sleep(ms, signal) {
     const stop = () => (clearTimeout(t), resolve(false))
     signal?.addEventListener('abort', stop, { once: true })
   })
+}
+
+/** Whether the process `pid` still runs (EPERM: it does, as another user). `unknown`: the answer for a pid that is no process id. */
+export function alive(pid, unknown = false) {
+  if (!Number.isInteger(pid) || pid <= 0) return unknown
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+/**
+ * Writes `value` as JSON to `path` through a temporary file beside it and a rename, so a reader sees the old file or the
+ * new one, never half of one. Synchronous, so a read-change-write around it stays one step. The temporary file does not
+ * stay behind when the rename fails. `space`: JSON.stringify's indent.
+ */
+export function writeJsonAtomic(path, value, space) {
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, `${JSON.stringify(value, null, space)}\n`)
+  // Windows refuses a rename onto a file another process has open for a moment: try again shortly
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(tmp, path)
+      return
+    } catch (e) {
+      if (i >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) {
+        try {
+          unlinkSync(tmp)
+        } catch {
+          // nothing left to remove
+        }
+        throw e
+      }
+      const until = systemNow() + 25
+      while (systemNow() < until);
+    }
+  }
 }
 
 /** Runs `fn` over `list` with at most `n` at a time, answers in order. */

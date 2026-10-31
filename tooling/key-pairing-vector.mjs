@@ -7,7 +7,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash, createHmac } from 'node:crypto'
 import process from 'node:process'
-import { pathToFileURL } from 'node:url'
+import { isMain } from '../scripts/is-main.mjs'
 
 const p = 2n ** 255n - 19n
 const L = 2n ** 252n + 27742317777372353535851937790883648493n
@@ -90,5 +90,5 @@ export function vector() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.stdout.write(`${JSON.stringify(vector(), null, 2)}
+if (isMain(import.meta.url)) process.stdout.write(`${JSON.stringify(vector(), null, 2)}
 `)

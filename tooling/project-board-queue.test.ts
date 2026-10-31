@@ -11,6 +11,7 @@ import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-he
 import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart } from '../.centralu/apps/project-board/notice-acks.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+import { g, GIT_ENV, githubStandIn, NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, screenLanded, shardsComplete, unexpandedSkip, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState, longSubject } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -19,6 +20,8 @@ import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-
 import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -441,6 +444,22 @@ describe('what the merge queue decides for one poll', () => {
     // Not knowing either time, a failure counts
     expect(lowerFailureCounts(lowerRun('failure', '2026-10-17T11:58:33Z'), null)).toBe(true)
     expect(lowerFailureCounts(lowerRun('failure', null), proved)).toBe(true)
+  })
+
+  it('writes a JSON file whole, and leaves no temporary file behind when it cannot', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-atomic-'))
+    try {
+      writeJsonAtomic(join(dir, 'a.json'), { a: 1 }, 2)
+      expect(readFileSync(join(dir, 'a.json'), 'utf8')).toBe('{\n  "a": 1\n}\n')
+      writeJsonAtomic(join(dir, 'b.json'), { b: 1 })
+      expect(readFileSync(join(dir, 'b.json'), 'utf8')).toBe('{"b":1}\n')
+      // The rename onto a folder fails
+      mkdirSync(join(dir, 'c.json'))
+      expect(() => writeJsonAtomic(join(dir, 'c.json'), { c: 1 })).toThrow()
+      expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('lets one driver hold the queue at a time, until it lets go or goes quiet', () => {
@@ -1493,7 +1512,6 @@ const FAST = { PROJECT_BOARD_QUEUE_STEP: 'read', PROJECT_BOARD_QUEUE_TICK_MS: '5
  * start a detached `git maintenance run --auto` that goes on working in the checkout after the command returns, which
  * kept a test's folder busy for its cleanup on Windows (`EBUSY ... rmdir …\\work`, as #503 saw for fixture repositories).
  */
-const NO_GIT_MAINTENANCE = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
 /** A server that polls only at its start: what a test drives or reads, nothing moves under it */
 const IDLE_SERVER = { PROJECT_BOARD_QUEUE_STEP: '', PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 /**
@@ -2200,8 +2218,6 @@ const BATCH_WAIT_MS = 90_000
 
 // --- Conflicts (#1182): real git, a bare repository standing for GitHub's --------------------------
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...NO_GIT_MAINTENANCE }
-const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim()
 const MIGRATION = 'packages/agent-host/src/dev-services/store/migrations/v55.ts'
 
 type ConflictRepo = { work: string; origin: string; main: string; heads: Record<string, string> }
@@ -2213,15 +2229,7 @@ type ConflictRepo = { work: string; origin: string; main: string; heads: Record<
  * own with uncommitted work, which nothing may touch.
  */
 function conflictRepo(branches: Record<number, string[]>, { base = {}, branch = {} }: { base?: Record<string, string>; branch?: Record<string, string> } = {}): ConflictRepo {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { origin, work } = githubStandIn(root)
   const files = [...new Set(Object.values(branches).flat())]
   const write = (f: string, text: string) => {
     mkdirSync(join(work, f, '..'), { recursive: true })
@@ -3830,15 +3838,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
  * bare repository standing for GitHub's, which the checkout fetches from (as the conflict tests' checkout does).
  */
 function mainRepo(commits: { subject: string; files: string[] }[]) {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { origin, work } = githubStandIn(root)
   writeFileSync(join(work, 'README.md'), 'base\n')
   g(work, 'add', '-A')
   g(work, 'commit', '-q', '-m', 'green base')
@@ -4629,15 +4629,7 @@ describe('the main guard with overlapping failures, and when it acts again (#125
  * which the queue's checkout fetches from. The checkout itself is left on a branch of its own with work not committed.
  */
 function integrateRepo(branches: Record<string, Record<string, string>>) {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { origin, work } = githubStandIn(root)
   const write = (f: string, text: string) => {
     mkdirSync(join(work, f, '..'), { recursive: true })
     writeFileSync(join(work, f), text)
@@ -5549,15 +5541,7 @@ describe('the merge queue does by itself what it told a session to do by hand (#
   describe('a stack top whose lower merged', () => {
     /** `up` (#77) is based on `low` (#76), which was squash-merged into main; origin.git stands for GitHub */
     function restackable({ lowerMerged = true }: { lowerMerged?: boolean } = {}) {
-      const origin = join(root, 'origin.git')
-      const work = join(root, 'work')
-      g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-      g(root, 'init', '-q', '-b', 'main', work)
-      g(work, 'config', 'user.name', 'Tester')
-      g(work, 'config', 'user.email', 'tester@example.test')
-      g(work, 'config', 'commit.gpgsign', 'false')
-      g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-      g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+      const { origin, work } = githubStandIn(root)
       const commit = (file: string, text: string, message: string) => {
         writeFileSync(join(work, file), text)
         g(work, 'add', file)

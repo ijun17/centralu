@@ -12,7 +12,7 @@
 // Gentle on GitHub: one item per tick (a few seconds), each item again only after its own wait
 // (queue.mjs POLL_MS: 90 s while CI runs), the required checks read once per head, and a rate limit
 // or an outage pauses the whole queue with a growing wait.
-import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { advanceClock, now as clock, systemNow } from './clock.mjs'
 import { canMerge, evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
@@ -73,7 +73,7 @@ import { classifyRun } from './run-failure.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
-import { listSome, plural, short, span } from './util.mjs'
+import { alive, listSome, plural, short, span, writeJsonAtomic } from './util.mjs'
 import { GUARD_MS, guardTick } from './main-guard.mjs'
 import { actOnRed } from './main-revert.mjs'
 
@@ -119,24 +119,6 @@ export function readQueue(dir) {
   }
 }
 
-function writeAtomic(path, value) {
-  const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
-  // Windows refuses a rename onto a file another process has open for a moment: try again shortly
-  for (let i = 0; ; i++) {
-    try {
-      renameSync(tmp, path)
-      return
-    } catch (e) {
-      if (i >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e
-      const until = systemNow() + 25
-      while (systemNow() < until) {
-        // a short spin: the read-change-write below stays synchronous, so no other change interleaves
-      }
-    }
-  }
-}
-
 /**
  * Reads the queue, lets `fn` change it, and writes it back, synchronously: inside one process nothing
  * runs in between, and between the two drivers the window is a file read and write. Answers what
@@ -146,7 +128,7 @@ export function updateQueue(dir, fn) {
   mkdirSync(dir, { recursive: true })
   const q = readQueue(dir)
   const out = fn(q)
-  writeAtomic(join(dir, QUEUE_FILE), q)
+  writeJsonAtomic(join(dir, QUEUE_FILE), q, 2)
   return out
 }
 
@@ -205,25 +187,14 @@ export function readLease(dir) {
 }
 
 /**
- * Whether the process that wrote a lease still runs (the data folder is this computer's, so its pid is
- * too). A driver killed before it could let go (SIGKILL after Centralu's grace) holds nothing.
+ * Takes or renews the lease for `holder`. False when another driver, still running, holds a fresh one. The pid is this
+ * computer's (the data folder is), so a driver killed before it could let go holds nothing; a pid that is no id holds it.
  */
-function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return true
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return e.code === 'EPERM' // it runs, as another user
-  }
-}
-
-/** Takes or renews the lease for `holder`. False when another driver, still running, holds a fresh one. */
 export function takeLease(dir, holder, now = systemNow()) {
   const cur = readLease(dir)
-  if (cur && cur.holder !== holder && Date.parse(cur.until) > now && alive(cur.pid)) return false
+  if (cur && cur.holder !== holder && Date.parse(cur.until) > now && alive(cur.pid, true)) return false
   mkdirSync(dir, { recursive: true })
-  writeAtomic(join(dir, LEASE_FILE), { holder, pid: process.pid, until: new Date(now + LEASE_MS).toISOString() })
+  writeJsonAtomic(join(dir, LEASE_FILE), { holder, pid: process.pid, until: new Date(now + LEASE_MS).toISOString() }, 2)
   // Two drivers that found it stale at once: the last write wins, and the other sees it here
   return readLease(dir)?.holder === holder
 }

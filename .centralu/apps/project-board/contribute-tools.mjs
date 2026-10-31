@@ -15,7 +15,7 @@ import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarn
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
-import { now as clock } from './clock.mjs'
+import { freshCache } from './cache.mjs'
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
 // The rules come from the repository (the pull request template, the commit conventions) and the
@@ -81,18 +81,10 @@ const RULES = {
   prTemplates: config.rules?.prTemplate ? [config.rules.prTemplate, ...PR_TEMPLATES.filter((p) => p !== config.rules.prTemplate)] : PR_TEMPLATES,
   commitConventions: config.rules?.commitConventions ?? 'docs/commit-conventions.md',
 }
-const RULES_TTL_MS = 10 * 60_000
-const ruleFiles = new Map() // `${repo} ${path} ${ref}` → { at, text }
+const ruleFiles = freshCache({ ttlMs: 10 * 60_000, max: 50 }) // `${repo} ${path} ${ref}` → the text
 
 /** A rules file from the repository on GitHub, kept 10 minutes; null when the repository has none. */
-async function ruleFile(repo, path, ref) {
-  const key = `${repo.toLowerCase()} ${path} ${ref}`
-  const hit = ruleFiles.get(key)
-  if (hit && clock() - hit.at < RULES_TTL_MS) return hit.text
-  const text = await readRepoFile(repo, path, ref)
-  ruleFiles.set(key, { at: clock(), text })
-  return text
-}
+const ruleFile = (repo, path, ref) => ruleFiles.get(`${repo.toLowerCase()} ${path} ${ref}`, () => readRepoFile(repo, path, ref))
 
 /** The commit conventions of `repo` (its default branch), or the usual ones with a note why. */
 async function conventionsOf(repo) {

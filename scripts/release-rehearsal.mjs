@@ -15,7 +15,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { isMain } from './is-main.mjs'
 
 export const WORKFLOW = 'release.yml'
 
@@ -61,4 +61,4 @@ async function main() {
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n- \`pnpm verify\`: ${why}\n`)
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main()
+if (isMain(import.meta.url)) await main()

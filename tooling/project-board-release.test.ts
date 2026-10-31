@@ -21,6 +21,7 @@ import {
   compareVersions,
   declaredVersion,
   nextVersion,
+  parseVersion,
   pathMatches,
   releaseNotes,
   sourceScheme,
@@ -28,6 +29,7 @@ import {
 } from '../.centralu/apps/project-board/versions.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+import { githubStandIn } from './git-fixture.test-helpers.js'
 
 /**
  * The project board's release tool (#386 step 3): docs/releasing.md as `release_status` and
@@ -68,6 +70,13 @@ describe('the version rules', () => {
     expect(compareVersions('0.1.0-alpha.3', '0.1.0-beta.1')).toBeLessThan(0)
     expect(compareVersions('0.2.0', '0.1.9')).toBeGreaterThan(0)
     expect(compareVersions('2.3.0-beta.16', '2.3.0-beta.16')).toBe(0)
+  })
+
+  // The board and the workflow's guard read versions with this one parser (the guard's own copy took no leading zero)
+  it('takes no version with a leading zero in a numeric prerelease id, or a build suffix', () => {
+    for (const v of ['1.0.0-beta.01', '1.0.0-01', '1.0.0+build', '01.0.0']) expect(parseVersion(v), v).toBeNull()
+    expect(parseVersion('1.0.0-beta.1a')).toMatchObject({ pre: ['beta', '1a'] })
+    expect(parseVersion('1.0.0-0.x')).toMatchObject({ pre: ['0', 'x'] })
   })
 
   it.each([
@@ -361,15 +370,7 @@ const BRAND_LITERAL = (version: string) => `export const APP_VERSION = '${versio
 const BRAND_IMPORT = "export { APP_VERSION } from './version.generated.js'\n"
 
 function repo({ version = BRAND_VERSION, switchAt = 'one' }: { version?: string; switchAt?: 'one' | 'two' | 'none' } = {}): Repo {
-  const origin = join(root, 'origin.git')
-  const work = join(root, 'work')
-  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
-  g(root, 'init', '-q', '-b', 'main', work)
-  g(work, 'config', 'user.name', 'Tester')
-  g(work, 'config', 'user.email', 'tester@example.test')
-  g(work, 'config', 'commit.gpgsign', 'false')
-  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
-  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const { origin, work } = githubStandIn(root)
   g(work, 'config', 'remote.origin.pushurl', origin)
   write(work, BRAND_PATH, BRAND_LITERAL(version))
   // The packages the shim needs on the registry (release.registry.packages)

@@ -22,6 +22,8 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir, userInfo } from 'node:os'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 
 type Frame = { t: number; dir: string; msg?: unknown; line?: string; raw?: string }
 
@@ -182,8 +184,8 @@ function rejoinChunks(frames: readonly { dir: string; msg?: unknown }[], places:
   flush()
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('frames-scrub.mts')
-if (isMain && process.argv[2] === '--rescrub') {
+const main = isMain(import.meta.url)
+if (main && process.argv[2] === '--rescrub') {
   // A committed fixture's paths were scrubbed already; what this pass adds is the rest (chunks, foreign folders, the user)
   for (const file of process.argv.slice(3)) {
     const [head, ...lines] = readFileSync(file, 'utf8').split('\n').filter(Boolean)
@@ -191,7 +193,7 @@ if (isMain && process.argv[2] === '--rescrub') {
     writeFileSync(file, [head, ...scrub(frames, '<cwd>').map((l) => JSON.stringify(l))].join('\n') + '\n')
     console.log(`rescrubbed ${file}`)
   }
-} else if (isMain) {
+} else if (main) {
   const [input, output] = process.argv.slice(2)
   const flag = (name: string) => {
     const i = process.argv.indexOf(`--${name}`)

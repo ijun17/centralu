@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
 import { fakeGh } from './fake-gh.test-helpers.js'
+import { gitAsT as git } from './git-fixture.test-helpers.js'
 // @ts-expect-error — plain JavaScript policy runs in Actions without installing dependencies
 import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readReleaseBase, validateLocalManifest } from '../scripts/local-manifest.mjs'
 // @ts-expect-error — plain JavaScript, shared with release-npm and bundle.mjs
@@ -19,8 +20,6 @@ const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'cc-local-update-'))
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 const base = '0.2.0-beta.20'
 const allowedBase = base
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 /**
  * A checkout holding `paths` of this repository, committed, with `tag` on it (none when null): since #1501 the base a
  * local build is cut from is the newest release tag reachable from the checkout's HEAD, not a file
@@ -221,10 +220,10 @@ describe('the data-only manifest boundary', () => {
   })
 
   it('has one main-module check, and every script that runs a command uses it', () => {
-    for (const name of ['bundle-stage', 'shell-bundle', 'local-update', 'content-manifest']) {
-      const source = readFileSync(resolve(`scripts/${name}.mts`), 'utf8')
-      expect(source, name).toContain('if (isMain(import.meta.url)) {')
-      expect(source, name).not.toMatch(/=== process\.argv\[1\]/)
+    for (const name of ['bundle-stage.mts', 'shell-bundle.mts', 'local-update.mts', 'content-manifest.mts', 'dev-live.mts', 'frames-scrub.mts', 'node-pin.mjs', 'pre-pr.mjs', 'release-guard.mjs', 'release-rehearsal.mjs', 'surface-drift.mts']) {
+      const source = readFileSync(resolve(`scripts/${name}`), 'utf8')
+      expect(source, name).toMatch(/\bisMain\(import\.meta\.url\)/)
+      expect(source, name).not.toMatch(/=== process\.argv\[1\]|pathToFileURL\(process\.argv/)
     }
     const dir = temp()
     const real = join(dir, 'real')

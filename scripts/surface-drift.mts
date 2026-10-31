@@ -21,7 +21,9 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 import { promisify } from 'node:util'
 import type { AgentAdapter, SurfaceEnv } from '../packages/agent-host/src/adapters/contract.js'
 import { createAdapters } from '../packages/agent-host/src/adapters/registry.js'
@@ -145,7 +147,7 @@ export function latestEnv(): { env: SurfaceEnv; dispose(): void } {
   return { env, dispose: () => temps.forEach((d) => rmSync(d, { recursive: true, force: true })) }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const { env, dispose } = latestEnv()
   try {
     process.exitCode = await runSurfaceDrift({
