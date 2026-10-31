@@ -1266,13 +1266,16 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000 * SLOW,
   )
-  it('listens on a free port the host picks for `--port 0`, says which in its line, and keeps that one (never 0) for the next start (#1788)', async () => {
+  it('listens on a free port the host picks for `--port 0`, says which in its line, and records nothing: the next start is not given a port the system picked (#1788)', async () => {
     const d = tempDir()
+    ensureServeState(d)
+    const before = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
     const s = await serveOnAnyPort(d)
     try {
       expect(s.port).toBeGreaterThan(0)
-      expect(readServeState(d).port).toBe(s.port)
-      expect((await connection(d)).port).toBe(s.port)
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).toBe(before)
+      // Whoever looks for the running host is told where it is, all the same
+      expect(await connection(d)).toMatchObject({ port: s.port, hostRunning: true })
       expect(await hello(s.port, limitedOf(String(readServeState(d).key)))).toMatchObject({ kind: 'hello_ok' })
     } finally {
       if (POSIX) s.child.kill('SIGTERM')
@@ -1991,16 +1994,17 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
     }
   }
 
-  it('detaches on a free port the host picks for `--port 0`, and reports and keeps the one it got (#1788)', async () => {
+  it('detaches on a free port the host picks for `--port 0`, reports it and stops it, and records nothing (#1788)', async () => {
     const d = tempDir()
     try {
       ensureServeState(d)
+      const before = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
       const r = await cli(d, ['--detach', '--port', '0'])
       expect(r.code, JSON.stringify(r.line)).toBe(0)
       expect(r.line).toMatchObject({ hostRunning: true, detach: { ok: true, already: false } })
       expect(r.line.port).toBeGreaterThan(0)
-      expect(readServeState(d).port).toBe(r.line.port)
-      expect((JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { port: number }).port).toBe(r.line.port)
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).toBe(before)
+      expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: true })
       await cli(d, ['--stop'])
     } finally {
       cleanup(d)

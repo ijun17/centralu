@@ -6,7 +6,7 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
 
   centralu serve                  Start the host in the foreground, on 127.0.0.1 only
   centralu serve --port <n>       ... on that port (kept for the next start; default ${DEFAULT_SERVE_PORT})
-  centralu serve --port 0         ... on a free port the system picks (the one it got is kept for the next start)
+  centralu serve --port 0         ... on a free port the system picks, for this run only
   centralu serve --detach         Start it in the background, outside this session; return once it answers
   centralu serve --stop           Ask the running host to stop, and wait until it has
   centralu serve --window         What the Centralu window on Windows runs here: start the host if
