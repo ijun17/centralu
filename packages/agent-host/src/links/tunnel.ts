@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
-import { asObj } from '../json-value.js'
+import { asObj, tryParseJson } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
 import { hostname } from 'node:os'
@@ -151,12 +151,8 @@ export interface Tunnel {
 export function parseConnectionLine(stdout: string, spec?: RemoteSpec): ConnectionLine {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
-    let raw: unknown
-    try {
-      raw = JSON.parse(lines[i]!)
-    } catch {
-      continue
-    }
+    const raw = tryParseJson(lines[i]!)
+    if (raw === undefined) continue
     const o = raw as Partial<ConnectionLine>
     if (o && typeof o === 'object' && typeof o.v === 'number') {
       if (o.v !== 1) throw new Error(`The remote's Centralu speaks connection format ${o.v}; update Centralu on this computer`)
@@ -283,20 +279,17 @@ export class StartedNotServing extends Error {
 export function parseDetachLine(stdout: string): DetachAnswer {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
-    let raw: unknown
-    try {
-      raw = JSON.parse(lines[i]!)
-    } catch {
-      continue
-    }
-    const d = (raw as { detach?: { ok?: unknown; how?: unknown; reason?: unknown; message?: unknown; node?: unknown } } | null)?.detach
+    const raw = tryParseJson(lines[i]!)
+    if (raw === undefined) continue
+    const d = asObj(raw).detach
     if (!d || typeof d !== 'object') continue
-    if (d.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof d.how === 'string' ? d.how : null }
+    const o = asObj(d)
+    if (o.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof o.how === 'string' ? o.how : null }
     return {
       ok: false,
-      reason: typeof d.reason === 'string' ? d.reason : 'failed',
-      message: typeof d.message === 'string' ? d.message : 'centralu serve --detach failed',
-      ...(typeof d.node === 'string' ? { node: d.node } : {}),
+      reason: typeof o.reason === 'string' ? o.reason : 'failed',
+      message: typeof o.message === 'string' ? o.message : 'centralu serve --detach failed',
+      ...(typeof o.node === 'string' ? { node: o.node } : {}),
     }
   }
   throw new Error('The remote did not say whether it started')
@@ -625,13 +618,8 @@ export function revokeCommand(spec: RemoteSpec, id: string): string {
 /** `--revoke`'s line: whether there was one to withdraw, or null when it printed none (an older serve refused the option) */
 export function parseRevoke(stdout: string): boolean | null {
   for (const l of stdout.split('\n').map((x) => x.trim()).reverse()) {
-    try {
-      const v: unknown = JSON.parse(l)
-      const revoked = asObj(v).revoked
-      if (typeof revoked === 'boolean') return revoked
-    } catch {
-      // not the line
-    }
+    const revoked = asObj(tryParseJson(l)).revoked
+    if (typeof revoked === 'boolean') return revoked
   }
   return null
 }

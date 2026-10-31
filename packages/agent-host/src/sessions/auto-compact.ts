@@ -1,5 +1,6 @@
 import type { AutoCompact, SessionInfo } from '@cc/protocol'
 import type { SettingAccess } from '../dev-services/store/settings.js'
+import { tryParseJson } from '../json-value.js'
 
 /** What `ModelWindows` reaches of the store */
 export type WindowSettings = SettingAccess & { deleteAppSetting(key: string): void }
@@ -136,13 +137,9 @@ export class ModelWindows {
     const raw = this.settings.appSetting(key)
     let value: Known | null = null
     if (raw !== null) {
-      try {
-        const v: unknown = JSON.parse(raw)
-        if (typeof v === 'object' && v !== null && 'window' in v && typeof v.window === 'number' && v.window > 0) {
-          value = { window: v.window, model: 'model' in v && typeof v.model === 'string' ? v.model : null }
-        }
-      } catch {
-        /* a damaged value is no record */
+      const v = tryParseJson(raw)
+      if (typeof v === 'object' && v !== null && 'window' in v && typeof v.window === 'number' && v.window > 0) {
+        value = { window: v.window, model: 'model' in v && typeof v.model === 'string' ? v.model : null }
       }
     }
     this.known.set(key, value)
