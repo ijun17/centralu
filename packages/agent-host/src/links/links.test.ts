@@ -2872,7 +2872,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       }
 
       it("reports the note's turn, then takes the instruction's turn for the caller's: its end is owed and a note goes into it", async () => {
-        const { remote, agent, r, id, reports } = await inTheGap()
+        const { remote, agent, r, id, reports, told } = await inTheGap()
         // At rest as far as the hub can see: an instruction, not a note
         expect(await agent(r.sessionId, 'send', 'a question for you again')).toMatchObject({ ok: true, state: 'working' })
         remote.release(id)
@@ -2884,7 +2884,12 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         // The caller's turn: a note goes into it, and its end is owed
         expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
-        await eventually(() => reports() === 3)
+        // The instruction's turn ends and is reported; the note it did not read then runs as a turn of its own, reported after
+        // it. The count is 3 only until that turn ends, some 30 ms, which a wait under load can miss (#1809): wait for both
+        await eventually(() => reports() === 4)
+        const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+        expect(reported[2]).toContain('answered: Yes')
+        expect(reported[3]).toContain('use the staging data')
       })
     })
   })
