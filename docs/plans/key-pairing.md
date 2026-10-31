@@ -403,7 +403,7 @@ all and would cut every link while a swap serves the older host.
 | Hub | Machine | What happens |
 |---|---|---|
 | new | new | key pairing (§4.2) and the key handshake; at the first accepted key hello the hub records it and runs the line once more with `--key-paired`, which removes its verifier entry there. The residual ends then |
-| new | old launcher ("unknown option for serve: --pair-key") | no record: `--pair <label>` as today, and the residual stays for that machine until it is updated; a hub with "Automatic updates" on brings it to its own version (#1508). With a record: refused (§5.1) |
+| new | old launcher ("unknown option for serve: --pair-key") | no record: `--pair <label>` as today (and the fallback before #1405 after it), and the residual stays for that machine until it is updated; a hub with "Automatic updates" on brings it to its own version (#1508). With a record: refused (§5.1) |
 | new | new launcher, old host still running (updated without restart) | the launcher's probe finds a host that does not sign and pairs by verifier (§4.2): no record, the link works as today and its next link after a restart pairs by key. With a record: refused (§5.1) |
 | old | new | the old hub runs `--pair <label>`; the new launcher takes it (a verifier pairing) and leaves the label's key entry alone. Verifier pairing for hub labels stops only after every machine the hub links has paired by key once and two releases have shipped with key pairing, from a floor chosen then in its own issue (D4, decided) |
 | new, rolled back to old | new | as the row above. When it is new again, its record is still there (the store keeps additive fields), so its next link carries `--key-paired` and removes the verifier entry the old build made |
@@ -424,8 +424,8 @@ it selects is a genuine release. So the remote's answer can never be what turns 
   verifier credential the hub withdraws it there at once (`serve --revoke <id>`, which every launcher since #1405
   takes). The machine's row says why, in D2's sentence (§11, decided). The next attempt, at the usual backoff, asks
   again.
-- **Without a record**, as today: the fallback to `--pair <label>` on "unknown option for serve: --pair-key". A launcher
-  that refuses `--pair` too predates the oldest release a link supports, and is told to update there. The window before the first key link is today's residual, no worse.
+- **Without a record**, as today: the fallback to `--pair <label>` on "unknown option for serve: --pair-key", then to
+  no pairing on "unknown option for serve: --pair". The window before the first key link is today's residual, no worse.
 - Considered: "a version the hub itself installed there takes keys" as the trigger, which would also close the window
   before the first key link. Not taken: a machine the hub updated may still run an older host until it restarts (§4.2)
   and would be refused where it links today, and an accepted key hello is the only thing that shows a key-capable host
