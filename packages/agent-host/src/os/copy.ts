@@ -1,3 +1,4 @@
+import { errnoCode } from './errors.js'
 import type { CopyTreeOptions, LinkKind, OsDirent, OsError, OsStats } from './port.js'
 import type { PlatformPath } from 'node:path'
 import { retarget, type OsFamily } from './rules.js'
@@ -304,7 +305,7 @@ export type CopyFilesAsync = {
 
 const DONE: CopyAnswer = { op: 'done' }
 /** What `throwIfNoEntry: false` answers as no entry: ENOENT only (a path through a file throws ENOTDIR on POSIX) */
-const isMissing = (e: unknown) => e instanceof Error && 'code' in e && e.code === 'ENOENT'
+const isMissing = (e: unknown) => errnoCode(e) === 'ENOENT'
 
 function answerSync(f: CopyFilesSync, s: CopyStep): CopyAnswer {
   switch (s.op) {

@@ -23,4 +23,5 @@ export interface HostClient {
 }
 export function startHost(opts?: Pick<HostOptions, 'db' | 'env'>): Promise<StartedHost>
 export function connect(host: Pick<StartedHost, 'port' | 'token'>, opts?: Pick<HostOptions, 'timeoutMs' | 'onEvent'>): Promise<HostClient>
-export function openHost(opts?: HostOptions): Promise<HostClient & { host: ChildProcess; port: number }>
+export function removeTemp(dir: string): void
+export function openHost(opts?: HostOptions): Promise<HostClient & { host: ChildProcess; port: number; stop: () => Promise<void> }>

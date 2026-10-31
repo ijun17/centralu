@@ -258,8 +258,8 @@ writeFileSync(
       hostProof: 1,
       // The host takes its token as the first line on stdin (#538): a keeper hands it over there instead of in the environment
       tokenOnStdin: 1,
-      // The host checks full credentials against serve.json's verifiers, given its key on stdin (#1405): `centralu serve` reads this
-      // to hand it the key and make each full credential at --pair, rather than keep one token for it
+      // The host checks full credentials against serve.json's verifiers, given its key on stdin (#1405): the `centralu serve` of
+      // 0.1.0-beta.45 reads this to hand it the key and make each full credential at --pair, rather than keep one token for it
       verifiers: 1,
       // The host signs a key `prove` and takes a hub's key hello (#1711): `centralu serve --pair-key` reads this to report the
       // key a host started next signs with when none runs

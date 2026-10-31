@@ -295,6 +295,29 @@ describe('a manifest change mid-turn still happens once, at turn end', () => {
     expect(count(/stopping: manifest changed/g)).toBe(1)
     expect(count(/starting: /g)).toBe(2)
   })
+
+  it('a scan that reads the manifest after the builder went idle, before the turn-end timer runs, still has the app start under it', async () => {
+    plant()
+    make()
+    await rt.tools(ref)
+    const before = await pid()
+    busy = true
+    const mf = join(projRoot, '.centralu', 'apps', ID, 'centralu.app.json')
+    writeFileSync(mf, readFileSync(mf, 'utf8').replace('"description": "counter"', '"description": "counter, renamed"'))
+    rt.refresh()
+    expect(description()).toBe('counter')
+
+    busy = false
+    rt.builderTurnEnded(ref)
+    // The file watcher's scan arriving late: the builder is idle, so this scan replaces the entry itself, before the timer
+    rt.refresh()
+    expect(description()).toBe('counter, renamed')
+    await until(status, (s) => s === 'running')
+    expect(await pid()).not.toBe(before)
+    await reflectDone()
+    expect(count(/stopping: manifest changed/g)).toBe(1)
+    expect(count(/starting: /g)).toBe(2)
+  })
 })
 
 /**

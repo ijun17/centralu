@@ -177,7 +177,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
     expect(r.text).toContain('show — reads, app, screen ui://project-board/index.html')
     expect(r.text).toContain('list_items — reads, model')
     expect(r.text).toContain('get_items — reads, model')
-    expect(r.text).toContain('list_needs_decision — reads, model')
+    expect(r.text).toContain('list_owner_answers — reads, model+app')
     expect(r.text).toContain('set_item_fields — changes, model+app')
     expect(r.text).toContain('add_item — changes, model')
     const html = (await rt!.readResource(ref, 'ui://project-board/index.html')).contents[0] as { text: string }
@@ -215,7 +215,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
     runtime()
     for (const [name, args] of [
       ['list_items', {}],
-      ['list_needs_decision', {}],
+      ['list_owner_answers', { view: 'items' }],
       ['get_items', { items: [8, 113] }],
     ] as const) {
       const r = await call(name, args)
@@ -259,7 +259,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
 
   it('lists what needs a decision, highest priority first', async () => {
     runtime()
-    const r = await call('list_needs_decision')
+    const r = await call('list_owner_answers', { view: 'items' })
     expect(r.text).toBe(
       [
         'Centralu: 2 items with Status Needs decision.',
@@ -267,7 +267,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
         '#101 Worktree management — Needs decision · Low · Host',
       ].join('\n'),
     )
-    expect((await call('list_needs_decision', { area: 'UI' })).data!.summary).toBe('Centralu: 1 item with Status Needs decision in Area UI.')
+    expect((await call('list_owner_answers', { view: 'items', area: 'UI' })).data!.summary).toBe('Centralu: 1 item with Status Needs decision in Area UI.')
   })
 
   it('sets a status on GitHub and back, saying in one line what changed, checked against GitHub', async () => {
@@ -507,7 +507,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
     const list = await call('list_items')
     expect(list.isError).toBe(true)
     expect(list.text).toMatch(message)
-    expect((await call('list_needs_decision')).text).toMatch(message)
+    expect((await call('list_owner_answers', { view: 'items' })).text).toMatch(message)
     const set = await call('set_item_fields', { item: '8', status: 'Ready' })
     expect(set.isError).toBe(true)
     expect(set.text).toMatch(message)

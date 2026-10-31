@@ -1,5 +1,6 @@
+import { bytesText } from '../bytes-text.js'
 import { isObj } from '../json-value.js'
-import { errnoCode } from './errno.js'
+import { errnoCode, isMissing } from '../os/errors.js'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
@@ -221,8 +222,8 @@ export async function resolveEntry(root: string, rel: string): Promise<string> {
   const parentInfo = await stat(parent, { bigint: true })
   if (!parentInfo.isDirectory()) throw new UnsafePathError(`${parentRel || '.'} is not a folder`)
   const entry = join(parent, name)
-  await lstat(entry).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new MissingPathError(rel)
+  await lstat(entry).catch((error: unknown) => {
+    if (isMissing(error)) throw new MissingPathError(rel)
     throw error
   })
   // The checked string is the used one: a child of a folder inside the project, never the folder itself
@@ -343,7 +344,7 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
         truncated: false,
         binary: true,
         bytes: size,
-        previewError: `Image is too large to preview (${(size / 1_000_000).toFixed(1)}MB; limit is ${MAX_IMAGE_PREVIEW / 1_000_000}MB)`,
+        previewError: `Image is too large to preview (${bytesText(size)}; limit is ${bytesText(MAX_IMAGE_PREVIEW)})`,
       }
     }
 

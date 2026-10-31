@@ -128,15 +128,15 @@ describe('messagesToChat — restoring tool output', () => {
     seq,
     role: 'system' as const,
     kind: 'tool_call' as const,
-    payload: { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test' } },
+    payload: { type: 'tool_call', callId: `c${seq}`, summary: { tool: 'Bash', title: 'pnpm test' } },
     ts: 0,
   })
-  const result = (seq: number, summary: string, ok = true) => ({
+  const result = (seq: number, summary: string, ok = true, callId = 'c1') => ({
     sessionId: 's',
     seq,
     role: 'system' as const,
     kind: 'tool_result' as const,
-    payload: { type: 'tool_result', callId: 'c1', ok, summary },
+    payload: { type: 'tool_result', callId, ok, summary },
     ts: 0,
   })
 
@@ -157,7 +157,7 @@ describe('messagesToChat — restoring tool output', () => {
   })
 
   it('with several calls, they are paired in the order they were emitted — the two are never swapped', () => {
-    const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false)])
+    const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false, 'c2')])
     expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([
       ['first', true],
       ['second', false],

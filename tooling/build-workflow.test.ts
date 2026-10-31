@@ -5,7 +5,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { workflowCheckNames, workflowEventJobs } from '../.centralu/apps/project-board/ci.mjs'
+import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
@@ -359,8 +359,6 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(ff).toContain('RUN_ID: ${{ github.run_id }}')
     expect(ff).toContain('gh run cancel "$RUN_ID"')
     expect(ff).not.toContain('continue-on-error')
-    // No event context: a release bump's run stays evidence for the release (docs/releasing.md, event audit)
-    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n${ff}`)[0]!.reason).toBeNull()
     // `verify` itself cancels nothing, so its check stays `failure`: how the queue tells this run from one cancelled for nothing
     expect(job('verify').body).not.toMatch(/run cancel|\/cancel/)
     expect(job('changes').body).toMatch(/^ {6}fail_fast: \$\{\{ steps\.classify\.outputs\.fail_fast \}\}$/m)
@@ -390,7 +388,6 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(changes).toContain('run: node .github/scripts/ci-changes.mjs')
     // main and the history back to the merge-base (see changedFiles below)
     expect(changes).toContain('fetch-depth: 0')
-    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n${changes}`)[0]!.reason).toBeNull()
     const script = readFileSync(new URL('../.github/scripts/ci-changes.mjs', import.meta.url), 'utf8')
     // One fact of the event, whether a pull request is a draft, and nothing else of it
     expect([...new Set(script.match(/GITHUB_(EVENT|REF|HEAD_REF|BASE_REF)\w*|github\.event/g))]).toEqual(['GITHUB_EVENT_PATH'])

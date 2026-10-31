@@ -92,12 +92,10 @@ With the limited credential: runs.
 - `machines.cancelUpdate`
 - `machines.disconnect`
 - `machines.list`
-- `machines.need`
 - `machines.probe`
 - `machines.reconnect`
 - `machines.revokeCredential`
 - `machines.setAutoReconnect`
-- `machines.setConnect`
 - `machines.sshHosts`
 - `machines.withdrawAsk`
 - `messages.image`
@@ -145,7 +143,6 @@ With the limited credential: runs.
 - `updates.status`
 - `usage.history`
 - `workspace.load`
-- `worktrees.createManager`
 - `worktrees.setTrunk`
 
 ## asks
@@ -228,6 +225,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `mail.wake`
 - `requests.answer`
 - `sessions.clearError`
+- `ui.reportCrash`
 - `updates.answerApply`
 - `updates.reportApply`
 - `workspace.save`

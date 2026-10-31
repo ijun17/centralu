@@ -145,11 +145,7 @@ const CATEGORIES = [
 
 type Category = (typeof CATEGORIES)[number]['id']
 
-/** Categories that were merged into another (2026-10-20): a request for one opens where it went */
-const MOVED: Record<string, Category> = { updates: 'background' }
-
-const categoryOf = (id: string | undefined): Category | null =>
-  CATEGORIES.find((c) => c.id === id)?.id ?? (id ? (MOVED[id] ?? null) : null)
+const categoryOf = (id: string | undefined): Category | null => CATEGORIES.find((c) => c.id === id)?.id ?? null
 
 /**
  * Settings (E-3, E-4, E-5).
@@ -311,7 +307,7 @@ export function Settings() {
               </SettingsPage>
             )}
 
-            {category === 'machines' && <MachinesSection onOpenCategory={(c) => setCategory(categoryOf(c) ?? 'background')} />}
+            {category === 'machines' && <MachinesSection onOpenCategory={setCategory} />}
 
             {category === 'appearance' && <AppearanceSection />}
 

@@ -1,7 +1,7 @@
 import { SessionId, errorMessage, type SessionInfo } from '@cc/protocol'
 import type { HousekeepingRequest } from '../adapters/contract.js'
 import { findProject, readProjects, shown, whereText } from './app-lookup.js'
-import { plainQuoted } from './tool-answers.js'
+import { plainQuoted, plural } from './tool-answers.js'
 import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
 export type { HousekeepingRequest }
@@ -17,7 +17,6 @@ const NAME_MAX = 120
 /** A path the project holds, quoted and escaped but not cut: the end of a path is what tells two files apart */
 const shownPath = (path: string): string => plainQuoted(path, 4096)
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /**
  * The orchestrator's housekeeping and reads of the window (#1219, fourth slice): renaming a session, taking ended

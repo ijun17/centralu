@@ -36,7 +36,7 @@ import { More, SettingsCard, SettingsPage, SettingsRow } from './SettingsLayout.
  * prompt when the link is held on versions. Adding one is the consent for this computer to reach it (plan §3.2): the
  * person can already open an ssh connection to it, and the link uses their own ssh and keys, never a password.
  */
-export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category: 'updates') => void }) {
+export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category: 'background') => void }) {
   const machines = useStore((s) => s.machines)
   // Automatic updates cover the linked machines too (#1508): each one on an older release follows this computer's version
   const follows = followHubLead(useStore((s) => s.update?.autoApply === true))
@@ -89,7 +89,7 @@ export function connectAction(status: MachineInfo['status']): { label: string; t
   return { label: 'Reconnect' }
 }
 
-export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
+export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'background') => void }) {
   const reconnect = useStore((s) => s.reconnectMachine)
   const disconnect = useStore((s) => s.disconnectMachine)
   const remove = useStore((s) => s.removeMachine)
@@ -559,7 +559,7 @@ function AskPairs({ m }: { m: MachineInfo }) {
  * protocol. An older remote is updated from here (plan §10.5) after the person read what that stops there; where this
  * computer cannot (a development build, a command of the person's own), the exact command to run there is given.
  */
-function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
+function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'background') => void }) {
   const accept = useStore((s) => s.acceptMachineVersions)
   const update = useStore((s) => s.update)
   const applyUpdate = useStore((s) => s.applyUpdate)
@@ -585,7 +585,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
           >
             {update?.newer && update.latest ? `Update this computer to ${update.latest}` : 'Check for an update'}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onOpenCategory('updates')}>
+          <Button variant="ghost" size="sm" onClick={() => onOpenCategory('background')}>
             Open Updates
           </Button>
         </div>
@@ -656,7 +656,9 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
         </Button>
       ) : (
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid={`machine-versions-refused-${m.id}`}>
-          Machines on different protocol versions cannot connect, even anyway.
+          {p.minimum
+            ? `Machines older than Centralu ${p.minimum} cannot connect, even anyway.`
+            : 'Machines on different protocol versions cannot connect, even anyway.'}
         </p>
       )}
     </div>

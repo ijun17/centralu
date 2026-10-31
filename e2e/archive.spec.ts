@@ -184,31 +184,6 @@ test('with the worktree box ticked the losses show all the same, and one Archive
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
 })
 
-test('a host that cannot list the losses (older build): the dialog shows none and archives as it did before, with the worktree ticked', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  const id = await answeredSession(page, 'alpha', 'what is the answer')
-  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
-  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
-  await page.evaluate((sid: string) => {
-    const m = (window as any).__mock
-    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
-    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
-  }, id)
-  await page.evaluate(() => {
-    ;(window as any).__mock.agents.archiveLosses = async () => {
-      throw new Error('Unknown method: agents.archiveLosses')
-    }
-  })
-  await page.getByTestId(`session-menu-${id}`).click()
-  await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toBeVisible()
-  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
-  await page.getByTestId('delete-worktree-toggle').check()
-  await page.getByTestId('confirm-delete-yes').click()
-  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeWorktree, id)).toBe(true)
-})
-
 test('a loss that appears after the dialog opened is shown at Archive, which moves nothing; the next Archive moves it', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')

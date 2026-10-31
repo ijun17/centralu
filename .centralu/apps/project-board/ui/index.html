@@ -519,7 +519,7 @@
       <div class="r-head">
         <div class="r-titles">
           <h2 id="release-title">Release</h2>
-          <div class="r-kicker">Bump, rehearse, tag and approve are done by an agent with the release tool; each step shows here.</div>
+          <div class="r-kicker">Rehearse, tag and approve are done by an agent with the release tool; each step shows here.</div>
         </div>
         <button class="r-close" id="release-refresh" type="button" tabindex="0">Read again</button>
         <button class="r-close" id="release-close" type="button" tabindex="0">Close</button>
@@ -874,7 +874,7 @@
 
       // --- "Needs decision": what each item asks, from its latest summary comment ----------------------
       let mode = 'board' // or 'decisions'
-      let decisionData = null // the last decision_summaries answer
+      let decisionData = null // the last list_owner_answers (summaries) answer
       let decisionError = null
       let decisionLoading = false
       let decisionSeq = 0
@@ -893,7 +893,7 @@
         renderDecisions()
         let r
         try {
-          r = await app.callServerTool({ name: 'decision_summaries', arguments: refresh ? { refresh: true } : {} })
+          r = await app.callServerTool({ name: 'list_owner_answers', arguments: refresh ? { view: 'summaries', refresh: true } : { view: 'summaries' } })
         } catch (e) {
           r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
         }
@@ -1211,7 +1211,7 @@
 
       async function deleteSavedAnswer() {
         const key = reader.key
-        const sc = await answerCall('delete_answer', { item: key }, 'Not deleted')
+        const sc = await answerCall('save_answer', { item: key, remove: true }, 'Not deleted')
         if (!sc) return
         if (mode === 'decisions') loadDecisions(false)
         if (reader.key !== key || !dlg.open) return

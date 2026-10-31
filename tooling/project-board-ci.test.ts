@@ -19,7 +19,6 @@ import {
   stripAttribution,
   summarizeDescription,
   workflowCheckNames,
-  workflowEventJobs,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/ci.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
@@ -448,6 +447,7 @@ const step = (key) => { const seq = st[key]; const v = seq[0]; if (seq.length > 
 if (args[0] === 'pr' && args[1] === 'view') {
   const pr = { ...st.pr }
   if (st.heads) pr.headRefOid = step('heads')
+  if (st.mergeables) pr.mergeable = step('mergeables')
   if (st.merged) Object.assign(pr, { state: 'MERGED', mergeCommit: { oid: 'abcdef1234567890' } })
   out(pr)
 } else if (args[0] === 'pr' && args[1] === 'merge') {
@@ -560,7 +560,7 @@ function runtime(state: Record<string, unknown>) {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: gh.env({ PROJECT_BOARD_CI_POLL_MS: '250' }),
+    env: gh.env({}),
     // The product's probe and call limits: a shorter one only adds a way to fail under load (#368)
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
@@ -691,7 +691,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const r = await call('merge_when_green', { pr: 77 })
     expect(r.isError).toBe(false)
     expect(r.data.outcome).toBe('pending')
-    expect(r.text.split('\n')[0]).toBe('Not merged yet: No checks are reported for its head commit yet, and no checks is not green. Call again later, or with wait: true to wait for them.')
+    expect(r.text.split('\n')[0]).toBe('Not merged yet: No checks are reported for its head commit yet, and no checks is not green. Call again later (queue_merge merges once green).')
     expect(merges()).toEqual([])
   })
 
@@ -700,13 +700,13 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     runtime(ghState({ workflow: null, checkRuns: [[]] }))
     const bare = await call('merge_when_green', { pr: 77 })
     expect(bare.data.outcome).toBe('pending')
-    expect(bare.text.split('\n')[0]).toBe('Not merged yet: No checks are reported for its head commit yet, and no checks is not green. Call again later, or with wait: true to wait for them.')
+    expect(bare.text.split('\n')[0]).toBe('Not merged yet: No checks are reported for its head commit yet, and no checks is not green. Call again later (queue_merge merges once green).')
     expect(merges()).toEqual([])
   })
 
   it('refuses a failing pull request with the failure, and merges nothing', async () => {
     runtime(ghState({ checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('linux-x64', null, 13)]] }))
-    const r = await call('merge_when_green', { pr: 77, wait: true })
+    const r = await call('merge_when_green', { pr: 77 })
     expect(r.isError).toBe(true)
     expect(r.data.outcome).toBe('refused')
     expect(r.text.split('\n')[0]).toBe('Not merged: A required check failed.')
@@ -729,7 +729,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
 
   it('merges nothing whose own run was the quick tier, and says how it lands', async () => {
     runtime(ghState({ checkRuns: [quick()] }))
-    const r = await call('merge_when_green', { pr: 77, wait: true })
+    const r = await call('merge_when_green', { pr: 77 })
     expect(r.isError).toBe(true)
     expect(r.data).toMatchObject({ outcome: 'refused', kind: 'quick-tier' })
     const first = r.text.split('\n')[0]
@@ -746,35 +746,44 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(merges()).toEqual([])
   })
 
-  it('waits until every required check is reported and passed, keeping the call alive, then squash-merges once with a clean message', async () => {
-    /*
-     * Nothing, then some running, then green. What keeps a long wait open is a progress notification
-     * for every poll: the runtime ends a call after `callTimeoutMs` without one, and its reset on
-     * progress has its own test (app-template.test.ts). So this counts the notifications that reach
-     * the caller, one per wait, rather than outliving a short deadline. A 2.5 s deadline did that
-     * before, over eleven waits, and failed under load (#368, "Request timed out"): every read is a
-     * fake `gh` process, the reads before the first notification are about a dozen, and each round
-     * of polling several more. One wait per state is all the merge decision needs.
-     */
-    const some = [ghRun('verify', 'success', 11)]
+  it('answers pending at once while checks run, and squash-merges once with a clean message when green', async () => {
     const running = [ghRun('verify', 'success', 11), ghRun('windows tests', null, 12), ghRun('linux-x64', 'success', 13)]
-    runtime(ghState({ checkRuns: [[], some, running, green()] }))
-    const progress: string[] = []
-    const r = await call('merge_when_green', { pr: '#77', wait: true }, progress)
+    runtime(ghState({ checkRuns: [running, green()] }))
+    // wait: true was the way to wait; it is gone, so the call answers at once and the old argument does nothing
+    const pending = await call('merge_when_green', { pr: '#77', wait: true })
+    expect(pending.data.outcome).toBe('pending')
+    expect(merges()).toEqual([])
+    const r = await call('merge_when_green', { pr: '#77' })
     expect(r.isError).toBe(false)
-    // Merged after the read that was green, not at the first one where everything reported had passed
-    expect(ghCalls().filter((a) => a.some((x) => x.includes('/check-runs?')))).toHaveLength(4)
     expect(r.data).toMatchObject({ outcome: 'merged', merged: true, commit: 'abcdef1234567890', subject: 'feat(apps): merge when green (#77)' })
     expect(r.text.split('\n')[0]).toBe('Merged PR #77 (squash) as abcdef1: "feat(apps): merge when green (#77)".')
-    // One per read that was not green yet. The time in the first is however long the first reads took: 0 s on an idle
-    // machine, 1 s or more under load (#368)
-    expect(progress).toHaveLength(3)
-    expect(progress[0]).toMatch(/^Waiting for PR #77 \(\d+ s so far\): No checks are reported/)
     expect(merges()).toEqual([
       ['pr', 'merge', '77', '-R', 'ijun17/centralu', '--squash', '--match-head-commit', 'c0ffee0000000000000000000000000000000000', '--subject', 'feat(apps): merge when green (#77)', '--body', 'Because.\n\nThings.\n\nRefs #386'],
     ])
     expect(ghCalls().flat()).not.toContain('--auto')
     expect(ghCalls().flat()).not.toContain('--delete-branch')
+
+    // A merge GitHub refuses is reported
+    await rt!.dispose({ awaitTree: true })
+    runtime(ghState({ mergeError: 'Pull request is not mergeable: the base branch policy prohibits the merge.' }))
+    const refused = await call('merge_when_green', { pr: 77 })
+    expect(refused.isError).toBe(true)
+    expect(refused.text.split('\n')[0]).toBe('Not merged: GitHub refused the merge: Pull request is not mergeable: the base branch policy prohibits the merge.')
+  })
+
+  it('asks GitHub again while mergeable is unknown, and merges once it knows', async () => {
+    runtime(ghState({ mergeables: ['UNKNOWN', 'UNKNOWN', 'MERGEABLE'] }))
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.data.outcome).toBe('merged')
+    expect(merges()).toHaveLength(1)
+  })
+
+  it('refuses when the head moved while mergeable was unknown, and merges nothing', async () => {
+    runtime(ghState({ mergeables: ['UNKNOWN', 'MERGEABLE'], heads: ['c0ffee0000000000000000000000000000000000', 'beef000000000000000000000000000000000000'] }))
+    const r = await call('merge_when_green', { pr: 77 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe('Not merged: its head moved from c0ffee0 to beef000 meanwhile, so the checks read are not the ones that count. Call again.')
+    expect(merges()).toEqual([])
   })
 
   it("takes the caller's body, deletes the branch only when asked and never a fork's", async () => {
@@ -797,30 +806,6 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(f.text.split('\n')[0]).toContain('Branch feat/merge-when-green not deleted: it is in a fork.')
     expect(ghCalls().filter((a) => a.includes('DELETE'))).toEqual([])
   })
-
-  it('stops waiting when the head moves, and reports a merge GitHub refused', async () => {
-    runtime(ghState({ checkRuns: [[]], heads: ['c0ffee0000000000000000000000000000000000', 'c0ffee0000000000000000000000000000000000', 'beef000000000000000000000000000000000000'] }))
-    const moved = await call('merge_when_green', { pr: 77, wait: true })
-    expect(moved.isError).toBe(true)
-    expect(moved.text).toBe('Not merged: its head moved from c0ffee0 to beef000 while waiting, so the checks waited on are not the ones that count. Call again to wait on the new commit.')
-    expect(merges()).toEqual([])
-
-    await rt!.dispose({ awaitTree: true })
-    runtime(ghState({ mergeError: 'Pull request is not mergeable: the base branch policy prohibits the merge.' }))
-    const refused = await call('merge_when_green', { pr: 77 })
-    expect(refused.isError).toBe(true)
-    expect(refused.text.split('\n')[0]).toBe('Not merged: GitHub refused the merge: Pull request is not mergeable: the base branch policy prohibits the merge.')
-  })
-
-  it('waits only as long as it is allowed to, then says what is still pending', async () => {
-    runtime(ghState({ checkRuns: [[ghRun('verify', null, 11)]] }))
-    // 0.02 min = 1.2 s: a few 250 ms polls
-    const r = await call('merge_when_green', { pr: 77, wait: true, waitMinutes: 0.02 })
-    expect(r.isError).toBe(false)
-    expect(r.data.outcome).toBe('timeout')
-    expect(r.text.split('\n')[0]).toMatch(/^Not merged: still not green after \d+ s of waiting \(limit 1 s\)\. Required checks still to pass: verify, windows tests \(not reported yet\), linux-x64 \(not reported yet\)\.$/)
-    expect(merges()).toEqual([])
-  })
 })
 
 describe('failure excerpt fallbacks', () => {
@@ -840,32 +825,6 @@ describe('failure excerpts across runners', () => {
     expect(failureLineIndex(['setup', first, ...summaries.filter((line) => line !== first)])).toBe(1)
   })
 })
-
-describe('release CI event audit', () => {
-  it('finds no event-dependent jobs in the release CI workflow', () => {
-    const jobs = workflowEventJobs(readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8'))
-    expect(jobs.length).toBeGreaterThan(0)
-    expect(jobs.every((j: { reason: string | null }) => j.reason === null)).toBe(true)
-  })
-
-  it.each(["    if: github.event_name == 'push'", '    steps:\n      - run: |\n          if [ "$GITHUB_EVENT_NAME" = push ]; then echo check; fi', '    env:\n      BRANCH: ${{ github.ref }}'])('requires main for event-dependent job content: %s', (body) => {
-    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n  verify:\n${body}\n`)).toEqual([
-      { names: ['verify'], unresolved: [], reason: 'uses event or branch context' },
-    ])
-  })
-})
-
-
-it('documents that called scripts need manual event review in both release guides', () => {
-  const workflow = 'on:\n  push:\n  pull_request:\njobs:\n  verify:\n    steps:\n      - run: node scripts/check.mjs\n'
-  expect(workflowEventJobs(workflow)[0].reason).toBeNull()
-  for (const file of ['docs/releasing.md', 'docs/releasing.ko.md']) {
-    const doc = readFileSync(join(REPO_ROOT, file), 'utf8')
-    expect(doc).toContain('The automated event audit does not follow scripts called by workflow steps')
-    expect(doc).toContain('Those need manual\nreview for event-dependent behavior')
-  }
-})
-
 
 it('keeps release bump builds out of the concurrency group cancelled by ordinary main pushes', () => {
   const workflow = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')

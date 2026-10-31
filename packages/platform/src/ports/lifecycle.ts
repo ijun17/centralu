@@ -40,6 +40,12 @@ export interface UpdatePort {
   reportApply(r: { requestId: string; ticket: string; started?: boolean; error?: string }): Promise<void>
 }
 
+/** What a window tells the host about its own failures */
+export interface DiagnosticsPort {
+  /** The screen crashed (the error boundary caught it): the host writes it to its log. Fire and forget; never rejects */
+  reportCrash(r: { message: string; stack: string; componentStack: string; version?: string }): Promise<void>
+}
+
 /**
  * Leftover processes still running from our folders (requested by the person, 2026-09-07).
  *

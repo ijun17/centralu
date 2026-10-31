@@ -217,7 +217,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
 
 describe('a start allowed but waiting for memory (#686)', () => {
   it('outlives a host swap without a second card, and the next host starts it when memory recovers', async () => {
-    let free = 1024 ** 3
+    let free = 512 * 1024 ** 2
     const gate = () => new MemoryGate({ read: async () => free, recheckMs: 20 })
     const a = host()
     a.mgr.useMemoryGate(gate())
@@ -237,7 +237,7 @@ describe('a start allowed but waiting for memory (#686)', () => {
     // The person already answered: no card again, and nothing starts while memory is short
     expect(card(b.mgr, parent)).toBeUndefined()
     expect(children(b.mgr, parent)).toEqual([])
-    expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
+    expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { available: '512 MB', floor: '2.0 GB' } })
     free = 4 * 1024 ** 3
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id

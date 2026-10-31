@@ -58,7 +58,7 @@ import {
   traitsOf,
   type OsFamily,
 } from './rules.js'
-import { abortReason, asError, errorCode } from './errors.js'
+import { abortReason, asError, errnoCode, isMissing } from './errors.js'
 import { copyTreeAsync, copyTreeSync } from './copy.js'
 import { runChild } from './run.js'
 
@@ -456,7 +456,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         try {
           found = lookup(next, follow, syscall, hops + 1)
         } catch (e) {
-          const code = errorCode(e)
+          const code = errnoCode(e)
           throw code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP' ? fsError(code, syscall, p) : e
         }
         if (node.junction && rest.length === 0 && found.node?.kind === 'file')
@@ -486,7 +486,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     try {
       return lookup(p, follow, syscall)
     } catch (e) {
-      if (errorCode(e) === 'ENOENT' || errorCode(e) === 'ENOTDIR') return null
+      if (isMissing(e)) return null
       throw e
     }
   }
@@ -699,7 +699,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       f = lookup(p, true, 'mkdir')
     } catch (e) {
       const up = P.dirname(p)
-      if (!o.recursive || errorCode(e) !== 'ENOENT' || up === p) throw e
+      if (!o.recursive || errnoCode(e) !== 'ENOENT' || up === p) throw e
       // A folder on the way is missing: made first, as `mkdir -p` does
       mkdir(up, o, parentOf ?? p)
       f = lookup(p, true, 'mkdir')
@@ -1050,7 +1050,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       return statOf(existing(p, true, 'stat'))
     } catch (e) {
       // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
-      if (o?.throwIfNoEntry === false && errorCode(e) === 'ENOENT') return undefined
+      if (o?.throwIfNoEntry === false && errnoCode(e) === 'ENOENT') return undefined
       throw e
     }
   }
@@ -1061,7 +1061,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       return statOf(existing(p, false, 'lstat'))
     } catch (e) {
       // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
-      if (o?.throwIfNoEntry === false && errorCode(e) === 'ENOENT') return undefined
+      if (o?.throwIfNoEntry === false && errnoCode(e) === 'ENOENT') return undefined
       throw e
     }
   }

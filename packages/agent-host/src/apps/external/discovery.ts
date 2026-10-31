@@ -5,6 +5,7 @@ import { serverNameProblem } from '@cc/protocol'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
 import { outsideAppCode } from './folder-walk.js'
+import { asObj, tryParseJson } from '../../json-value.js'
 
 /**
  * Scans the places apps live (M4 A-2, plan decision 1).
@@ -200,12 +201,8 @@ export function scanRootApp(root: string, taken: readonly string[]): ScannedApp 
 
 /** The `id` of a manifest that did not pass, when it is at least an id's shape — so the app keeps its key while it is mended */
 function rawId(text: string): string | null {
-  try {
-    const id = (JSON.parse(text) as { id?: unknown }).id
-    return typeof id === 'string' && serverNameProblem(id) === null ? id : null
-  } catch {
-    return null
-  }
+  const id = asObj(tryParseJson(text)).id
+  return typeof id === 'string' && serverNameProblem(id) === null ? id : null
 }
 
 /**

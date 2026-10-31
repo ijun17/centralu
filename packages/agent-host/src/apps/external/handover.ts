@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
+import { errnoCode } from '../../os/errors.js'
 import { realOs } from '../../os/real.js'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
@@ -73,6 +74,9 @@ type Staged = { home: string; appDir: string; review: AppReview; timer: NodeJS.T
 
 const NOT_ENABLED = 'This app was imported and is not enabled yet. Review what it runs, then enable it'
 const CHANGED = 'This app changed what it runs or what it uses since you enabled it. Review it and enable it again'
+
+/** Why a step failed, for text a person reads: the OS's code for a file error (its message names the path), else the message of an error this code threw itself */
+const why = (e: unknown): string => errnoCode(e) ?? (e instanceof Error ? e.message : 'unknown error')
 
 export class AppHandover {
   private book: ImportBook
@@ -156,7 +160,7 @@ export class AppHandover {
       return { token, review }
     } catch (e) {
       discard(home, this.opts.remove)
-      throw e instanceof ImportRefused ? e : new ImportRefused(`Could not import from ${source.label}: ${(e as Error).message}`)
+      throw e instanceof ImportRefused ? e : new ImportRefused(`Could not import from ${source.label}: ${why(e)}`)
     } finally {
       if (tmp) discard(tmp, this.opts.remove)
     }
@@ -322,13 +326,13 @@ export class AppHandover {
       try {
         this.versions.capture(key, dir, 'before restore')
       } catch (e) {
-        throw new ImportRefused(`Could not keep a copy of the current files first (${(e as Error).message}), so nothing was restored`)
+        throw new ImportRefused(`Could not keep a copy of the current files first (${why(e)}), so nothing was restored`)
       }
     } else this.snapshot(key, dir, 'before restore')
     try {
       return this.versions.restore(key, id, dir, { keepOthers: opts.root === true })
     } catch (e) {
-      throw new ImportRefused((e as Error).message)
+      throw new ImportRefused(why(e))
     }
   }
 

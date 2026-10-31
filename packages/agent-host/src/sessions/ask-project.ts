@@ -236,3 +236,23 @@ export function awayFor<A extends { machine: string; machineId: string }>(wanted
   if (prefix === null && !byId) return [...away]
   return away.filter((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
 }
+
+/**
+ * The ordinary session an ask names: by id, or by name (any case) when exactly one has it, and when none is named the only one there
+ * is. Otherwise the refusal that lists them. The name is the caller's own text, so it goes into the refusal on one line (#120)
+ */
+export function pickAskedSession<S extends { id: string; name: string; state: string }>(
+  sessions: readonly S[],
+  wanted: string | undefined,
+  label: string,
+): { chosen: S } | { error: string } {
+  const named = wanted ? sessions.filter((s) => s.name.toLowerCase() === wanted.toLowerCase()) : sessions
+  const chosen = sessions.find((s) => s.id === wanted) ?? (named.length === 1 ? named[0] : undefined)
+  if (chosen) return { chosen }
+  const list = sessions.map((s) => JSON.stringify({ id: s.id, name: s.name, state: s.state })).join('\n')
+  return {
+    error: sessions.length
+      ? `${wanted ? `No unique ordinary session named "${oneLineText(wanted, 120)}" in ${label}. ` : ''}Name a session with the session argument. Sessions (name, state):\n${list}`
+      : `${label} has no ordinary session. The person has to open one there; this call cannot create one.`,
+  }
+}

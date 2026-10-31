@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
+import { isMissing } from '../os/errors.js'
 import { isInside as rulesIsInside } from '../os/rules.js'
 import { shareRoot, walkLinks, walkLinksSync, type LinkWalk } from './link-walk.js'
 
@@ -77,8 +78,8 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
       const linkStats = await lstat(candidate, { bigint: true })
       if (linkStats.isSymbolicLink()) {
         if (windows) offMachine(await walkLinks(candidate, shareRoot(rootReal)))
-        const target = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
-          if (isMissingFsPath(error)) throw new MissingPathError(rel)
+        const target = await realpath(candidate).catch((error: unknown) => {
+          if (isMissing(error)) throw new MissingPathError(rel)
           throw error
         })
         assertInside(rootReal, target)
@@ -89,8 +90,8 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
         current = windows ? realInside(rootReal, await realpath(candidate)) : candidate
       }
     } catch (error) {
-      if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
-      if (isMissingFsPath(error)) throw new MissingPathError(rel)
+      if (isMissing(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
+      if (isMissing(error)) throw new MissingPathError(rel)
       throw error
     }
     if (index < parts.length - 1 && !stats.isDirectory()) throw new UnsafePathError(`${rel || '.'} is not a folder`)
@@ -130,8 +131,8 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
         current = windows ? realInside(rootReal, realpathSync.native(candidate)) : candidate
       }
     } catch (error) {
-      if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
-      if (isMissingFsPath(error)) throw new MissingPathError(rel)
+      if (isMissing(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
+      if (isMissing(error)) throw new MissingPathError(rel)
       throw error
     }
     if (index < parts.length - 1 && !stats.isDirectory()) throw new UnsafePathError(`${rel || '.'} is not a folder`)
@@ -241,8 +242,4 @@ function realInside(rootReal: string, real: string): string {
 function offMachine(walk: LinkWalk): void {
   if (walk.ok) return
   throw new UnsafePathError(walk.reason === 'elsewhere' ? `Path leads off this machine (${walk.why})` : `Path cannot be checked: ${walk.why}`)
-}
-
-function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')
 }

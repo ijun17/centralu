@@ -78,7 +78,7 @@ tools agents use to record the owner's answers.
 - **"Needs decision"** (the header's second button) lists the items with that Status, each with the
   Question and Recommendation of its latest `## Decision needed (summary, …)` comment, and
   "Answered" when a `Decision (owner, …)` comment came after it (`decisionSummary` in markdown.mjs,
-  `decision_summaries` in decision-tools.mjs).
+  `list_owner_answers` with `view: "summaries"` in decision-tools.mjs, which the screen calls).
 - **The owner's answer never goes to GitHub as written** (owner decision, 2026-10-12: the
   repository is public, and the owner answers in their own words and language). The answer box
   under an item whose Status is the decision status saves it with `save_answer` ("Save answer" or
@@ -86,20 +86,20 @@ tools agents use to record the owner's answers.
   `centralu.readJson`/`writeJson`: the per-user app data Centralu gives the app, outside the
   repository (`answers.mjs` holds the rules, pure). The screen then says plainly that nothing was
   posted and that the agent records the decision in English, and shows the answer on the item
-  ("saved …, not recorded yet") with Edit and Delete (`delete_answer`) until it is recorded. Edit
+  ("saved …, not recorded yet") with Edit and Delete (`save_answer` with `remove: true`) until it is recorded. Edit
   opens it in the box; Esc steps back out of the change. Saving again replaces the answer waiting;
   a recorded answer is history and shows with its decision comment ("recorded in English"). A
-  failed save says why and keeps the text. Drafts live in the screen's memory only. Both tools are
+  failed save says why and keeps the text. Drafts live in the screen's memory only. `save_answer` is
   screen-only; nothing on the screen posts to GitHub.
-- **Agents record it** (both model-only): `list_owner_answers` (`all?`; read-only) lists the
-  answers not recorded yet with the item's title and the owner's text, which agents never post as
+- **Agents record it**: `list_owner_answers` (read-only, agents and the screen; `view?` is `answers` by default) lists the
+  answers not recorded yet (`all?` adds the recorded ones) with the item's title and the owner's text, which agents never post as
   written. The agent posts the decision on the issue in English with `comment`, in CONTRIBUTING.md's
   form `**Decision (owner, YYYY-MM-DD):** …`, then calls `mark_answer_recorded` (`item`, `url`) with
   that comment's address. It reads the comment back from GitHub and refuses unless it is on that
-  item, holds "Decision (owner, YYYY-MM-DD)" and is in English. `list_needs_decision` marks an item
+  item, holds "Decision (owner, YYYY-MM-DD)" and is in English. `list_owner_answers` with `view: "items"` (`area?`, `detail?`: the "Needs decision" items, one line each) marks an item
   with an answer waiting "· answered, not recorded yet" (and counts them in its summary), the
   screen's "Needs decision" cards say "Answered, not recorded yet", and `read_item` and
-  `decision_summaries` carry `ownerAnswer`.
+  the `summaries` view carry `ownerAnswer`.
 - **Input methods.** An Enter or Esc the input method took (ending or cancelling a Korean syllable)
   neither reviews, steps back nor closes: `composing` in the screen, the same three signs as
   Centralu's `composingKey` (docs/usability.md).
@@ -109,7 +109,7 @@ tools agents use to record the owner's answers.
 The repository's contribution procedure, kept as code so every agent follows it the same way. The
 decisions are pure functions in `ci.mjs`; `github.mjs` reads GitHub; `ci-tools.mjs` puts them together.
 `project.json` `ci` names the workflows that hold the required checks, the issue listing known
-intermittent failures (#368), and how long a merge may wait.
+intermittent failures (#368).
 
 - **Green means every required check is reported and passed.** No checks reported, a required check
   not reported yet, or one still running is not green (on 2026-10-05 a script read "no checks yet"
@@ -125,7 +125,7 @@ intermittent failures (#368), and how long a merge may wait.
   `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
   non-required checks. Compact output still says when the PR adds required jobs (#445).
   `read_failed_job` reads at most 40 lines around a job failure, without timestamps or colour codes.
-- **`merge_when_green`** (`pr`, `body?`, `wait?`, `waitMinutes?`, `deleteBranch?`): refuses unless the
+- **`merge_when_green`** (`pr`, `body?`, `deleteBranch?`, `intoBatch?`): refuses unless the
   gh account has maintain or admin permission (checked first), the PR is open and not a draft, the
   checks are green and GitHub can merge it. Squash only, with `--match-head-commit`, never `--auto`
   and never `--delete-branch` (that flag deletes the local branch and, when a Centralu worktree
@@ -133,15 +133,12 @@ intermittent failures (#368), and how long a merge may wait.
   through the API when asked, on GitHub only, never a fork's, never a local branch). Session
   deletion removes a worktree and its branch, not the merge. Subject `Title (#N)`; body from `body`
   or the description's Why / What changed / Closes, without `Co-Authored-By:` or "Generated with" lines; no author flag,
-  so the PR author stays the author. Pending answers at once unless `wait: true`, which polls every
-  `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
-  after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
-  "still running" at 240 s and follows the call with `run_status`. When the merge queue has a batch running on the
+  so the PR author stays the author. Pending answers at once (it never waits: `queue_merge` merges once green, or
+  `bin/wait-checks.mjs` below waits in the background; #1143 P16). When the merge queue has a batch running on the
   same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
   ("Not merged: …", `outcome: 'batch-running'`, `isError`: it is not a success an agent could read as merged): merging here moves the default branch under the batch, which then stops
   before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
-  `intoBatch: true` merges anyway (a release bump goes through here, and `release`'s bump summary says to pass it; the answer then says it again). A call that only waits
-  carries the same note.
+  `intoBatch: true` merges anyway (the answer then says it again).
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
   admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
@@ -396,7 +393,7 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   own later, one more cycle; and a failing check hands the conflict to the author with nothing pushed,
   with no second try, since what fails then is a real new line in the list.
 - **Mechanical files**: when every conflicted file is named by an entry of `project.json`
-  `queue.conflicts.mechanical` (`files`: path patterns as `release.versionFiles`; `run`: commands as
+  `queue.conflicts.mechanical` (`files`: path patterns, `*` one folder name and `**` any number; `run`: commands as
   argument lists, run in order without a shell, each at most `timeoutMinutes`, default 30; on Windows
   a `.cmd` shim such as pnpm is started through cmd.exe), the default branch's version of each is
   taken, each command of the matching entries runs once in list order (the lockfile entry first, so
@@ -509,8 +506,7 @@ has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of 
 default 4: the owner's, 2026-10-19, this repository's too).
 
 - **Which**: active items in CI whose own CI was read on their head, not sent back from a batch on
-  that head (`batchless`), not a fork's (its head would run CI in this repository's branch) and not a
-  release bump (its CI is the release's evidence), in one repository, those fixed after a conflict
+  that head (`batchless`), not a fork's (its head would run CI in this repository's branch), in one repository, those fixed after a conflict
   first (`front`), then in the order they were queued; a stack is one item, so one member. With two
   tiers, **every ready item** (2026-10-19): its own quick run passed, still runs, waits for a runner
   or has not reported yet, but not one whose own CI failed (its poll handles that). Without tiers,
@@ -597,8 +593,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
 GitHub Actions was the bottleneck: a full run of `build.yml` is about 24 jobs, the free plan runs 20
 at once, and every push of every pull request started one. The owner chose two tiers: a pull
 request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests, the macOS tests); the **full
-tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
-bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
+tier** (every job) runs on main and on a manual run (a batch's dispatch, or a person's)
+(`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
 alone is green on what it reports. On while `project.json` has `ci.fullTier`, the name of the check
 that passes on a full run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it
 passed, `quick` when it finished otherwise, null while not reported).
@@ -607,7 +603,7 @@ passed, `quick` when it finished otherwise, null while not reported).
 2026-10-19), nothing lands that has not passed the full tier on what lands. With `quick` (this
 repository's since the owner's decision of 2026-10-19), a change lands after the **fast tier**: its
 own quick run, then its batch's run of the quick tier on what lands (the batch's dispatch asks for
-`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
+`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a commit on main).
 No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
 rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
 run and the full tier's check is not asked for. That run is judged as a pull request's own quick run is
@@ -623,9 +619,9 @@ green batch queue/batch-98 stopped with "never reported" (2026-10-19). The main 
 the required set: it judges main's runs and its probes by their conclusion, and both are full runs.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
-  a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
+  a full run a person started on its branch), or a batch's. A head whose own run
   finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
-  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
+  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, batches
   off): from a branch of this repository, the queue starts the full tier on its branch itself, once per
   head (`workflow_dispatch` of the CI workflows, no inputs; `fullDispatch` on the item; #1509 item 4), and
   lands it when that run is green; attention `full-tier` only when no full run has reported in 15 minutes
@@ -699,7 +695,7 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   Without this a red batch of one was formed again every tick.
 - **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
   `queue_merge` or to start the full tier), and waits while the full tier's check has not passed.
-- **The release** takes a bump PR's run as evidence only when the full tier's check passed on it,
+- **The release** takes a commit's own push run as evidence only when the full tier's check passed on it,
   when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
 - `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
   without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue.test.ts`,
@@ -791,8 +787,7 @@ looked into).
   branch `revert/<sha>`): the reverse of its change applied to the default branch's tip in a temporary
   index from the checkout (nothing in the checkout moves) and pushed. It is **queued at the front**
   (`front`), for the session that queued the culprit (owner, author and notice address of its merged
-  item), and lands through the fast tier like any change. **A release bump is never reverted** (a
-  subject `chore(release): …`, or a change to project.json `release.source`); nor is anything when
+  item), and lands through the fast tier like any change. Nothing is reverted when
   the reverse no longer applies (later commits changed the same lines) or there is no checkout: then
   the issue says to fix or revert it by hand. Either way, an issue with the failure (the run, the
   failed jobs, the first failing line, the candidates, how the culprit was found and what the queue
@@ -933,9 +928,7 @@ and refuses with every reason at once, sending nothing.
   fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
   past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
   process group), its `--cleanup` removes the worktrees and their links, and nothing is opened; a
-  call cancelled while waiting for its turn opens nothing either. A release bump (`release.mjs`)
-  calls `openPr` directly and does not run pre-pr: it changes version strings only, which the
-  release tool has checked itself.
+  call cancelled while waiting for its turn opens nothing either.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
@@ -967,77 +960,59 @@ and refuses with every reason at once, sending nothing.
 ## The release (#386 step 3)
 
 docs/releasing.md as code: `release.mjs` holds the procedure, `versions.mjs` the version rules (pure),
-`project.json` `release` the layout: where the version is declared (`source`: a file and a pattern
-whose first group is the version; brand.ts here), the files that carry it (`versionFiles`, paths
-where `*` is one folder name and `**` any number), `ignore`, `tagPrefix`, `branchPrefix`, the release
-`workflow`, its `rehearsalInputs` and its `environment`. Releasing is the maintainer's act like
-merging: every step but the status refuses first unless the login has maintain or admin. Owner
-decision (2026-10-06): the maintainer's agent drives it end to end, approvals included, and every
-step shows on the screen.
+`project.json` `release` the layout: where the version would be declared (`source`: a file, a pattern
+whose first group is the version, a marker and a name, which tell a commit of the tag scheme from one that
+still declares it; brand.ts here), `tagPrefix`, `branchPrefix`, the release `workflow`, its `rehearsalInputs`
+and its `environment`. Releasing is the maintainer's act like merging: every step but the status refuses
+first unless the login has maintain or admin. Owner decision (2026-10-06): the maintainer's agent drives it
+end to end, approvals included, and every step shows on the screen.
+
+No file carries the release version (#1501): the build stamps it from the tag, and there is no bump PR or
+bump commit (the version-bump path of the brand scheme was removed, #1143). The next release is the next
+prerelease after the newest tag (or `version`), cut from the newest commit of main since that tag whose own
+push run of CI is fully green, the full tier included (or `commit`).
 
 - **Read fresh at every call**: main's commit and the tags from the remote (`git fetch`/`ls-remote`
   under refs of the call's own, removed again), CI on main from GitHub, the release workflow's runs.
   `release_status` (read-only, agents and the screen's "Release" dialog) answers the phase
   (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), the release
   commit and how far behind main it is (#1350), CI on it, the checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
-  the last tag (the release notes draft, without `chore(release)` commits) and the next step.
+  the last tag (the release notes draft, without `chore(release)` commits) and the next step. It follows
+  the newest tag until its release run has succeeded or its shim is on the registry, then the next
+  release, or "nothing landed since".
 - **Release CI sources (#633 review):** match GitHub Actions check-suite ids to runs of the
-  configured CI workflow files and exact commit/event (main push or PR). Release/rehearsal checks
+  configured CI workflow files and exact commit/event (main push). Release/rehearsal checks
   can have the same job names and never replace CI checks. Before every npm-publish approval,
   require only the tagged commit's own green CI; no PR fallback and no gate on later main commits.
   Cancelled builds name their run id and rerun command; a successful new attempt replaces the old
-  cancellation. Generated release bumps have their own build concurrency group per commit.
-  Status reports this publication gate. The inline event scan does not follow called scripts or
-  actions; review those manually as described in docs/releasing.md.
-- **The release commit (#1350):** a release is cut from the bump's own squash commit, not main's head.
-  `releaseCommit` walks main's first-parent history back from its head to the first commit that
-  does not declare main's version (`release.source`); that commit is the default for `rehearse` and
-  `tag`, and `commit` names another one of that run (main's head among them). A version main no
-  longer declares (a later commit changed it, a newer bump) is refused, by `version` or by `commit`.
-  Everything the release reads is read at that commit: CI, the version files, the rehearsals (those on
-  it, and those on the bump branch at a commit with its tree), the PR evidence. What lands after it
-  does not matter, and a rehearsal of main's head does not count (only runs on the release commit, or
-  on the bump branch at a commit with its tree). The notes run from the last tag to the release commit;
-  what came after is listed as "Not in this release". A shallow checkout whose history stops before
-  the bump is refused (the boundary is not the bump). `tag` and `rehearse`
-  need a clean checkout, not one on main or at main (the tag is pushed by id); `bump` still does.
-  Off main's head `rehearse` pushes the commit to `branchPrefix` + the version (never moved: a branch
-  there with another tree is refused) and dispatches the workflow on it; `tag` deletes that branch
-  after the push when it is still at the release commit (a bump PR's head is not).
-- **CI evidence for rehearse and tag (#629):** CI on the release commit green is used directly and its
-  failure always blocks. Otherwise the merged bump PR may supply green required checks only when the
-  release commit is its single-parent squash commit and the PR head has the identical Git tree. Audit required workflow
-  jobs for event/branch behavior first; such jobs or unmapped required names require main CI. Both
-  steps and status say which evidence they used, or why it was refused. Bump still needs main CI.
+  cancellation. Status reports this publication gate.
+- **The release commit (#1350, #1501):** the newest commit on main's first-parent history since the newest
+  tag (of the newest 20, `CANDIDATE_LOOK`) whose **own push run** of CI is fully green with the full tier
+  (a batch's quick run never counts), and under the tag scheme by `sourceScheme` (`versions.mjs`, from
+  `release.source`'s `pattern`, `marker` and `name`): a commit whose source still declares the version, or
+  declares it in a form neither reading understands, is passed over (named, it is refused). The release
+  workflow's guard imports the same function and reads the same `release.source`, so the two never disagree
+  about a commit. `commit` names another commit of that history. Everything the release reads is read at that
+  commit: CI, the rehearsals (those on it, and those on its rehearsal branch, `branchPrefix` + the version, at
+  a commit with its tree). What lands after it does not matter, and a rehearsal of main's head does not count.
+  The notes run from the last tag to the release commit; what came after is listed as "Not in this release".
+  `tag` and `rehearse` need a clean checkout, not one on main or at main (the tag is pushed by id). Off
+  main's head `rehearse` pushes the commit to `branchPrefix` + the version (never moved: a branch there with
+  another tree is refused) and dispatches the workflow on it; `tag` deletes that branch after the push when it
+  is still at the release commit.
 - **`release`** (`step`, `confirm?`, `path?`): each step checks everything first and refuses with every
   reason at once; without `confirm: true` it says what it would do and does nothing.
-  - `bump` (`version?` or `bump?` = prerelease/patch/minor/major, `notes?`, `closes?`): needs the
-    checkout clean, on main and at main's commit on the remote, CI green, main's version tagged
-    (released), the new version after it and after the latest tag, untagged, and no branch or open pull
-    request for it yet. Every file in `versionFiles` must carry main's version as a quoted string, and
-    no other tracked text file outside `release.ignore` may carry it, including suffixes and template
-    strings (`git grep` on main's commit, no extension filter; each hit is reported as `file:line`).
-    `ignore` explicitly allows historical docs, release notes and lockfiles; intentional fixture pins
-    need an exact path there. `versionFiles` wins over `ignore`. See docs/releasing.md. The bump
-    replaces the quoted version only (prose like "removed in 0.1.0-beta.16" stays), commits it on main
-    in a temporary index (the checkout, its index and branches never move), pushes
-    `chore/release-<version>` (never forced) and opens the pull request through `open_pr`'s own code,
-    checked with `dryRun` before the push: the merged list under Why, the files under What changed.
-    It warns, never refuses, when other builds' jobs (running plus queued, of every active run) reach
-    three quarters of `release.runners` (default 20): the bump PR's CI would queue behind them (#1035).
-  - `rehearse`: CI green on the release commit, the version untagged and its files consistent; starts the workflow on main (or, when main has moved past the release commit, on a branch at it)
-    with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
-    A rehearsal already running or passed on that commit is not started again. While main's version
-    is released (#1035), it rehearses the open bump PR instead: on its branch, with no CI required,
-    when exactly one `branchPrefix` branch after main's version has an open PR into main (or
-    `version` names it), its head is the PR's head, main's head is an ancestor of it (else the
-    squash would give main another tree), and it carries that version consistently and untagged.
-  - `tag` (`version?`, `commit?`, `skipRehearsal?`): a clean checkout, CI green on the release commit, main's version after the
-    latest tag and untagged (a release tag is never moved), its files consistent, and a successful
-    rehearsal on that commit, or on `branchPrefix` + the version at a commit with its tree (the
-    bump PR's rehearsal; the rule #629 uses for its CI), unless `skipRehearsal: true`. The newest of
-    those counts. Pushes the tag on the release commit by its id
-    (lightweight, as before; no local tag is made) and answers the release run.
+  - `rehearse`: the next version on the release commit, CI green on it, the newest tag released (its run
+    succeeded or its shim is on the registry, which the guard would refuse otherwise); starts the workflow
+    with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval) plus
+    `version`, on main or, when main has moved past the release commit, on a branch at it. A rehearsal
+    already running or passed for that version on that commit is not started again.
+  - `tag` (`version?`, `commit?`, `skipRehearsal?`): a clean checkout, the release commit as above, the
+    version after every tag and untagged (a release tag is never moved), and a successful rehearsal on that
+    commit (or its rehearsal branch, same tree) whose run name is `rehearse <version>` (release.yml's
+    `run-name`), unless `skipRehearsal: true`. The newest of those counts. Pushes an **annotated** tag whose
+    message is the notes (their only record; `git mktag` in the object store, no local ref), by id, and
+    answers the release run.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve
     (`current_user_can_approve`); otherwise it names the reviewers and the run's address. Says which
@@ -1055,30 +1030,12 @@ step shows on the screen.
     if any changes; no job listed as waiting is "not yet"; an aborted call never approves.
   - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
     newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
-- **`release.scheme: "tag"` (#1501)**, off by default ("brand", everything above): no file carries the
-  release version, the build stamps it from the tag, and no bump PR or bump commit exists. `bump` refuses.
-  The next release is `version` (default the next prerelease after the newest tag), after every tag and
-  untagged, cut from `commit` (default the newest commit on main's first-parent history since the newest
-  tag whose **own push run** of CI is fully green with the full tier, of the newest 20; a batch's quick run
-  never counts), and under the tag scheme by `sourceScheme` (`versions.mjs`, from `release.source`'s `pattern`,
-  `marker` and `name`): a commit whose source still declares the version, or declares it in a form neither reading
-  understands, is passed over (named, it is refused). The release workflow's guard imports the same function and reads
-  the same `release.source`, so the two never disagree about a commit. `rehearse` and `tag` refuse while the newest
-  tag is not released (the check status uses: its run succeeded or its shim is on the registry). `rehearse` dispatches the workflow with `rehearsalInputs` plus `version` (on main, or on
-  `branchPrefix` + the version made at that commit), and `tag` counts only a successful rehearsal on that
-  commit (or that branch, same tree) whose run name is `rehearse <version>` (release.yml's `run-name`). `tag`
-  pushes an **annotated** tag whose message is the notes (their only record; `git mktag` in the object
-  store, no local ref), by id. `approve` reads only the tagged commit's own CI (no bump PR to stand for it);
-  the shim's registry gate is unchanged. `release_status` follows the newest tag until its release run
-  succeeded or its shim is on the registry, then the next release, or "nothing landed since". The release
-  workflow's guard (`scripts/release-guard.mjs`) holds a tag pushed by hand to the same rules.
+- The release workflow's guard (`scripts/release-guard.mjs`) holds a tag pushed by hand to the same rules.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
   and push to a bare repository through `pushurl`.
-- Tests: `tooling/project-board-release.test.ts`. It also holds `versionFiles` to this repository, which
-  is on the tag scheme since #1501: every file they name holds the placeholder `0.0.0-dev`, `brand.ts`
-  declares nothing, and the last brand-scheme version is left in no other file. Its fixture repositories
-  are of the brand scheme, made from those files (`brandSchemeText`), and run with `release.scheme` set
-  back to "brand" unless a test says "tag".
+- Tests: `tooling/project-board-release.test.ts`. Its fixture repositories are of the tag scheme, made
+  here: brand.ts declares the last release of the brand scheme up to a chosen commit and imports the
+  version after it (`switchAt`).
 
 ## Files
 
@@ -1088,8 +1045,8 @@ step shows on the screen.
   order agents and the screen list them). A new tool goes in its family's `tools` and in `ORDER`.
 - The tool families, each a `tools` table of `{ config, handler }`: `view-tools.mjs` (`show` and the
   screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
-  `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
-  decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
+  `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (save_answer, list_owner_answers,
+  mark_answer_recorded), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
   mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,

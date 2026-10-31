@@ -1,7 +1,8 @@
 import { ORCHESTRATOR_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
-import { plainQuoted } from './tool-answers.js'
+import { bytesText } from '../bytes-text.js'
+import { plainQuoted, plural } from './tool-answers.js'
 import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
 export type { TrashRequest }
@@ -23,19 +24,6 @@ const ROWS = 25
 /** A name as one quoted line the person or the model reads (`plainQuoted`) */
 const shown = (name: string): string => plainQuoted(name)
 
-function bytesText(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB']
-  let value = bytes / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
-}
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
 /** What deleting an archived session for good takes with it besides its conversation, as the window's row says it */

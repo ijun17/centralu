@@ -2,7 +2,6 @@ import { z } from 'zod'
 import { Attachment, GitBranch, GitCommit, GitDiff, GitFileStatus } from '../../entities.js'
 import { FsEntry, FsFile } from '../files.js'
 import { ProjectInfo, SavedCommand } from '../projects.js'
-import { SessionInfo } from '../sessions.js'
 
 /** The results of the `projects` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./projects.params.ts */
 export const projectsResults = {
@@ -57,7 +56,6 @@ export const projectsResults = {
   'projects.setTrusted': z.object({ ok: z.literal(true) }),
   'projects.reorder': z.array(ProjectInfo),
   'projects.setCommands': z.array(SavedCommand),
-  'worktrees.createManager': SessionInfo,
   'worktrees.setTrunk': z.object({ ok: z.literal(true) }),
   'projects.setWorktreeSetup': z.object({ ok: z.literal(true) }),
   'projects.setAgentInstructions': z.object({ ok: z.literal(true) }),

@@ -40,7 +40,7 @@ export function orchestratorMcp(
   appsAttached = false,
 ) {
   const defs = toolDefsFor(profile)
-  // A set with a deferred tool is loaded tool by tool: the reader's always, the orchestrator's in the `deferred` tier (#512)
+  // A set with a deferred tool is loaded tool by tool: only the reader's has one
   const someDeferred = defs.some((t) => 'deferred' in t && t.deferred === true)
   return createSdkMcpServer({
     name: ORCHESTRATOR_MCP_NAME,
@@ -57,8 +57,7 @@ export function orchestratorMcp(
      *
      * The reader set (#320) is loaded tool by tool instead: all but app_guide (deferring them made
      * recall go unused, measured), while app_guide waits behind tool search — it rides in every
-     * ordinary session, and the person rarely asks one of them about the app. The orchestrator's
-     * rare commands are deferred the same way in the `deferred` tier, a prototype measured in #512.
+     * ordinary session, and the person rarely asks one of them about the app.
      */
     alwaysLoad: !someDeferred,
     // None for the reader set (#320): server instructions are where a role would creep in

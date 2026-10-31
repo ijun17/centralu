@@ -1,4 +1,5 @@
-import { errnoCode } from './errno.js'
+import { bytesText } from '../bytes-text.js'
+import { errnoCode } from '../os/errors.js'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -121,8 +122,6 @@ export function resolveWrittenPath(
 const refuse = (reason: MessageImageRefusal, message: string, file?: string): MessageImage =>
   file === undefined ? { ok: false, reason, message } : { ok: false, reason, message, file }
 
-const mb = (n: number) => `${(n / 1_000_000).toFixed(1)} MB`
-
 /** Reads `abs` as a reply's image: checks 2 and 3 of the module comment, on one descriptor */
 export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_MAX_BYTES): Promise<MessageImage> {
   const windows = sep === '\\'
@@ -155,7 +154,7 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
     if (info.isDirectory()) return refuse('not_an_image', `${file} is a folder, not an image`, file)
     if (!info.isFile()) return refuse('not_an_image', `${file} is not a regular file`, file)
     if (info.size > max) {
-      return refuse('too_large', `The image is ${mb(info.size)}; a reply shows images up to ${mb(max)}`, file)
+      return refuse('too_large', `The image is ${bytesText(info.size)}; a reply shows images up to ${bytesText(max)}`, file)
     }
     // One byte past the cap, so a file that grew since the stat is caught by what was read, not by what was said
     const buf = Buffer.allocUnsafe(Math.min(info.size, max) + 1)
@@ -165,7 +164,7 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
       if (bytesRead === 0) break
       total += bytesRead
     }
-    if (total > max) return refuse('too_large', `The image is over ${mb(max)}; a reply shows images up to ${mb(max)}`, file)
+    if (total > max) return refuse('too_large', `The image is over ${bytesText(max)}; a reply shows images up to ${bytesText(max)}`, file)
     const bytes = buf.subarray(0, total)
     const mime = sniffImage(bytes)
     if (!mime) return refuse('not_an_image', `${file} is not a ${MESSAGE_IMAGE_KINDS} image`, file)

@@ -7,7 +7,7 @@ import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './orchestrator-tools.js'
 import { presetWithin } from './start-agent.js'
-import { raceBound } from './with-timeout.js'
+import { raceBound } from '../timing.js'
 
 /**
  * What the handoff flow reaches of the session manager (#428), each member read when used: the manager builds it with

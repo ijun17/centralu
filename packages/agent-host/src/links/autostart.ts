@@ -1,4 +1,5 @@
 import { autostartCommand, lastLine, NOT_FOUND, parseAutostart, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { tryParseJson } from '../json-value.js'
 
 /**
  * Starting a linked machine's host at boot (docs/plans/remote-hub.md §10.4, owner decision 4: offered
@@ -20,14 +21,10 @@ export function parseAutostartLine(stdout: string): { ok: boolean; state: Remote
   for (const line of stdout.split(/\r?\n/).reverse()) {
     const t = line.trim()
     if (!t.startsWith('{')) continue
-    try {
-      const o = JSON.parse(t) as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } }
-      const state = o.v === 1 ? parseAutostart(o.autostart) : null
-      if (state && typeof o.autostart?.ok === 'boolean') {
-        return { ok: o.autostart.ok, state, message: typeof o.autostart.message === 'string' ? o.autostart.message : null }
-      }
-    } catch {
-      // not the line
+    const o = tryParseJson(t) as { v?: unknown; autostart?: { ok?: unknown; message?: unknown } } | null | undefined
+    const state = o?.v === 1 ? parseAutostart(o.autostart) : null
+    if (state && typeof o?.autostart?.ok === 'boolean') {
+      return { ok: o.autostart.ok, state, message: typeof o.autostart.message === 'string' ? o.autostart.message : null }
     }
   }
   return null
@@ -57,9 +54,6 @@ export async function autostartRemote(
     if (/unknown option for serve: --autostart/.test(r.stderr)) {
       throw unasked('too_old', `The Centralu on ${c.target} is too old to start at boot; update it first`)
     }
-    if (/--autostart needs on, off or status \(got "remove"\)/.test(r.stderr)) {
-      throw Object.assign(new Error(`The Centralu on ${c.target} predates --autostart remove`), { olderServe: true })
-    }
     const why = lastLine(r.stderr)
     throw new Error(`Centralu on ${c.target} gave no answer about starting at boot${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
   }
@@ -74,13 +68,7 @@ export async function autostartRemote(
  */
 export async function removeAutostart(c: Parameters<typeof autostartRemote>[0]): Promise<boolean> {
   try {
-    try {
-      await autostartRemote(c, 'remove')
-    } catch (err) {
-      // A serve from before `remove` (#1224 review), where `off` removes the entry
-      if (!(err as { olderServe?: boolean }).olderServe) throw err
-      await autostartRemote(c, 'off')
-    }
+    await autostartRemote(c, 'remove')
     return true
   } catch (err) {
     if ((err as { reason?: AutostartUnasked }).reason) return false

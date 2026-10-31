@@ -25,8 +25,8 @@
  */
 import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { constants, tmpdir } from 'node:os'
+import { linkSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { constants } from 'node:os'
 import { posix, win32, dirname, basename, join } from 'node:path'
 
 /**
@@ -36,8 +36,8 @@ import { posix, win32, dirname, basename, join } from 'node:path'
 export type Started = number | string
 /** A process: its id and the stamp of when it started (null while it is not known) */
 export type Proc = { pid: number; started: Started | null }
-/** What a lock names: the runner, what it runs, the child it started, and whether it may have made the old lock folder (`legacyLockDir`) */
-export type Holder = Proc & { at: number; command: string; cwd: string; child?: Proc; legacy?: boolean }
+/** What a lock names: the runner, what it runs, the child it started */
+export type Holder = Proc & { at: number; command: string; cwd: string; child?: Proc }
 
 /** The OS's answers about other processes; replaced in tests */
 export type Probe = {
@@ -59,17 +59,6 @@ export const lockFile = (env: NodeJS.ProcessEnv = process.env, platform: NodeJS.
   if (env.E2E_LOCK_FILE) return env.E2E_LOCK_FILE
   return platform === 'win32' ? win32.join(env.ProgramData || 'C:\\ProgramData', LOCK_NAME) : posix.join('/tmp', LOCK_NAME)
 }
-
-/**
- * The folder the shell line this replaced made (`until mkdir /tmp/centralu-e2e.lock …`; in Git Bash on Windows that is the
- * temporary folder). A branch cut before the runners took the lock still runs bare Playwright behind only that line, so while
- * a run holds the lock it makes this folder too, and removes it when it gives the lock back, only if it made it. It never
- * waits for it: an old line in a new checkout holds it itself around a run that holds the lock, and waiting would be a
- * deadlock. So this protects one direction only: a new run does not stop an old run that holds the folder. To be removed once
- * no branch is left that has the line (#1637).
- */
-export const legacyLockDir = (env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string =>
-  env.E2E_LEGACY_LOCK_DIR || join(platform === 'win32' ? tmpdir() : '/tmp', 'centralu-e2e.lock')
 
 /** The error code (`ENOENT`, `EPERM`) of what was thrown, when it has one */
 const code = (err: unknown): string | undefined => (typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined)
@@ -288,8 +277,7 @@ export function readHolder(path: string): Holder | null | 'unreadable' {
     const at = field(v, 'at')
     const command = field(v, 'command')
     const cwd = field(v, 'cwd')
-    const legacy = field(v, 'legacy')
-    return { ...p, at: typeof at === 'number' ? at : 0, command: typeof command === 'string' ? command : '', cwd: typeof cwd === 'string' ? cwd : '', ...(child ? { child } : {}), ...(legacy === true ? { legacy: true } : {}) }
+    return { ...p, at: typeof at === 'number' ? at : 0, command: typeof command === 'string' ? command : '', cwd: typeof cwd === 'string' ? cwd : '', ...(child ? { child } : {}) }
   } catch {
     return 'unreadable'
   }
@@ -320,8 +308,6 @@ export function generations(file: string): Generation[] {
 export type Held = {
   release: () => void
   setChild: (child: Proc) => void
-  /** Makes the old lock folder, having recorded that it may be this lock's; `mkdir` is replaced in tests */
-  claimLegacy: (dir: string, inherit: boolean, mkdir?: (dir: string) => void) => void
   holder: Holder
   readonly released: boolean
 }
@@ -377,7 +363,7 @@ export type Hooks = { afterJudged?: (judged: Holder | null) => void; link?: (exi
  * One try at the lock: taken, or who holds it. A holder that is gone is taken over (it is in `tookOver`). The lock is the
  * highest generation; taking it is creating the next one, which only one of any number of takers can.
  */
-export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe, legacyDir: string | null = null, hooks: Hooks = {}): Attempt {
+export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe, hooks: Hooks = {}): Attempt {
   for (let attempt = 0; attempt < 12; attempt++) {
     const all = generations(file)
     const top = all[all.length - 1]
@@ -403,7 +389,6 @@ export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe,
     // Ours is told from the others by its number: `file` may be written with `//`, `./` or mixed slashes, and a listing gives
     // the path normalised, so the paths of one file differ as strings.
     const others = generations(file).filter((g) => g.gen !== next)
-    const stale: Holder[] = []
     let withdraw = false
     for (const g of others) {
       // A lock above ours: the next taker looks at the highest, so a lock held below it is not held. A live holder above is
@@ -416,21 +401,17 @@ export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe,
       }
       const h = readHolder(g.path)
       if (h === null || h === 'unreadable') continue
-      if (holderGone(h, probe)) stale.push(h)
-      else withdraw = true
+      if (!holderGone(h, probe)) withdraw = true
     }
     if (withdraw) {
       remove(mine)
       continue
     }
-    const h = held(mine, self)
-    // A stale lock below this one that made the old folder: this one takes on removing it (before those files go)
-    if (legacyDir !== null) h.claimLegacy(legacyDir, stale.some((s) => s.legacy === true))
     for (const g of others) {
       const o = readHolder(g.path)
       if (o !== null && o !== 'unreadable' && holderGone(o, probe)) remove(g.path)
     }
-    return { ok: true, held: h, tookOver: judged === null ? [] : [judged] }
+    return { ok: true, held: held(mine, self), tookOver: judged === null ? [] : [judged] }
   }
   const all = generations(file)
   const top = all[all.length - 1]
@@ -440,7 +421,6 @@ export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe,
 function held(path: string, self: Holder): Held {
   let current = self
   let released = false
-  let legacyMade: string | null = null
   const ours = () => {
     const r = readHolder(path)
     return r !== null && r !== 'unreadable' && r.pid === current.pid && r.started === current.started && r.at === current.at
@@ -475,39 +455,11 @@ function held(path: string, self: Holder): Held {
     setChild(child) {
       replace({ ...current, child })
     },
-    // The old lock folder (legacyLockDir), made while this lock is held. The intent is written first and the folder made
-    // after, so a runner killed between the two leaves a record that says the folder may be its own: whoever takes the lock
-    // over removes it (`inherit`). Made the other way round, a kill between them left a folder no record owned.
-    claimLegacy(dir, inherit, mkdir = (d) => mkdirSync(d)) {
-      if (existsSync(dir) && !inherit) return // an old shell line holds it, and it is not ours to remove
-      if (!replace({ ...current, legacy: true })) return
-      if (inherit) {
-        try {
-          rmdirSync(dir)
-        } catch {
-          // not there
-        }
-      }
-      try {
-        mkdir(dir)
-        legacyMade = dir
-      } catch {
-        // An old shell line made it just now: not ours, so the record stops saying it may be
-        replace({ ...current, legacy: false })
-      }
-    },
     release() {
       if (released) return
       released = true
       // Only our own record is removed: a lock that is not ours any more is someone else's
       const own = ours()
-      if (legacyMade !== null) {
-        try {
-          rmdirSync(legacyMade)
-        } catch {
-          // gone already
-        }
-      }
       if (own) remove(path)
     },
   }
@@ -565,8 +517,6 @@ export type AcquireOptions = {
   /** Where lines for the person go */
   say?: (line: string) => void
   now?: () => number
-  /** The old lock folder to make while the lock is held (`legacyLockDir`); null for none */
-  legacyDir?: string | null
   /** Stops the wait: the promise rejects */
   signal?: AbortSignal
 }
@@ -577,13 +527,12 @@ export async function acquireLock(opts: AcquireOptions): Promise<Held> {
   const now = opts.now ?? Date.now
   // A start time is asked for once per process, not at every look (on Windows it is a PowerShell process)
   const probe = cachedProbe(opts.probe ?? realProbe, now)
-  const legacyDir = opts.legacyDir === undefined ? legacyLockDir() : opts.legacyDir
   const say = opts.say ?? ((line: string) => console.error(`e2e lock: ${line}`))
   const self = describeSelf(opts.command, probe, now)
   let shown = ''
   let shownAt = 0
   for (;;) {
-    const r = tryAcquire(file, self, probe, legacyDir)
+    const r = tryAcquire(file, self, probe)
     for (const gone of r.tookOver) say(`the holder, pid ${gone.pid}${gone.command ? ` (${gone.command})` : ''}, is gone; taking the lock over`)
     if (r.ok) return r.held
     const line = waitingLine(r.holder, r.path, now())

@@ -272,13 +272,13 @@ describe('readTextFile — image previews', () => {
 
   it('an image over the cap sends no bytes and says why', async () => {
     const { writeFile } = await import('node:fs/promises')
-    await writeFile(join(root, 'large.png'), Buffer.alloc(10_000_001))
+    await writeFile(join(root, 'large.png'), Buffer.alloc(12 * 1024 * 1024))
 
     await expect(readTextFile(root, 'large.png')).resolves.toMatchObject({
       text: '',
       binary: true,
-      bytes: 10_000_001,
-      previewError: expect.stringMatching(/too large/i),
+      bytes: 12 * 1024 * 1024,
+      previewError: 'Image is too large to preview (12 MB; limit is 10 MB)',
     })
   })
 })

@@ -13,6 +13,11 @@ export function durationText(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`
 }
 
+/** Blocks this thread for `ms` without spinning: for a start with nothing to serve yet, and a few-millisecond retry at a hello */
+export function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
 /** A timer that never holds the process open */
 function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
   const t = setTimeout(fn, ms)

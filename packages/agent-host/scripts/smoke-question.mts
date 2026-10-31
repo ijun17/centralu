@@ -6,17 +6,21 @@
  * the approval card once went dead. So there are two things checked here: does question_request
  * arrive, and once an answer is sent, **does the model know that answer and act on it.**
  *
+ * Nothing touches the real data folder: the host runs in memory with CC_DATA_DIR in a temp folder.
+ *
  * Run with: pnpm smoke:question
  */
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost, type Json } from './host-client.mjs'
+import { openHost, removeTemp, type Json } from './host-client.mjs'
 
 const cwd = mkdtempSync(join(tmpdir(), 'cc-q-'))
 writeFileSync(join(cwd, 'README.md'), '# Target\n')
 
-const { host, ws, events, call: rpc, next } = await openHost()
+const data = mkdtempSync(join(tmpdir(), 'cc-q-data-'))
+const client = await openHost({ env: { CC_DATA_DIR: data } })
+const { events, call: rpc, next } = client
 const waitFor = (pred: (e: Json) => boolean, ms: number, from?: number) => next(pred, 'event', ms, from).then(() => true, () => false)
 
 const project = await rpc('projects.add', { path: cwd })
@@ -31,7 +35,7 @@ await rpc('agents.send', {
 const got = await waitFor((e) => e.sessionId === s.id && e.type === 'question_request', 150000)
 const req = events.find((e) => e.sessionId === s.id && e.type === 'question_request')
 console.log(`\n  did the options make it to the screen ${got ? '✅' : '❌'}`)
-if (!got || !req) { ws.close(); host.kill(); process.exit(1) }
+if (!got || !req) { await client.stop(); removeTemp(data); process.exit(1) }
 
 const q = req.questions[0]
 console.log(`  question: ${q.question}`)
@@ -61,15 +65,13 @@ let toldUs = false
 try {
   await rpc('agents.answerQuestion', { sessionId: s.id, requestId: 'q-does-not-exist', answers: [] })
 } catch (e) {
-  // '사라졌' matches the (still Korean, out of this branch's scope) error thrown by
-  // agent-host/src/sessions/manager.ts when a question has disappeared — kept as-is because it is
-  // the value being compared against.
-  toldUs = String((e as Error).message).includes('사라졌')
+  // The host's own words for it (agent-host/src/sessions/manager.ts `answerQuestion`)
+  toldUs = String((e as Error).message).includes('already gone')
 }
 console.log(`  does it tell us when we answer a question that has disappeared ${toldUs ? '✅' : '❌'}`)
 
-ws.close()
-host.kill()
+await client.stop()
+removeTemp(data)
 const ok = got && intact && knew && cleared && toldUs
 console.log(ok ? '\n✅ PASS — the options were rendered and the answer made it back to the model' : '\n❌ check failed')
 process.exit(ok ? 0 : 1)
