@@ -656,7 +656,9 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
         </Button>
       ) : (
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid={`machine-versions-refused-${m.id}`}>
-          Machines on different protocol versions cannot connect, even anyway.
+          {p.minimum
+            ? `Machines older than Centralu ${p.minimum} cannot connect, even anyway.`
+            : 'Machines on different protocol versions cannot connect, even anyway.'}
         </p>
       )}
     </div>

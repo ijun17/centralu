@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HostActivity, MachineInfo, MachineVersions } from '@cc/protocol'
+import { MIN_SUPPORTED_VERSION } from '@cc/protocol/client'
 import { asksRow, autostartRow, awayNote, elevatedNote, followHubLead, followHubNote, hostStartNote, installNote, isAway, isMirrored, logonNote, machineAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
@@ -163,6 +164,27 @@ describe('the version prompt (#82, plan §4)', () => {
     )
     expect(p?.compatible).toBe(false)
     expect(p?.text).toMatch(/cannot talk to each other until this computer is updated/)
+  })
+
+  it('held below the minimum supported version on one protocol: says the oldest version this computer works with (#1143)', () => {
+    const p = versionPrompt(
+      machine({
+        status: 'versions_differ',
+        versions: versions({ remote: { version: '0.1.0-beta.44', protocolVersion: 1, dev: false }, older: 'remote', compatible: false }),
+      }),
+    )!
+    expect(p).toMatchObject({ compatible: false, minimum: MIN_SUPPORTED_VERSION, held: true, updateHere: true })
+    expect(p.text).toBe(
+      `Box runs Centralu 0.1.0-beta.44, older than ${MIN_SUPPORTED_VERSION}, the oldest this computer works with. They cannot connect until Box is updated.`,
+    )
+    // Another protocol keeps its own sentence
+    const other = versionPrompt(
+      machine({
+        status: 'versions_differ',
+        versions: versions({ remote: { version: '0.2.0-beta.1', protocolVersion: 2, dev: false }, older: 'hub', compatible: false }),
+      }),
+    )!
+    expect(other.minimum).toBeNull()
   })
 
   it('a connected link on one protocol is offered the update, not held for it (#689)', () => {
