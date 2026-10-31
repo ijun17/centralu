@@ -363,7 +363,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 | `attach_app({ app })` | 필요하면 동의를 묻고, 붙이고, 앱을 띄워 도구 목록을 읽는다(15초 한도) | 도구를 `mcp__<서버>__<도구>`로, 언제 생기는지, 그리고 `detach_app` |
 | `detach_app({ app })` | 이 도구로 붙인 앱을 뗀다(`find_apps`가 준 이름이나 서버 이름). 결정 4가 준 앱은 남는다 | — |
 
-읽기 묶음이 아니라 자기 한도(`APP_ACCESS_BUDGET_CHARS`, 900. 지금 874이고, 그중 도구마다 약 210은 이름과 스키마 껍데기다)로 센다. Claude는 셋 다 도구 검색 뒤로 미룬다. 요청마다 입력 토큰이 +31이고, 올려 두면 +263이다(`scripts/probe-reader-tools.mts`. Codex는 미루기가 없어 올려 둔다). haiku(Claude Code 2.1.289, `scripts/smoke-app-access.mts`: 시도마다 새 임시 프로젝트 쌍과 나눈 앱 하나, 동의 카드는 "늘"로 답하고, 도구도 프로젝트도 이름 대지 않은 요청)로 쟀다: 5번 중 5번, 모델은 도구 검색으로 `find_apps`를 찾고, 앱을 붙이고, 같은 턴에 그 도구를 부르고, 떼었으며, 다음 턴에는 어떤 호출도 앱에 닿지 않았다(한 번은 모델이 옛 이름을 불러 보았고, CLI가 "No such tool available"이라고 답했다).
+읽기 묶음이 아니라 자기 한도(`APP_ACCESS_BUDGET_CHARS`, 900. 지금 874이고, 그중 도구마다 약 210은 이름과 스키마 껍데기다)로 센다. Claude는 셋 다 도구 검색 뒤로 미룬다. 요청마다 입력 토큰이 +31이고, 올려 두면 +263이다(`scripts/probe-reader-tools.mts`. Codex는 미루기가 없어 올려 둔다). haiku(Claude Code 2.1.289, `scripts/smoke-delegation.mjs app-access`: 시도마다 새 임시 프로젝트 쌍과 나눈 앱 하나, 동의 카드는 "늘"로 답하고, 도구도 프로젝트도 이름 대지 않은 요청)로 쟀다: 5번 중 5번, 모델은 도구 검색으로 `find_apps`를 찾고, 앱을 붙이고, 같은 턴에 그 도구를 부르고, 떼었으며, 다음 턴에는 어떤 호출도 앱에 닿지 않았다(한 번은 모델이 옛 이름을 불러 보았고, CLI가 "No such tool available"이라고 답했다).
 
 이 스모크 테스트는 `ask_project`(#371 B)가 같은 서버에 올라오기 전에 돌렸다. 그것이 올라와 있으니, 다른 프로젝트의 앱을 묻는 질문은 `ask_project`로 갔고 도구 검색으로는 한 번도 가지 않았다(#522: 10번 중 0번 `attach_app`을 불렀다). 그 뒤로 Claude는 `find_apps`를 올려 두고(요청마다 +75 토큰), `ask_project`의 설명 끝에 "For another project's apps, use find_apps."를 붙인다(+11). `attach_app`과 `detach_app`은 그대로 미룬다. 10번 중 9번, 다시 잰 10번 중 8번이 이어서 `attach_app`을 불렀다([tool-cost.md](tool-cost.md) §8).
 

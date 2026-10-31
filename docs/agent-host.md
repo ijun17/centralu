@@ -203,7 +203,7 @@ one more node process (about 40 MB resident, idle). The bridge sets
 and without it Codex in auto (`approvalPolicy: never`) refused every call on its own.
 The bridge decodes its stdin as one UTF-8 stream: a pipe can split a multibyte character between
 two chunks, and decoding each chunk on its own put U+FFFD into the tool's arguments.
-`scripts/smoke-reader.mts` runs the set end to end with a real model (`TOOL=codex` for Codex).
+`scripts/smoke-delegation.mjs reader` runs the set end to end with a real model (`TOOL=codex` for Codex).
 
 ### 1.2 Asking another project (`ask_project`, #371 part B)
 
@@ -339,7 +339,7 @@ the tool. One of five unrelated how-to questions drew a call naming a project th
 (7 in 10 each), and the guide, which lists every seat's tools, keeps no word of the removed
 control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 
-`packages/agent-host/scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
+`packages/agent-host/scripts/smoke-delegation.mjs ask-project` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
 (`CALLER`/`CALLEE` = `claude` or `codex`).
 
@@ -744,7 +744,7 @@ instruction sent at rest in the gap between a turn and the one run for a note be
 that turn opens. The tool runs inputs in the order they were given, so a turn that names an input has taken every one given
 before it, and all of them leave the host's store (a CLI that runs several notes as one turn names only the last); so do
 those a turn's end says it took in. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
-`turnStartInputs`); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
+`turnStartInputs`; a note sent into a one-reply turn about 2.3 s after its task still reached the turn's end and ran as the next turn, measured); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
 just after a turn ended or queued behind a compact or review (`flushPending`), gives its `turn/start` the input's id as the
 client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
 `working` for that turn that names it; a message that joined a turn already running shows after the turn's first item and
@@ -4035,8 +4035,8 @@ it: it reads what the API reports each request wrote, and falls back to five min
 nothing was reported. The idle time behind the rebuilds put down to expiry is shown with them
 (`expiredIdleMs`, the shortest and longest in the window).
 
-Measured with `scripts/probe-cache-causes.mts` (live, haiku, CLI 2.1.289 through SDK 0.3.263, a
-subscriber's login, 2026-10-12): the API reported `1h` for the SDK session's writes, and `5m` under
+Measured with `scripts/probe-cache-causes.mts`, a probe since removed (git history keeps it) (live, haiku, CLI 2.1.289 through SDK 0.3.263, a
+subscriber's login, claude.ai connectors and auto memory off, 2026-10-12): the API reported `1h` for the SDK session's writes, and `5m` under
 `FORCE_PROMPT_CACHING_5M`. A switch to sonnet read 0 and wrote 23,266 of 23,268 tokens, named
 `model_change`. A new session under the forced five minutes wrote all 16,794, named `cold_start`;
 without it, the first request read 12,973 tokens another session had cached, so no rebuild. After

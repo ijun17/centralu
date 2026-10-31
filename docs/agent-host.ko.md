@@ -190,7 +190,7 @@ Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. �
 건다: 우리 도구는 Claude 쪽처럼 묻지 않으며, 이것이 없으면 auto(`approvalPolicy: never`)의
 Codex가 모든 호출을 스스로 거절했다. 다리는 stdin을 하나의 UTF-8 흐름으로 읽는다: 파이프는
 여러 바이트로 된 글자를 두 덩어리 사이에서 자를 수 있고, 덩어리마다 따로 읽으면 도구 인자에 U+FFFD가
-들어갔다. `scripts/smoke-reader.mts`가 실제 모델로 처음부터 끝까지
+들어갔다. `scripts/smoke-delegation.mjs reader`가 실제 모델로 처음부터 끝까지
 돌린다(Codex는 `TOOL=codex`).
 
 ### 1.2 다른 프로젝트에 맡기기 (`ask_project`, #371 B)
@@ -271,7 +271,7 @@ project export the sprites again, then tell me where the files are"에 로드하
 설명은 "a task"가 아니라 "a job"이라 쓴다: 모델에게는 같게 읽히고(각각 10번 중 7번), 모든 자리의 도구를 나열하는 안내서에
 없어진 컨트롤 레일의 task라는 말이 남지 않게 한다(#372). 다른 문구 두 가지는 낫지 않았다(5번 중 0, 3).
 
-`packages/agent-host/scripts/smoke-ask-project.mts`가 임시 스토어와 데이터 폴더에서 처음부터 끝까지 돌린다: 한 임시 프로젝트의 haiku 세션이 다른
+`packages/agent-host/scripts/smoke-delegation.mjs ask-project`가 임시 스토어와 데이터 폴더에서 처음부터 끝까지 돌린다: 한 임시 프로젝트의 haiku 세션이 다른
 프로젝트에 자기만 아는 숫자를 쓴 파일을 만들게 하고 그 파일을 읽어 온다(`CALLER`/`CALLEE` = `claude` 또는 `codex`).
 
 ### 1.2.1 같은 프로젝트에서 다른 에이전트 띄우기 (`start_agent`, `agent_session`, #561)
@@ -2143,7 +2143,7 @@ claude.ai 구독자이고 요청의 출처가 원격으로 설정되는 허용 �
 짐작하지 않는다: 요청마다 API가 알린 쓰기 수명을 읽고, 아무것도 알리지 않았을 때만 5분으로 본다.
 만료로 본 재구축 앞의 쉰 시간을 함께 보인다(`expiredIdleMs`, 그 창에서 가장 짧고 가장 긴 것).
 
-`scripts/probe-cache-causes.mts`로 잰 결과(실제 호출, haiku, SDK 0.3.263을 거친 CLI 2.1.289, 구독자
+지금은 지운 프로브(git 기록에 남아 있다) `scripts/probe-cache-causes.mts`로 잰 결과(실제 호출, haiku, SDK 0.3.263을 거친 CLI 2.1.289, 구독자
 로그인, 2026-10-12): SDK 세션의 쓰기에 API는 `1h`를, `FORCE_PROMPT_CACHING_5M`에서는 `5m`을 알렸다.
 sonnet으로 바꾸자 0을 읽고 23,268 중 23,266을 썼고 `model_change`로 적혔다. 5분을 강제한 새 세션은
 16,794를 모두 썼고 `cold_start`로 적혔다. 강제하지 않았을 때 첫 요청은 다른 세션이 캐시한 12,973
