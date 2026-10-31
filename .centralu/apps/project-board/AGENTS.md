@@ -109,7 +109,7 @@ tools agents use to record the owner's answers.
 The repository's contribution procedure, kept as code so every agent follows it the same way. The
 decisions are pure functions in `ci.mjs`; `github.mjs` reads GitHub; `ci-tools.mjs` puts them together.
 `project.json` `ci` names the workflows that hold the required checks, the issue listing known
-intermittent failures (#368), and how long a merge may wait.
+intermittent failures (#368).
 
 - **Green means every required check is reported and passed.** No checks reported, a required check
   not reported yet, or one still running is not green (on 2026-10-05 a script read "no checks yet"
@@ -125,7 +125,7 @@ intermittent failures (#368), and how long a merge may wait.
   `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
   non-required checks. Compact output still says when the PR adds required jobs (#445).
   `read_failed_job` reads at most 40 lines around a job failure, without timestamps or colour codes.
-- **`merge_when_green`** (`pr`, `body?`, `wait?`, `waitMinutes?`, `deleteBranch?`): refuses unless the
+- **`merge_when_green`** (`pr`, `body?`, `deleteBranch?`, `intoBatch?`): refuses unless the
   gh account has maintain or admin permission (checked first), the PR is open and not a draft, the
   checks are green and GitHub can merge it. Squash only, with `--match-head-commit`, never `--auto`
   and never `--delete-branch` (that flag deletes the local branch and, when a Centralu worktree
@@ -133,15 +133,12 @@ intermittent failures (#368), and how long a merge may wait.
   through the API when asked, on GitHub only, never a fork's, never a local branch). Session
   deletion removes a worktree and its branch, not the merge. Subject `Title (#N)`; body from `body`
   or the description's Why / What changed / Closes, without `Co-Authored-By:` or "Generated with" lines; no author flag,
-  so the PR author stays the author. Pending answers at once unless `wait: true`, which polls every
-  `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
-  after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
-  "still running" at 240 s and follows the call with `run_status`. When the merge queue has a batch running on the
+  so the PR author stays the author. Pending answers at once (it never waits: `queue_merge` merges once green, or
+  `bin/wait-checks.mjs` below waits in the background; #1143 P16). When the merge queue has a batch running on the
   same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
   ("Not merged: …", `outcome: 'batch-running'`, `isError`: it is not a success an agent could read as merged): merging here moves the default branch under the batch, which then stops
   before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
-  `intoBatch: true` merges anyway (a release bump goes through here, and `release`'s bump summary says to pass it; the answer then says it again). A call that only waits
-  carries the same note.
+  `intoBatch: true` merges anyway (a release bump goes through here, and `release`'s bump summary says to pass it; the answer then says it again).
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
   admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
