@@ -346,14 +346,14 @@ describe('the shutdown rule (S-5)', () => {
       // The first blow (SIGTERM) came and was held off — proof that this test is watching the second blow. The fixed
       // sleep this replaces proved neither on a loaded machine: it could end before the SIGTERM was sent, or after the
       // SIGKILL (#845)
-      await until(() => records('parent').some((r) => r.t === 'sigterm-held' && r.pid === grandchild), (x) => x, 3_000)
+      await until(() => records('parent').some((r) => r.t === 'sigterm-held' && r.pid === grandchild), (x) => x)
       expect(alive(grandchild)).toBe(true)
-      await until(() => alive(grandchild), (a) => a === false, 6_000)
+      await until(() => alive(grandchild), (a) => a === false)
     } finally {
       own.end([grandchild])
     }
-    // The test's own cap must exceed the waits (3 s and 6 s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
-  }, 15_000 * SLOW)
+    // The test's own cap must exceed its waits (the start, then two of `until`'s default) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
+  }, 35_000 * SLOW)
 
   /*
    * Windows (#14) has no groups. A child Node spawns without `detached` dies with the app (libuv's job), so the test
@@ -412,7 +412,7 @@ describe('the shutdown rule (S-5)', () => {
       rt.refresh()
       expect(alive(pid)).toBe(true)
       await rt.dispose()
-      await until(() => alive(pid), (a) => a === false, 6_000)
+      await until(() => alive(pid), (a) => a === false)
       expect((await first).status).not.toBe('ok')
     } finally {
       own.end([pid], { group: true })
@@ -447,7 +447,7 @@ describe('the shutdown rule (S-5)', () => {
     await Promise.all([rt.tools(ref('a1')), rt.tools(ref('a2'))])
     const pids = [starts('a1')[0]!.pid, starts('a2')[0]!.pid]
     await rt.dispose()
-    await until(() => pids.map(alive), (xs) => xs.every((x) => !x), 6_000)
+    await until(() => pids.map(alive), (xs) => xs.every((x) => !x))
   })
 })
 

@@ -39,14 +39,24 @@ export function plantApp(
 }
 
 /**
- * Waits for something that happens "soon", like an fs watch, and returns the value `read` gave once `ok` held. If it
- * does not settle in time, fails with the last value.
+ * How long a wait gets by default: the time the runtime itself allows a real app process to start (`connectTimeoutMs`
+ * is `10_000` in every test here). A wait for something a process does must not give up before the runtime does: on a
+ * loaded 3-core macOS runner a start took longer than the 4 s this used to be, and `reload.test.ts` failed on
+ * `status === 'running'` while the runtime was still starting the app (#1704). Waiting for the runtime's own verdict
+ * costs a passing test nothing, since `until` returns as soon as the value holds, and a real hang still ends the test
+ * here, with the last value, before the app-runtime test limit (`15_000 × SLOW`, vitest.config.ts).
+ */
+export const PROCESS_WAIT_MS = 10_000
+
+/**
+ * Waits for something that happens "soon", like an fs watch or a process starting or ending, and returns the value
+ * `read` gave once `ok` held. If it does not settle in time, fails with the last value.
  *
  * `eventually()` with a value and a test kept apart, so a value that is itself falsy (`alive(pid) === false`) can be
  * waited for and returned. The limit is `ms` × `SLOW`, as for `eventually()`: a caller's own limit (`6_000` for a
  * process tree to end) used to replace the scaled default and so skipped the scaling on Windows (#845).
  */
-export async function until<T>(read: () => T, ok: (v: T) => boolean, ms = 4_000): Promise<T> {
+export async function until<T>(read: () => T, ok: (v: T) => boolean, ms = PROCESS_WAIT_MS): Promise<T> {
   const got = await eventually(() => {
     const v = read()
     if (!ok(v)) throw new Error(`the last value was ${inspect(v, { depth: 3 })}`)
