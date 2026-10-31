@@ -183,8 +183,9 @@ describe('cancellation', () => {
     make()
     const ac = new AbortController()
     const p = rt.call(ref('notes'), 'slow', {}, SESSION, { signal: ac.signal })
-    await until(() => records('notes').some((r) => r.t === 'start'), (x) => x)
-    setTimeout(() => ac.abort(), 300)
+    // Cancelled once the call has reached the app, not a fixed 300 ms after the call began: a loaded machine was still starting the app then
+    await until(() => records('notes').some((r) => r.t === 'method' && r.method === 'tools/call'), (x) => x)
+    ac.abort()
     const out = await p
     expect(out.status).toBe('cancelled')
     // The signal on the app's own handler fired — the cancellation travelled all the way to the app

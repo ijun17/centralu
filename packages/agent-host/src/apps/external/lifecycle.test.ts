@@ -352,7 +352,7 @@ describe('the shutdown rule (S-5)', () => {
     } finally {
       own.end([grandchild])
     }
-    // The test's own cap must exceed its waits (the start, then two of `until`'s default) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
+    // The test's own cap must exceed its waits (a start, then up to three of `until`'s default) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
   }, 35_000 * SLOW)
 
   /*
@@ -417,7 +417,7 @@ describe('the shutdown rule (S-5)', () => {
     } finally {
       own.end([pid], { group: true })
     }
-  }, 15_000 * SLOW)
+  }, 35_000 * SLOW)
 
   /*
    * A caller about to delete the data folder (a test's cleanup, which removes it at once) waits for the trees: by default

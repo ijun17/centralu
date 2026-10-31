@@ -7,7 +7,6 @@ import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { AppVersions, VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
 import { until } from './test-helpers.js'
-import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
@@ -77,8 +76,8 @@ afterEach(async () => {
 
 describe('a version is captured when the code changes and starts', () => {
   // Eight real starts of the app, ~230 ms each with nothing to wait out between them: ~2 s alone,
-  // past 5 s on a loaded machine, so this test gets more room than vitest's 5 s default
-  it('one version at first start, unchanged after starting again with the same code, one more version for changed code — only the most recent 5 are kept', { timeout: 10_000 * SLOW }, async () => {
+  // past 10 s on a loaded machine, so it runs under the app-runtime project's 30 s limit (vitest.config.ts)
+  it('one version at first start, unchanged after starting again with the same code, one more version for changed code — only the most recent 5 are kept', async () => {
     make()
     expect(rt.snapshots(ref)).toEqual([])
     expect(await running()).toBe('v1')

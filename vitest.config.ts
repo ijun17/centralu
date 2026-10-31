@@ -79,7 +79,7 @@ export default defineConfig({
      * limit, and every other test keeps the 5s default, which still catches a real hang quickly. That limit has to
      * outlast the waits inside a test: `until` gives a process start 10s (`PROCESS_WAIT_MS`, the runtime's own connect
      * budget), and a test starts several, so under CPU load a limit of 15s ended the test before a wait could say what it
-     * was still waiting for (#1704).
+     * was still waiting for.
      */
     projects: [
       {

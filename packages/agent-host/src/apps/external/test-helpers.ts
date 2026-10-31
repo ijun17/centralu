@@ -39,12 +39,13 @@ export function plantApp(
 }
 
 /**
- * How long a wait gets by default: the time the runtime itself allows a real app process to start (`connectTimeoutMs`
- * is `10_000` in every test here). A wait for something a process does must not give up before the runtime does: on a
- * loaded 3-core macOS runner a start took longer than the 4 s this used to be, and `reload.test.ts` failed on
- * `status === 'running'` while the runtime was still starting the app (#1704). Waiting for the runtime's own verdict
- * costs a passing test nothing, since `until` returns as soon as the value holds, and a real hang still ends the test
- * here, with the last value, before the app-runtime test limit (`30_000 × SLOW`, vitest.config.ts).
+ * How long a wait gets by default: generous, because most waits here are for a real app process to start or end, and
+ * a loaded machine makes that slow. The runtime lets one start take `connectTimeoutMs` (10 s in most of these tests)
+ * for each step of its handshake, so a wait that gave up in 4 s was cut off while the runtime was still starting the
+ * app: `reload.test.ts` failed on a loaded macOS runner with `status` still 'stopped' (#1704). A passing test pays
+ * nothing for the longer limit, since `until` returns as soon as the value holds. A real hang ends the wait here, with
+ * the last value, before the app-runtime test limit (`30_000 × SLOW`, vitest.config.ts) ends the test, as long as the
+ * test keeps to that limit.
  */
 export const PROCESS_WAIT_MS = 10_000
 
