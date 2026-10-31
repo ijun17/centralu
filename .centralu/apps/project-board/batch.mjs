@@ -107,8 +107,8 @@ export const batchName = (b) => b.branch
 const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
 /**
- * The items one batch would take now: active, in CI, not in a batch, not a fork's or a release
- * bump (`ci.batchable`, from the item's poll), their own CI read on the head they have, and not
+ * The items one batch would take now: active, in CI, not in a batch, not a fork's
+ * (`ci.batchable`, from the item's poll), their own CI read on the head they have, and not
  * sent back from a batch on this head. The oldest first (those fixed after a conflict before them,
  * queueOrder), at most `max`, in one repository (the oldest item's). A stack is one item: one member.
  *

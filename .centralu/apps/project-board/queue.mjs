@@ -464,7 +464,7 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
         `${n} passed the quick tier of CI, and ${landsFrom(landTier)}, but its batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
       )
     if (!canBatch) {
-      const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release branch'
+      const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off'
       // A branch of this repository: the queue starts the full tier on it itself, once per head (#1509 item 4), as the
       // reason below would have a session do by hand. A fork's branch is not run here: its code is not trusted with this
       // repository's runners and secrets

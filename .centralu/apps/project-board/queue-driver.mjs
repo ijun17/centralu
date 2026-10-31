@@ -308,14 +308,11 @@ export async function failingLine(repo, job) {
 
 /**
  * Whether a pull request may share a batch (#962): not a fork's (the queue merges its head into a
- * branch of this repository and starts CI there, with this repository's secrets), not a release bump
- * (its CI is the release's evidence, docs/releasing.md, and it lands alone).
+ * branch of this repository and starts CI there, with this repository's secrets).
  */
 export function batchable(pr) {
   if (pr.isCrossRepository) return false
-  const prefix = config.release?.branchPrefix
-  if (prefix && String(pr.headRefName ?? '').startsWith(prefix)) return false
-  return !/^chore\(release\)!?:/.test(String(pr.title ?? ''))
+  return true
 }
 
 /**
@@ -712,7 +709,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     // Written down before asking, so a refusal or a driver stopped mid-call never starts it twice
     save({ ...base, fullDispatch: patch.fullDispatch })
     try {
-      // No inputs: the full tier (a release bump, or a manual run with no tier asked for, is full, .github/scripts/ci-changes.mjs)
+      // No inputs: the full tier (a manual run with no tier asked for is full, .github/scripts/ci-changes.mjs)
       for (const w of CI.workflows) await dispatchWorkflow(repo, w.split('/').pop(), d.action.branch)
       wait = pollMs('acted')
     } catch (e) {
