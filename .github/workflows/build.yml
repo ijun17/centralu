@@ -30,7 +30,7 @@ on:
         options: [full, quick]
         default: full
 
-# Ordinary pushes to a branch supersede earlier work. A push to main is never cancelled by the next
+# Ordinary pushes to a branch supersede earlier work. A running main run is never cancelled by a newer push
 # (#1259): changes land after the fast tier, and each main commit's full run is how the merge
 # queue's main guard finds what broke main; the queue holds landing while too many are unfinished.
 concurrency:

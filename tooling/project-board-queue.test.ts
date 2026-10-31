@@ -4186,6 +4186,30 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 600, branch })
   })
 
+  // The release no longer makes a bump commit (#1143), so nothing about a commit's title or files exempts it from the revert
+  it.each([
+    ['a chore(release) commit that changes a UI file', 'chore(release): change 81 (#81)', 'packages/ui/src/a.ts'],
+    ['a commit that changes only brand.ts', 'feat(ui): change 81 (#81)', 'packages/protocol/src/brand.ts'],
+    ['a chore(release) commit that changes brand.ts', 'chore(release): 1.2.3 (#81)', 'packages/protocol/src/brand.ts'],
+  ])('finds %s as the culprit and reverts it like any other', async (_name, subject, file) => {
+    const repo = mainRepo([{ subject, files: [file] }])
+    const culprit = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: culprit, title: subject.replace(/ \(#81\)$/, ''), updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redOn(repo, culprit))
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    const branch = `revert/${culprit.slice(0, 12)}`
+    const tip = g(repo.origin, 'rev-parse', branch)
+    expect(g(repo.origin, 'rev-parse', `${tip}^`)).toBe(culprit)
+    // The green tree is restored
+    expect(g(repo.origin, 'rev-parse', `${tip}^{tree}`)).toBe(g(repo.origin, 'rev-parse', `${repo.green}^{tree}`))
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([['pr-create', branch, `revert: ${subject.replace(/ \(#81\)$/, '')}`]])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: culprit })
+    expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 600, branch })
+    expect(issues()[0]!.body).toContain('Reverted it in #600')
+    expect(issues()[0]!.body).not.toContain('release bump')
+    expect(mainRedNotices()[0]!.text).not.toContain('release bump')
+  })
+
   it('says to revert by hand when the revert does not apply to main any more, and opens nothing', async () => {
     const repo = mainRepo([
       { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
