@@ -173,6 +173,14 @@ export function installedCopyPath(
 }
 
 /**
+ * Whether a background process replacing the installed copy may raise an OS prompt (#1736): on macOS, changing a signed
+ * bundle in /Applications from another process can ask for App Management, which is never raised unasked.
+ */
+export function copySwapMayPrompt(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'darwin'
+}
+
+/**
  * How to read the version the copy `centralu install` made carries (#645).
  *
  * macOS: the bundle's `CFBundleShortVersionString`, printed by `plutil`, which reads XML and binary

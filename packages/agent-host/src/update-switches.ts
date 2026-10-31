@@ -59,18 +59,6 @@ export function installsByDefault(f: InstallFacts): boolean {
   return f.startedBy === 'keeper' && f.bundlePath !== null && samePath(f.bundlePath, f.installedCopy)
 }
 
-/** What decides whether a host brings the installed desktop copy up to its own version (`copyFollowsHost`) */
-export type FollowFacts = {
-  /** The bundled build id, or `dev` for a host run from source */
-  build: string
-  startedBy: 'app' | 'keeper' | 'serve' | null
-  /** The script this host runs from (`process.argv[1]`) */
-  entry: string | undefined
-  /** Where a linked hub installs Centralu in this data folder (`<data>/remote`, links/install.ts) */
-  hubInstall: string
-  env: Record<string, string | undefined>
-}
-
 /**
  * Whether this host brings the installed desktop copy (`installedCopyPath`) up to its own version (#1736,
  * `UpdateService.followHost`): only a `centralu serve` host a linked hub installed, a release, not under CI.
@@ -81,10 +69,14 @@ export type FollowFacts = {
  *
  * It follows the same rule as the hub's update of the host itself: the machine's own "Automatic updates" switch is not
  * read, because the hub does not read it either (`LinkedMachine.followsHub` reads the hub's). A host from the npm
- * package (`centralu serve` run by hand) is left out: refreshing the package would replace the files it runs from.
+ * package (`centralu serve` run by hand) is left out: refreshing the package would replace the files it runs from. Never
+ * where the swap may raise an OS prompt (`copySwapMayPrompt`: macOS), which nothing raises unasked.
+ *
+ * `entry` is the script this host runs from (`process.argv[1]`), `hubInstall` where a linked hub installs Centralu in
+ * this data folder (`<data>/remote`, links/install.ts).
  */
-export function copyFollowsHost(f: FollowFacts): boolean {
-  if (f.build === 'dev' || inCi(f.env) || f.startedBy !== 'serve' || !f.entry) return false
+export function copyFollowsHost(f: Pick<InstallFacts, 'build' | 'startedBy' | 'env'> & { entry: string | undefined; hubInstall: string; swapMayPrompt: boolean }): boolean {
+  if (f.build === 'dev' || inCi(f.env) || f.startedBy !== 'serve' || !f.entry || f.swapMayPrompt) return false
   const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
   return norm(f.entry).startsWith(`${norm(f.hubInstall)}/`)
 }

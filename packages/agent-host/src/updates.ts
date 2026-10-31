@@ -130,8 +130,8 @@ export type UpdateDeps = {
   writeAutoApply?: (enabled: boolean) => void
   /** Test seam for the bounded registry-propagation wait. */
   wait?: (ms: number) => Promise<void>
-  /** The npm package's own launcher (`<npm root -g>/centralu/bin/centralu.mjs`), when it is there (`followHost`) */
-  globalLauncher?: () => Promise<string | null>
+  /** The globally installed npm package, when it is there (`npmGlobalPackage`) */
+  globalPackage?: () => Promise<GlobalPackage | null>
   /** The Node that runs that launcher: this host's (`process.execPath`) */
   node?: string
 }
@@ -139,13 +139,15 @@ export type UpdateDeps = {
 /** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
 export { installedCopyPath }
 
+/** The globally installed npm package: its launcher's path and its version (null when unreadable) */
+export type GlobalPackage = { launcher: string; version: string | null }
+
 /**
- * The launcher of the globally installed npm package, by its path: `npm root -g`, then `centralu/bin/centralu.mjs`.
- *
- * Not `centralu` from PATH: on a machine a hub manages, that may be the hub's shim (`<data>/remote/bin`), whose
- * `install` has no desktop app to copy, since the hub installs the host-only package there.
+ * The globally installed npm package, found by `npm root -g`: its launcher (`centralu/bin/centralu.mjs`) is what
+ * `install` runs, by its path. Not `centralu` from PATH: on a machine a hub manages, that may be the hub's shim
+ * (`<data>/remote/bin`), whose `install` has no desktop app to copy, since the hub installs the host-only package there.
  */
-async function npmGlobalLauncher(): Promise<string | null> {
+async function npmGlobalPackage(): Promise<GlobalPackage | null> {
   const cmd = commandFor('npm', ['root', '-g'])
   const out = await new Promise<string>((done) => {
     execFile(cmd.file, cmd.args, { timeout: 60_000, windowsHide: true }, (err, stdout) => done(err ? '' : String(stdout)))
@@ -153,12 +155,23 @@ async function npmGlobalLauncher(): Promise<string | null> {
   const root = out.trim().split(/\r?\n/).at(-1)?.trim()
   if (!root) return null
   const launcher = join(root, APP_SLUG, 'bin', `${APP_SLUG}.mjs`)
-  return existsSync(launcher) ? launcher : null
+  return existsSync(launcher) ? { launcher, version: packageVersion(join(root, APP_SLUG, 'package.json')) } : null
 }
 
-function existingInstalledCopy(): string | null {
-  const path = installedCopyPath()
-  return existsSync(path) ? path : null
+/** `path` when the copy `centralu install` made is there; on Linux, a menu entry whose AppImage is gone is not */
+export function existingCopy(path: string, platform: Platform = HOST_PLATFORM): string | null {
+  if (!existsSync(path)) return null
+  // A menu entry whose AppImage is gone (its package was uninstalled) is no copy: refreshing it would reinstall that
+  const app = installedCopyVersionSource(path, platform)?.kind === 'menu-entry' ? menuEntryApp(path) : null
+  return app !== null && !existsSync(app) ? null : path
+}
+
+/** A version well-formed enough to compare: `<major>.<minor>.<patch>`, with a prerelease or not */
+const WELL_FORMED = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/
+
+/** `version` is well-formed and not older than `than` */
+function atLeast(version: string | null, than: string): boolean {
+  return version !== null && WELL_FORMED.test(version) && !isNewerVersion(than, version)
 }
 
 /**
@@ -172,7 +185,10 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
   const source = installedCopyVersionSource(copy, platform)
   if (!source) return null
   try {
-    if (source.kind === 'menu-entry') return menuEntryVersion(copy)
+    if (source.kind === 'menu-entry') {
+      const app = menuEntryApp(copy)
+      return app ? packageVersion(join(dirname(app), 'package.json')) : null
+    }
     const text =
       source.kind === 'command'
         ? execFileSync(source.file, source.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000, windowsHide: true })
@@ -183,13 +199,24 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
   }
 }
 
-/** The version of the package whose AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`) */
-function menuEntryVersion(entry: string): string | null {
-  const app = /^Exec="([^"]+)"/m.exec(readFileSync(entry, 'utf8'))?.[1]
-  if (!app) return null
-  const pkg: unknown = JSON.parse(readFileSync(join(dirname(app), 'package.json'), 'utf8'))
-  const version = typeof pkg === 'object' && pkg !== null && 'version' in pkg ? pkg.version : null
-  return typeof version === 'string' && version.trim() ? version.trim() : null
+/** The AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`, as `centralu install` writes it) */
+function menuEntryApp(entry: string): string | null {
+  try {
+    return /^Exec="([^"]+)"/m.exec(readFileSync(entry, 'utf8'))?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
+/** The `version` of a package.json, or null when it cannot be read */
+function packageVersion(file: string): string | null {
+  try {
+    const pkg: unknown = JSON.parse(readFileSync(file, 'utf8'))
+    const version = typeof pkg === 'object' && pkg !== null && 'version' in pkg ? pkg.version : null
+    return typeof version === 'string' && version.trim() ? version.trim() : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -252,6 +279,17 @@ export function failureDetail(file: string, stderr: string): string | null {
   return (file === 'npm' ? lines.at(-1) : lines[0]) ?? null
 }
 
+/**
+ * A failed command in one line for the host log: its exit code and its first line that names an error (npm's `npm error
+ * code ENOTFOUND`), which says why, where `failureDetail` keeps npm's last line for the update line.
+ */
+export function failureLine(e: unknown): string {
+  const stderr = e instanceof Error && 'stderr' in e && typeof e.stderr === 'string' ? e.stderr : ''
+  const code = e instanceof Error && 'exitCode' in e && (typeof e.exitCode === 'number' || typeof e.exitCode === 'string') ? `exit ${e.exitCode}: ` : ''
+  const line = stderr.split(/\r?\n/).map((l) => l.trim()).find((l) => /\berr(?:or)?\b|ERR!/i.test(l) && !/complete log of this run/i.test(l))
+  return `${code}${line ?? errorMessage(e)}`
+}
+
 export function runCommand(file: string, args: string[], resolve?: (file: string) => ToolLaunch): Promise<void> {
   const cmd = commandFor(file, args, resolve)
   return new Promise((done, reject) => {
@@ -261,7 +299,8 @@ export function runCommand(file: string, args: string[], resolve?: (file: string
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return reject(new Error(`${file} was not found on PATH (${err.message})`))
       }
-      reject(new Error(failureDetail(file, String(stderr)) || err.message))
+      // What `failureLine` reads besides the message
+      reject(Object.assign(new Error(failureDetail(file, String(stderr)) || err.message), { exitCode: err.code, stderr: String(stderr) }))
     })
   })
 }
@@ -290,7 +329,7 @@ export class UpdateService {
       build: deps.build ?? '',
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
-      installedCopy: deps.installedCopy ?? existingInstalledCopy,
+      installedCopy: deps.installedCopy ?? (() => existingCopy(installedCopyPath())),
       installedCopyVersion: deps.installedCopyVersion ?? ((copy) => readInstalledCopyVersion(copy)),
       now: deps.now ?? Date.now,
       schedule:
@@ -309,7 +348,7 @@ export class UpdateService {
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
       wait: deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
-      globalLauncher: deps.globalLauncher ?? npmGlobalLauncher,
+      globalPackage: deps.globalPackage ?? npmGlobalPackage,
       node: deps.node ?? process.execPath,
     }
     this.status = {
@@ -633,8 +672,10 @@ export class UpdateService {
        * kept the package is still updated — the launcher and `centralu serve` come from it — and
        * the notice says what was kept; the window's own bundle check offers to apply the copy.
        *
-       * `centralu` resolves through PATH, which the host augments from the login shell at
-       * startup (`env-path.ts`) precisely because a GUI app does not inherit one.
+       * The launcher is the one npm just installed, found by `npm root -g` (`installCopy`), not
+       * `centralu` from PATH, which on a machine a hub manages may be the hub's shim (#1736). `npm`
+       * resolves through PATH, which the host augments from the login shell at startup
+       * (`env-path.ts`) precisely because a GUI app does not inherit one.
        *
        * **This deletes and re-creates the bundle we are running out of** (`rmSync` then
        * `ditto`, inside `centralu install`). macOS keeps a running process alive through
@@ -656,7 +697,7 @@ export class UpdateService {
           const notice = `The local build ${copyVersion} at ${copy} is newer than ${version} and was kept.`
           this.status = { ...this.status, error: this.status.error ? `${this.status.error} ${notice}` : notice }
         } else {
-          await this.deps.run(APP_SLUG, ['install'])
+          await this.installCopy()
         }
       }
       if (this.stopped) return
@@ -692,13 +733,14 @@ export class UpdateService {
    * Bring the installed desktop copy up to this host's own version (#1736), once per host start; main.ts calls it only
    * for a host a linked hub installed (`copyFollowsHost`, update-switches.ts, which says why and which switch rules it).
    *
-   * Only a copy older than this host, or whose version cannot be read, is replaced: after a rollback by the hub the copy
-   * is newer and stays, since a window of the same protocol works with the older host, and a maintainer's local build
-   * newer than this host stays by the same compare. The version is pinned, never `latest`: the hub decides it.
+   * Only a copy older than this host, or whose version cannot be read or is malformed, is replaced: after a rollback by
+   * the hub the copy is newer and stays, since a window of the same protocol works with the older host, and a
+   * maintainer's local build newer than this host stays by the same compare.
    *
-   * The same two steps as an install from the app (`runApply`): `npm i -g centralu@<this version>`, then the npm
-   * package's own launcher's `install` by its path (`npmGlobalLauncher`), which on Windows renames the running copy
-   * aside. Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
+   * The same two steps as an install from the app (`runApply`): `npm i -g centralu@<this version>`, pinned since the hub
+   * decides it, then the npm package's own launcher's `install` by its path (`installCopy`), which on Windows renames the
+   * running copy aside. A global package already at or above this version is never taken down to it: only its `install`
+   * runs. Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
    * which is also when the hub's next update arrives. Never beside an install from the app: one running leaves this for
    * the next start, and one asked for meanwhile waits for this to end (`runApply`).
    */
@@ -708,7 +750,7 @@ export class UpdateService {
     if (!copy) return Promise.resolve()
     const was = this.deps.installedCopyVersion(copy)
     const to = this.deps.current
-    if (was !== null && !isNewerVersion(to, was)) return Promise.resolve()
+    if (atLeast(was, to)) return Promise.resolve()
     this.following = this.runFollow(copy, was, to).finally(() => {
       this.following = null
     })
@@ -717,16 +759,23 @@ export class UpdateService {
 
   private async runFollow(copy: string, was: string | null, to: string): Promise<void> {
     try {
-      await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${to}`])
+      const global = await this.deps.globalPackage()
+      if (!atLeast(global?.version ?? null, to)) await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${to}`])
       if (this.stopped) return
-      const launcher = await this.deps.globalLauncher()
-      if (!launcher) throw new Error(`npm installed ${APP_SLUG}@${to}, but \`npm root -g\` did not lead to its launcher`)
-      if (this.stopped) return
-      await this.deps.run(this.deps.node, [launcher, 'install'])
-      console.error(`[updates] the installed copy at ${copy} moved from ${was ?? 'an unreadable version'} to ${to}, this host's version`)
+      await this.installCopy()
+      console.error(`[updates] the installed copy at ${copy} was refreshed from the npm package at ${global?.version && atLeast(global.version, to) ? global.version : to} (it held ${was ?? 'an unreadable version'}; this host is ${to})`)
     } catch (e) {
-      console.error(`[updates] could not bring the installed copy at ${copy} to ${to}: ${errorMessage(e)}; tried again at the next host start`)
+      console.error(`[updates] could not bring the installed copy at ${copy} to ${to}: ${failureLine(e)}; tried again at the next host start`)
     }
+  }
+
+  /** The global npm package's launcher's `install`, by its path (`npmGlobalPackage`), never `centralu` from PATH */
+  private async installCopy(): Promise<void> {
+    if (this.stopped) return
+    const global = await this.deps.globalPackage()
+    if (!global) throw new Error(`\`npm root -g\` did not lead to the ${APP_SLUG} launcher`)
+    if (this.stopped) return
+    await this.deps.run(this.deps.node, [global.launcher, 'install'])
   }
 
   /**

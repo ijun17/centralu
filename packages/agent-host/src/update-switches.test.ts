@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Store } from './dev-services/store.js'
-import { AUTO_APPLY_UPDATES_KEY, AUTO_UPDATE_CHECK_KEY, copyFollowsHost, installsByDefault, updateSwitches, type FollowFacts, type InstallFacts } from './update-switches.js'
+import { copySwapMayPrompt } from './os.js'
+import { AUTO_APPLY_UPDATES_KEY, AUTO_UPDATE_CHECK_KEY, copyFollowsHost, installsByDefault, updateSwitches, type InstallFacts } from './update-switches.js'
 
 /**
  * "Automatic updates" (owner decision 2026-10-20): checking and installing-and-applying-when-idle are one setting, on for
@@ -84,13 +85,14 @@ describe('which hosts install by default', () => {
 })
 
 describe('which host brings the installed desktop copy to its own version (#1736)', () => {
-  const follow = (f: Partial<FollowFacts> = {}) =>
+  const follow = (f: Partial<Parameters<typeof copyFollowsHost>[0]> = {}) =>
     copyFollowsHost({
       build: 'abc123',
       startedBy: 'serve',
       entry: 'C:\\Users\\u\\.centralu\\remote\\versions\\0.1.0-beta.46\\node_modules\\@centralu\\host-win32-x64\\host\\main.mjs',
       hubInstall: 'C:\\Users\\u\\.centralu\\remote',
       env: {},
+      swapMayPrompt: false,
       ...f,
     })
 
@@ -104,6 +106,12 @@ describe('which host brings the installed desktop copy to its own version (#1736
     expect(follow({ entry: 'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\centralu\\host\\main.mjs' })).toBe(false)
     expect(follow({ entry: 'C:\\Users\\u\\.centralu\\remote-old\\main.mjs' })).toBe(false)
     expect(follow({ entry: undefined })).toBe(false)
+  })
+
+  it('never on macOS, where swapping /Applications from the background may raise the App Management prompt', () => {
+    expect(copySwapMayPrompt('darwin')).toBe(true)
+    expect(copySwapMayPrompt('win32') || copySwapMayPrompt('linux')).toBe(false)
+    expect(follow({ entry: '/Users/u/.centralu/remote/versions/0.1.0-beta.46/host/main.mjs', hubInstall: '/Users/u/.centralu/remote', swapMayPrompt: true })).toBe(false)
   })
 
   it('never a host from source or one under CI', () => {

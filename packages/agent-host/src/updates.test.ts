@@ -9,7 +9,11 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 const RELEASE = '0.1.0-beta.20'
 import { installedCopyVersionSource } from './os.js'
 import { resolveCommand } from './tool-launch.js'
-import { UpdateService, hubUpdatesMachines, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
+import { UpdateService, hubUpdatesMachines, commandFor, existingCopy, failureDetail, failureLine, installedCopyPath, readInstalledCopyVersion, runCommand, type GlobalPackage, type LatestResult } from './updates.js'
+
+/** The global npm package's launcher the fake `npm root -g` finds */
+const LAUNCHER = '/prefix/node_modules/centralu/bin/centralu.mjs'
+const INSTALL: [string, string[]] = ['/host/node', [LAUNCHER, 'install']]
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { bundleVersionCommand, installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
 
@@ -33,7 +37,7 @@ function make(
     /** The version the build carries; RELEASE when not given, `null` for the build's own (`APP_VERSION`) */
     current?: string | null
     build?: string
-    globalLauncher?: () => Promise<string | null>
+    globalPackage?: () => Promise<GlobalPackage | null>
   } = {},
 ) {
   const published: UpdateStatus[] = []
@@ -61,7 +65,7 @@ function make(
     wait: opts.wait,
     now: opts.now ?? (() => now),
     schedule: opts.schedule ?? (() => () => {}),
-    globalLauncher: opts.globalLauncher ?? (async () => '/prefix/node_modules/centralu/bin/centralu.mjs'),
+    globalPackage: opts.globalPackage ?? (async () => ({ launcher: LAUNCHER, version: null })),
     node: '/host/node',
   })
   return {
@@ -406,7 +410,7 @@ describe('UpdateService', () => {
     await settle()
     expect(h.calls).toEqual([
       ['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']],
-      ['centralu', ['install']],
+      INSTALL,
     ])
     expect(h.svc.current().phase).toBe('restart_required')
   })
@@ -417,7 +421,7 @@ describe('UpdateService', () => {
       registry: '9999.0.0',
       installedCopy: copy,
       run: async (file) => {
-        if (file === 'centralu') throw new Error('Windows would not replace it — Centralu is probably still running.')
+        if (file === '/host/node') throw new Error('Windows would not replace it — Centralu is probably still running.')
       },
     })
     await h.svc.check(true)
@@ -523,7 +527,7 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       await h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]], ['centralu', ['install']]])
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]], INSTALL])
       expect(h.svc.current().error).toBeNull()
     })
 
@@ -1026,8 +1030,6 @@ describe.runIf(process.platform === 'win32')('runCommand with real batch files (
 })
 
 describe('the installed copy follows a host a hub installed (#1736)', () => {
-  const LAUNCHER = '/prefix/node_modules/centralu/bin/centralu.mjs'
-
   it('replaces an older copy: npm pinned to this host\'s version, then the npm launcher\'s install by its path', async () => {
     const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19' })
     await h.svc.followHost()
@@ -1037,10 +1039,44 @@ describe('the installed copy follows a host a hub installed (#1736)', () => {
     expect(h.svc.current().phase).toBe('idle')
   })
 
-  it('replaces a copy whose version cannot be read', async () => {
-    const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => null })
-    await h.svc.followHost()
-    expect(h.calls.map(([f]) => f)).toEqual(['npm', '/host/node'])
+  it('replaces a copy whose version cannot be read or is malformed', async () => {
+    for (const v of [null, 'garbage', '$(VERSION)']) {
+      const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => v })
+      await h.svc.followHost()
+      expect(h.calls.map(([f]) => f), String(v)).toEqual(['npm', '/host/node'])
+    }
+  })
+
+  it('never takes the global npm package down: one at or above this host only runs its install', async () => {
+    for (const version of ['0.1.0-beta.21', RELEASE]) {
+      const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version }) })
+      await h.svc.followHost()
+      expect(h.calls, version).toEqual([INSTALL])
+    }
+    const older = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version: '0.1.0-beta.19' }) })
+    await older.svc.followHost()
+    expect(older.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${RELEASE}`]], INSTALL])
+  })
+
+  it('logs the exit code and the first line naming the error, not npm\'s last line', () => {
+    const stderr = 'npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error network request failed\nnpm error \'proxy\' config is set properly.  See: \'npm help config\''
+    expect(failureLine(Object.assign(new Error('last line'), { exitCode: 1, stderr }))).toBe('exit 1: npm error code ENOTFOUND')
+    expect(failureLine(new Error('spawn npm ENOENT'))).toBe('spawn npm ENOENT')
+  })
+
+  it('counts a Linux menu entry whose AppImage is gone as no copy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-menu-entry-'))
+    try {
+      const entry = join(dir, 'centralu.desktop')
+      const app = join(dir, 'Centralu.AppImage')
+      writeFileSync(entry, `[Desktop Entry]\nExec="${app}" %U\n`)
+      expect(existingCopy(entry, 'linux')).toBeNull()
+      writeFileSync(app, '')
+      expect(existingCopy(entry, 'linux')).toBe(entry)
+      expect(existingCopy(join(dir, 'missing.desktop'), 'linux')).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('leaves a copy of this version, a newer one after a rollback, a newer local build, and no copy at all', async () => {
@@ -1062,7 +1098,7 @@ describe('the installed copy follows a host a hub installed (#1736)', () => {
       expect(h.calls).toHaveLength(1)
       expect(h.published).toEqual([])
       expect(log.mock.calls.join(' ')).toMatch(/could not bring the installed copy.*EACCES/)
-      const none = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalLauncher: async () => null })
+      const none = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => null })
       await none.svc.followHost()
       expect(none.calls.map(([f]) => f)).toEqual(['npm'])
     } finally {
@@ -1088,7 +1124,7 @@ describe('the installed copy follows a host a hub installed (#1736)', () => {
     npm.resolve()
     await Promise.all([first, second])
     await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-    expect(h.calls.map(([f, a]) => `${f} ${a.at(-1)}`)).toEqual([`npm centralu@${RELEASE}`, '/host/node install', 'npm centralu@0.1.0-beta.22', 'centralu install'])
+    expect(h.calls.map(([f, a]) => `${f} ${a.at(-1)}`)).toEqual([`npm centralu@${RELEASE}`, '/host/node install', 'npm centralu@0.1.0-beta.22', '/host/node install'])
   })
 
   it('does not start beside an install from the app', async () => {
