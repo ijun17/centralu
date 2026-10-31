@@ -2821,8 +2821,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
     it('reads its question to the caller, and reports its end to the caller once', async () => {
       const { agent, r, reports } = await followUp()
-      // The first turn's end was reported; this one's is owed too
-      expect(reports()).toBe(1)
+      // The first turn's end is reported (its report may still be on the way); this one's is owed too
+      await eventually(() => reports() === 1)
       const asked = await agent(r.sessionId, 'status')
       if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
       expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
@@ -2888,8 +2888,11 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         // it. The count is 3 only until that turn ends, some 30 ms, which a wait under load can miss (#1809): wait for both
         await eventually(() => reports() === 4)
         const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
-        expect(reported[2]).toContain('answered: Yes')
         expect(reported[3]).toContain('use the staging data')
+        // The two turns ran in that order there. Report 3's words are not checked: they are read once it is written, and
+        // by then the note's turn may have begun (#1809 review)
+        const answers = remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'assistant' && m.kind === 'text').map((m) => (m.payload as { text?: string }).text ?? '')
+        expect(answers.slice(-2)).toEqual(['answered: Yes', expect.stringContaining('use the staging data')])
       })
     })
   })
