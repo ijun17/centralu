@@ -305,7 +305,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     const heir = await handOff(h, project, parent)
-    await h.mgr.restoreSession(parent)
+    await h.mgr.trash.restoreSession(parent)
     expect(childThread(h, child).owner).toBe(at(h, heir))
     expect(h.tool.run(parent, { action: 'read', thread: childThread(h, child).id }).isError).toBe(true)
   })
@@ -366,7 +366,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     openBy(h.mail, { by: at(h, g), kind: 'assign', subject: 'G gives A work', body: 'do it', assignee: at(h, parent) })
     const heir = await handOff(h, project, parent, false)
     h.mgr.rename(heir, 'Successor')
-    const asks = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
+    const asks = (await h.mgr.trash.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
     expect(asks.asks).toContain('It is the assignee of an unfinished mail thread ("G gives A work"); it goes to "Successor", which took over from it, and stays there if it is restored.')
   })
 })
@@ -379,7 +379,7 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     const heir = await handOff(h, project, parent, false)
     const both = openBy(h.mail, { by: at(h, x), kind: 'question', subject: 'X asks both', body: 'which?', members: [at(h, parent), at(h, heir)] }).thread
     await h.mgr.trashSession(parent)
-    await h.mgr.restoreSession(parent)
+    await h.mgr.trash.restoreSession(parent)
     expect(store.mail.pendingFor(at(h, parent), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).not.toContain(both.id)
     expect(store.mail.pendingFor(at(h, heir), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).toContain(both.id)
   })
@@ -418,7 +418,7 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     h.mgr.rename(heir, 'Successor')
     openBy(h.mail, { by: at(h, parent), kind: 'assign', subject: 'A gives B work', body: 'do it', assignee: at(h, heir) })
     openBy(h.mail, { by: at(h, x), kind: 'question', subject: 'X asks A', body: 'what?', members: [at(h, parent)] })
-    const asks = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
+    const asks = (await h.mgr.trash.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
     expect(asks.asks).toContain('It is in an unfinished mail thread as a member ("X asks A"); it goes to "Successor", which took over from it, and stays there if it is restored.')
     expect(asks.asks).toContain('It owns an unfinished mail thread whose assignee is "Successor" ("A gives B work"); it becomes the person\'s.')
     await h.mgr.trashSession(parent)
@@ -437,7 +437,7 @@ describe('the re-check of the review fixes (#1580)', () => {
     h.mail.post(work.id, at(h, heir), { kind: 'question', body: 'which branch?' })
     await h.mgr.trashSession(parent)
     expect(thread(work.id).owner).toBe(PERSON)
-    await h.mgr.restoreSession(parent)
+    await h.mgr.trash.restoreSession(parent)
     expect(store.mail.pendingFor(at(h, parent), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).not.toContain(work.id)
   })
 
@@ -466,7 +466,7 @@ describe('the re-check of the review fixes (#1580)', () => {
     const fromX = openBy(h.mail, { by: at(h, parent), kind: 'question', subject: 'A asks X', body: 'what?', members: [at(h, x)] }).thread
     h.mail.post(fromX.id, at(h, x), { kind: 'answer', body: 'that' })
     h.mail.update(fromX.id, PERSON, { state: 'done', outcome: 'finished' })
-    const after = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
+    const after = (await h.mgr.trash.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
     expect(after.asks).toContain('It has unread mail in a closed mail thread ("A asks X"); that mail goes to "Successor".')
     // The thread whose only unread mail is the heir's own answer is not counted
     expect(after.asks.some((l) => l.includes('"A asks B"'))).toBe(false)

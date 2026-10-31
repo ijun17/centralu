@@ -22,7 +22,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   startAgent: AgentStartFlow['startAgent']
   agentSession: DelegationFlow['agentSession']
   listAgents: DelegationFlow['listAgents']
-  requireAppAccess: SessionAppWiring['requireAppAccess']
+  readonly apps: Pick<SessionAppWiring, 'requireAppAccess'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
   /** The `compact_self` tool of a session (#1451) */
@@ -149,9 +149,9 @@ export class SessionTools {
    */
   private appAndMailTools(sessionId: string): Pick<OrchestratorTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
     return {
-      findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
-      attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
-      detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+      findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
+      attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
+      detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       mail: (args) => this.host.mailTool(sessionId, args),
       compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
     }

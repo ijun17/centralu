@@ -12,7 +12,7 @@ import type { WorktreeHost } from './worktree-sessions.js'
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type LaunchInputsHost = Pick<DelegationHost, 'store' | 'builderRefOf' | 'readGrants'> &
-  Pick<RoutedCardsHost, 'isAppAgentSession'> &
+  Pick<RoutedCardsHost, 'apps'> &
   Pick<WorktreeHost, 'projectTrusted'> & {
     /** The orchestrator's approved skills (#71), read for its prompt */
     readonly proposals: Pick<OrchestratorProposals, 'skillsPrompt'>
@@ -74,7 +74,7 @@ export class LaunchInputs {
      * (below): that session runs inside the project, and whether it gets the project's settings was
      * already decided by the person through trust.
      */
-    if (m.projectId === null && this.host.isAppAgentSession(m)) return { projectTrusted: false }
+    if (m.projectId === null && this.host.apps.isAppAgentSession(m)) return { projectTrusted: false }
     return { projectTrusted: this.host.projectTrusted(m.projectId) }
   }
 

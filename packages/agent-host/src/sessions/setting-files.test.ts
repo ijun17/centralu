@@ -176,7 +176,7 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
 /** Stands up a session of that kind through the same path the product uses — right up through the tool's first launch */
 const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   orchestrator: async (tool) => {
-    mgr.configureOrchestrator(tool)
+    mgr.orchestratorSlot.configureOrchestrator(tool)
     return (await mgr.orchestrator()).id
   },
   // Nothing creates one since the control app went (#372): one an older build left is opened by a new host and woken
@@ -233,7 +233,7 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
   adapter.detect = async () => ({ tool, installed: true, loggedIn: true, detail: 'test' })
   return new Promise<string>((resolve, reject) => {
     mgr
-      .runAppAgent(
+      .appSessions.runAppAgent(
         { app: { projectId: appProjectId, appId }, appName: `App ${appId}`, tool, prompt: 'look around' },
         { signal: new AbortController().signal, progress: () => {}, onSession: resolve },
       )

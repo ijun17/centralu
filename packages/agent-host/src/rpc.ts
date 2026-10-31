@@ -228,18 +228,18 @@ export function createRpcHandler(
       mgr.answerQuestion(sessionId, requestId, answers)
       return { ok: true as const }
     },
-    'agents.models': async (p) => mgr.listModels(RpcMethods['agents.models'].params.parse(p).tool),
+    'agents.models': async (p) => mgr.toolQueries.listModels(RpcMethods['agents.models'].params.parse(p).tool),
     'agents.interrupt': async (p) => {
       mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)
       return { ok: true as const }
     },
     'agents.stopBackgroundTask': async (p) => {
       const { sessionId, taskId } = RpcMethods['agents.stopBackgroundTask'].params.parse(p)
-      await mgr.stopBackgroundTask(sessionId, taskId)
+      await mgr.sessionSettings.stopBackgroundTask(sessionId, taskId)
       return { ok: true as const }
     },
     'agents.clearBackgroundTasks': async (p) => {
-      mgr.clearBackgroundTasks(RpcMethods['agents.clearBackgroundTasks'].params.parse(p).sessionId)
+      mgr.sessionSettings.clearBackgroundTasks(RpcMethods['agents.clearBackgroundTasks'].params.parse(p).sessionId)
       return { ok: true as const }
     },
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
@@ -251,25 +251,25 @@ export function createRpcHandler(
     // The window's archive of a session that looks idle: only when nothing is lost (#1512)
     'agents.archiveIfAtRest': async (p) => {
       const { sessionId, deleteExternal } = RpcMethods['agents.archiveIfAtRest'].params.parse(p)
-      return mgr.archiveIfAtRest(sessionId, deleteExternal)
+      return mgr.trash.archiveIfAtRest(sessionId, deleteExternal)
     },
     // What the window's archive dialog lists before it moves anything (#1595)
     'agents.archiveLosses': async (p) => {
       const { sessionId } = RpcMethods['agents.archiveLosses'].params.parse(p)
-      return { asks: mgr.archiveLosses(sessionId) }
+      return { asks: mgr.trash.archiveLosses(sessionId) }
     },
     // A hub's start_agent child deleted with the worktree made for it, when nothing would be lost (#1161 item 3)
     'agents.deleteAgentChild': async (p) => {
       const { sessionId, worktreeBranch } = RpcMethods['agents.deleteAgentChild'].params.parse(p)
-      return mgr.deleteHubChild(sessionId, worktreeBranch)
+      return mgr.worktrees.deleteHubChild(sessionId, worktreeBranch)
     },
     'agents.exportHandoffRecord': async (p) => {
       const { sessionId, toTool } = RpcMethods['agents.exportHandoffRecord'].params.parse(p)
-      return mgr.exportHandoffRecord(sessionId, toTool)
+      return mgr.handoffNotes.exportHandoffRecord(sessionId, toTool)
     },
     'agents.exportHandoffNote': async (p) => {
       const { sessionId, afterSeq } = RpcMethods['agents.exportHandoffNote'].params.parse(p)
-      return mgr.exportHandoffNote(sessionId, afterSeq)
+      return mgr.handoffNotes.exportHandoffNote(sessionId, afterSeq)
     },
     'agents.autoCompact': async (p) => mgr.autoCompactFor(RpcMethods['agents.autoCompact'].params.parse(p).sessionId),
     'agents.worktreeStatus': async (p) =>
@@ -277,27 +277,27 @@ export function createRpcHandler(
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
     'agents.resolveMcpProposal': async (p) => {
       const { name, approve } = RpcMethods['agents.resolveMcpProposal'].params.parse(p)
-      const r = await mgr.resolveMcpProposal(name, approve)
+      const r = await mgr.orchestratorSlot.resolveMcpProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
-    'agents.skillProposals': async () => ({ proposals: mgr.skillProposals() }),
+    'agents.skillProposals': async () => ({ proposals: mgr.orchestratorSlot.skillProposals() }),
     'agents.resolveSkillProposal': async (p) => {
       const { name, approve } = RpcMethods['agents.resolveSkillProposal'].params.parse(p)
-      const r = await mgr.resolveSkillProposal(name, approve)
+      const r = await mgr.orchestratorSlot.resolveSkillProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
-    'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSkills() }),
+    'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSlot.orchestratorSkills() }),
     'agents.deleteOrchestratorSkill': async (p) => {
       const { name } = RpcMethods['agents.deleteOrchestratorSkill'].params.parse(p)
-      const r = await mgr.deleteOrchestratorSkill(name)
+      const r = await mgr.orchestratorSlot.deleteOrchestratorSkill(name)
       if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
       return { ok: true as const }
     },
     'agents.listExternalSessions': async (p) => {
       const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
-      return mgr.listExternalSessions(projectId, tool, limit)
+      return mgr.externals.listExternalSessions(projectId, tool, limit)
     },
     'agents.restartSession': async (p) =>
       mgr.restartSession(RpcMethods['agents.restartSession'].params.parse(p).sessionId),
@@ -359,7 +359,7 @@ export function createRpcHandler(
     },
     'git.branches': async (p) => mgr.files.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
     'git.ignoredEntries': async (p) =>
-      mgr.gitIgnoredEntries(RpcMethods['git.ignoredEntries'].params.parse(p).projectId),
+      mgr.files.gitIgnoredEntries(RpcMethods['git.ignoredEntries'].params.parse(p).projectId),
     'git.checkout': async (p) => {
       const { projectId, branch, dryRun } = RpcMethods['git.checkout'].params.parse(p)
       return mgr.files.gitCheckout(projectId, branch, dryRun)
@@ -377,7 +377,7 @@ export function createRpcHandler(
     'git.cancel': async (p) => mgr.files.gitCancel(RpcMethods['git.cancel'].params.parse(p).projectId),
     'attachments.save': async (p) => {
       const { sessionId, name, mime, dataBase64 } = RpcMethods['attachments.save'].params.parse(p)
-      return mgr.saveAttachment(sessionId, name, mime, dataBase64)
+      return mgr.record.saveAttachment(sessionId, name, mime, dataBase64)
     },
     'fs.listDir': async (p) => {
       const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
@@ -442,35 +442,35 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'approvals.deleteRule': async (p) => {
-      mgr.deleteApprovalRule(RpcMethods['approvals.deleteRule'].params.parse(p).id)
+      mgr.approvalRules.deleteApprovalRule(RpcMethods['approvals.deleteRule'].params.parse(p).id)
       return { ok: true as const }
     },
     'workspace.save': async (p) => {
-      mgr.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
+      mgr.prefs.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
       return { ok: true as const }
     },
-    'workspace.load': async () => mgr.loadWorkspace(),
+    'workspace.load': async () => mgr.prefs.loadWorkspace(),
     // The orchestrator's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
     'projects.add': async (p) => {
       const info = await mgr.addProject(RpcMethods['projects.add'].params.parse(p).path)
       externalApps?.refresh()
       return info
     },
-    'projects.inspect': async (p) => mgr.inspectFolder(RpcMethods['projects.inspect'].params.parse(p).path),
+    'projects.inspect': async (p) => mgr.projectCreation.inspectFolder(RpcMethods['projects.inspect'].params.parse(p).path),
     'projects.create': async (p) => {
       const { name, parent, source } = RpcMethods['projects.create'].params.parse(p)
-      const info = await mgr.createProject(name, parent, source)
+      const info = await mgr.projectCreation.createProject(name, parent, source)
       externalApps?.refresh()
       return info
     },
     'projects.createPreview': async (p) => {
       const { name, parent, source } = RpcMethods['projects.createPreview'].params.parse(p)
-      return mgr.projectCreatePreview(name, parent, source)
+      return mgr.projectCreation.projectCreatePreview(name, parent, source)
     },
     'orchestrator.get': async () => mgr.orchestrator(),
-    'orchestrator.peek': async () => mgr.orchestratorPeek(),
+    'orchestrator.peek': async () => mgr.orchestratorSlot.orchestratorPeek(),
     'orchestrator.configure': async (p) => {
-      mgr.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
+      mgr.orchestratorSlot.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
       return { ok: true as const }
     },
     'apps.viewFrame': async (p) => {
@@ -578,7 +578,7 @@ export function createRpcHandler(
     'apps.setShared': async (p) => {
       // Sharing a project app with the person's other projects (#371 part A) — the manager stores it and recounts sessions
       const { appId, projectId, shared } = RpcMethods['apps.setShared'].params.parse(p)
-      mgr.setAppShared({ projectId, appId }, shared)
+      mgr.apps.setAppShared({ projectId, appId }, shared)
       return { ok: true as const }
     },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
@@ -588,7 +588,7 @@ export function createRpcHandler(
       const { token, enable, reviewKey, parent } = RpcMethods['apps.importCommit'].params.parse(p)
       // An import lands as a project of its own (#1141): `<parent>/<id>`, `~/Centralu` unless the person chose a parent
       requireExternalApps()
-      return mgr.commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }, parent)
+      return mgr.appSessions.commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }, parent)
     },
     'apps.importCancel': async (p) => {
       requireExternalApps().cancelImport(RpcMethods['apps.importCancel'].params.parse(p).token)
@@ -623,10 +623,10 @@ export function createRpcHandler(
       const { appId, projectId, id } = RpcMethods['apps.restoreVersion'].params.parse(p)
       return requireExternalApps().restoreVersion({ appId, projectId }, id)
     },
-    'apps.create': async (p) => mgr.createApp(RpcMethods['apps.create'].params.parse(p)),
+    'apps.create': async (p) => mgr.appSessions.createApp(RpcMethods['apps.create'].params.parse(p)),
     'apps.builder': async (p) => {
       const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)
-      return mgr.builderOf({ appId, projectId })
+      return mgr.appSessions.builderOf({ appId, projectId })
     },
     'apps.errors': async (p) => {
       const { appId, projectId } = RpcMethods['apps.errors'].params.parse(p)
@@ -634,19 +634,19 @@ export function createRpcHandler(
     },
     'apps.reach': async (p) => {
       const { sessionId, appId, projectId } = RpcMethods['apps.reach'].params.parse(p)
-      return mgr.appReach(sessionId, { appId, projectId })
+      return mgr.apps.appReach(sessionId, { appId, projectId })
     },
     'apps.check': async (p) => {
       const { appId, projectId } = RpcMethods['apps.check'].params.parse(p)
-      const r = await mgr.checkApp({ appId, projectId })
+      const r = await mgr.appSessions.checkApp({ appId, projectId })
       return { ok: r.ok, text: r.text, findings: r.findings }
     },
     // A capability question (M4 D-4) — one from a chain started by a view. One started by a session
     // comes through `agents.respondApproval` as that session's own approval card
-    'apps.questions': async () => mgr.appQuestionList(),
+    'apps.questions': async () => mgr.hostCards.appQuestionList(),
     'apps.answerQuestion': async (p) => {
       const { questionId, decision } = RpcMethods['apps.answerQuestion'].params.parse(p)
-      mgr.answerAppQuestion(questionId, decision)
+      mgr.hostCards.answerAppQuestion(questionId, decision)
       return { ok: true as const }
     },
     'apps.permissions': async (p) => {
@@ -659,10 +659,10 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     // Cross-project consents (#371) — the host owns them; Settings lists and revokes
-    'projectConsents.list': async () => mgr.projectConsents(),
+    'projectConsents.list': async () => mgr.consents.projectConsents(),
     'projectConsents.revoke': async (p) => {
       const { fromProjectId, toProjectId, kind } = RpcMethods['projectConsents.revoke'].params.parse(p)
-      mgr.revokeProjectConsent(fromProjectId, toProjectId, kind)
+      mgr.consents.revokeProjectConsent(fromProjectId, toProjectId, kind)
       return { ok: true as const }
     },
     'apps.usage': async (p) => {
@@ -671,12 +671,12 @@ export function createRpcHandler(
     },
     'apps.createBuilder': async (p) => {
       const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
-      return mgr.createAppBuilder({ appId, projectId }, tool)
+      return mgr.appSessions.createAppBuilder({ appId, projectId }, tool)
     },
     'apps.sendError': async (p) => {
       const { appId, projectId, at } = RpcMethods['apps.sendError'].params.parse(p)
       return sendErrorToBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
         { appId, projectId },
         at,
       )
@@ -684,7 +684,7 @@ export function createRpcHandler(
     'apps.askBuilder': async (p) => {
       const { appId, projectId, text, attachments, instanceId } = RpcMethods['apps.askBuilder'].params.parse(p)
       return askBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
         { ref: { appId, projectId }, text, attachments, instanceId },
       )
     },
@@ -702,14 +702,14 @@ export function createRpcHandler(
     },
     'apps.sessionTools': async (p) => {
       const { sessionId, server } = RpcMethods['apps.sessionTools'].params.parse(p)
-      return { tools: await mgr.appSessionTools(sessionId, server) }
+      return { tools: await mgr.apps.appSessionTools(sessionId, server) }
     },
     'apps.sessionCall': async (p) => {
       const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
-      return mgr.callAppForSession(sessionId, server, name, args, waitMs)
+      return mgr.apps.callAppForSession(sessionId, server, name, args, waitMs)
     },
-    'grid.get': async () => mgr.grid(),
-    'grid.set': async (p) => mgr.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
+    'grid.get': async () => mgr.layout.grid(),
+    'grid.set': async (p) => mgr.layout.setGridView(RpcMethods['grid.set'].params.parse(p).panels),
     /*
      * Not listed with no protection (#841 item 7): a keeper that could not answer made every agent it holds a stray,
      * offered to be stopped on quit. The stop refuses that case already; the list says it too.
@@ -717,14 +717,14 @@ export function createRpcHandler(
     'processes.strays': async () => {
       const held = await heldOrUnknown()
       if (held === null) throw rpcError('The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again')
-      return findStrays(mgr.folderRoots(), process.pid, held)
+      return findStrays(mgr.projectRegistry.folderRoots(), process.pid, held)
     },
     'processes.stop': async (p) =>
-      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await heldOrUnknown()),
+      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.projectRegistry.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),
     'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
     'projects.reorder': async (p) =>
-      mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
+      mgr.projectRegistry.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
     'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(RpcMethods['projects.deleteOutlook'].params.parse(p).projectId)) ?? 'stays' }),
     'projects.delete': async (p) => {
       const { projectId } = RpcMethods['projects.delete'].params.parse(p)
@@ -761,11 +761,11 @@ export function createRpcHandler(
     },
     'projects.setCommands': async (p) => {
       const { projectId, commands } = RpcMethods['projects.setCommands'].params.parse(p)
-      return mgr.setProjectCommands(projectId, commands)
+      return mgr.projectRegistry.setProjectCommands(projectId, commands)
     },
     'worktrees.setTrunk': async (p) => {
       const { projectId, baseBranch } = RpcMethods['worktrees.setTrunk'].params.parse(p)
-      await mgr.setWorktreeTrunk(projectId, baseBranch)
+      await mgr.projectRegistry.setWorktreeTrunk(projectId, baseBranch)
       return { ok: true as const }
     },
     'projects.setAgentInstructions': async (p) => {
@@ -775,16 +775,16 @@ export function createRpcHandler(
     },
     'projects.setWorktreeSetup': async (p) => {
       const { projectId, setup } = RpcMethods['projects.setWorktreeSetup'].params.parse(p)
-      mgr.setWorktreeSetup(projectId, setup)
+      mgr.projectRegistry.setWorktreeSetup(projectId, setup)
       return { ok: true as const }
     },
     'sessions.reorder': async (p) => {
       const { projectId, orderedIds } = RpcMethods['sessions.reorder'].params.parse(p)
-      return mgr.reorderSessions(projectId, orderedIds)
+      return mgr.layout.reorderSessions(projectId, orderedIds)
     },
     'projects.gitStatus': async (p) => {
       const { projectId } = RpcMethods['projects.gitStatus'].params.parse(p)
-      return mgr.projectGitStatus(projectId)
+      return mgr.projectRegistry.projectGitStatus(projectId)
     },
     'sessions.list': async () => mgr.listSessions(),
     'sessions.rename': async (p) => {
@@ -798,7 +798,7 @@ export function createRpcHandler(
     },
     'sessions.markRead': async (p) => {
       const { sessionId, seq } = RpcMethods['sessions.markRead'].params.parse(p)
-      mgr.markRead(sessionId, seq)
+      mgr.sessionSettings.markRead(sessionId, seq)
       return { ok: true as const }
     },
     'messages.load': async (p) => {
@@ -807,7 +807,7 @@ export function createRpcHandler(
     },
     'messages.image': async (p) => {
       const { sessionId, path } = RpcMethods['messages.image'].params.parse(p)
-      return mgr.messageImage(sessionId, path)
+      return mgr.record.messageImage(sessionId, path)
     },
     'messages.subagent': async (p) => {
       const { sessionId, parentCallId, afterSeq, limit } = RpcMethods['messages.subagent'].params.parse(p)
@@ -815,19 +815,19 @@ export function createRpcHandler(
     },
     'messages.subagentTrashed': async (p) => {
       const { sessionId, parentCallId } = RpcMethods['messages.subagentTrashed'].params.parse(p)
-      return mgr.subagentTrashed(sessionId, parentCallId)
+      return mgr.trash.subagentTrashed(sessionId, parentCallId)
     },
     'agents.commands': async (p) =>
-      mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
+      mgr.toolQueries.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
     'agents.usage': async (p) => {
       const { tool, limits, settle } = RpcMethods['agents.usage'].params.parse(p)
-      return mgr.usageFor(tool, { limits, settle })
+      return mgr.toolQueries.usageFor(tool, { limits, settle })
     },
     'usage.history': async (p) => mgr.usageHistory(RpcMethods['usage.history'].params.parse(p)),
-    'agents.account': async (p) => mgr.accountFor(RpcMethods['agents.account'].params.parse(p).tool),
+    'agents.account': async (p) => mgr.toolRegistry.accountFor(RpcMethods['agents.account'].params.parse(p).tool),
     'files.search': async (p) => {
       const { projectId, query, limit } = RpcMethods['files.search'].params.parse(p)
-      return searchFiles(mgr.cwdOfProject(projectId), query, limit, mgr.gitTrust(projectId))
+      return searchFiles(mgr.cwdOfProject(projectId), query, limit, mgr.projectRegistry.gitTrust(projectId))
     },
     'terminal.list': async (p) => {
       const { projectId } = RpcMethods['terminal.list'].params.parse(p)
@@ -898,7 +898,7 @@ export function createRpcHandler(
     },
     'themes.import': async (p) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
     'themes.resolve': async (p) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
-    'approvals.rules': async () => mgr.listApprovalRules(),
+    'approvals.rules': async () => mgr.approvalRules.listApprovalRules(),
     /*
      * The session archive (#204; "trash" until #1404, kept in the method names because the protocol only grows).
      * These are the person's: this handler is reached over the UI's socket and, for the central
@@ -906,43 +906,43 @@ export function createRpcHandler(
      * person's card. The other agents' tools (`orchestrator-tools.ts`) and the apps' broker (`broker.ts`, `host_data`)
      * have no verb for any of it.
      */
-    'trash.list': async () => mgr.listTrash(),
+    'trash.list': async () => mgr.trash.listTrash(),
     'trash.read': async (p) => {
       const { sessionId, limit, beforeSeq } = RpcMethods['trash.read'].params.parse(p)
-      return mgr.readTrashed(sessionId, limit, beforeSeq)
+      return mgr.trash.readTrashed(sessionId, limit, beforeSeq)
     },
     'trash.restore': async (p) => {
-      const r = await mgr.restoreSession(RpcMethods['trash.restore'].params.parse(p).sessionId)
+      const r = await mgr.trash.restoreSession(RpcMethods['trash.restore'].params.parse(p).sessionId)
       // A project registered again is a project added — its apps are read the same way (`projects.add`)
       if (r.project) externalApps?.refresh()
       return r
     },
     'trash.purge': async (p) => {
-      await mgr.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
+      await mgr.trash.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
       void settleDeletedProjects?.()
       return { ok: true as const }
     },
     'trash.empty': async () => {
-      const r = await mgr.emptyTrash()
+      const r = await mgr.trash.emptyTrash()
       void settleDeletedProjects?.()
       return r
     },
     // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
     'trash.readRun': async (p) => {
       const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)
-      return mgr.readTrashedRun(runId, limit, beforeSeq)
+      return mgr.trash.readTrashedRun(runId, limit, beforeSeq)
     },
-    'trash.purgeRuns': async (p) => mgr.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
+    'trash.purgeRuns': async (p) => mgr.trash.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
     // A session's subagent steps, to the trash without it and back (#418): the person's too, like the rest of the trash
-    'subagents.usage': async () => mgr.subagentUsage(),
-    'subagents.trash': async (p) => mgr.trashSubagentSteps(RpcMethods['subagents.trash'].params.parse(p).sessionId),
+    'subagents.usage': async () => mgr.trash.subagentUsage(),
+    'subagents.trash': async (p) => mgr.trash.trashSubagentSteps(RpcMethods['subagents.trash'].params.parse(p).sessionId),
     'trash.restoreSubagentSteps': async (p) => {
-      await mgr.restoreSubagentSteps(RpcMethods['trash.restoreSubagentSteps'].params.parse(p).sessionId)
+      await mgr.trash.restoreSubagentSteps(RpcMethods['trash.restoreSubagentSteps'].params.parse(p).sessionId)
       return { ok: true as const }
     },
     'trash.purgeSubagentSteps': async (p) => {
       const { sessionId, upTo } = RpcMethods['trash.purgeSubagentSteps'].params.parse(p)
-      await mgr.purgeSubagentSteps(sessionId, upTo)
+      await mgr.trash.purgeSubagentSteps(sessionId, upTo)
       return { ok: true as const }
     },
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)

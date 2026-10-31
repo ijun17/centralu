@@ -19,7 +19,7 @@ const what = { text: 'export the sprites' }
 describe('consent from one project to another', () => {
   it('asks in the calling session, and "always" is remembered for the pair, so the next reach does not ask', async () => {
     const s = await w.callerSession()
-    const first = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
+    const first = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     const card = w.card(s)!
     expect(card.detail).toEqual({
@@ -34,13 +34,13 @@ describe('consent from one project to another', () => {
     w.mgr.respondApproval(s, card.requestId, 'always')
     expect(await first).toEqual({ ok: true })
     expect(w.events.some((e) => e.type === 'project_consents_changed')).toBe(true)
-    expect(w.mgr.projectConsents()).toMatchObject([{ fromProjectId: w.caller.id, fromName: w.caller.name, toProjectId: w.target.id, toName: w.target.name, kind: 'delegate' }])
+    expect(w.mgr.consents.projectConsents()).toMatchObject([{ fromProjectId: w.caller.id, fromName: w.caller.name, toProjectId: w.target.id, toName: w.target.name, kind: 'delegate' }])
 
     // Remembered: no second card
-    expect(await w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)).toEqual({ ok: true })
+    expect(await w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)).toEqual({ ok: true })
     expect(w.card(s)).toBeUndefined()
     // …but only for that kind and that direction
-    const apps = w.mgr.ensureProjectAccess(s, w.target.id, 'apps', { text: '', app: { appId: 'extractor', name: 'Extractor' } })
+    const apps = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'apps', { text: '', app: { appId: 'extractor', name: 'Extractor' } })
     await w.until(() => !!w.card(s))
     expect(w.card(s)!.detail).toMatchObject({ access: 'apps', app: { appId: 'extractor', name: 'Extractor' } })
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
@@ -49,13 +49,13 @@ describe('consent from one project to another', () => {
 
   it('"allow once" passes this call only, and asks again next time', async () => {
     const s = await w.callerSession()
-    const first = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
+    const first = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
     expect(await first).toEqual({ ok: true })
-    expect(w.mgr.projectConsents()).toEqual([])
+    expect(w.mgr.consents.projectConsents()).toEqual([])
 
-    const second = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
+    const second = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
     expect(await second).toEqual({ ok: true })
@@ -65,14 +65,14 @@ describe('consent from one project to another', () => {
     const s = await w.callerSession()
     // Asked from inside a turn, as a tool call asks (a card raised between turns closes back into its rest, #428)
     await w.mgr.send(s, 'reach the toolkit')
-    const p = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
+    const p = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     const r = await p
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain(`did not allow ${w.caller.name} to reach ${w.target.name}`)
     expect(!r.ok && r.error).toContain('Do not ask again')
-    expect(w.mgr.projectConsents()).toEqual([])
+    expect(w.mgr.consents.projectConsents()).toEqual([])
     // The session goes back to work — it is still inside the tool call that asked
     expect(w.mgr.listSessions().find((x) => x.id === s)?.state).toBe('working')
   })
@@ -80,14 +80,14 @@ describe('consent from one project to another', () => {
   it('a revoked pair asks again', async () => {
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    expect(await w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)).toEqual({ ok: true })
+    expect(await w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)).toEqual({ ok: true })
 
     w.events.length = 0
-    w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.mgr.consents.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
     expect(w.events.some((e) => e.type === 'project_consents_changed')).toBe(true)
-    expect(w.mgr.projectConsents()).toEqual([])
+    expect(w.mgr.consents.projectConsents()).toEqual([])
 
-    const p = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
+    const p = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     expect((await p).ok).toBe(false)
@@ -96,7 +96,7 @@ describe('consent from one project to another', () => {
   it('a withdrawn question takes its card down and refuses', async () => {
     const s = await w.callerSession()
     const ac = new AbortController()
-    const p = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what, ac.signal)
+    const p = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what, ac.signal)
     await w.until(() => !!w.card(s))
     const requestId = w.card(s)!.requestId
     ac.abort()
@@ -108,10 +108,10 @@ describe('consent from one project to another', () => {
 
   it('needs no consent inside its own project, and none from a session with no project', async () => {
     const s = await w.callerSession()
-    expect(await w.mgr.ensureProjectAccess(s, w.caller.id, 'delegate', what)).toEqual({ ok: true })
+    expect(await w.mgr.consents.ensureProjectAccess(s, w.caller.id, 'delegate', what)).toEqual({ ok: true })
     expect(w.card(s)).toBeUndefined()
     const orc = await w.mgr.orchestrator()
-    expect((await w.mgr.ensureProjectAccess(orc.id, w.target.id, 'delegate', what)).ok).toBe(false)
+    expect((await w.mgr.consents.ensureProjectAccess(orc.id, w.target.id, 'delegate', what)).ok).toBe(false)
   })
 
   it('lists and revokes through the RPC Settings uses', async () => {

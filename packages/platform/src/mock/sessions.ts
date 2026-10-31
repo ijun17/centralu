@@ -241,7 +241,7 @@ export class SessionsMock {
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
     /*
-     * The same rule as the real thing (manager.reorderSessions, #999): the order is one across projects, so only the
+     * The same rule as the real thing (SessionLayout.reorderSessions, #999): the order is one across projects, so only the
      * slots this project's sessions hold take the new order, and every other session stays where it was. A session
      * missing from the list stays at the end of this project's, as it was.
      */

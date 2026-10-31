@@ -65,7 +65,7 @@ describe('loading past sessions', () => {
   it('gives a list of past sessions the tool has on file', async () => {
     const { a, m, rpc: call } = withListing()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
-    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    const res = await m.externals.listExternalSessions(p.id, 'claude', 30)
     expect(res.supported).toBe(true)
     expect(a.listed).toEqual({ cwd: tmpdir(), limit: 30 })
     expect(res.sessions).toEqual([
@@ -77,7 +77,7 @@ describe('loading past sessions', () => {
     const { a, m, rpc: call } = withListing()
     a.fail = new Error('codex needs an update')
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
-    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    const res = await m.externals.listExternalSessions(p.id, 'claude', 30)
     expect(res).toMatchObject({ supported: false, reason: 'codex needs an update', sessions: [] })
     // Even if the listing dies, the creation path is unaffected.
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
@@ -86,7 +86,7 @@ describe('loading past sessions', () => {
 
   it('an unsupported adapter answers with supported=false', async () => {
     const p = await addProject()
-    const res = await mgr.listExternalSessions(p.id, 'claude', 30)
+    const res = await mgr.externals.listExternalSessions(p.id, 'claude', 30)
     expect(res.supported).toBe(false)
     expect(res.sessions).toEqual([])
   })
@@ -119,7 +119,7 @@ describe('loading past sessions', () => {
     await call('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-past', importHistory: true,
     })
-    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    const res = await m.externals.listExternalSessions(p.id, 'claude', 30)
     expect(res.sessions[0]!.imported).toBe(true)
   })
 
@@ -329,7 +329,7 @@ describe('a deleted session can be recovered from the past-conversations list', 
 
     // While it is in the list, it is blocked from being opened again — and it also reports which session it
     // is open as.
-    const listed = (await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!
+    const listed = (await m.externals.listExternalSessions(p.id, 'claude', 30)).sessions[0]!
     expect(listed.imported).toBe(true)
     expect(listed.importedAs).toBe(s.id)
 
@@ -341,7 +341,7 @@ describe('a deleted session can be recovered from the past-conversations list', 
       dialog promises (the conversation stays in the tool, and can be pulled back out via
       + → Past conversations) is exactly this assertion.
     */
-    expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(false)
+    expect((await m.externals.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(false)
   })
 })
 

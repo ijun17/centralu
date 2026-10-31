@@ -114,7 +114,7 @@ describe('the session manager writes its per-folder caches through remember (#39
     for (let i = 0; i < FOLDERS; i++) {
       store.settings.saveCommands('claude', join(root, `f${i}`), [{ name: 'from-disk', description: '', argumentHint: '' }])
       const { id } = await sessionIn(i)
-      expect((await mgr.listCommands(id)).commands.map((c) => c.name)).toEqual(['from-disk'])
+      expect((await mgr.toolQueries.listCommands(id)).commands.map((c) => c.name)).toEqual(['from-disk'])
     }
     expect(held('commandCache')).toBe(FOLDER_CACHE_KEYS)
   })

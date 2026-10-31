@@ -176,6 +176,30 @@ Manager line counts are after each pull request.
   `canReadMail`, the two `stop()` pairs through `stopSelfCompaction()`, one `setting` and `notice` for both compaction
   modules, `updateResumeDone` and `tellPersonOfInterruption` inlined, and `nameUnnamedWorktrees` (§7: old rows still
   named "New session" stay so, by the owner's removal of old-version compatibility, #1143).
+- **3, the forwarding stubs** (`manager.ts` 3,063 to 2,713): 70 stubs, the rpc-only ones and, by decision D1, the ones
+  tests call, except the session's own verbs (`createSession`, `startAgent`, `agentSession`, `askProject`,
+  `orchestrator`, `runOrchestratorTool`, `updateSettings`, `rename`). The router, the other modules and the tests call the
+  module (`mgr.trash.restoreSession`); the module fields they need are public `readonly`. Still on the manager because
+  `main.ts`, `links/` or `adapters/` call them (those files are out of this round): `addProject`, `askFromMachine`,
+  `builderBusy`, `forgetWatchHolder`, `forwarding`, `hostReader`, `listProjects`, `loadMessages`, `mcpProposals`,
+  `observeLinked`, `remoteAgentParent`, `sendFromHub`, `setAgentInstructions`, `setUiPreferences`, `toolProfileOf`,
+  `trashSession`, `uiPreferences`, `useExternalApps`, `useLinkedApps`, `useLinkedSessions`, `useProjectsHome`, and the five
+  of PR 5 (`noteAgentMoved`, `noteAgentMoveFailed`, `sessionAppsHub`, `recordAppView`, `loadSubagentMessages`). So
+  "five stubs reach `main.ts`" in §2 was low: 21 more do.
+- **4, `seat()` on `parts()`** (`manager.ts` 2,713 to 2,698): the 20 entries `seat()` repeated are gone; it is its own entries
+  standing on the `parts()` object as prototype, typed so a missing one does not compile. `proposals` and `linkedReader`
+  stay its own (the seat reads them with a wider type than `parts()` gives). A prototype, not `Object.assign`, which would
+  read the `proposals` getter once and keep the value; the small `stands` guard says the type without an assertion
+  (the assertion ceiling only goes down).
+- **8, `parts()` forwards to exposed modules** (`manager.ts` 2,698 to 2,690): only 8 of the 42, far fewer than the ~56 lines
+  the plan counted, because a hand-built host stops the rest: a test builds the host of `AskProjectFlow`, `DelegationFlow`,
+  `RestartPolicy`, `SessionTrash`, `HandoffFlow`, `ChildReports`, `LinkedReports`, `RemoteAgents`, `HostCards`,
+  `AppSessions`, `SessionEvents`, `WorktreeSessions`, `ChildOwnership` and the orchestrator seat, and the shared
+  `DelegationHost` is in most of them. Done where no test builds the consumer: `dropOpenedByAuto`, `withdrawReaches`
+  (`queue`), `isAppAgentSession`, `requireAppAccess` (`apps`), `appHostData`, `runAppAgent`, `agentRunEnded`
+  (`appSessions`) and `askCapability` (`hostCards`); `HandoffChildren`, `ProjectConsents`, `RoutedCards`, `LaunchInputs`,
+  `UpdatesAsked`, `SessionTools` and `SessionAppWiring` read the module off the host. The other 34 wait for a pull request
+  that also rewrites those tests' hosts.
 
 ### 6.2 Work in flight
 

@@ -134,7 +134,7 @@ describe('a chain started from the UI — that app\'s question', () => {
     w.rt.refresh()
     answerAgent()
     const pending = w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
-    const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
+    const [q] = await until(() => w.mgr.hostCards.appQuestionList(), (l) => l.length === 1)
     // The RPC's answer keeps exactly the protocol's shape (the same kind of check as a schema smoke test)
     expect(RpcMethods['apps.questions'].result.parse(await w.rpc('apps.questions', {}))).toEqual([q])
     expect(q).toMatchObject({
@@ -163,7 +163,7 @@ describe('a chain started from the UI — that app\'s question', () => {
     answerAgent()
     const call = () => w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
     const first = call()
-    const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
+    const [q] = await until(() => w.mgr.hostCards.appQuestionList(), (l) => l.length === 1)
     await w.rpc('apps.answerQuestion', { questionId: q!.id, decision: 'allow' })
     const said = async (r: ReturnType<typeof call>) => (await r).result!.structuredContent as { isError: boolean; text: string }
     expect((await said(first)).isError).toBe(false)
@@ -174,7 +174,7 @@ describe('a chain started from the UI — that app\'s question', () => {
     w.store.permissions.putAppPermission(key, w.projectId, { ...stored, decision: 'allow-this-week' as 'allow' })
     const asked = w.events.filter((e) => e.type === 'external_app_questions_changed').length
     expect(await said(call())).toMatchObject({ isError: true, text: expect.stringContaining('run_agent refused: the person did not allow') })
-    expect(w.mgr.appQuestionList()).toEqual([])
+    expect(w.mgr.hostCards.appQuestionList()).toEqual([])
     expect(w.events.filter((e) => e.type === 'external_app_questions_changed')).toHaveLength(asked)
     expect(w.store.permissions.getAppPermission(key, 'agent:claude')).toMatchObject({ decision: 'allow-this-week' })
   })
@@ -185,7 +185,7 @@ describe('a chain started from the UI — that app\'s question', () => {
     answerAgent()
     const ask = async () => {
       const pending = w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
-      const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
+      const [q] = await until(() => w.mgr.hostCards.appQuestionList(), (l) => l.length === 1)
       await w.rpc('apps.answerQuestion', { questionId: q!.id, decision: 'allow' })
       return pending
     }

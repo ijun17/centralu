@@ -389,30 +389,30 @@ describe('guard/purge-callers and guard/subagent-purge-callers', () => {
   })
   it('counts a reference of any spelling against the listed ones of the file (#204)', async () => {
     const rpc = 'packages/agent-host/src/rpc.ts'
-    const listed = 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(id)'
+    const listed = 'mgr.trash.emptyTrash()' + NL + 'mgr.trash.purgeSession(id)'
     expect(await lines(rpc, listed, 'purge-callers')).toEqual([])
     // The same receiver spelled another way is the same listed reference; a second one of that receiver is a finding, and so is a kind the file does not list
-    expect(await lines(rpc, "mgr.emptyTrash()" + NL + "mgr['purgeSession'](id)", 'purge-callers')).toEqual([])
-    expect(await lines(rpc, listed + NL + 'mgr.purgeSession.bind(mgr)(id)', 'purge-callers')).toEqual([2, 3])
-    expect(await lines(rpc, listed + NL + 'const { purgeSession } = mgr', 'purge-callers')).toEqual([3])
+    expect(await lines(rpc, "mgr.trash.emptyTrash()" + NL + "mgr.trash['purgeSession'](id)", 'purge-callers')).toEqual([])
+    expect(await lines(rpc, listed + NL + 'mgr.trash.purgeSession.bind(mgr.trash)(id)', 'purge-callers')).toEqual([2, 3])
+    expect(await lines(rpc, listed + NL + 'const { purgeSession } = mgr.trash', 'purge-callers')).toEqual([3])
     expect(await lines(rpc, listed + NL + "const k = 'purgeSession'", 'purge-callers')).toEqual([3])
   })
   it('lets a listed file make the calls listed for it, and no others', async () => {
     const rpc = 'packages/agent-host/src/rpc.ts'
-    expect(await lines(rpc, 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(id)', 'purge-callers')).toEqual([])
+    expect(await lines(rpc, 'mgr.trash.emptyTrash()' + NL + 'mgr.trash.purgeSession(id)', 'purge-callers')).toEqual([])
     // Another receiver in the same file is a finding
-    expect(await lines(rpc, 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(id)' + NL + 'other.purgeSession(id)', 'purge-callers')).toEqual([3])
+    expect(await lines(rpc, 'mgr.trash.emptyTrash()' + NL + 'mgr.trash.purgeSession(id)' + NL + 'other.purgeSession(id)', 'purge-callers')).toEqual([3])
     // A listed call that is no longer made says so
-    expect(await lines(rpc, 'mgr.emptyTrash()', 'purge-callers')).toEqual([1])
+    expect(await lines(rpc, 'mgr.trash.emptyTrash()', 'purge-callers')).toEqual([1])
   })
   it('lets a listed call be made as many times as listed: a second identical call is a finding (#204)', async () => {
     const manager = 'packages/agent-host/src/sessions/manager.ts'
-    const once = ['self.purgeSession(id)', 'this.trash.emptyTrash()', 'this.trash.purgeSession(id)'].join(NL)
+    const once = ['self.trash.purgeSession(id)'].join(NL)
     expect(await lines(manager, once, 'purge-callers')).toEqual([])
     // The listed line did not make it free: the second call is reported, with the first (the finding is a count, not a place)
-    expect(await lines(manager, once + NL + 'this.trash.purgeSession(other)', 'purge-callers')).toEqual([3, 4])
-    expect(await lines('packages/agent-host/src/rpc.ts', 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(a)' + NL + 'mgr.purgeSession(b)', 'purge-callers')).toEqual([2, 3])
-    expect(await lines('packages/agent-host/src/sessions/manager.ts', 'this.trash.purgeSubagentSteps(a)' + NL + 'this.trash.purgeSubagentSteps(b)', 'subagent-purge-callers')).toEqual([1, 2])
+    expect(await lines(manager, once + NL + 'self.trash.purgeSession(other)', 'purge-callers')).toEqual([1, 2])
+    expect(await lines('packages/agent-host/src/rpc.ts', 'mgr.trash.emptyTrash()' + NL + 'mgr.trash.purgeSession(a)' + NL + 'mgr.trash.purgeSession(b)', 'purge-callers')).toEqual([2, 3])
+    expect(await lines('packages/agent-host/src/rpc.ts', 'mgr.trash.purgeSubagentSteps(a)' + NL + 'mgr.trash.purgeSubagentSteps(b)', 'subagent-purge-callers')).toEqual([1, 2])
   })
   it('reads the host sources, not its tests', async () => {
     expect(await lines('packages/agent-host/src/sessions/x.test.ts', 'mgr.purgeSession(id)', 'purge-callers')).toEqual([])

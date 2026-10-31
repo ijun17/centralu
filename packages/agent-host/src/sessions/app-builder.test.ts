@@ -345,7 +345,7 @@ describe('a builder asked for twice at once (#839)', () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     expect(builder).toBeNull()
     claude.fail = false
-    const [a, b] = await Promise.all([mgr.createAppBuilder({ projectId, appId: 'notes' }), mgr.createAppBuilder({ projectId, appId: 'notes' })])
+    const [a, b] = await Promise.all([mgr.appSessions.createAppBuilder({ projectId, appId: 'notes' }), mgr.appSessions.createAppBuilder({ projectId, appId: 'notes' })])
     expect(a.id).toBe(b.id)
     expect(mgr.listSessions().filter((s) => s.appId === 'notes')).toHaveLength(1)
     expect(claude.seen).toHaveLength(1)
@@ -357,8 +357,8 @@ describe('a builder asked for on another tool while one is stood up (#839 review
     claude.fail = true
     await create({ projectId, id: 'notes', name: 'Notes' })
     claude.fail = false
-    const first = mgr.createAppBuilder({ projectId, appId: 'notes' }, 'claude')
-    await expect(mgr.createAppBuilder({ projectId, appId: 'notes' }, 'codex')).rejects.toThrow(/already being started on claude/)
+    const first = mgr.appSessions.createAppBuilder({ projectId, appId: 'notes' }, 'claude')
+    await expect(mgr.appSessions.createAppBuilder({ projectId, appId: 'notes' }, 'codex')).rejects.toThrow(/already being started on claude/)
     expect((await first).tool).toBe('claude')
     expect(codex.seen).toEqual([])
   })
