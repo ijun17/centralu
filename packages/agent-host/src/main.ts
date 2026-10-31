@@ -288,8 +288,9 @@ start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))
 
 /*
- * A store a newer Centralu wrote, past what this host can read (#292), or one older than the v27 baseline (#1143), is
- * refused like a lock conflict (HO2). Any other failure to open still throws.
+ * A store a newer Centralu wrote, past what this host can read (#292), is refused like a lock
+ * conflict (HO2). One older than the v27 baseline (#1143) exits the same way, but the desktop supervisor does not
+ * know its sentence and retries before it shows it. Any other failure to open still throws.
  */
 start.at('store')
 let store: Store
