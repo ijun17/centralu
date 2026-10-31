@@ -5,7 +5,7 @@
  */
 import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials } from './serve-host.mjs'
+import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
 import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
 
@@ -36,7 +36,7 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const installed = protocolVersionOf(entry) ?? 0
   const prove = hostProvesOf(entry)
   // The limited credential is enough to probe and to stop it (#1405, `host.stop` is everyday)
-  const own = ownCredentials(state, entry)
+  const own = { token: state.token, proofKey: state.proofKey }
   const probe = () => probeHost({ port, ...own, protocolVersion: installed, prove })
   const first = await probe()
   if (!heldHere(first, dataDir, undefined, state.port != null)) {
@@ -138,13 +138,12 @@ export async function moveIntoSignIn({
   const port = state.port ?? DEFAULT_SERVE_PORT
   const prove = hostProvesOf(entry)
   const protocolVersion = existing.protocolVersion ?? protocolVersionOf(entry) ?? 0
-  const own = ownCredentials(state, entry)
+  const own = { token: state.token, proofKey: state.proofKey }
   /*
    * `host.handover` takes everyday rights (#1711, docs/plans/key-pairing.md §4.4): said with the credentials this
    * launcher holds for its own host (the limited credential, after a proof under the key), and no credential is made for
    * it. Before, a full one made for this call went to whatever answered that proof, which a reader of serve.json can. A
-   * host from #1405 to key pairing refuses it (`link`): no note on the row while this waits, and the move goes on. An
-   * older installed host knows only the token kept for it (`ownCredentials`)
+   * host from #1405 to key pairing refuses it (`link`): no note on the row while this waits, and the move goes on
    */
   const sayHandover = (h) => askHostRpc({ port, ...own, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
   const report = (handover) => (tell ?? sayHandover)(handover)
