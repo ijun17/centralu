@@ -48,6 +48,7 @@ import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
 import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, keeperProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { missingIcoImages } from './icon-check.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
@@ -206,6 +207,14 @@ function installLinuxHost(pkgDir: string): void {
   const dest = join(pkgDir, 'host')
   rmSync(dest, { recursive: true, force: true })
   cpSync(join(ROOT, 'apps/desktop/src-tauri/resources/host'), dest, { recursive: true, dereference: true })
+}
+
+const ICONS = join(ROOT, 'apps/desktop/src-tauri/icons')
+
+/** The menu entry's icon in a Linux package is the repository's (#1736): `centralu install` points the entry at it */
+function checkLinuxIcon(pkgDir: string): void {
+  if (!readFileSync(join(pkgDir, 'icon.png')).equals(readFileSync(join(ICONS, 'icon.png')))) fail(`icon.png in the package differs from ${join(ICONS, 'icon.png')}`)
+  console.log("  icon.png is the repository's")
 }
 
 /** The files `centralu serve` cannot start without, in the unpacked Linux host */
@@ -416,6 +425,7 @@ const TARGETS: Record<string, Target | undefined> = {
     },
     check: (dest) => {
       checkLinuxHost(dirname(dest))
+      checkLinuxIcon(dirname(dest))
       /*
        * (a) macOS verifies the code signature here. An AppImage has none, so check what the
        *     signature was really standing in for: that this file is the artifact we think it
@@ -473,6 +483,7 @@ const TARGETS: Record<string, Target | undefined> = {
     },
     check: (dest) => {
       checkLinuxHost(dirname(dest))
+      checkLinuxIcon(dirname(dest))
       // (a) same AppImage-magic check as linux-x64 — arch-independent
       const magic = head(dest, 11)
       if (magic.subarray(0, 4).toString('latin1') !== '\x7fELF') fail(`not an ELF binary: ${dest}`)
@@ -576,6 +587,11 @@ const TARGETS: Record<string, Target | undefined> = {
       const machine = pe.readUInt16LE(at + 4)
       if (machine !== 0x8664) fail(`not x86-64: PE machine 0x${machine.toString(16)}`)
       console.log('  PE32+ x86-64')
+
+      // (d) the window's icon, the taskbar's and the Start menu's: every image of the repository's icon.ico (#1736)
+      const missing = missingIcoImages(readFileSync(join(ICONS, 'icon.ico')), readFileSync(exe))
+      if (missing.length) fail(`centralu.exe lacks image(s) ${missing.join(', ')} of ${join(ICONS, 'icon.ico')}: it was built with another icon`)
+      console.log('  icon.ico embedded')
     },
   },
 }

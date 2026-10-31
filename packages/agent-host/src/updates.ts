@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
@@ -130,10 +130,31 @@ export type UpdateDeps = {
   writeAutoApply?: (enabled: boolean) => void
   /** Test seam for the bounded registry-propagation wait. */
   wait?: (ms: number) => Promise<void>
+  /** The npm package's own launcher (`<npm root -g>/centralu/bin/centralu.mjs`), when it is there (`followHost`) */
+  globalLauncher?: () => Promise<string | null>
+  /** The Node that runs that launcher: this host's (`process.execPath`) */
+  node?: string
 }
 
 /** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
 export { installedCopyPath }
+
+/**
+ * The launcher of the globally installed npm package, by its path: `npm root -g`, then `centralu/bin/centralu.mjs`.
+ *
+ * Not `centralu` from PATH: on a machine a hub manages, that may be the hub's shim (`<data>/remote/bin`), whose
+ * `install` has no desktop app to copy, since the hub installs the host-only package there.
+ */
+async function npmGlobalLauncher(): Promise<string | null> {
+  const cmd = commandFor('npm', ['root', '-g'])
+  const out = await new Promise<string>((done) => {
+    execFile(cmd.file, cmd.args, { timeout: 60_000, windowsHide: true }, (err, stdout) => done(err ? '' : String(stdout)))
+  })
+  const root = out.trim().split(/\r?\n/).at(-1)?.trim()
+  if (!root) return null
+  const launcher = join(root, APP_SLUG, 'bin', `${APP_SLUG}.mjs`)
+  return existsSync(launcher) ? launcher : null
+}
 
 function existingInstalledCopy(): string | null {
   const path = installedCopyPath()
@@ -151,6 +172,7 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
   const source = installedCopyVersionSource(copy, platform)
   if (!source) return null
   try {
+    if (source.kind === 'menu-entry') return menuEntryVersion(copy)
     const text =
       source.kind === 'command'
         ? execFileSync(source.file, source.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000, windowsHide: true })
@@ -159,6 +181,14 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
   } catch {
     return null
   }
+}
+
+/** The version of the package whose AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`) */
+function menuEntryVersion(entry: string): string | null {
+  const app = /^Exec="([^"]+)"/m.exec(readFileSync(entry, 'utf8'))?.[1]
+  if (!app) return null
+  const version = (JSON.parse(readFileSync(join(dirname(app), 'package.json'), 'utf8')) as { version?: unknown }).version
+  return typeof version === 'string' && version.trim() ? version.trim() : null
 }
 
 /**
@@ -247,6 +277,8 @@ export class UpdateService {
   private retry: { version: string; failures: number; at: number } | null = null
   /** Cancels the automatic retry timer, while one is pending */
   private retryTimer: (() => void) | null = null
+  /** The installed copy being brought to this host's version (`followHost`), while it runs */
+  private following: Promise<void> | null = null
 
   constructor(
     private publish: (status: UpdateStatus) => void,
@@ -276,6 +308,8 @@ export class UpdateService {
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
       wait: deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+      globalLauncher: deps.globalLauncher ?? npmGlobalLauncher,
+      node: deps.node ?? process.execPath,
     }
     this.status = {
       /*
@@ -539,6 +573,8 @@ export class UpdateService {
       // Finish an older check before asking again, including when auto-apply started inside it.
       // Keep the install busy throughout: checks and another click must not replace its target.
       await this.inFlight
+      // Never two installs at once: one bringing the copy to this host's version finishes first (`followHost`)
+      await this.following
       if (this.stopped) return
       const age = this.status.checkedAt === null ? Infinity : this.deps.now() - this.status.checkedAt
       if (version === null || age < 0 || age >= INSTALL_CHECK_MAX_AGE_MS) {
@@ -648,6 +684,47 @@ export class UpdateService {
         if (this.status.phase === 'failed') this.installIfAutomatic()
       }
       answer()
+    }
+  }
+
+  /**
+   * Bring the installed desktop copy up to this host's own version (#1736), once per host start; main.ts calls it only
+   * for a host a linked hub installed (`copyFollowsHost`, update-switches.ts, which says why and which switch rules it).
+   *
+   * Only a copy older than this host, or whose version cannot be read, is replaced: after a rollback by the hub the copy
+   * is newer and stays, since a window of the same protocol works with the older host, and a maintainer's local build
+   * newer than this host stays by the same compare. The version is pinned, never `latest`: the hub decides it.
+   *
+   * The same two steps as an install from the app (`runApply`): `npm i -g centralu@<this version>`, then the npm
+   * package's own launcher's `install` by its path (`npmGlobalLauncher`), which on Windows renames the running copy
+   * aside. Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
+   * which is also when the hub's next update arrives. Never beside an install from the app: one running leaves this for
+   * the next start, and one asked for meanwhile waits for this to end (`runApply`).
+   */
+  followHost(): Promise<void> {
+    if (this.stopped || this.installing || this.following) return this.following ?? Promise.resolve()
+    const copy = this.deps.installedCopy()
+    if (!copy) return Promise.resolve()
+    const was = this.deps.installedCopyVersion(copy)
+    const to = this.deps.current
+    if (was !== null && !isNewerVersion(to, was)) return Promise.resolve()
+    this.following = this.runFollow(copy, was, to).finally(() => {
+      this.following = null
+    })
+    return this.following
+  }
+
+  private async runFollow(copy: string, was: string | null, to: string): Promise<void> {
+    try {
+      await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${to}`])
+      if (this.stopped) return
+      const launcher = await this.deps.globalLauncher()
+      if (!launcher) throw new Error(`npm installed ${APP_SLUG}@${to}, but \`npm root -g\` did not lead to its launcher`)
+      if (this.stopped) return
+      await this.deps.run(this.deps.node, [launcher, 'install'])
+      console.error(`[updates] the installed copy at ${copy} moved from ${was ?? 'an unreadable version'} to ${to}, this host's version`)
+    } catch (e) {
+      console.error(`[updates] could not bring the installed copy at ${copy} to ${to}: ${(e as Error).message}; tried again at the next host start`)
     }
   }
 

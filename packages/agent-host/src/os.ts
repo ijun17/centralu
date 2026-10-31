@@ -179,18 +179,20 @@ export function installedCopyPath(
  * plists alike. It is the launcher's command (`bundleVersionCommand` in
  * `packaging/npm/centralu/bin/platform.mjs`, pinned to this by `updates.test.ts`), so the host and
  * `centralu install` never disagree about a copy. Windows: the `centralu-version.txt` the launcher
- * writes beside the copy (the exe's version resource drops the prerelease tag). Nothing on Linux:
- * its menu entry points back into the npm package, so there is no second copy to compare.
+ * writes beside the copy (the exe's version resource drops the prerelease tag). Linux: the menu entry points back
+ * into the npm package (`Exec=` names the AppImage in `@centralu/linux-<arch>`), so the copy's version is that
+ * package's, read from the `package.json` beside the AppImage (#1736).
  */
 export function installedCopyVersionSource(
   copy: string,
   platform: Platform = HOST_PLATFORM,
-): { kind: 'command'; file: string; args: string[] } | { kind: 'file'; name: string } | null {
+): { kind: 'command'; file: string; args: string[] } | { kind: 'file'; name: string } | { kind: 'menu-entry' } | null {
   if (platform === 'darwin') {
     return { kind: 'command', file: '/usr/bin/plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(copy, 'Contents', 'Info.plist')] }
   }
   // A file name in the copy, joined where it is read (by that host's path rules)
   if (platform === 'win32') return { kind: 'file', name: 'centralu-version.txt' }
+  if (platform === 'linux') return { kind: 'menu-entry' }
   return null
 }
 

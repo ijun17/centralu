@@ -54,10 +54,44 @@ export type InstallFacts = {
  * temporary one, and it must not install the published package globally on the machine running it.
  */
 export function installsByDefault(f: InstallFacts): boolean {
-  const ci = f.env.CI !== undefined && f.env.CI !== '' && f.env.CI !== '0' && f.env.CI.toLowerCase() !== 'false'
-  if (f.build === 'dev' || ci) return false
+  if (f.build === 'dev' || inCi(f.env)) return false
   if (f.startedBy === 'app') return true
   return f.startedBy === 'keeper' && f.bundlePath !== null && samePath(f.bundlePath, f.installedCopy)
+}
+
+/** What decides whether a host brings the installed desktop copy up to its own version (`copyFollowsHost`) */
+export type FollowFacts = {
+  /** The bundled build id, or `dev` for a host run from source */
+  build: string
+  startedBy: 'app' | 'keeper' | 'serve' | null
+  /** The script this host runs from (`process.argv[1]`) */
+  entry: string | undefined
+  /** Where a linked hub installs Centralu in this data folder (`<data>/remote`, links/install.ts) */
+  hubInstall: string
+  env: Record<string, string | undefined>
+}
+
+/**
+ * Whether this host brings the installed desktop copy (`installedCopyPath`) up to its own version (#1736,
+ * `UpdateService.followHost`): only a `centralu serve` host a linked hub installed, a release, not under CI.
+ *
+ * The hub updates such a machine with the host-only package (`machines.update`), which has no desktop executable, so a
+ * window there that runs on this host (`start_plan.rs`, `Host::Serve`) would keep the executable it was installed with
+ * for good, its icon, shell and keeper included. The host the hub just moved is the one that knows the version to reach.
+ *
+ * It follows the same rule as the hub's update of the host itself: the machine's own "Automatic updates" switch is not
+ * read, because the hub does not read it either (`LinkedMachine.followsHub` reads the hub's). A host from the npm
+ * package (`centralu serve` run by hand) is left out: refreshing the package would replace the files it runs from.
+ */
+export function copyFollowsHost(f: FollowFacts): boolean {
+  if (f.build === 'dev' || inCi(f.env) || f.startedBy !== 'serve' || !f.entry) return false
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return norm(f.entry).startsWith(`${norm(f.hubInstall)}/`)
+}
+
+/** `CI` set to anything but empty, `0` or `false` */
+function inCi(env: Record<string, string | undefined>): boolean {
+  return env.CI !== undefined && env.CI !== '' && env.CI !== '0' && env.CI.toLowerCase() !== 'false'
 }
 
 /** Two paths the same once trailing separators are dropped */

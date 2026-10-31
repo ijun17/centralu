@@ -2652,7 +2652,8 @@ putting the release it was cut from over it would undo it (`keepsInstalledCopy`,
 `semver.mjs`). A version that cannot be read or is not well-formed SemVer in that shape is replaced, so a corrupt
 plist or version file cannot block updates. The version is read the same way as the launcher reads it
 (`readInstalledCopyVersion`: `plutil -extract CFBundleShortVersionString raw` on the bundle's `Info.plist`, XML or
-binary, on macOS; the launcher's `centralu-version.txt` on Windows; nothing on Linux). When a local build is kept,
+binary, on macOS; the launcher's `centralu-version.txt` on Windows; on Linux the `package.json` beside the AppImage the
+menu entry's `Exec=` starts, #1736). When a local build is kept,
 the package is still updated, `restart_required` carries a notice naming it, and the window's own bundle check offers
 to apply it. `centralu install` applies the same rule by itself and takes `--force` to replace such a copy on
 purpose (#645). With `autoApply` on ("Apply updates
@@ -3522,6 +3523,22 @@ the person did not remove what the hub installed there, neither side runs a loca
 - **An agent's call.** A limited caller's `machines.update` with `when` `idle` or absent runs without a card when
   `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"); the
   transport judges it once and tells the handler (`RpcContext.covered`), and the orchestrator's `install_machine` (update) goes without its card on the same check; both run `unasked`.
+
+**The desktop copy follows the host** (#1736). The hub's update brings the host-only package, which has no desktop
+executable, so a Windows window that runs on the machine's `centralu serve` host (`start_plan.rs`, `Host::Serve`) kept the
+executable it was installed with: its icon, shell and keeper never moved. So a `centralu serve` host the hub installed
+(its entry under `<data>/remote`; a release, not under CI: `copyFollowsHost` in `update-switches.ts`) brings the
+installed copy (`installedCopyPath`) up to its own version once per start (`UpdateService.followHost`): when the copy is
+older than the host or its version cannot be read, it runs `npm i -g --prefer-online centralu@<host version>` and then the
+npm package's own launcher's `install`, by its path (`npm root -g`), not `centralu` from PATH, which there may be the
+hub's shim with no app to copy. On Windows that renames the running copy aside (the table under "On Windows" above), so
+the window's next start runs the new executable; on Linux the menu entry already points into the package. A copy newer
+than the host (a rollback by the hub, or a newer local build) stays. It follows the rule of the hub's update of the host
+itself: the machine's own "Automatic updates" switch is not read, since the hub reads only its own. Nobody sees it: no
+status changes. A failure is one line in the host log and is tried again at the next host start; it never runs beside
+an install from the app (one running leaves it for the next start, one asked for meanwhile waits for it). The release
+check (`scripts/release-npm.mts`, `scripts/icon-check.mts`) fails a Windows package whose `centralu.exe` lacks an image of
+`icons/icon.ico` and a Linux package whose `icon.png` differs from `icons/icon.png`.
 
 **Starting a machine's host at boot** (plan §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
 on? }` (additive) runs `centralu serve --autostart on|off|status` there through the lookup, and the Centralu found

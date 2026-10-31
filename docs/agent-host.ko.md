@@ -1816,6 +1816,17 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 보인다. 에이전트(제한된 자격)의 `machines.update`도 `when`이 `idle`이거나 없고 `followsHub`가 참이면 카드 없이 돌고(`transport/method-rights.ts`의 `RightsHost`),
 오케스트레이터의 `install_machine`(update)도 같은 확인으로 카드를 건너뛴다. `now`, 롤백, 제거, 설치, `acceptVersions`는 계속 묻는다.
 
+**데스크톱 사본은 호스트를 따른다**(#1736). 허브의 업데이트는 데스크톱 실행 파일이 없는 호스트 전용 패키지를 가져오므로, 기기의 `centralu serve`
+호스트로 도는 Windows 창(`start_plan.rs`, `Host::Serve`)은 설치될 때의 실행 파일에 머물렀다(아이콘, 셸, 키퍼 모두). 그래서 허브가 설치한
+`centralu serve` 호스트(진입점이 `<data>/remote` 아래, 릴리스, CI 아님: `update-switches.ts`의 `copyFollowsHost`)는 시작할 때마다 한 번 설치된
+사본(`installedCopyPath`)을 자기 버전으로 올린다(`UpdateService.followHost`). 사본이 호스트보다 오래되었거나 버전을 읽을 수 없으면
+`npm i -g --prefer-online centralu@<호스트 버전>`을 돌린 뒤, PATH의 `centralu`(거기서는 복사할 앱이 없는 허브의 shim일 수 있다)가 아니라
+npm 패키지의 런처를 경로로(`npm root -g`) 불러 `install`한다. Windows에서는 도는 사본을 옆으로 옮기므로 창의 다음 시작이 새 실행 파일을
+돌린다. 호스트보다 새 사본(허브의 롤백, 더 새 로컬 빌드)은 그대로 둔다. 호스트 자체에 대한 허브의 업데이트와 같은 규칙을 따라, 기기 자신의
+"Automatic updates" 스위치는 읽지 않는다. 화면에 보이는 것은 없다. 실패는 호스트 로그 한 줄이고 다음 호스트 시작에 다시 시도하며, 앱의 설치와
+나란히 돌지 않는다. 릴리스 확인(`scripts/release-npm.mts`, `scripts/icon-check.mts`)은 `centralu.exe`에 `icons/icon.ico`의 이미지가 빠진
+Windows 패키지와 `icon.png`가 `icons/icon.png`와 다른 Linux 패키지를 실패시킨다.
+
 **업데이트가 끊은 턴은 이어진다**(#1618, 2026-10-26 소유자 결정). 기다리지 않는 업데이트(사람의 `now`, 아무도 승인하지 않은 모든 업데이트)는
 그쪽에서 돌던 턴을 끊는다. 그 업데이트가 띄운 호스트가 각 턴을 사람의 Continue처럼 한 번 이어 간다.
 - **어느 턴.** 정의는 하나이고, 멈추는 호스트가 멈추는 순간에 기록한다: 세션들을 놓을 때 턴 중인 세션들(idle.ts의 `cutTurns`: working, 또는 승인·질문
