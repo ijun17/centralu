@@ -176,7 +176,7 @@ export const tools = {
         view: z.enum(['answers', 'items', 'summaries']).optional().describe('Default "answers"'),
         all: z.boolean().optional().describe('answers: also the answers already recorded; default false'),
         area: z.string().optional().describe('items: only this Area, for example "UI"'),
-        detail: detailInput.describe('items: "full" adds type, state, URL and ids'),
+        detail: detailInput.describe('items: "full" adds type, state, URL and ids; default "compact"'),
         refresh: refreshInput.describe('summaries: skip the short cache and ask GitHub now'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },

@@ -311,8 +311,7 @@ export async function failingLine(repo, job) {
  * branch of this repository and starts CI there, with this repository's secrets).
  */
 export function batchable(pr) {
-  if (pr.isCrossRepository) return false
-  return true
+  return !pr.isCrossRepository
 }
 
 /**

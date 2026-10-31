@@ -3438,7 +3438,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     runtime(
       tieredState({
         prs: {
-          '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }),
+          '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched' }),
           '78': ghPr(78, { headRefOid: B, isCrossRepository: true }),
         },
         runs: { [SHA]: [ghRun('success')], [B]: [ownRun(78, B, 902, 5002, 'success')] },
@@ -3449,7 +3449,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
     await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the full run to land and the fork to need attention', BATCH_WAIT_MS)
-    expect(writes().map(short2)).toEqual(['merge 77', 'delete chore/release-9.9.9-beta.1'])
+    expect(writes().map(short2)).toEqual(['merge 77', 'delete feat/unbatched'])
     expect(batchesOnDisk()).toEqual([])
     expect(notices().find((e) => e.text.includes('#78'))!.text).toContain("ran only the quick tier of CI")
   })
@@ -5492,27 +5492,27 @@ describe('the merge queue does by itself what it told a session to do by hand (#
     const quick = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
     const unbatched = (extra: Record<string, unknown> = {}) =>
       ghState({
-        prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1', ...extra }) },
+        prs: { '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched', ...extra }) },
         checks: { [SHA]: quick },
         runs: { [SHA]: [ghRun('success')] },
       })
 
     it('has the full tier started on its branch, once, when it passed only the quick tier', async () => {
-      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      seedQueue([item({ title: 'feat(x): unbatched' })])
       runtime(unbatched(), NO_BATCH)
       await until(() => writes().some((w) => w[0] === 'dispatch'), 'the dispatch')
       await morePolls()
-      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'chore/release-9.9.9-beta.1']])
-      expect(gh().dispatched).toEqual([{ ref: 'chore/release-9.9.9-beta.1', inputs: null }])
-      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on chore/release-9.9.9-beta.1')
+      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'feat/unbatched']])
+      expect(gh().dispatched).toEqual([{ ref: 'feat/unbatched', inputs: null }])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on feat/unbatched')
       expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
     })
 
     it('writes the dispatch down before asking for it, so a call the network cuts off is not repeated into a second run', async () => {
-      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      seedQueue([item({ title: 'feat(x): unbatched' })])
       runtime(
         ghState({
-          prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }) },
+          prs: { '77': ghPr(77, { headRefName: 'feat/unbatched', title: 'feat(x): unbatched' }) },
           checks: { [SHA]: quick },
           runs: { [SHA]: [ghRun('success')] },
           // gh cannot reach GitHub at the dispatch: the queue pauses, and the item remembers it was asked for on this head
