@@ -2542,7 +2542,7 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   that can carry script and external references, which the window would be taking on the strength of an agent's
   sentence (`<img>` does not run them, but nothing here needs it to). The project file viewer still shows a project's
   SVGs.
-- **At most 10 MB** (`IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
+- **At most 10 MB** (10 MiB, `IMAGE_PREVIEW_MAX_BYTES`, shared with the file viewer's preview), checked on the opened file
   and again on what was read, so a file that grows between the two is still refused.
 - **Only this machine.** A `file://` URL that names another host is refused, and on Windows so is any path that
   resolves to `\\…`: a UNC share (`\\server\share`, `//server/share`, and `file://server/share`, which Node turns into

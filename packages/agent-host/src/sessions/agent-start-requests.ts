@@ -9,7 +9,8 @@ import type { AgentConsents } from './agent-consents.js'
 import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
-import { gigabytes, type MemoryShortfall } from './memory-gate.js'
+import { bytesText } from '../bytes-text.js'
+import type { MemoryShortfall } from './memory-gate.js'
 import { FILL, namedCall } from './tool-seats.js'
 import { ASK_THE_PERSON, ORCHESTRATOR_PLACE, agentStartPending, agentStartPersonText, orchestratorPlace, type StartProgress } from './start-agent-terms.js'
 
@@ -149,7 +150,7 @@ export class AgentStartRequests {
 
   /** A shortfall in the words the caller and the person read (#686) */
   lowMemory(short: MemoryShortfall): LowMemory {
-    return { available: gigabytes(short.available), floor: gigabytes(short.floor), maxWaitMinutes: this.host.memoryGate?.maxWaitMinutes ?? 0 }
+    return { available: bytesText(short.available), floor: bytesText(short.floor), maxWaitMinutes: this.host.memoryGate?.maxWaitMinutes ?? 0 }
   }
 
   /**

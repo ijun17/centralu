@@ -265,11 +265,11 @@ describe('readMessageImage', () => {
   })
 
   it('refuses a PNG past the real 10 MB cap without reading it', async () => {
-    const big = Buffer.alloc(IMAGE_PREVIEW_MAX_BYTES + 1)
+    const big = Buffer.alloc(IMAGE_PREVIEW_MAX_BYTES + 1024 * 1024)
     PNG.copy(big)
     writeFileSync(join(dir, 'big.png'), big)
     const got = await readMessageImage(join(dir, 'big.png'))
-    expect(got).toMatchObject({ ok: false, reason: 'too_large', file: join(dir, 'big.png') })
+    expect(got).toMatchObject({ ok: false, reason: 'too_large', file: join(dir, 'big.png'), message: 'The image is 11 MB; a reply shows images up to 10 MB' })
     expect(got).not.toHaveProperty('data')
   })
 })
