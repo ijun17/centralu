@@ -253,7 +253,6 @@ export interface ToolWire {
   readonly turns: {
     midTurnInput: boolean                     // false: the core queues (ACP, agy); true: sent at once (Claude, Codex)
     interruptEndsProcess: boolean             // agy: a Stop ends the process; the next input starts a new one
-    confirmsStop: boolean                     // the tool ends the turn after a Stop (timer applies); §2.4
   }
   /** What `auto` answers for a call that reaches the decision order (§2.7): Claude deny, ACP and agy allow */
   readonly autoGrant: 'allow' | 'deny'
