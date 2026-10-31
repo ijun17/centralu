@@ -206,8 +206,8 @@ export class SessionManager {
   private readonly usageRecorder: UsageRecorder
   /** Each model's context window as the tools reported it, for where agents compact (#1376, auto-compact.ts) */
   private readonly modelWindows: ModelWindows
-  /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
-  private readonly files: ProjectFiles
+  /** A project's git panel, file tree and file operations (dev-services/project-files.ts); the RPC router calls it directly */
+  readonly files: ProjectFiles
   /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
   private readonly toolRegistry: ToolRegistry
   /** The remembered "always allow" answers: written, read for a launch, listed in Settings (approval-rules.ts) */
@@ -1958,99 +1958,14 @@ export class SessionManager {
     return this.projectRegistry.gitTrust(...a)
   }
 
-  /** `ProjectFiles.projectOrigin` (dev-services/project-files.ts), kept on the manager for its callers */
-  projectOrigin(...a: Parameters<ProjectFiles['projectOrigin']>): ReturnType<ProjectFiles['projectOrigin']> {
-    return this.files.projectOrigin(...a)
-  }
-
-  /** `ProjectFiles.gitStatusFiles` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitStatusFiles(...a: Parameters<ProjectFiles['gitStatusFiles']>): ReturnType<ProjectFiles['gitStatusFiles']> {
-    return this.files.gitStatusFiles(...a)
-  }
-
-  /** `ProjectFiles.gitDiff` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitDiff(...a: Parameters<ProjectFiles['gitDiff']>): ReturnType<ProjectFiles['gitDiff']> {
-    return this.files.gitDiff(...a)
-  }
-
-  /** `ProjectFiles.gitLog` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitLog(...a: Parameters<ProjectFiles['gitLog']>): ReturnType<ProjectFiles['gitLog']> {
-    return this.files.gitLog(...a)
-  }
-
-  /** `ProjectFiles.gitCommitDetail` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitCommitDetail(...a: Parameters<ProjectFiles['gitCommitDetail']>): ReturnType<ProjectFiles['gitCommitDetail']> {
-    return this.files.gitCommitDetail(...a)
-  }
-
-  /** `ProjectFiles.gitBranches` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitBranches(...a: Parameters<ProjectFiles['gitBranches']>): ReturnType<ProjectFiles['gitBranches']> {
-    return this.files.gitBranches(...a)
-  }
-
   /** `ProjectFiles.gitIgnoredEntries` (dev-services/project-files.ts), kept on the manager for its callers */
   gitIgnoredEntries(...a: Parameters<ProjectFiles['gitIgnoredEntries']>): ReturnType<ProjectFiles['gitIgnoredEntries']> {
     return this.files.gitIgnoredEntries(...a)
   }
 
-  /** `ProjectFiles.gitCheckout` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitCheckout(...a: Parameters<ProjectFiles['gitCheckout']>): ReturnType<ProjectFiles['gitCheckout']> {
-    return this.files.gitCheckout(...a)
-  }
-
-  /** `ProjectFiles.gitStage` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitStage(...a: Parameters<ProjectFiles['gitStage']>): ReturnType<ProjectFiles['gitStage']> {
-    return this.files.gitStage(...a)
-  }
-
-  /** `ProjectFiles.gitCommit` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitCommit(...a: Parameters<ProjectFiles['gitCommit']>): ReturnType<ProjectFiles['gitCommit']> {
-    return this.files.gitCommit(...a)
-  }
-
-  /** `ProjectFiles.gitPush` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitPush(...a: Parameters<ProjectFiles['gitPush']>): ReturnType<ProjectFiles['gitPush']> {
-    return this.files.gitPush(...a)
-  }
-
-  /** `ProjectFiles.gitCancel` (dev-services/project-files.ts), kept on the manager for its callers */
-  gitCancel(...a: Parameters<ProjectFiles['gitCancel']>): ReturnType<ProjectFiles['gitCancel']> {
-    return this.files.gitCancel(...a)
-  }
-
-  /** `ProjectFiles.listDir` (dev-services/project-files.ts), kept on the manager for its callers */
-  listDir(...a: Parameters<ProjectFiles['listDir']>): ReturnType<ProjectFiles['listDir']> {
-    return this.files.listDir(...a)
-  }
-
-  /** `ProjectFiles.watchDirs` (dev-services/project-files.ts), kept on the manager for its callers */
-  watchDirs(...a: Parameters<ProjectFiles['watchDirs']>): ReturnType<ProjectFiles['watchDirs']> {
-    return this.files.watchDirs(...a)
-  }
-
   /** `ProjectFiles.forgetWatchHolder` (dev-services/project-files.ts), kept on the manager for its callers */
   forgetWatchHolder(...a: Parameters<ProjectFiles['forgetWatchHolder']>): ReturnType<ProjectFiles['forgetWatchHolder']> {
     return this.files.forgetWatchHolder(...a)
-  }
-
-  /** `ProjectFiles.readTextFile` (dev-services/project-files.ts), kept on the manager for its callers */
-  readTextFile(...a: Parameters<ProjectFiles['readTextFile']>): ReturnType<ProjectFiles['readTextFile']> {
-    return this.files.readTextFile(...a)
-  }
-
-  /** `ProjectFiles.moveEntry` (dev-services/project-files.ts), kept on the manager for its callers */
-  moveEntry(...a: Parameters<ProjectFiles['moveEntry']>): ReturnType<ProjectFiles['moveEntry']> {
-    return this.files.moveEntry(...a)
-  }
-
-  /** `ProjectFiles.importFile` (dev-services/project-files.ts), kept on the manager for its callers */
-  importFile(...a: Parameters<ProjectFiles['importFile']>): ReturnType<ProjectFiles['importFile']> {
-    return this.files.importFile(...a)
-  }
-
-  /** `ProjectFiles.resolveFile` (dev-services/project-files.ts), kept on the manager for its callers */
-  resolveFile(...a: Parameters<ProjectFiles['resolveFile']>): ReturnType<ProjectFiles['resolveFile']> {
-    return this.files.resolveFile(...a)
   }
 
   /** `UiPreferenceStore.saveWorkspace` (ui-preferences.ts), kept on the manager for its callers */
