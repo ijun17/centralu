@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { ASK_WAIT_MS } from './ask-project.js'
-import { PAUSED_REPORT_SETTLE_MS } from './manager.js'
+import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { askProjectText } from './tool-answers.js'
 
 /**

@@ -31,7 +31,7 @@ import {
 } from './start-agent-terms.js'
 
 // Moved to the terms start_agent's modules share (#428); still importable from here
-export { ASK_THE_PERSON, ORCHESTRATOR_PLACE, START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS, agentStartPending, agentStartPersonText } from './start-agent-terms.js'
+export { ASK_THE_PERSON, agentStartPending, agentStartPersonText } from './start-agent-terms.js'
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
 function startAgentLate(progress: StartProgress): ChildRunResult {
