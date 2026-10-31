@@ -206,11 +206,12 @@ export class MidTurnLedger {
   }
 
   /**
-   * Every tracked input fails now, and the turns they were bound to are stopped. While the conversation opens, what was sent
-   * meanwhile is dropped and no turn will come to say it stopped, so the stop is said here (#168)
+   * Every tracked input fails now, and the turns they were bound to are stopped. Before the conversation exists, what was sent
+   * meanwhile is dropped and no turn will come to say it stopped, so the stop is said here (#168). Once it exists, a turn may
+   * run in it (an adopted one, still being looked up): what waits goes once it opens, as any message sent then
    */
   interrupt(reason = new Error('The parent note was stopped before it finished')): void {
-    const waking = this.phase === 'opening' && this.queue.length > 0
+    const waking = this.phase === 'opening' && !this.wire.hasConversation() && this.queue.length > 0
     for (const turn of this.receipts.failAll(reason)) {
       if (turn !== this.running && !this.ended.includes(turn)) this.stop(turn, false)
     }
@@ -249,15 +250,17 @@ export class MidTurnLedger {
     if (count > 0) this.emit(undeliveredError(this.sessionId, count, when))
   }
 
+  /** Said before the connection closes, while the session is still this one's (the manager drops a stale one's events) */
   async dispose(): Promise<void> {
     const opening = this.phase === 'opening'
     this.phase = 'closed'
-    const closed = this.wire.close()
     this.receipts.failAll(new Error('The session process ended before the parent note finished'))
     this.wire.connectionEnded()
-    // A message sent in this tick, with nothing to wait behind, is still written, and the closed connection refuses it
     if (opening || this.blocking) this.dropQueue(opening ? 'were sent while it was opening' : 'were sent during compaction')
-    await closed
+    // One sent in this tick with nothing to wait behind: a tracked one has failed and is not written; any other is, and the
+    // closed connection refuses it
+    this.queue = this.queue.filter((q) => !q.receipt)
+    await this.wire.close()
   }
 
   /** A host swap: the next host resumes the conversation, but not what this one held while it opened (#428) */

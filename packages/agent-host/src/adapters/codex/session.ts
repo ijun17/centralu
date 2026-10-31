@@ -168,6 +168,7 @@ export class CodexSession implements SessionHandle {
     this.ledger = new MidTurnLedger(opts.sessionId, this.emit, {
       label: 'Codex',
       open: () => this.start(),
+      hasConversation: () => this.threadId !== null,
       write: (inputs, queued) => this.write(inputs, queued),
       refusal: (err) => turnError(err.message),
       interrupt: (turnId) => this.client.request('turn/interrupt', { threadId: this.threadId, turnId }),

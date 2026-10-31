@@ -108,6 +108,8 @@ export interface MidTurnWire {
   readonly label: string
   /** Opens or resumes the conversation */
   open(): Promise<void>
+  /** The tool named the conversation while it opens: from then a turn may run in it, so a Stop no longer takes back what waits */
+  hasConversation(): boolean
   /**
    * Writes inputs as one message: several only when they `queued` behind a blocking turn, sent then as they are. `answer`
    * settles with the tool's answer and rejects when it refused; `blocking`: they started a turn no input may join until it

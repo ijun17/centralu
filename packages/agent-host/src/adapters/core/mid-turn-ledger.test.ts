@@ -32,11 +32,17 @@ class Wire implements MidTurnWire {
   readonly interrupts: string[] = []
   readonly log: string[] = []
   refuseStop: string | null = null
+  /** The tool has named the conversation (`hasConversation`) */
+  conversation = false
 
   constructor(private readonly said: string[]) {}
 
   open(): Promise<void> {
     return this.opened.promise
+  }
+
+  hasConversation(): boolean {
+    return this.conversation
   }
 
   write(inputs: readonly MidTurnInput[], queued: boolean): { answer: Promise<unknown>; blocking?: boolean } {
@@ -123,6 +129,21 @@ describe('a tool that takes input mid-turn: the queue', () => {
     expect(wire.writes.map((w) => w.texts)).toEqual([['c']])
   })
 
+  it('a Stop once the tool named the conversation, still opening, keeps what was sent: a turn may run there (an adopted one)', async () => {
+    const { wire, ledger, said, observe } = setup()
+    wire.conversation = true
+    ledger.send('a')
+    void ledger.sendTracked('b', observe('b')).catch(() => {})
+    ledger.interrupt()
+    expect(said).toEqual(['b:fail The parent note was stopped before it finished'])
+    ledger.taken([], 'adopted')
+    wire.opened.resolve()
+    await ledger.ready
+    expect(wire.writes.map((w) => w.texts)).toEqual([['a']])
+    ledger.interrupt()
+    expect(wire.interrupts).toEqual(['adopted'])
+  })
+
   it('writes what is sent on a later tick, so a Stop in the same tick keeps a tracked input from going', async () => {
     const { wire, ledger } = await ready()
     ledger.send('a')
@@ -146,6 +167,21 @@ describe('a tool that takes input mid-turn: the queue', () => {
     ledger.turnEnded('compact-1', { how: 'complete' })
     expect(wire.writes[1]).toMatchObject({ texts: ['a', '/compact'], queued: true })
     expect(said.slice(-2)).toEqual(['write:a+/compact', 'turn_complete'])
+  })
+
+  it('a refused message that waited behind a blocking turn fails every tracked input still waiting, not only its own', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    void ledger.sendTracked('x', observe('x')).catch(() => {})
+    await tick()
+    wire.answer(0, 't1')
+    ledger.send('/compact')
+    await tick()
+    ledger.send('a')
+    ledger.turnEnded('compact-1', { how: 'complete' })
+    expect(wire.writes[2]).toMatchObject({ texts: ['a'], queued: true })
+    wire.writes[2]!.reply.reject(new Error('busy'))
+    await tick()
+    expect(said.slice(-2)).toEqual(['x:fail busy', 'error'])
   })
 
   it('a blocking turn that fails to start lets what waited go, then says the refusal', async () => {
@@ -203,6 +239,75 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     ledger.turnEnded('t2', { how: 'interrupted' })
     ledger.turnEnded('t3', { how: 'interrupted' })
     expect(said.filter((s) => s.startsWith('waiting_input'))).toEqual(['waiting_input:interrupted', `waiting_input:${INTERRUPTED_BY_TOOL}`])
+  })
+
+  it('a write refused after a Stop failed its tracked input says nothing more: that Stop already did', async () => {
+    const { wire, ledger, events, observe } = await ready()
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await tick()
+    ledger.interrupt()
+    wire.writes[0]!.reply.reject(new Error('busy'))
+    await tick()
+    expect(events).toEqual([])
+    expect(wire.log).toEqual(['releaseCards'])
+  })
+
+  it('a late answer for an input already completed changes nothing, even one that names no turn', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    void ledger.sendTracked('a', observe('a'))
+    await tick()
+    // The input's own item named its turn before the write was answered
+    ledger.taken(wire.writes[0]!.inputs, 't1')
+    ledger.turnEnded('t1', { how: 'complete' })
+    void ledger.sendTracked('b', observe('b')).catch(() => {})
+    await tick()
+    wire.answer(0, null)
+    expect(said.filter((s) => s.startsWith('b:'))).toEqual([])
+    expect(ledger.steerable()).toBeNull()
+  })
+
+  it('an answer that names no turn for a tracked input fails it, as nothing will say it finished', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await tick()
+    wire.answer(0, null)
+    expect(said.slice(-1)).toEqual(['a:fail Tool did not identify the turn accepting the parent note'])
+  })
+
+  it('an error of the tool’s own fails the tracked inputs still waiting, and with none waiting releases nothing', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    ledger.failed(new Error('thread broke'))
+    expect(wire.log).toEqual([])
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await tick()
+    ledger.failed(new Error('thread broke'))
+    expect(said.slice(-1)).toEqual(['a:fail thread broke'])
+    expect(wire.log).toEqual(['releaseCards'])
+  })
+
+  it('late answers for several turns that already ended each complete their input, and bring none back for a Stop', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    void ledger.sendTracked('a', observe('a'))
+    void ledger.sendTracked('b', observe('b'))
+    await tick()
+    ledger.turnEnded('t1', { how: 'complete' })
+    ledger.turnEnded('t2', { how: 'complete' })
+    wire.answer(0, 't1')
+    wire.answer(1, 't2')
+    expect(said.filter((s) => s.endsWith(':complete'))).toEqual(['a:complete', 'b:complete'])
+    expect(ledger.steerable()).toBeNull()
+  })
+
+  it('a turn named after a Stop is stopped quietly: a refusal means it had ended, and nothing runs to say "still running"', async () => {
+    const { wire, ledger, events, observe } = await ready()
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await tick()
+    ledger.interrupt()
+    wire.refuseStop = 'no such turn'
+    wire.answer(0, 't2')
+    await tick()
+    expect(wire.interrupts).toEqual(['t2'])
+    expect(events).toEqual([])
   })
 
   it('an interrupt the tool made on its own completes the inputs of that turn', async () => {
@@ -296,7 +401,7 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     opening.ledger.send('a')
     await opening.ledger.dispose()
     expect(opening.events).toEqual([expect.objectContaining({ type: 'error', error: expect.objectContaining({ message: expect.stringContaining('were sent while it was opening') }) })])
-    expect(opening.wire.log).toEqual(['close', 'connectionEnded'])
+    expect(opening.wire.log).toEqual(['connectionEnded', 'close'])
     const blocked = await ready()
     blocked.ledger.send('/compact')
     await tick()
@@ -308,6 +413,27 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     await swapped.ledger.detach()
     expect(swapped.events.at(-1)).toMatchObject({ type: 'error', error: { message: expect.stringContaining('as Centralu restarted') } })
     expect(swapped.ledger.closed).toBe(true)
+  })
+
+  it('an opening that finishes after the close (an answer read before the process exits) leaves it closed', async () => {
+    const { wire, ledger } = setup()
+    ledger.send('a')
+    const closing = ledger.dispose()
+    wire.opened.resolve()
+    await closing
+    await ledger.ready
+    await tick()
+    expect(ledger.closed).toBe(true)
+    expect(wire.writes).toEqual([])
+  })
+
+  it('a tracked input sent in the same tick as the close fails and is not written', async () => {
+    const { wire, ledger, said, observe } = await ready()
+    void ledger.sendTracked('a', observe('a')).catch(() => {})
+    await ledger.dispose()
+    await tick()
+    expect(said).toEqual(['a:fail The session process ended before the parent note finished'])
+    expect(wire.writes).toEqual([])
   })
 
   it('a tracked input sent while it opened fails with why the opening ended, after a host swap let go of it', async () => {

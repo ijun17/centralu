@@ -328,8 +328,8 @@ What the ledger owns now, one copy for every tool on it:
   with "`<label>` exited (code N)", and the queued ones with the undelivered count and its `error` event; the close fails
   them with "the session closed". `turnInputs` names the inputs the last turn took by the host's names.
 - **The Stop** (§2.4): `stopAsked` on the turn, the wire's own Stop, the cards released, and the 10 s timer
-  (`STOP_CONFIRM_MS`, now one constant for ACP; Claude's own copy in `claude/index.ts` goes with PR 7) for a tool with
-  `confirmsStop`. The notice reads ACP's words ("`<label>` has not confirmed the stop; the turn may still be running.");
+  (`STOP_CONFIRM_MS`, now one constant for ACP; Claude's own copy in `claude/index.ts` goes with PR 7) for every tool on
+  `CoreSession` (its `confirmsStop` setting went in PR 6, §4.2). The notice reads ACP's words ("`<label>` has not confirmed the stop; the turn may still be running.");
   Claude's differ ("…after N s. The turn is still running."), so PR 7 takes ACP's words or keeps its own as a visible
   change of its own, not inside the move.
 - **"Interrupted by the tool"**: an `interrupted` ending without our Stop is `INTERRUPTED_BY_TOOL`, and its input completes.
@@ -384,8 +384,9 @@ What the mid-turn ledger owns, Codex's copies gone (`CodexTurns`, `WakingSends`,
   turn's end is said; one bound to a turn that already ended completes at once. An untracked one (`send`) has no receipt, as
   before, and gives `turn/start` no client id.
 - **The Stop.** Every tracked input fails at once (Claude does the same; ACP's fail when the stopped turn ends, §2.3), the
-  turns they were bound to are stopped, the wire releases its cards and app calls, and the running turn is stopped. While the
-  conversation opens, what was sent is dropped and the stop is said there (#168). A turn ended `interrupted` is the person's
+  turns they were bound to are stopped, the wire releases its cards and app calls, and the running turn is stopped. Before
+  the tool has named the conversation (`hasConversation`), what was sent is dropped and the stop is said there (#168); once
+  it has, while an adopted thread's running turn is still looked up, what waits goes when it opens. A turn ended `interrupted` is the person's
   Stop when our Stop was sent to it (by id, including one named after the Stop), otherwise `INTERRUPTED_BY_TOOL` (#698).
 - **An error.** A turn that failed, or an error of the thread's own, fails the tracked inputs with its message before it is
   said; a write the tool refused is said with the wire's words (`turnError`), and stops the session when it carried a
@@ -394,13 +395,15 @@ What the mid-turn ledger owns, Codex's copies gone (`CodexTurns`, `WakingSends`,
   message not yet written, or a blocking turn. The tracked inputs fail with "The session process ended before the parent
   note finished", and the wire's words for the crash are kept (`codex app-server exited (code N)` with its stderr tail).
 - **The close and `detach`.** The close fails the tracked inputs and says what never went, in the words of where it waited
-  ("were sent while it was opening" or "were sent during compaction"); `detach` says only what waited for the opening. A
+  ("were sent while it was opening" or "were sent during compaction"), then closes the connection; a tracked input sent in
+  the same tick is not written. `detach` says only what waited for the opening. A
   conversation that never opened fails the tracked inputs sent meanwhile with why, after the lazy resume's watchdog has
   spoken (`codex/background-resume.ts`).
 
 The core tests (`core/mid-turn-ledger.test.ts`) play the tool on a scripted wire: the queue while opening and behind a
 blocking turn, binding and late answers, the Stop and a turn named after it, a refused Stop, a failed turn, a refused write,
-the exit in each state, and the close's words. Codex's own tests (36 files, through its client's frames) pass unchanged. Codex
+the exit in each state, and the close's words. The #1733 review's mutants of the ledger and of Codex's calls into it each fail
+one of these or a Codex test. Codex's own tests (36 files, through its client's frames) pass unchanged. Codex
 has no recorded replays yet (PR 2 recorded none), so those tests are the pin.
 
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
@@ -536,7 +539,7 @@ estimates of changed lines without fixtures.
 | 3 | **The process seam**: `tool-process.ts` starts every tool (local, host watch, keeper, adopt) and stops it (EOF, bound, tree); the spawn and dispose paths call it; `endsWithHost` for every tool (Q3); what `agy` needs (§5.1) | M, ~350 | all adapter tests and replays unchanged; core tests for stop order and bound; a real-OS test per tool that it ends with its host | 1 (built before 2: Claude's spawn flag is in `claude/sdk-query.ts`, not its spawn site) |
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
-| 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (`confirmsStop: false`, §2.4). Done: `core/mid-turn-ledger.ts` (§4.2) | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
+| 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
 | 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
