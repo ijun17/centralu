@@ -699,23 +699,24 @@ export class MailRecords {
     return row?.n ?? 0
   }
 
+  /** The message with the highest `seq` that satisfies `where` (its `?` filled by `args`) */
+  private latestMessage(where: string, ...args: string[]): MessageRow | undefined {
+    const row = this.db.prepare<string[], MessageSql>(`SELECT * FROM mail_messages WHERE ${where} ORDER BY seq DESC LIMIT 1`).get(...args)
+    return row && toMessage(row)
+  }
+
   /** The latest message `sender` posted in the thread */
   lastBy(threadId: string, sender: string): MessageRow | undefined {
-    const row = this.db
-      .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? ORDER BY seq DESC LIMIT 1`)
-      .get(threadId, sender)
-    return row && toMessage(row)
+    return this.latestMessage('thread_id = ? AND sender = ?', threadId, sender)
   }
 
   /** Centralu's latest report of a pause in the thread that was to wake its owner (§6): the one the next pause is compared with */
   lastWakingPause(threadId: string): MessageRow | undefined {
-    const row = this.db
-      .prepare<[string], MessageSql>(
-        `SELECT * FROM mail_messages WHERE thread_id = ? AND sender = 'centralu' AND kind = 'report' AND (wake IS NULL OR wake <> 'no')
-           AND json_valid(facts) AND json_extract(facts, '$.outcome') = 'paused' ORDER BY seq DESC LIMIT 1`,
-      )
-      .get(threadId)
-    return row && toMessage(row)
+    return this.latestMessage(
+      `thread_id = ? AND sender = 'centralu' AND kind = 'report' AND (wake IS NULL OR wake <> 'no')
+           AND json_valid(facts) AND json_extract(facts, '$.outcome') = 'paused'`,
+      threadId,
+    )
   }
 
   /** Whether `owner` or the person has posted work, a note, a question or an answer in the thread after `seq` */
@@ -731,28 +732,17 @@ export class MailRecords {
 
   /** The latest `report` `sender` posted in the thread (not an event or a note) */
   lastReportBy(threadId: string, sender: string): MessageRow | undefined {
-    const row = this.db
-      .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? AND kind = 'report' ORDER BY seq DESC LIMIT 1`)
-      .get(threadId, sender)
-    return row && toMessage(row)
+    return this.latestMessage(`thread_id = ? AND sender = ? AND kind = 'report'`, threadId, sender)
   }
 
   /** The latest message `sender` wrote itself: not one Centralu put in the thread in its name (`relayed`: a session's last response a report carries) */
   lastWordBy(threadId: string, sender: string): MessageRow | undefined {
-    const row = this.db
-      .prepare<[string, string], MessageSql>(
-        `SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? AND COALESCE(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.relayed') END, 0) <> 1 ORDER BY seq DESC LIMIT 1`,
-      )
-      .get(threadId, sender)
-    return row && toMessage(row)
+    return this.latestMessage(`thread_id = ? AND sender = ? AND COALESCE(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.relayed') END, 0) <> 1`, threadId, sender)
   }
 
   /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
   lastMessageOf(threadId: string): MessageRow | undefined {
-    const row = this.db
-      .prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND kind <> 'event' ORDER BY seq DESC LIMIT 1`)
-      .get(threadId)
-    return row && toMessage(row)
+    return this.latestMessage(`thread_id = ? AND kind <> 'event'`, threadId)
   }
 
   message(id: string): MessageRow | undefined {
@@ -842,11 +832,16 @@ export class MailRecords {
     this.db.prepare(`UPDATE mail_participants SET read_seq = MAX(read_seq, ?) WHERE thread_id = ? AND address = ?`).run(seq, threadId, address)
   }
 
+  /** `UPDATE mail_receipts SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <messageIds>`: `setArgs` fill the `?` of `set`; returns the rows changed */
+  private updateReceipts(set: string, setArgs: readonly (string | number | null)[], recipient: string, messageIds: readonly string[], also?: string): number {
+    return this.db
+      .prepare(`UPDATE mail_receipts SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(...setArgs, recipient, JSON.stringify(messageIds)).changes
+  }
+
   /** Marks `recipient`'s receipts for exactly these messages read (not handled), keeping an earlier read time */
   markRead(recipient: string, messageIds: readonly string[], now: number): number {
-    return this.db
-      .prepare(`UPDATE mail_receipts SET read_at = COALESCE(read_at, ?) WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(now, recipient, JSON.stringify(messageIds)).changes
+    return this.updateReceipts('read_at = COALESCE(read_at, ?)', [now], recipient, messageIds)
   }
 
   /**
@@ -915,16 +910,12 @@ export class MailRecords {
 
   /** Written, and committed, before a delivery is tried (§7.6.1): a host that dies after it and before `markDelivered` leaves a delivery that may have gone */
   markAttempt(recipient: string, messageIds: readonly string[], now: number): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET attempt_at = ?, attempts = attempts + 1 WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(now, recipient, JSON.stringify(messageIds))
+    this.updateReceipts('attempt_at = ?, attempts = attempts + 1', [now], recipient, messageIds)
   }
 
   /** The tool took them (§7.6.2–4): delivered, and read for those whose words went in whole. A failed attempt's error is forgotten */
   markDelivered(recipient: string, messageIds: readonly string[], readIds: readonly string[], now: number): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET delivered_at = ?, last_error = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(now, recipient, JSON.stringify(messageIds))
+    this.updateReceipts('delivered_at = ?, last_error = NULL', [now], recipient, messageIds)
     this.markRead(recipient, readIds, now)
   }
 
@@ -951,23 +942,17 @@ export class MailRecords {
 
   /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox. Not "uncertain": nothing went */
   failAttempt(recipient: string, messageIds: readonly string[], error: string, retryAt: number): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = ?, due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(error, retryAt, recipient, JSON.stringify(messageIds))
+    this.updateReceipts('attempt_at = NULL, last_error = ?, due_at = ?', [error, retryAt], recipient, messageIds)
   }
 
   /** A try that was not made after all (the receiver left rest while it was being woken): the attempt is taken back, and it counts for nothing */
   undoAttempt(recipient: string, messageIds: readonly string[]): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, attempts = MAX(attempts - 1, 0) WHERE recipient = ? AND delivered_at IS NULL AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(recipient, JSON.stringify(messageIds))
+    this.updateReceipts('attempt_at = NULL, attempts = MAX(attempts - 1, 0)', [], recipient, messageIds, 'delivered_at IS NULL')
   }
 
   /** These messages are read and handled for `recipient`: they were put in a thread for the record, and nothing is to wake it for them */
   markHandledIds(recipient: string, messageIds: readonly string[], now: number): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?) WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(now, now, recipient, JSON.stringify(messageIds))
+    this.updateReceipts('read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)', [now, now], recipient, messageIds)
   }
 
   /** The reports of Centralu in a thread that `recipient` has not read or handled are read and handled: a call gave it the answer they tell of. Returns how many */
@@ -983,9 +968,7 @@ export class MailRecords {
 
   /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
   setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET held = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(held, recipient, JSON.stringify(messageIds))
+    this.updateReceipts('held = ?', [held], recipient, messageIds)
   }
 
   /** Deliveries that were tried and not known to have gone: what a host that starts finds a previous one left (§7.6.5) */
@@ -1000,16 +983,12 @@ export class MailRecords {
 
   /** A delivery that may have gone and may not: held until the person says (§7.6.5) */
   markUncertain(recipient: string, messageIds: readonly string[]): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET held = 'uncertain', attempt_at = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(recipient, JSON.stringify(messageIds))
+    this.updateReceipts(`held = 'uncertain', attempt_at = NULL`, [], recipient, messageIds)
   }
 
   /** A delivery that may have gone, of mail that starts no work: tried again, and its next frame says it may be a repeat (§7.6.5) */
   markMaybeRepeated(recipient: string, messageIds: readonly string[], dueAt: number): void {
-    this.db
-      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = 'maybe_repeated', due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(dueAt, recipient, JSON.stringify(messageIds))
+    this.updateReceipts(`attempt_at = NULL, last_error = 'maybe_repeated', due_at = ?`, [dueAt], recipient, messageIds)
   }
 
   /**
@@ -1017,13 +996,14 @@ export class MailRecords {
    * mail that was held back from waking a session (`policy`, `budget`) goes as the mail it is and is not held again (`released`)
    */
   releaseHeld(recipient: string, messageIds: readonly string[], to: null | 'released' | 'dismissed', dueAt: number): number {
-    return this.db
-      .prepare(
-        `UPDATE mail_receipts SET delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
-               held = CASE WHEN ? IS NULL AND held IN ('policy', 'budget') THEN 'released' ELSE ? END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?
-          WHERE recipient = ? AND held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') AND message_id IN (SELECT value FROM json_each(?))`,
-      )
-      .run(to, to, dueAt, recipient, JSON.stringify(messageIds)).changes
+    return this.updateReceipts(
+      `delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
+               held = CASE WHEN ? IS NULL AND held IN ('policy', 'budget') THEN 'released' ELSE ? END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?`,
+      [to, to, dueAt],
+      recipient,
+      messageIds,
+      `held IN ('uncertain', 'failed', 'loop', 'budget', 'policy')`,
+    )
   }
 
   /** Receipts the Inbox lists for a person to act on: held for a reason that needs them (§7.6, §7.7, §7.9) */
