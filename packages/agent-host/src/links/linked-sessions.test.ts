@@ -80,6 +80,8 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(r).toEqual({ ok: false, error: 'git said no' })
     const reading = linkedSessions(() => [m], async () => ({ origin: 'git@github.com:me/apps.git' }))
     expect(await reading.origin(project!)).toEqual({ ok: true, origin: 'git@github.com:me/apps.git' })
+    // A machine without a method says so as it came, with nothing more (#1143)
+    expect(await linkedSessions(() => [m]).hubAuto('m1')).toEqual({ ok: false, error: expect.stringMatching(/^Unknown method: host\.hubAuto/) })
   })
 
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
@@ -216,6 +218,9 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [away]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'Box is not reachable right now' })
     const failing = machine({ 'host.lastAnswer': new Error('the link closed') })
     expect(await linkedSessions(() => [failing]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'the link closed' })
+    // A machine without host.lastAnswer is said as it answered, not read from its lines instead (#1143)
+    const without = machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: 'done' })] } })
+    expect(await linkedSessions(() => [without]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: expect.stringMatching(/^Unknown method: host\.lastAnswer/) })
   })
 
   it('tells a call on a machine only the person connects to ask the person, at once, and never connects it (#1341)', async () => {
@@ -251,10 +256,10 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   })
 
   /*
-   * #1480: a machine from before the budget ignores `maxChars` and `toolLines` and answers every line it has, so the hub
-   * holds both: the answer a linked session gives is as bounded as a local one's, and "no tools" leaves tool lines out
+   * #1480: the hub holds `maxChars` and `toolLines` on whatever a machine answers, every line it has included: the
+   * answer a linked session gives is as bounded as a local one's, and "no tools" leaves tool lines out
    */
-  it('bounds what a machine from before the budget answers, and leaves tool lines out when asked', async () => {
+  it('bounds what a machine answers past its budget, and leaves tool lines out when asked', async () => {
     const asked: unknown[] = []
     const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
     const lines = Array.from({ length: 30 }, (_, i) => line(i))
@@ -317,9 +322,10 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     const current = machine({})
     current.call = async (method, params) => {
       asked.push({ method, params })
-      return { state: 'idle', lines: [], maxChars: 12_000 }
+      // No `maxChars` echoed: passed on as answered all the same (#1143)
+      return { state: 'idle', lines: [] }
     }
-    await linkedSessions(() => [current]).read('m1.w1', 40, { before: 12 })
+    expect(await linkedSessions(() => [current]).read('m1.w1', 40, { before: 12 })).toEqual({ ok: true, state: 'idle', lines: [] })
     await linkedSessions(() => [current]).read('m1.w1', 40, { from: 30 })
     expect(asked).toEqual([
       { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, before: 12 } },
@@ -334,6 +340,10 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [current]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: [line] })
     const none = machine({ 'host.readSession': { state: 'idle', lines: [] } })
     expect(await linkedSessions(() => [none]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: [] })
+    // Plain lines with no `shown` are the machine's answer too, passed on unchanged (#1143)
+    const plain = [JSON.stringify({ role: 'user', text: 'a' }), JSON.stringify({ role: 'assistant', text: 'b' })]
+    const lines = machine({ 'host.readSession': { state: 'idle', lines: plain } })
+    expect(await linkedSessions(() => [lines]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: plain })
   })
 
   it('lists an away machine from the mirror without its orchestrator, and does not ask it', async () => {
