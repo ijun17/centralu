@@ -170,9 +170,6 @@ export const changes = async (dir) =>
     .filter((l) => l.trim())
     .map((l) => l.slice(3))
 
-/** The branch the checkout is on; empty when detached. */
-export const head = (dir) => out(dir, ['rev-parse', 'HEAD'])
-
 /** The remote's refs under `prefix` (`refs/tags/` or `refs/heads/`) as { name, sha }; an annotated tag's commit. */
 export async function remoteRefs(dir, remote, prefix) {
   const text = await git(dir, ['ls-remote', '--quiet', remote, `${prefix}*`])

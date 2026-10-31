@@ -992,14 +992,14 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const s = repo()
     runtime()
     await call('release_status', { path: s.work })
-    await call('release', { step: 'bump', path: s.work })
+    await call('release', { step: 'tag', path: s.work })
     expect(g(s.work, 'for-each-ref', 'refs/centralu-release')).toBe('')
     expect(existsSync(join(APP, 'private-words.json'))).toBe(false)
   })
 })
 
 /*
- * release.scheme "tag" (#1501): no file carries the release version and there is no bump. The next release is the next
+ * No file carries the release version (#1501) and there is no bump. The next release is the next
  * prerelease after the newest tag, cut from the newest commit of main since it whose own push run is fully green;
  * the rehearsal is dispatched with the version as an input and counts only for that version (its run name), and the
  * tag is annotated with the notes, their only record.

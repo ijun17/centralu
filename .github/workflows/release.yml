@@ -89,7 +89,7 @@ jobs:
       # compares against the literal "false"/"true" for that reason.
       dry_run: ${{ steps.plan.outputs.dry_run }}
       also_latest: ${{ steps.plan.outputs.also_latest }}
-      # "brand" while brand.ts declares the version, "tag" once the tag alone does (#1501)
+      # "tag": the tag alone states the version (#1501); empty when the guard stopped the run
       scheme: ${{ steps.plan.outputs.scheme }}
       # "true" only on a tag push whose tree a successful rehearsal built and verified (#1042)
       skip_verify: ${{ steps.rehearsal.outputs.skip_verify }}
