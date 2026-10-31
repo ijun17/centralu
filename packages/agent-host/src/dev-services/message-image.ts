@@ -1,4 +1,4 @@
-import { errnoCode } from './errno.js'
+import { errnoCode } from '../os/errors.js'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'

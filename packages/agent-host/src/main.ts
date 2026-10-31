@@ -84,6 +84,7 @@ import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
 import { PtyBroker, brokerPtyModule, personOpener } from './dev-services/broker-pty.js'
 import { detectToken } from './elevation.js'
+import { raceTimeout } from './timing.js'
 
 /**
  * Agent Host entry point.
@@ -936,7 +937,7 @@ const shutdown = new Shutdown({
 })
 
 start.at('listen')
-await Promise.race([elevation, new Promise<void>((resolve) => setTimeout(resolve, 3_000).unref())])
+await raceTimeout(elevation, 3_000, undefined)
 try {
   port = await server.listen()
 } catch (err) {

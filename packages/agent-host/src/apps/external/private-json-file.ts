@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, linkSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { errnoCode } from '../../os/errors.js'
 
 /**
  * One small JSON document kept in the host's data folder that only this user may read (app secrets,
@@ -70,8 +71,7 @@ export class PrivateJsonFile<T> {
     try {
       text = readFileSync(this.path, 'utf8')
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return this.settled(this.opts.empty())
+      if (errnoCode(e) === 'ENOENT') return this.settled(this.opts.empty())
       return this.stuck('could not be read', readFailure(e))
     }
     let doc: unknown
@@ -87,6 +87,21 @@ export class PrivateJsonFile<T> {
 
   /** Replaces the file with `doc`. Throws, writing nothing, while the last read was a stand-in */
   write(doc: T): void {
+    this.put(doc, 'replace')
+  }
+
+  /**
+   * Writes `doc` as the file **only while there is none**, and says whether it did. A check for the file and then
+   * `write` leaves a window in which a file the other host of a swap wrote, or a person put back, is replaced by the
+   * rename (#1172 review). A hard link to the finished temp file never replaces anything: EEXIST means another file
+   * won, and it is left as it is. Throws, writing nothing, while the last read was a stand-in, as `write` does
+   */
+  create(doc: T): boolean {
+    return this.put(doc, 'create')
+  }
+
+  /** Writes `doc` to a temp file of its own and moves it onto the file, or links it there while there is none (false: there is one). The temp file never stays */
+  private put(doc: T, how: 'replace' | 'create'): boolean {
     if (this.standIn) {
       throw new Error(`${this.opts.label} could not be read, so it was not overwritten. Fix or remove ${this.path}`)
     }
@@ -99,38 +114,15 @@ export class PrivateJsonFile<T> {
     const tmp = `${this.path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
     try {
       writeFileSync(tmp, JSON.stringify(doc, null, this.opts.indent), { mode: 0o600, flag: 'wx' })
-      renameSync(tmp, this.path)
+      if (how === 'replace') renameSync(tmp, this.path)
+      else linkSync(tmp, this.path)
     } catch (e) {
-      rmSync(tmp, { force: true })
+      if (how === 'create' && errnoCode(e) === 'EEXIST') return false
       throw e
-    }
-    // What the person re-entered is the file now: the line about the one moved aside has done its job
-    this.lastTrouble = null
-    chmodSync(this.path, 0o600)
-  }
-
-  /**
-   * Writes `doc` as the file **only while there is none**, and says whether it did. A check for the file and then
-   * `write` leaves a window in which a file the other host of a swap wrote, or a person put back, is replaced by the
-   * rename (#1172 review). A hard link to the finished temp file never replaces anything: EEXIST means another file
-   * won, and it is left as it is. Throws, writing nothing, while the last read was a stand-in, as `write` does
-   */
-  create(doc: T): boolean {
-    if (this.standIn) {
-      throw new Error(`${this.opts.label} could not be read, so it was not overwritten. Fix or remove ${this.path}`)
-    }
-    const tmp = `${this.path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
-    try {
-      writeFileSync(tmp, JSON.stringify(doc, null, this.opts.indent), { mode: 0o600, flag: 'wx' })
-      try {
-        linkSync(tmp, this.path)
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false
-        throw e
-      }
     } finally {
       rmSync(tmp, { force: true })
     }
+    // What the person re-entered is the file now: the line about the one moved aside has done its job
     this.lastTrouble = null
     chmodSync(this.path, 0o600)
     return true
@@ -150,8 +142,8 @@ export class PrivateJsonFile<T> {
       renameSync(this.path, aside)
     } catch (e) {
       // Gone in the meantime: the other host of a swap moved it aside first, and nothing is left to overwrite
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return this.settled(this.opts.empty())
-      return this.stuck('is unreadable and could not be moved aside', `${reason}, and it could not be moved aside (${errorCode(e)})`)
+      if (errnoCode(e) === 'ENOENT') return this.settled(this.opts.empty())
+      return this.stuck('is unreadable and could not be moved aside', `${reason}, and it could not be moved aside (${errnoCode(e) ?? 'unknown error'})`)
     }
     console.error(`[apps] ${this.opts.label} is unreadable (${reason}); moved to ${basename(aside)}. ${this.opts.lost}`)
     this.standIn = false
@@ -180,14 +172,9 @@ export type FileTrouble = { movedTo: string | null; at: number; reason?: string 
 const NOT_JSON = 'it is not valid JSON'
 const WRONG_SHAPE = 'it is not the JSON object Centralu writes'
 
-/** An error's code, never its message (which names paths and may one day quote more) */
-function errorCode(e: unknown): string {
-  return (e as NodeJS.ErrnoException)?.code ?? 'unknown error'
-}
-
 /** Why a file could not be read, in words a person can act on, with the OS's code */
 function readFailure(e: unknown): string {
-  const code = errorCode(e)
+  const code = errnoCode(e) ?? 'unknown error'
   const words: Record<string, string> = {
     EACCES: 'Centralu may not read it',
     // On Windows also what a file another program holds (an antivirus scan) answers
@@ -245,6 +232,6 @@ function alive(pid: number): boolean {
     return true
   } catch (e) {
     // EPERM: it exists, it just belongs to someone else
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
+    return errnoCode(e) === 'EPERM'
   }
 }
