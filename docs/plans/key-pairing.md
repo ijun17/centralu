@@ -230,7 +230,7 @@ launcher then:
      `pairKey`. The key entry stays: it is public and is used once a new host runs.
    - **No host answers** (the connection to the host's port is refused: nothing listens there) **and no keeper runs
      there:** `hostKey` is derived from the file's key (the host started next gets that key on stdin), and `pairKey` is
-     in `takes` when the installed host takes key hellos (`bundle-info.json`, as `takesVerifiers` reads `verifiers`);
+     in `takes` when the installed host takes key hellos (`bundle-info.json` says `keyPairing`, `takesKeyHellos`);
      otherwise as the previous case. With `--key-paired` and `pairKey`, the label's verifier entry is removed now.
    - **Unknown:** the probe times out (`probeHost`'s 2 s), the socket closes before a proof, the proof is malformed, or
      nothing listens but a keeper runs there (the keeper hands every host it starts its own copy of the key, which after
@@ -367,13 +367,13 @@ host. §3 has the comparison.
   anything. That is accepted because it is cosmetic and bounded: a note of a fixed shape on the machine's row, with no
   text of the caller's, that opens and stops nothing. `host.stop` set the precedent: a limited caller may already call
   it, and it does far more (it ends the host). `sayHandover` then
-  says it with the credentials the launcher already holds for its own host (`ownCredentials`: the limited credential,
+  says it with the credentials the launcher already holds for its own host (the limited credential,
   proved under the key) and makes no credential: no `pairServe(…, 'handover')`, no revoke after. A squatter answering
   that proof receives the limited credential, which the file already holds. By build:
   - a host from slice 3 on takes it under limited rights;
   - a host from #1405 to slice 3 refuses it (`link`); the new launcher ignores the refusal, the row shows no hand-over
     note during that wait, and the move happens as before;
-  - a host from before verifiers gets the one token it knows (`legacyHostToken`), as today: that token is in the file;
+  - a host from before verifiers (older than 0.1.0-beta.45) is no longer served (#1143);
   - an older launcher with a new host still makes a `via: 'handover'` entry; a new host takes such an entry as
     **limited**, never full, which is enough for the call now. `UsedCredentials.saw` keeps skipping them while a reader
     can still meet one, and **only** them: a verifier entry. A key entry carries no `via` for the host (`readKeyEntries`
