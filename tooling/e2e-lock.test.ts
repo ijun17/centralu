@@ -542,12 +542,12 @@ describe('the runners (real processes)', () => {
   /**
    * A command that logs its start and ends, logging its end, once the test creates `gate`. It holds the lock for as long as the
    * test needs, not for a length of time a loaded machine can overrun: a run that arrives late would find the lock free and
-   * never wait.
+   * never wait. It ends by itself after two minutes, so a failed test leaves no run polling for a gate that never comes.
    */
   const heldUntilGate = (id: string) =>
-    `${logLine(id, 'start')}; const t = setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(dir, 'gate'))})) { clearInterval(t); ${logLine(id, 'end')} } }, 20)`
+    `${logLine(id, 'start')}; const t = setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(dir, 'gate'))})) { clearInterval(t); clearTimeout(cap); ${logLine(id, 'end')} } }, 20); const cap = setTimeout(() => process.exit(1), 120_000)`
   const openGate = () => writeFileSync(join(dir, 'gate'), '')
-  const isWaiting = (r: { stderr: () => string }) => r.stderr().includes('waiting for the e2e lock')
+  const isWaiting = (r: { stderr: () => string }) => /waiting for the e2e lock: held by pid \d+/.test(r.stderr())
 
   it(
     'lets two runs started together go one after the other, and the second says who it waits for',
