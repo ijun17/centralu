@@ -1,11 +1,11 @@
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
-import { ownProcesses } from '../process.test-helpers.js'
+import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 
 
 /**
@@ -28,8 +28,7 @@ function fakeGh(bin: string): void {
   chmodSync(gh, 0o755)
 }
 
-// `pr` creates `pids` before it writes it, so a read can find it empty: parse until it parses (`eventually` retries a throw)
-const pids = (project: string, ms: number) => eventually(() => JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number], ms)
+const pids = (project: string, ms: number) => fileHolding(join(project, 'pids'), (t) => JSON.parse(t) as [number, number], ms)
 
 /*
  * The host's merge check runs gh in the project's folder, and stopping the host aborts it (#368). Windows refuses to

@@ -8,6 +8,7 @@ import { CodexClient } from './codex/client.js'
 import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli, ownPid } from './fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { pidIn } from '../process.test-helpers.js'
 
 /**
  * An agent CLI this host starts itself, without a keeper (Windows, dev, e2e, a debug app): stopping
@@ -94,14 +95,10 @@ describe('an agent CLI started without a keeper, for real', () => {
           { onNotification: () => {}, onServerRequest: () => {}, onExit: () => resolve() },
           { command: process.execPath, args: fakeAgentCli({ pidFile }).args },
         )
-        const wait = setInterval(() => {
-          if (!existsSync(pidFile)) return
-          clearInterval(wait)
-          void client.dispose()
-        }, 20)
+        void pidIn(pidFile).then(() => client.dispose())
       })
       await ended
-      const helper = Number(readFileSync(pidFile, 'utf8'))
+      const helper = await pidIn(pidFile)
       started.push(ownPid(helper))
       expect(await goneWithin(helper, unix ? 5000 : 15_000)).toBe(true)
     } finally {

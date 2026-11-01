@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach, onTestFinished } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,7 @@ import { alive as isAlive, cleanUp, consoleHosts, plantTreeScript, settle, treeP
 import { TerminalService, commandShell, interactiveShell, shellPath, type PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
-import { ownProcesses } from '../process.test-helpers.js'
+import { ownProcesses, pidIn } from '../process.test-helpers.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -180,8 +180,7 @@ describe('multiple terminals', () => {
     const svc = new TerminalService(() => {})
     stubPty(svc, mod)
     const t = svc.create(dir, 80, 24)
-    for (let i = 0; i < 250 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20))
-    const server = Number(readFileSync(pidFile, 'utf8'))
+    const server = await pidIn(pidFile, 5_000)
     // The server is known by its number only; once this test has seen it end, the number is not ours to signal (#1308)
     const own = ownProcesses()
     try {
