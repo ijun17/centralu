@@ -400,8 +400,7 @@ export class ClaudeSession implements SessionHandle {
     }
     // The turn goes again instead of failing: its error marker would end the turn on screen
     if (retrying) events = events.filter((e) => e.type !== 'error')
-    // The turn's end is the normalizer's; after a failure or a limit (`error`, `limited`) a waiting Stop has nothing to confirm
-    // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it
+    // A result ends the open turn: a Stop still waiting is confirmed by it, unless it failed or hit a limit (nothing to confirm)
     if (m.type === 'result') this.ledger.endSaid(events, completedInputs, took)
     else this.ledger.said(events)
     this.schedules.arm()

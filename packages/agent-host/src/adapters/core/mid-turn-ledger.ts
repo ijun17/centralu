@@ -221,9 +221,12 @@ export class MidTurnLedger {
   endSaid(events: readonly NormalizedEvent[], completes: readonly string[] | undefined, took: readonly string[] | null): void {
     this.turnEnded(null, null)
     this.ending = took
-    this.said(events, completes)
-    this.ending = null
-    this.confirmStop()
+    try {
+      this.said(events, completes)
+    } finally {
+      this.ending = null
+      this.confirmStop()
+    }
   }
 
   /** The inputs of the turn whose end is being said (`endSaid`), for the host to read as it handles it; null otherwise */
