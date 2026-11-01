@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ToolName, UsageHistory, UsageHistoryBy } from '@cc/protocol/client'
 import { percentOf, topUsage } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatCount } from '../../app/format.js'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailedFold } from '../../components/LoadFailed.jsx'
 import { weeklySeries } from './weekly.js'
 
 const DAY_MS = 24 * 3_600_000
@@ -20,7 +22,7 @@ const GROUPS: { by: Extract<UsageHistoryBy, 'session' | 'project'>; label: strin
  * readings the host stored, and the sessions or projects that used the most tokens with their cache hit rate.
  *
  * Asked once when the dropdown opens, and again when the list is regrouped. A host that predates the question (or a
- * failed one) leaves the section out: there is nothing to say, and the limits above it are not affected.
+ * failed one) says so in a line (`LoadFailedFold`); the limits above it are not affected.
  */
 export function HistorySection({
   tool,
@@ -36,24 +38,27 @@ export function HistorySection({
 }) {
   const platform = usePlatform()
   const [by, setBy] = useState<'session' | 'project'>('session')
-  const [state, setState] = useState<{ from: number; to: number; history: UsageHistory } | null>(null)
+  // Another grouping reads again over the last answer; the panel is keyed by tool and machine, so another one starts anew
+  const read = useLoad(
+    () => {
+      const now = Date.now()
+      const from = now - DAYS * DAY_MS
+      const to = now + 3_600_000
+      return platform.agents
+        .usageHistory({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), groupBy: 'day', by, tool }, machine ?? undefined)
+        .then((history) => ({ from, to, history }))
+    },
+    [platform, tool, machine, by],
+    [],
+    { keepLast: true },
+  )
 
-  useEffect(() => {
-    let alive = true
-    const now = Date.now()
-    const from = now - DAYS * DAY_MS
-    const to = now + 3_600_000
-    void platform.agents
-      .usageHistory({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), groupBy: 'day', by, tool }, machine ?? undefined)
-      .then((history) => alive && setState({ from, to, history }))
-      .catch(() => alive && setState(null))
-    return () => {
-      alive = false
-    }
-  }, [platform, tool, machine, by])
-
-  if (!state) return null
-  return <HistoryView {...state} by={by} onBy={setBy} canOpen={canOpen} onOpen={onOpen} />
+  return (
+    <>
+      <LoadFailedFold what="the usage history" error={read.error} onRetry={() => void read.reload()} className="pt-3" testId="usage-history-failed" />
+      {read.data && <HistoryView {...read.data} by={by} onBy={setBy} canOpen={canOpen} onOpen={onOpen} />}
+    </>
+  )
 }
 
 /** What the section shows for an answer; apart from the question so it can be drawn from an answer alone */

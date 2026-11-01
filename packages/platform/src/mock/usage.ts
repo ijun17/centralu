@@ -30,9 +30,12 @@ export class UsageMock {
   usageHistoryState: UsageHistory = { by: 'session', readings: [], rows: [] }
   /** For tests: every usage history question, and which machine it went to (null: this computer) */
   usageHistoryCalls: { by: string; groupBy: string; machine: string | null }[] = []
+  /** For tests: when set, the usage history fails with this reason */
+  usageHistoryError: string | null = null
   readonly agents: Pick<AgentPort, 'usage' | 'usageHistory'> = {
     usageHistory: async (range, machine) => {
       this.usageHistoryCalls.push({ by: range.by, groupBy: range.groupBy, machine: machine ?? null })
+      if (this.usageHistoryError !== null) throw new Error(this.usageHistoryError)
       return { ...this.usageHistoryState, by: range.by }
     },
     usage: async (tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }) => {

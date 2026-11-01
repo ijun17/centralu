@@ -85,19 +85,42 @@ export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) 
  * - `refresh` are signals that the same subject changed (a file touched, a version bumped): it is read again while the
  *   last answer stays on screen, so a list does not blink on every refresh.
  *
+ * - `keepLast` leaves the last answer on screen while `deps` change and the new one is read, as a refresh does: for a
+ *   question that is typed or toggled (a search box, a grouping), not one about another subject.
+ * - `delayMs` waits that long before each read starts and starts it only if nothing changed meanwhile (a search box asks
+ *   when the typing pauses).
+ *
  * An answer to an older question (the subject changed, the screen went away, a newer read started) is dropped.
  */
-export function useLoad<T>(read: () => Promise<T> | null, deps: DependencyList, refresh: DependencyList = []): Load<T> {
+export function useLoad<T>(
+  read: () => Promise<T> | null,
+  deps: DependencyList,
+  refresh: DependencyList = [],
+  { delayMs = 0, keepLast = false }: { delayMs?: number; keepLast?: boolean } = {},
+): Load<T> {
   // Loading until the first read says otherwise: it runs before anything reads `data` past the first render
   const [shown, setShown] = useState<Loaded<T>>({ data: undefined, error: null, loading: true })
   const [loader] = useState(() => createLoader<T>(setShown))
   const latest = useRef(read)
   latest.current = read
 
+  /** Starts a read now, or after the pause; the returned function takes back one that has not started */
+  const start = (keep: boolean) => {
+    if (delayMs <= 0) {
+      void loader.read(latest.current, keep)
+      return () => {}
+    }
+    const t = setTimeout(() => void loader.read(latest.current, keep), delayMs)
+    return () => clearTimeout(t)
+  }
+
   useEffect(() => {
-    void loader.read(latest.current, false)
+    const cancel = start(keepLast)
     // The subject changed or the screen went away: an answer still on its way is late
-    return () => loader.drop()
+    return () => {
+      cancel()
+      loader.drop()
+    }
     // `deps` is the caller's list, checked where it is written
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
@@ -109,7 +132,7 @@ export function useLoad<T>(read: () => Promise<T> | null, deps: DependencyList, 
       refreshed.current = true
       return
     }
-    void loader.read(latest.current, true)
+    return start(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, refresh)
 

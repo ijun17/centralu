@@ -229,6 +229,25 @@ test('Command palette: Enter waits for the search of the latest keystroke instea
   await expect(page.getByTestId('palette-empty')).toBeVisible()
 })
 
+test('Command palette: a failed message search says so, and Retry asks again (#1143)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'deploy script')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.searchResults = [{ sessionId: [...m.sessions.keys()][0], seq: 3, snippet: 'Fixed token expiry handling' }]
+    m.searchMessagesError = 'the host did not answer'
+  })
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('token')
+  await expect(page.getByTestId('palette-search-failed')).toContainText('Could not read the message search: the host did not answer')
+
+  await page.evaluate(() => ((window as any).__mock.searchMessagesError = null))
+  await page.getByTestId('palette-search-failed-retry').click()
+  await expect(page.getByTestId('palette-item-message')).toContainText('token expiry')
+  await expect(page.getByTestId('palette-search-failed')).toHaveCount(0)
+})
+
 /** Picking a project with no sessions from the palette also navigates to that project (#183) — it used to just close the palette */
 test('Command palette: picking a project with no sessions navigates to that project (#183)', async ({
   page,
