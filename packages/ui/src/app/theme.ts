@@ -1,4 +1,5 @@
 import { THEME_PRESETS, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
+import { readStored, writeStored } from './stored.js'
 
 /**
  * The theme engine (#312 step 3).
@@ -154,12 +155,9 @@ export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.do
 
 const CACHE_KEY = 'cc-theme'
 
+/** Storage denied: the next start paints Dark for a moment, then the prefs arrive */
 export function cacheChoice(choice: ThemeChoice): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(choice))
-  } catch {
-    /* storage denied — the next start paints Dark for a moment, then the prefs arrive */
-  }
+  writeStored(CACHE_KEY, choice)
 }
 
 /**
@@ -169,9 +167,7 @@ export function cacheChoice(choice: ThemeChoice): void {
  */
 export function applyCachedTheme(): void {
   try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return
-    const choice = JSON.parse(raw) as ThemeChoice
+    const choice = readStored(CACHE_KEY) as ThemeChoice | undefined
     if (!choice?.dark || !choice?.light) return
     const theme = pickTheme(choice)
     // The cache is the page's own writing, but it is re-checked like anything stored

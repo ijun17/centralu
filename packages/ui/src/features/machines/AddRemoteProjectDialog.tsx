@@ -4,7 +4,6 @@ import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
 import { TextField } from '../../components/TextField.jsx'
-import { isPlainEscape } from '../../app/keys.js'
 
 /**
  * Adds a folder on a linked machine as a project (#82). The folder picker is this computer's, and cannot see another
@@ -25,10 +24,6 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
     <Modal onClose={onClose} testId="add-remote-project-dialog">
       <form
         className="flex w-[440px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
-        onKeyDown={(e) => {
-          // Not the Esc that cancels a composition in the path field (#181)
-          if (isPlainEscape(e.nativeEvent)) onClose()
-        }}
         onSubmit={async (e) => {
           e.preventDefault()
           if (!path.trim()) return

@@ -1,5 +1,6 @@
 import { appKeyOf, GridPanel } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
+import { readStored, writeStored } from './stored.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
 
@@ -13,23 +14,14 @@ export class GridMock {
   private gridList: GridPanel[] | null = null
   get gridPanels(): GridPanel[] {
     if (this.gridList) return this.gridList
-    try {
-      const raw = localStorage.getItem('cc-mock-grid')
-      const stored: unknown = raw ? JSON.parse(raw) : []
-      // A panel this build cannot read is dropped, as the real list drops it
-      this.gridList = Array.isArray(stored) ? stored.flatMap((p: unknown) => { const r = GridPanel.safeParse(p); return r.success ? [r.data] : [] }) : []
-    } catch {
-      this.gridList = [] // node, or storage denied — the in-memory copy still works
-    }
+    const stored = readStored('cc-mock-grid') // nothing in node, or with storage denied: the in-memory copy still works
+    // A panel this build cannot read is dropped, as the real list drops it
+    this.gridList = Array.isArray(stored) ? stored.flatMap((p: unknown) => { const r = GridPanel.safeParse(p); return r.success ? [r.data] : [] }) : []
     return this.gridList
   }
   set gridPanels(list: GridPanel[]) {
     this.gridList = list
-    try {
-      localStorage.setItem('cc-mock-grid', JSON.stringify(list))
-    } catch {
-      /* node, or storage denied — the in-memory copy still works */
-    }
+    writeStored('cc-mock-grid', list)
   }
   readonly agents: Pick<AgentPort, 'grid' | 'setGridView'> = {
     // The host's rule (store.listGridView): a session panel only while its session is live, an app panel while its project is registered

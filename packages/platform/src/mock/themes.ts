@@ -2,6 +2,7 @@ import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol/client'
 import { isRecord, parseThemeFile, formatThemeFile } from '@cc/protocol/client'
 import type { ThemesPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
+import { readStored, writeStored } from './stored.js'
 import { mockError } from './mock-error.js'
 
 /** The themes folder (#312), behind the `themes` port */
@@ -31,20 +32,11 @@ export class ThemesMock {
   private loadThemes(): void {
     if (this.themesLoaded) return
     this.themesLoaded = true
-    try {
-      const raw = localStorage.getItem('cc-mock-themes')
-      const stored: unknown = raw ? JSON.parse(raw) : null
-      if (isRecord(stored)) for (const [id, text] of Object.entries(stored)) if (typeof text === 'string' && !this.themeFiles.has(id)) this.themeFiles.set(id, text)
-    } catch {
-      /* node, or storage denied */
-    }
+    const stored = readStored('cc-mock-themes') // nothing in node, or with storage denied
+    if (isRecord(stored)) for (const [id, text] of Object.entries(stored)) if (typeof text === 'string' && !this.themeFiles.has(id)) this.themeFiles.set(id, text)
   }
   private persistThemes(): void {
-    try {
-      localStorage.setItem('cc-mock-themes', JSON.stringify(Object.fromEntries(this.themeFiles)))
-    } catch {
-      /* node, or storage denied */
-    }
+    writeStored('cc-mock-themes', Object.fromEntries(this.themeFiles))
   }
 
   private themeEntry(id: string): ThemeFileEntry {
