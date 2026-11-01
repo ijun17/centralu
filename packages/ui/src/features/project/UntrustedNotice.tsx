@@ -1,3 +1,4 @@
+import { createListeners } from '@cc/core'
 import { useState, useSyncExternalStore } from 'react'
 import { Button } from '../../components/Button.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
@@ -9,17 +10,14 @@ import { TrustCard, trustCardIds, UNTRUSTED_OFF } from './TrustCard.jsx'
  * `useSyncExternalStore`: two panels of one project in a grid both let it go when either does.
  */
 const putAway = new Set<string>()
-const listeners = new Set<() => void>()
+const listeners = createListeners((e) => console.error('A notice listener threw', e))
 let putAwayCount = 0
-const subscribe = (fn: () => void) => {
-  listeners.add(fn)
-  return () => void listeners.delete(fn)
-}
+const subscribe = (fn: () => void) => listeners.add(fn)
 const isPutAway = (id: string) => putAway.has(id)
 function putAwayNow(id: string): void {
   putAway.add(id)
   putAwayCount++
-  for (const fn of listeners) fn()
+  listeners.emit()
 }
 
 /**
