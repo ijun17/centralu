@@ -135,7 +135,8 @@ export class MidTurnLedger {
     this.unanswered += 1
     let written: ReturnType<NonNullable<MidTurnWire['write']>>
     try {
-      written = this.wire.write!(inputs, queued)
+      if (!this.wire.write) throw new Error(`${this.wire.label} writes its own inputs`)
+      written = this.wire.write(inputs, queued)
     } catch (err) {
       written = { answer: Promise.reject(err instanceof Error ? err : new Error(String(err))) }
     }
@@ -157,7 +158,7 @@ export class MidTurnLedger {
     const tracked = trackedOf(inputs)
     if (tracked.length > 0 && tracked.every((r) => r.cancelled || r.completed)) return
     if (queued ? this.receipts.size > 0 : tracked.length > 0) this.interrupt(err)
-    this.emit({ type: 'error', sessionId: this.sessionId, error: this.wire.refusal!(err) })
+    this.emit({ type: 'error', sessionId: this.sessionId, error: this.wire.refusal?.(err) ?? { code: 'internal', message: err.message, retryable: true } })
   }
 
   /** A turn the tool started: the one a Stop targets */
@@ -303,7 +304,7 @@ export class MidTurnLedger {
    * run in it (an adopted one, still being looked up): what waits goes once it opens, as any message sent then
    */
   interrupt(reason = new Error('The parent note was stopped before it finished')): void {
-    const waking = this.phase === 'opening' && !this.wire.hasConversation!() && this.queue.length > 0
+    const waking = this.phase === 'opening' && !this.wire.hasConversation?.() && this.queue.length > 0
     for (const turn of this.receipts.failAll(reason)) {
       if (turn !== this.running && !this.ended.includes(turn)) this.stop(turn, false)
     }
