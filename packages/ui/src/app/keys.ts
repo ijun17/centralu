@@ -76,12 +76,15 @@ export function letterOf(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null 
   return spot ? spot[1]!.toLowerCase() : null
 }
 
+/** The element a key event landed on, read as one: its fields are checked before use (tests hand in plain objects) */
+const elementOf = (target: EventTarget | null) => target as HTMLElement | null
+
 /**
  * Is this a field that accepts text (#181) — the arrow keys and Enter inside that field belong to
  * the field. An input like a checkbox or a button does not accept text.
  */
 export function isTextEntry(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
+  const el = elementOf(target)
   if (!el || typeof el.tagName !== 'string') return false
   if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true
   if (el.tagName !== 'INPUT') return false
@@ -91,7 +94,7 @@ export function isTextEntry(target: EventTarget | null): boolean {
 
 /** Whether a key press lands on a control that presses itself on Enter: a button or a link */
 export function pressesItself(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
+  const el = elementOf(target)
   return !!el && typeof el.closest === 'function' && el.closest('button, a[href], [role="button"]') !== null
 }
 

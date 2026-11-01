@@ -26,7 +26,6 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
   useEffect(() => {
     if (!visible) return
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
         typing: isTextEntry(e.target),
