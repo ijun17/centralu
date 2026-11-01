@@ -109,6 +109,14 @@ describe('a quiet input the CLI ran a turn for', () => {
     wire.say(result([quiet]))
     await tick()
     expect(events.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+
+    // The next quiet input, answered with no turn behind it, is still no finished turn
+    events.length = 0
+    handle.send('<centralu-nudge/>', { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    await tick()
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    expect(events.filter((e) => e.type === 'turn_complete' || e.type === 'usage_update')).toEqual([])
     await handle.dispose()
   })
 })

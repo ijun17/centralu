@@ -358,7 +358,7 @@ export class ClaudeSession implements SessionHandle {
     if (m.type === 'result') {
       const named = Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((x): x is string => typeof x === 'string') : []
       const ids = named.length > 0 ? named : m.user_message_uuid ? [m.user_message_uuid] : []
-      // Not when the CLI ran a turn for it: the state went to working then, and only this result can end it
+      // Not when the CLI ran a turn for it: that turn put the session to work, and only this result can end it
       const quietOnly = ids.length > 0 && ids.every((id) => this.quietInputs.has(id)) && !this.cliTurnRan
       this.cliTurnRan = false
       for (const id of ids) this.quietInputs.delete(id)
