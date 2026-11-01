@@ -7,6 +7,7 @@ import type { AppRef } from './ref.js'
 import type { RuntimeTiming } from './runtime-types.js'
 import { AppUnavailableError } from './unavailable.js'
 import { visibilityOf } from './visibility.js'
+import { sleep } from '../../timing.js'
 
 /**
  * What the lifecycle asks of the runtime (`ExternalApps`) — the rule for whether an app may run, how
@@ -108,7 +109,7 @@ export class AppLifecycle {
     const epoch = L.epoch
     const p = (async () => {
       const wait = L.retryAt - Date.now()
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+      if (wait > 0) await sleep(wait)
       if (L.epoch !== epoch || this.host.disposed()) throw new AppUnavailableError('The app changed or was stopped, so this start was abandoned')
       const usedPrior = L.verdict !== undefined
       const pipeId = ++this.pipeSeq

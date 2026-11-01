@@ -5,6 +5,7 @@ import { bridgeToken } from './transport/bridge-token.js'
 import { sessionToken } from './transport/session-token.js'
 import { lineSplitter } from './transport/json-lines.js'
 import { tryParseJson } from './json-value.js'
+import { sleep } from './timing.js'
 
 /**
  * The host's half of a blue-green swap (#280, option C step 3).
@@ -239,7 +240,7 @@ export async function runDrain(bound: number, deps: DrainDeps): Promise<DrainRep
   const report = await deps.drain.drain(bound)
   if (report.cut.length > 0) {
     deps.log(`[agent-host] cut after ${bound}ms: ${report.cut.join(', ')}`)
-    await new Promise((r) => setTimeout(r, deps.settleMs ?? 200))
+    await sleep(deps.settleMs ?? 200)
   }
   try {
     await deps.detach()

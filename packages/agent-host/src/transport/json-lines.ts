@@ -35,12 +35,15 @@ type Waiting<T> = { resolve: (v: T) => void; reject: (e: Error) => void; timer: 
 export class PendingRequests<T = unknown> {
   private readonly waiting = new Map<string, Waiting<T>>()
 
-  /** The answer to `id`, or a rejection with `timeoutMessage` once `timeoutMs` has passed without one */
-  wait(id: string | number, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  /**
+   * The answer to `id`, or a rejection once `timeoutMs` has passed without one: an `Error` with `timeout` as its text, or
+   * the error `timeout()` makes (one that carries a code or `retryable`)
+   */
+  wait(id: string | number, timeoutMs: number, timeout: string | (() => Error)): Promise<T> {
     const key = String(id)
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.waiting.delete(key)) reject(new Error(timeoutMessage))
+        if (this.waiting.delete(key)) reject(typeof timeout === 'string' ? new Error(timeout) : timeout())
       }, timeoutMs)
       timer.unref?.()
       this.waiting.set(key, { resolve, reject, timer })

@@ -47,6 +47,7 @@ import { prepareWorktreeDependencies } from '../dev-services/worktree-dependenci
 import { RestartPolicy } from './restart-policy.js'
 import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
+import { sleep } from '../timing.js'
 
 /**
  * How long deleting a hub's child waits for a turn the hub just stopped to end (#1161 item 3): an interrupt reaches the
@@ -536,7 +537,7 @@ export class WorktreeSessions {
       return kept(`it is not the worktree Centralu made for an agent started on ${branch}`)
     }
     for (const until = Date.now() + STOPPING_WAIT_MS; inTurn(m.state) && Date.now() < until; ) {
-      await new Promise((r) => setTimeout(r, 100))
+      await sleep(100)
       m = this.host.meta.get(sessionId)
       if (!m) return already
     }

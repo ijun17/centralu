@@ -41,3 +41,19 @@ describe('PendingRequests', () => {
     expect(p.size).toBe(0)
   })
 })
+
+describe('PendingRequests timeout error', () => {
+  it('rejects with the error a function makes, so a code or retryable survives', async () => {
+    vi.useFakeTimers()
+    try {
+      const p = new PendingRequests()
+      const w = p.wait(1, 1000, () => Object.assign(new Error('no answer'), { retryable: true }))
+      const seen = w.catch((e: unknown) => e)
+      vi.advanceTimersByTime(1000)
+      expect(await seen).toMatchObject({ message: 'no answer', retryable: true })
+      expect(p.size).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

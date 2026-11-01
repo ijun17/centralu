@@ -11,6 +11,7 @@ import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, t
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
+import { sleep } from '../timing.js'
 
 /**
  * A linked machine (links.ts): its connection (linked-machine-connection.ts), and what the person
@@ -29,26 +30,6 @@ const ACTIVITY_UNREAD_RETRIES = 2
 const FOLLOW_RETRY_MS = 10 * 60_000
 /** How many updates of its own the hub runs for one version of its own: the first, and one retry (#1508) */
 const FOLLOW_TRIES = 2
-
-/** Why a signal was aborted, as an Error */
-const reasonOf = (signal: AbortSignal): Error => (signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
-
-/** Waits `ms`, or until `signal` aborts (and then throws its reason) */
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(reasonOf(signal))
-    const t = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    t.unref?.()
-    function onAbort() {
-      clearTimeout(t)
-      reject(reasonOf(signal))
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
 
 /** The hub's own updates of a machine for one version of the hub's (#1508, `LinkedMachine.followHub`) */
 type FollowState = {
@@ -199,7 +180,7 @@ export class LinkedMachine extends LinkedMachineConnection {
           seen = true
           blind = 0
           if (turnsRunning(r.activity) === 0) {
-            await pause(settle, wait.signal)
+            await sleep(settle, wait.signal, { unref: true })
             const again = await read()
             // Only a reading that succeeded and shows nobody in a turn lets the host be stopped: a failed one proves nothing
             if (again.activity && turnsRunning(again.activity) === 0) {
@@ -216,7 +197,7 @@ export class LinkedMachine extends LinkedMachineConnection {
           this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
           return null
         }
-        await pause(poll, wait.signal)
+        await sleep(poll, wait.signal, { unref: true })
       }
     } finally {
       if (this.idleWait === wait) this.idleWait = null
@@ -259,7 +240,7 @@ export class LinkedMachine extends LinkedMachineConnection {
       const r = await this.readActivity()
       if (r.activity) return r.activity
       if (r.cannot || i >= ACTIVITY_UNREAD_RETRIES) throw linkError(this.blindSentence())
-      await pause(poll, new AbortController().signal)
+      await sleep(poll, new AbortController().signal, { unref: true })
     }
   }
 
