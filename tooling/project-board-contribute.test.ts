@@ -798,7 +798,7 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(writes()).toEqual([])
     const [run] = prePrCalls()
     const ns = spaceOf(run!.args)
-    expect(run!.args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/main`, '--main', `${ns}/main`])
+    expect(run!.args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--limit', '1680', '--head', `${ns}/feat/tools`, '--base', `${ns}/main`, '--main', `${ns}/main`])
     expect(run!.refs).toContain(`${ns}/feat/tools ${c.tools}`)
     // A second call fetches under another name: one call's clean-up never deletes what the other reads
     await call('open_pr', { ...PR_PLAIN, path: c.work })
@@ -817,7 +817,7 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(r.isError, r.text).toBe(false)
     const args = prePrCalls()[0]!.args
     const ns = spaceOf(args)
-    expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
+    expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--limit', '1680', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
   })
 

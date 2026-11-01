@@ -32,7 +32,7 @@ type Report = { testResults: { name: string; assertionResults: { ancestorTitles:
  * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
  */
 function fakeRunners(opts: { orphans?: string[]; linkTo?: string } = {}) {
-  const calls = { prepare: [] as string[], tsc: [] as string[], vitest: [] as string[][] }
+  const calls = { prepare: [] as string[], tsc: [] as string[], vitest: [] as string[][], timeouts: [] as (number | undefined)[] }
   return {
     calls,
     runners: {
@@ -41,14 +41,16 @@ function fakeRunners(opts: { orphans?: string[]; linkTo?: string } = {}) {
         calls.prepare.push(sha)
         if (opts.linkTo) symlinkSync(opts.linkTo, join(dir, 'src', 'node_modules'), 'junction')
       },
-      tsc: (dir: string) => {
+      tsc: (dir: string, o?: { timeoutMs?: number }) => {
+        calls.timeouts.push(o?.timeoutMs)
         calls.tsc.push(git(dir, 'rev-parse', 'HEAD'))
         return existsSync(join(dir, 'BROKEN')) ? { ok: false, out: 'src/a.ts(1,1): error TS2322: broken' } : { ok: true, out: '' }
       },
       depcruise: () => ({
         summary: { violations: [...(opts.orphans ?? []).map((from) => ({ rule: { name: 'no-orphans' }, from })), { rule: { name: 'not-to-unresolvable' }, from: 'src/x.ts' }] },
       }),
-      vitest: (dir: string, files: string[]): Report => {
+      vitest: (dir: string, files: string[], o?: { timeoutMs?: number }): Report => {
+        calls.timeouts.push(o?.timeoutMs)
         calls.vitest.push(files)
         return {
           testResults: files.map((file) => ({
@@ -221,7 +223,7 @@ describe('what pre-pr reads', () => {
       // And again after the revert check's unlink and prepare: typescript is still there to run
       unlinkLinks(tree)
       realRunners.prepare(tree, root)
-      expect(realRunners.tsc(tree)).toEqual({ ok: true, out: '' })
+      expect(realRunners.tsc(tree)).toEqual({ ok: true, out: '', timedOut: false })
     } finally {
       // Links first: `typescript` in both folders leads into this repository's own node_modules, which no delete may follow
       unlinkLinks(tree)
@@ -273,6 +275,7 @@ describe('what pre-pr reads', () => {
     expect(parseArgs(['--head', 'origin/x', '--base', 'origin/y', '--stack', 'a', '--stack', 'b', '--exempt', 'revert=a=b', '--run-id', '12-3', '--no-fetch', '--json'])).toEqual({
       fetch: false, json: true, head: 'origin/x', base: 'origin/y', stack: ['a', 'b'], exempt: { revert: 'a=b' }, runId: '12-3',
     })
+    expect(parseArgs(['--limit', '90', '--guards-limit', '30'])).toMatchObject({ limitMs: 90_000, guardsLimitMs: 30_000 })
     expect(() => parseArgs(['--skip'])).toThrow(/Unknown argument --skip/)
     expect(() => parseArgs(['--exempt', 'revert'])).toThrow(/Unknown argument --exempt/)
     expect(() => parseArgs(['--cleanup', '../x'])).toThrow(/--cleanup takes a run id/)
@@ -316,6 +319,58 @@ describe('pre-pr on a stack of two pull requests', () => {
 
   afterEach(() => {
     rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('asks the base only about a changed file that is not new and has a passing test', () => {
+    // Every test of the file fails without the change: the first pass already decides
+    git(repo, 'checkout', '-q', '-b', 'solo', 'main')
+    write('src/a.test.mjs', 'knows two :: src/a.mjs :: value = 2\n')
+    commit('solo')
+    const solo = run({ head: 'solo' })
+    expect(solo.calls.vitest).toEqual([['src/a.test.mjs']])
+    expect(solo.findings).toEqual([])
+    // One that passes asks, and its new test is named
+    write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nstill exports :: src/a.mjs :: export\n')
+    commit('solo: a test that guards nothing')
+    const loose = run({ head: 'solo' })
+    expect(loose.calls.vitest).toEqual([['src/a.test.mjs'], ['src/a.test.mjs']])
+    expect(loose.findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
+  })
+
+  it('refuses what it could not start for want of time, as it refuses a failure, and runs nothing then', () => {
+    const r = run({ limitMs: 59_000 })
+    expect(r.calls.tsc).toEqual([])
+    expect(r.calls.vitest).toEqual([])
+    expect(r.findings.map((f: { check: string; message: string }) => [f.check, /: not run: out of time/.test(f.message)])).toEqual([['tsc', true], ['tsc', true], ['revert', true]])
+    expect(r.ok).toBe(false)
+    // An exempted check is left out, not reported as not run
+    expect(run({ limitMs: 59_000, exempt: { tsc: 'x', revert: 'x' } }).ok).toBe(true)
+  })
+
+  it('gives each phase what is left of the total', () => {
+    const t = { now: 0 }
+    const fake = fakeRunners()
+    // Each tsc takes 100 s of the fake clock, out of 300 s
+    const slow = { ...fake.runners, tsc: (dir: string, o?: { timeoutMs?: number }) => { t.now += 100_000; return fake.runners.tsc(dir, o) } }
+    const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: slow, limitMs: 300_000, now: () => t.now })
+    expect(r.ok).toBe(false)
+    // Two tsc (300 s, then 200 s left) and the first vitest pass (100 s left)
+    expect(fake.calls.timeouts).toEqual([300_000, 200_000, 100_000, 100_000])
+  })
+
+  it('does not judge a test when a vitest pass gave no report or a tool was stopped, and says so', () => {
+    const fake = fakeRunners()
+    const stopped = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tsc: () => ({ ok: false, out: '', timedOut: true }) } })
+    expect(stopped.findings.filter((f: { check: string }) => f.check === 'tsc').map((f: { message: string }) => f.message.split(': not run')[0]).length).toBe(2)
+    expect(stopped.findings.filter((f: { message: string }) => /tsc fails/.test(f.message))).toEqual([])
+    // The first pass: no report
+    const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: () => null } })
+    expect(first.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
+    expect(first.findings[0].message).toMatch(/not run: vitest gave no report/)
+    // The second pass: no report, and no test of the first looks new
+    let n = 0
+    const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: (dir: string, files: string[]) => (n++ ? null : fake.runners.vitest(dir, files)) } })
+    expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: no report/.test(f.message)])).toEqual([['revert', true]])
   })
 
   it('reports each new test that passes with the other changes reverted, and none that fails or was there', () => {
@@ -677,6 +732,7 @@ describe('pre-pr and the guards a branch adds', () => {
   }
   const GUARD = 'no banned in src :: src :: banned\n'
   const clock = { t: 0 }
+  let step = 1000
   const vitestCalls: string[][] = []
   const runners = (prs: unknown[], extra: Record<string, unknown> = {}) => {
     const fake = fakeRunners()
@@ -687,7 +743,7 @@ describe('pre-pr and the guards a branch adds', () => {
       prepare: (dir: string, _root: string, options?: { linkOnly?: boolean }) => (options?.linkOnly && existsSync(join(dir, 'needs-install')) ? false : undefined),
       vitest: (dir: string, files: string[]) => {
         vitestCalls.push(files)
-        clock.t += 1000
+        clock.t += step
         return {
           testResults: files.map((file) => ({
             name: join(dir, file),
@@ -715,6 +771,7 @@ describe('pre-pr and the guards a branch adds', () => {
 
   beforeEach(() => {
     clock.t = 0
+    step = 1000
     vitestCalls.length = 0
     repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
     bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
@@ -792,6 +849,13 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(r.ok).toBe(true)
   })
 
+  it('does not start the guards with less time than they need', () => {
+    addGuard()
+    const r = run(runners([openPr(21, { 'src/p21.txt': 'fine\n' })]), { limitMs: 59_000 })
+    expect(vitestCalls).toEqual([])
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts: not run: out of time (59 s of the 59 s left).'])
+  })
+
   it('stops at its time limit and names the pull requests it did not reach', () => {
     addGuard()
     const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
@@ -800,6 +864,16 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(vitestCalls).toHaveLength(2)
     expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
     expect(r.notes).toContain('tooling/guard.test.ts run against 3 open pull request(s): 0 would fail, 0 skipped, 1 not reached.')
+  })
+
+  it('caps the guards by what is left of the whole run, not only by their own limit', () => {
+    addGuard()
+    step = 31_000
+    const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
+    // 61.5 s in all: two runs of 31 s use it up, though the guards' own limit is ten minutes
+    const r = run(runners(prs), { limitMs: 61_500 })
+    expect(vitestCalls).toHaveLength(2)
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
   })
 
   it('asks nothing of GitHub when the branch changes no guard or the check is exempted, and leaves no ref behind', () => {
