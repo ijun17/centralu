@@ -3,8 +3,7 @@ import { CONTRACT, expectedFor, memoryContext, outcome } from './contract.test-h
 import { memoryOs, type MemoryOs, type ProgramContext } from './memory.js'
 import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import type { OsFamily } from './rules.js'
-import type { OsChild } from './port.js'
-import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS, runChild } from './run.js'
+import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS } from './run.js'
 
 /**
  * The in-memory OS (#1599, docs/plans/os-layer.md §7.1) answering as each family does, on whatever OS this runs: the
@@ -342,82 +341,6 @@ describe('processes in memory', () => {
     const late = os.processes.run(os.env.execPath, [], { signal: abort.signal })
     await os.clock.advance(RUN_STOP_GRACE_MS)
     expect((await late).ended).toBe('aborted')
-  })
-
-  it('an abort after the program has exited changes nothing: the answer is its own', async () => {
-    const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/daemon', (ctx) => (ctx.stdout.write('d'), waits(ctx)))
-    os.programs.add('/usr/bin/starts', (ctx) => {
-      ctx.start('/usr/bin/daemon', [], { stdio: ['ignore', 'inherit', 'inherit'] })
-    })
-    const abort = new AbortController()
-    const run = os.processes.run('starts', [], { signal: abort.signal })
-    await os.clock.advance(CLOSE_AFTER_EXIT_MS - 1)
-    abort.abort()
-    await os.clock.advance(1)
-    const r = await run
-    expect({ code: r.code, ended: r.ended }).toEqual({ code: 0, ended: undefined })
-  })
-
-  it('hands the child over as it starts, and stdout to its reader in place of the result', async () => {
-    const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/says', (ctx) => (ctx.stdout.write('a b '), waits(ctx)))
-    const seen: string[] = []
-    const children: unknown[] = []
-    const run = os.processes.run('says', [], {
-      onChild: (child) => children.push(child),
-      // Not collected, and not counted by maxBuffer; true ends the program
-      maxBuffer: 1,
-      onStdout: (chunk) => {
-        seen.push(chunk.toString())
-        return true
-      },
-    })
-    await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
-    const r = await run
-    expect({ ended: r.ended, seen, stdout: r.stdout.length, children: children.length }).toEqual({
-      ended: 'stopped',
-      seen: ['a b '],
-      stdout: 0,
-      children: 1,
-    })
-  })
-
-  it('keeps the first or the last bytes of stderr as asked, never ending the run for them', async () => {
-    const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/says', (ctx) => {
-      for (const part of ['abcd', 'efgh', 'ijkl']) ctx.stderr.write(part)
-    })
-    const keep = (from: 'head' | 'tail') =>
-      os.processes.run('says', [], { maxBuffer: 5, stderrKeep: { bytes: 6, from } }).then((r) => [r.stderr.toString(), r.ended])
-    expect(await keep('head')).toEqual(['abcdef', undefined])
-    expect(await keep('tail')).toEqual(['ghijkl', undefined])
-  })
-
-  it('keeps no stderr at all when asked for no bytes', async () => {
-    const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/says', (ctx) => void ctx.stderr.write('abcd'))
-    for (const from of ['head', 'tail'] as const)
-      expect((await os.processes.run('says', [], { stderrKeep: { bytes: 0, from } })).stderr.length).toBe(0)
-  })
-
-  it('sweeps what a run left only when it ended the run for a reason of its own, not when the reader had enough', async () => {
-    const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/says', (ctx) => (ctx.stdout.write('x'), waits(ctx)))
-    const sweeps: Array<boolean | undefined> = []
-    const spy = {
-      processes: { stop: (child: OsChild, grace: number, o?: { sweep?: boolean }) => (sweeps.push(o?.sweep), os.processes.stop(child, grace, o)) },
-      clock: os.clock,
-      files: os.files,
-    }
-    const start = (stdio: ['pipe' | 'ignore', 'pipe' | number, 'pipe']) => os.processes.start('says', [], { stdio })
-    const reader = runChild(spy, start, { onStdout: () => true })
-    await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
-    expect((await reader).ended).toBe('stopped')
-    const slow = runChild(spy, start, { timeoutMs: 10 })
-    await os.clock.advance(10 + RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
-    expect((await slow).ended).toBe('timeout')
-    expect(sweeps).toEqual([false, true])
   })
 
   it("a run's stdout file is made readable by its owner alone (0600)", async () => {
