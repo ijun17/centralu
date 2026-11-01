@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol/client'
 import type { RelaunchCheck } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
+import { useWhileVisible } from '../../app/useWhileVisible.js'
 import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'
 import { trackTyping, typedWithin, TYPING_QUIET_MS } from './typing.js'
 
@@ -56,32 +57,27 @@ export function useRelaunchCheck(): RelaunchCheck | null | undefined {
   const phase = useStore((s) => s.update?.phase)
   const [check, setCheck] = useState<RelaunchCheck | null>(null)
   useEffect(() => {
-    if (!relaunch) return setCheck(null)
-    let live = true
-    let checking = false
-    const read = async () => {
-      if (checking || document.hidden) return
-      checking = true
+    if (!relaunch) setCheck(null)
+  }, [relaunch])
+  // The check in flight, as the `live` of the run that started it: a check of an older run no longer holds a new one back
+  const checking = useRef<(() => boolean) | null>(null)
+  useWhileVisible(
+    async (live) => {
+      if (!relaunch || checking.current?.() || document.hidden) return
+      checking.current = live
       try {
         const c = await relaunch.check()
-        if (live) setCheck(c)
+        if (live()) setCheck(c)
       } catch (e) {
-        if (live) setCheck({ ready: false, reason: String(e) })
+        if (live()) setCheck({ ready: false, reason: String(e) })
       } finally {
-        checking = false
+        if (checking.current === live) checking.current = null
       }
-    }
-    void read()
-    const timer = setInterval(() => void read(), RECHECK_MS)
-    window.addEventListener('focus', read)
-    document.addEventListener('visibilitychange', read)
-    return () => {
-      live = false
-      clearInterval(timer)
-      window.removeEventListener('focus', read)
-      document.removeEventListener('visibilitychange', read)
-    }
-  }, [relaunch, phase])
+    },
+    RECHECK_MS,
+    { immediate: true, onReturn: 'always', onFocus: true, enabled: !!relaunch },
+    [relaunch, phase],
+  )
   return relaunch ? check : undefined
 }
 
