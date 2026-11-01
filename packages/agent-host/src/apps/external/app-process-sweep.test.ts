@@ -3,7 +3,7 @@ import type { GroupedChild } from '../../dev-services/grouped-child.js'
 import { realOs } from '../../os/real.js'
 import { ownProcesses } from '../../process.test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
-import { AppProcess } from './app-process.js'
+import { AppProcess, EXIT_WAIT_MS } from './app-process.js'
 
 /**
  * What an app left running is swept with the time of its exit as the host recorded it (#1650 review): the window of
@@ -65,27 +65,36 @@ vi.mock('../../dev-services/kill-tree.js', async (importOriginal) => ({
   stopTree: (handle: { pid?: number }) => void kills.push(handle.pid ?? 0),
 }))
 
+/** An app that keeps running once its input closes, so only the kill ends it, and what ends it and its grandchild */
+async function startStubborn() {
+  const dir = tempRoot('cc-app-stop-')
+  made.push(dir)
+  const log = os.paths.path.join(dir, 'fixture.jsonl')
+  const appLog = os.paths.path.join(dir, 'app.log')
+  const proc = await AppProcess.start({
+    command: os.env.execPath,
+    args: [os.paths.fromFileUrl(new URL('./test-fixtures/app.mjs', import.meta.url)), '--log', log, '--mode', 'ignore-eof'],
+    cwd: dir,
+    env: os.env.all(),
+    logPath: appLog,
+    logMaxBytes: 1024 * 1024,
+    redact: (t) => t,
+    probeTimeoutMs: 10_000,
+    connectTimeoutMs: 10_000,
+    exitWaitMs: 1500,
+  })
+  const grandchild = (JSON.parse(os.files.readFileSync(log, 'utf8').trim().split('\n').find((l) => l.includes('"grandchild"'))!) as { grandchild: number }).grandchild
+  const end = () => {
+    // Node sends nothing to a child it has seen exit
+    proc.child.kill('SIGKILL')
+    ownProcesses().end([grandchild])
+  }
+  return { proc, appLog, end }
+}
+
 describe('stopping an app and waiting for its tree', () => {
   it('resolves only once the app has exited, even when that is after the stop gave up waiting for the kill', async () => {
-    const dir = tempRoot('cc-app-stop-')
-    made.push(dir)
-    const log = os.paths.path.join(dir, 'fixture.jsonl')
-    const fixture = os.paths.fromFileUrl(new URL('./test-fixtures/app.mjs', import.meta.url))
-    const proc = await AppProcess.start({
-      command: os.env.execPath,
-      // Keeps running once its input closes, so only the kill ends it
-      args: [fixture, '--log', log, '--mode', 'ignore-eof'],
-      cwd: dir,
-      env: os.env.all(),
-      logPath: os.paths.path.join(dir, 'app.log'),
-      logMaxBytes: 1024 * 1024,
-      redact: (t) => t,
-      probeTimeoutMs: 10_000,
-      connectTimeoutMs: 10_000,
-      exitWaitMs: 1500,
-    })
-    const own = ownProcesses()
-    const grandchild = (JSON.parse(os.files.readFileSync(log, 'utf8').trim().split('\n').find((l) => l.includes('"grandchild"'))!) as { grandchild: number }).grandchild
+    const { proc, end } = await startStubborn()
     try {
       let settled = false
       const stopped = proc.stop(0, { awaitTree: true }).then(() => (settled = true))
@@ -97,9 +106,23 @@ describe('stopping an app and waiting for its tree', () => {
       await stopped
       expect(proc.alive).toBe(false)
     } finally {
-      // Node sends nothing to a child it has seen exit
-      proc.child.kill('SIGKILL')
-      own.end([grandchild])
+      end()
+    }
+  })
+
+  it('goes on without an app that never exits once EXIT_WAIT_MS has passed, and says so in its log', async () => {
+    const { proc, appLog, end } = await startStubborn()
+    try {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const stopped = proc.stop(0, { awaitTree: true })
+      // The grace and the kill's wait (0 ms each here) come first
+      await vi.advanceTimersByTimeAsync(EXIT_WAIT_MS + 1_000)
+      await stopped
+      expect(proc.alive).toBe(true)
+      expect(os.files.readFileSync(appLog, 'utf8')).toContain(`still running ${EXIT_WAIT_MS}ms after it was stopped`)
+    } finally {
+      vi.useRealTimers()
+      end()
     }
   })
 })
