@@ -101,7 +101,7 @@ module.exports = {
     },
     {
       name: 'host-no-frontend',
-      comment: 'agent-host shares only protocol.',
+      comment: 'agent-host shares only protocol and common.',
       severity: 'error',
       from: { path: '^packages/agent-host/src' },
       to: { path: '^packages/(ui|core|platform)/src' },

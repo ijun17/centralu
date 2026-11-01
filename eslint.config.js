@@ -232,7 +232,7 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   { files: ['**/*.mjs'], rules: { 'no-empty': 'off', '@typescript-eslint/no-unused-expressions': 'off' } },
-  // agent-host: shares only protocol (core/ui/platform live on the other side of the process).
+  // agent-host: shares only protocol and common (core/ui/platform live on the other side of the process).
   {
     files: ['packages/agent-host/**/*.ts'],
     rules: {
@@ -240,7 +240,7 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@cc/core', '@cc/ui', '@cc/platform/*'], message: 'agent-host shares only protocol (docs/architecture.md §2)' },
+            { group: ['@cc/core', '@cc/ui', '@cc/platform/*'], message: 'agent-host shares only protocol and common (docs/architecture.md §2)' },
             { group: ['react', 'react-dom'], message: 'agent-host is a Node process — no browser code' },
           ],
         },

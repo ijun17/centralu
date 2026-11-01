@@ -121,6 +121,12 @@
       "why": "messages between UI, host and linked machines of different versions: additions only, and a mistake reaches every pair"
     },
     {
+      "id": "common",
+      "tier": "deep",
+      "paths": ["packages/common/**"],
+      "why": "helpers the host and the screen both run (listener sets, pending requests with their timeouts): a mistake reaches every caller on both sides, and a build of the host and a window of another build must still agree"
+    },
+    {
       "id": "lint-allowlist",
       "tier": "light",
       "paths": ["tooling/lint-allowlist/*.txt"],
