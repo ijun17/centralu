@@ -197,10 +197,11 @@ export class MidTurnLedger {
 
   /** A turn ended; `ending`: how, said to the host with the inputs bound to it settled (null: the tool says no more of it) */
   turnEnded(id: string | null, ending: ToolTurnEnding | null): void {
+    const was = this.running
     this.running = null
     if (id) keep(this.ended, id)
-    // A named turn's end lets a waiting Stop go, said or not (Codex's turn/failed); Claude's is confirmed by `endSaid`
-    if (id || ending) this.endStopWait()
+    // The running turn's end lets its Stop go, said or not (Codex's turn/failed), not a late one's; Claude's: `endSaid` confirms
+    if (id ? id === was : ending) this.endStopWait()
     if (!ending) return
     if (this.blocking) this.unblock()
     const sessionId = this.sessionId

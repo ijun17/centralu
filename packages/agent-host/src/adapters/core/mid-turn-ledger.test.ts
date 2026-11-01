@@ -557,6 +557,17 @@ describe('a tool that writes its own inputs, on the ledger with its policies', (
       ledger.turnEnded('u', null)
       vi.advanceTimersByTime(20_000)
       expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(1)
+      // A late end of an earlier turn does not let the running one's Stop go; an exit does
+      ledger.turnStarted('v')
+      ledger.stopByPerson()
+      ledger.turnEnded('t', { how: 'complete' })
+      ledger.turnStarted('v')
+      vi.advanceTimersByTime(10_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(2)
+      ledger.stopByPerson()
+      ledger.exited(false, 'gone')
+      vi.advanceTimersByTime(20_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(2)
     } finally {
       vi.useRealTimers()
     }
