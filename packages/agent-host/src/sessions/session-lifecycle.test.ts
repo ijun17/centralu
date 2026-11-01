@@ -160,6 +160,25 @@ describe('a process that goes while its session is idle (#1397)', () => {
     expect(events.at(-1)).toEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
   })
 
+  // #1829, #673: a card the host raised between turns needs no process; it stays up and closes into its own rest
+  it('leaves a card the host raised between turns open, and the state with it', async () => {
+    const id = await newSession()
+    const gone = claude.last
+    gone.emit({ type: 'turn_complete', sessionId: id })
+    const answer = mgr.hostCards.askHost(id, { kind: 'project_access', access: 'delegate', from: { id: 'p1', name: 'One' }, to: { id: 'p2', name: 'Two', trusted: true }, text: 'One asks Two' }, undefined, { requestId: 'xp-1', alwaysAsk: true })
+    expect(mgr.listSessions().find((x) => x.id === id)).toMatchObject({ state: 'waiting_approval', pendingApproval: { requestId: 'xp-1' } })
+    const before = events.length
+    gone.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(mgr.isLive(id)).toBe(false)
+    // Nothing but the sleep: no turn ended, and the card was not taken down and raised again
+    expect(events.slice(before)).toEqual([{ type: 'session_live', sessionId: id, live: false, reason: 'asleep' }])
+    expect(mgr.listSessions().find((x) => x.id === id)).toMatchObject({ state: 'waiting_approval', pendingApproval: { requestId: 'xp-1' } })
+    await rpc('agents.respondApproval', { sessionId: id, requestId: 'xp-1', decision: 'allow' })
+    expect(await answer).toBe('allow')
+    // Back to the rest it was raised from
+    expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('idle')
+  })
+
   it('resumes the conversation on the next message: a new process is started for the same thread', async () => {
     const id = await newSession()
     const gone = claude.last
