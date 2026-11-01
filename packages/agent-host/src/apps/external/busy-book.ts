@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { realOs } from '../../os/real.js'
-import { replaceFileSync } from '../../os/replace-file.js'
+import { writeFileWhole } from '../../os/write-file-whole.js'
 
 /** One app that held busy when it was last heard from (#1236) */
 export type BusyRecord = { projectId: string | null; appId: string; reason: string; at: number }
@@ -28,7 +28,7 @@ export class BusyBook {
     else all[key] = rec
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      replaceFileSync(realOs().files, this.file, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
+      writeFileWhole(realOs().files, this.file, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
     } catch (e) {
       console.error(`[apps] could not record which apps are busy in ${this.file}: ${(e as Error).message}`)
     }

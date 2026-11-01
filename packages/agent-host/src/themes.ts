@@ -11,7 +11,7 @@ import {
   type ThemeFileEntry,
 } from '@cc/protocol'
 import { realOs } from './os/real.js'
-import { replaceFileSync } from './os/replace-file.js'
+import { writeFileWhole } from './os/write-file-whole.js'
 import { rpcError } from './rpc-error.js'
 
 /** A theme file bigger than this is not a theme (the full token set written out is about 4KB) */
@@ -81,7 +81,7 @@ export class ThemeFiles {
     const path = join(this.dir, THEME_SCHEMA_FILE)
     const text = `${JSON.stringify(themeFileJsonSchema(), null, 2)}\n`
     const current = await readFile(path, 'utf8').catch(() => null)
-    if (current !== text) replaceFileSync(realOs().files, path, text)
+    if (current !== text) writeFileWhole(realOs().files, path, text)
   }
 
   /** Every `<id>.json` in the folder, read and checked. A file that cannot be read is listed with the reason. */
@@ -115,7 +115,7 @@ export class ThemeFiles {
   async save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry> {
     const target = id ?? (await this.freeId(content.name))
     await mkdir(this.dir, { recursive: true })
-    replaceFileSync(realOs().files, this.pathOf(target), formatThemeFile(content))
+    writeFileWhole(realOs().files, this.pathOf(target), formatThemeFile(content))
     return this.read(target)
   }
 
@@ -130,7 +130,7 @@ export class ThemeFiles {
     const fromName = basename(source).replace(/\.json$/i, '')
     const id = await this.freeId(parsed.name !== 'import' ? parsed.name : fromName)
     // The text is copied as it is (comments of a sort, key order, `$schema`), not re-serialised
-    replaceFileSync(realOs().files, this.pathOf(id), text)
+    writeFileWhole(realOs().files, this.pathOf(id), text)
     return this.read(id)
   }
 

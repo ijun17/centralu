@@ -1,6 +1,6 @@
 import { errnoCode } from '../os/errors.js'
 import type { Os } from '../os/port.js'
-import { replaceFileSync } from '../os/replace-file.js'
+import { writeFileWhole } from '../os/write-file-whole.js'
 import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedRecord } from './serve-credentials.js'
 
 /**
@@ -247,7 +247,7 @@ export class UsedCredentialsFile {
     const records = this.used.records()
     const text = records.map(encodeUsedRecord).join('')
     try {
-      replaceFileSync(this.os.files, this.path, text, { mode: 0o600 })
+      writeFileWhole(this.os.files, this.path, text, { mode: 0o600 })
     } catch (e) {
       this.log(`[agent-host] the file of used credentials could not be shortened (${codeOf(e)})`)
       return

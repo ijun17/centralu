@@ -2,7 +2,7 @@ import { chmodSync, readFileSync, readdirSync, renameSync, rmSync, statSync } fr
 import { basename, dirname, join } from 'node:path'
 import { errnoCode } from '../../os/errors.js'
 import { realOs } from '../../os/real.js'
-import { createFileSync, replaceFileSync } from '../../os/replace-file.js'
+import { writeFileWhole } from '../../os/write-file-whole.js'
 
 /**
  * One small JSON document kept in the host's data folder that only this user may read (app secrets,
@@ -106,12 +106,9 @@ export class PrivateJsonFile<T> {
     if (this.standIn) {
       throw new Error(`${this.opts.label} could not be read, so it was not overwritten. Fix or remove ${this.path}`)
     }
-    // The temp file is created at 0600 from the start (os/replace-file.ts); tightening the file once more after the move
-    // covers someone having loosened the permissions on an existing one
+    // Created at 0600 from the start; tightening once more after the move covers a loosened file already there
     const text = JSON.stringify(doc, null, this.opts.indent)
-    const files = realOs().files
-    if (how === 'replace') replaceFileSync(files, this.path, text, { mode: 0o600 })
-    else if (!createFileSync(files, this.path, text, { mode: 0o600 })) return false
+    if (!writeFileWhole(realOs().files, this.path, text, { mode: 0o600, create: how === 'create' })) return false
     // What the person re-entered is the file now: the line about the one moved aside has done its job
     this.lastTrouble = null
     chmodSync(this.path, 0o600)
