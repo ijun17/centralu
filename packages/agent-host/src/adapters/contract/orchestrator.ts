@@ -243,7 +243,12 @@ export type LinkedSessions = {
    */
   projects(need?: ProjectNeed): Promise<ProjectLookup>
   /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
-  projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string; lastActive?: string }[] }>>
+  projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
+  /**
+   * When each of that project's sessions last moved, by qualified id, for the refusal that lists them. A separate read, since
+   * the machine builds it for all its sessions: asked for only once a refusal is built. Never fails; none known: empty. Absent: none
+   */
+  sessionsMoved?(project: LinkedProject): Promise<Record<string, string>>
   /**
    * A new session in a machine's project, under `preset` (`normal` when none is given; the caller caps it, #838), named
    * if a name is given. For start_agent's child there (#1038): its model and effort, a new worktree on `worktreeBranch`,

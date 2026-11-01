@@ -404,8 +404,13 @@ export class AskProjectFlow {
       return ask && ask.callerId === callerId
     })
     if (!opts.task && !wantedSession && mine.length === 1) return this.awaitLinkedAsk(this.linkedAsks.get(mine[0]!.id)!, reader, signal)
-    const picked = pickAskedSession(sessions, wantedSession, label)
-    if ('error' in picked) return { ok: false, error: picked.error }
+    let picked = pickAskedSession(sessions, wantedSession, label)
+    if ('error' in picked) {
+      // The times are read only for the refusal that lists them: a successful ask never waits for them
+      const moved = (await reader.sessionsMoved?.(target)) ?? {}
+      picked = pickAskedSession(sessions, wantedSession, label, (s) => moved[s.id])
+      return { ok: false, error: (picked as { error: string }).error }
+    }
     const chosen = picked.chosen
     const pending = this.linkedAsks.get(chosen.id)
     if (pending && pending.callerId === callerId && !opts.task) return this.awaitLinkedAsk(pending, reader, signal)

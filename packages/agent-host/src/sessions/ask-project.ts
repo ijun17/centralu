@@ -252,7 +252,7 @@ export function pickAskedSession<S extends { id: string; name: string; state: st
   const named = wanted ? sessions.filter((s) => s.name.toLowerCase() === wanted.toLowerCase()) : sessions
   const chosen = sessions.find((s) => s.id === wanted) ?? (named.length === 1 ? named[0] : undefined)
   if (chosen) return { chosen }
-  const list = sessions.map((s) => JSON.stringify({ id: s.id, name: s.name, state: s.state, lastActive: lastActive(s) ?? null })).join('\n')
+  const list = sessions.map((s) => JSON.stringify({ id: s.id, name: oneLineText(s.name, 200), state: s.state, lastActive: lastActive(s) ?? null })).join('\n')
   return {
     error: sessions.length
       ? `${wanted ? `No unique ordinary session named "${oneLineText(wanted, 120)}" in ${label}. ` : ''}Name a session with the session argument. Sessions (name, state, last active):\n${list}`

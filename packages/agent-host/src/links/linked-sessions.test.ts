@@ -434,18 +434,19 @@ describe("a linked machine in every session's list and search (#984)", () => {
 })
 
 describe('the projects of linked machines, for ask_project (#700)', () => {
-  describe('the sessions of a project, for the refusal that lists them', () => {
+  describe('when a project’s sessions last moved, for the refusal that lists them', () => {
     const project = { id: 'm1.p1', name: 'apps', path: '/srv/apps', defaultTool: null, machine: 'Box', machineId: 'm1' } as const
-    const listed = [{ id: 'w1', projectId: 'p1', kind: 'worker', name: 'Worker', state: 'idle' }]
 
-    it('carries when each last moved, as the machine says it', async () => {
-      const m = machine({ 'sessions.list': listed, 'host.sessions': [row({ sessionId: 'w1', lastActive: '2026-01-02 03:04' })] })
-      expect(await linkedSessions(() => [m]).projectSessions(project)).toEqual({ ok: true, sessions: [{ id: 'm1.w1', name: 'Worker', state: 'idle', lastActive: '2026-01-02 03:04' }] })
+    it('is what the machine says of each, by the hub’s ids', async () => {
+      const m = machine({ 'host.sessions': [row({ sessionId: 'w1', lastActive: '2026-01-02 03:04' }), row({ sessionId: 'w2' })] })
+      expect(await linkedSessions(() => [m]).sessionsMoved!(project)).toEqual({ 'm1.w1': '2026-01-02 03:04' })
     })
 
-    it('still lists them when the machine cannot say (an older build)', async () => {
-      const m = machine({ 'sessions.list': listed })
-      expect(await linkedSessions(() => [m]).projectSessions(project)).toEqual({ ok: true, sessions: [{ id: 'm1.w1', name: 'Worker', state: 'idle' }] })
+    it('is none when the machine cannot say (an older build), and listing the sessions does not read it', async () => {
+      const m = machine({ 'sessions.list': [{ id: 'w1', projectId: 'p1', kind: 'worker', name: 'Worker', state: 'idle' }] })
+      const reader = linkedSessions(() => [m])
+      expect(await reader.sessionsMoved!(project)).toEqual({})
+      expect(await reader.projectSessions(project)).toEqual({ ok: true, sessions: [{ id: 'm1.w1', name: 'Worker', state: 'idle' }] })
     })
   })
 
