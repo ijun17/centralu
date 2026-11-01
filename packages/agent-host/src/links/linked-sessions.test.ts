@@ -434,6 +434,22 @@ describe("a linked machine in every session's list and search (#984)", () => {
 })
 
 describe('the projects of linked machines, for ask_project (#700)', () => {
+  describe('when a project’s sessions last moved, for the refusal that lists them', () => {
+    const project = { id: 'm1.p1', name: 'apps', path: '/srv/apps', defaultTool: null, machine: 'Box', machineId: 'm1' } as const
+
+    it('is what the machine says of each, by the hub’s ids', async () => {
+      const m = machine({ 'host.sessions': [row({ sessionId: 'w1', lastActive: '2026-01-02 03:04' }), row({ sessionId: 'w2' })] })
+      expect(await linkedSessions(() => [m]).sessionsMoved!(project)).toEqual({ 'm1.w1': '2026-01-02 03:04' })
+    })
+
+    it('is none when the machine cannot say (an older build), and listing the sessions does not read it', async () => {
+      const m = machine({ 'sessions.list': [{ id: 'w1', projectId: 'p1', kind: 'worker', name: 'Worker', state: 'idle' }] })
+      const reader = linkedSessions(() => [m])
+      expect(await reader.sessionsMoved!(project)).toEqual({})
+      expect(await reader.projectSessions(project)).toEqual({ ok: true, sessions: [{ id: 'm1.w1', name: 'Worker', state: 'idle' }] })
+    })
+  })
+
   it('does not wait on a machine that is slow to list its projects: it is counted as away, from its mirror, and the others are heard', async () => {
     const slow: RoutedMachine = {
       ...machine({}, { mirror: { projects: [{ id: 'p-old', name: 'old', path: '/srv/old', defaultTool: null }] } }),

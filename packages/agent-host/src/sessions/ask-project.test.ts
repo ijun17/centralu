@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { ASK_WAIT_MS, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
@@ -62,6 +62,20 @@ describe('the projects a name points at, here and on linked machines (#700)', ()
   it('tells the choices apart by id and machine', () => {
     expect(projectChoice(here('p2', 'cc'))).toBe('cc [p2] on this computer')
     expect(projectChoice(there('win-pc', 'Windows PC', 'p9', 'cc'))).toBe('cc [win-pc.p9] on Windows PC')
+  })
+})
+
+describe('the refusal that lists the sessions an ask could name', () => {
+  const sessions = [
+    { id: 's1', name: 'One', state: 'idle', lastActive: '2026-01-02 03:04' },
+    { id: 's2', name: 'Two', state: 'working' },
+  ]
+
+  it('gives each session with when it last moved, whoever the ask is for', () => {
+    const picked = pickAskedSession(sessions, 'missing', 'apps')
+    expect(picked).toEqual({
+      error: expect.stringContaining('Sessions (name, state, last active):\n{"id":"s1","name":"One","state":"idle","lastActive":"2026-01-02 03:04"}\n{"id":"s2","name":"Two","state":"working","lastActive":null}'),
+    })
   })
 })
 
@@ -246,6 +260,11 @@ describe('asking another project', () => {
     for (const session of ['Sprites', 'missing', caller]) {
       expect(await w.mgr.askProject(caller, { project: w.target.id, session, task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining('No unique ordinary session') })
     }
+    // The refusal lists the sessions with when each last moved, and puts the caller's text on one line (#120)
+    const long = await w.mgr.askProject(caller, { project: w.target.id, session: `a\nb${'x'.repeat(200)}`, task: 'export' })
+    expect(long).toMatchObject({ ok: false, error: expect.stringContaining('last active):') })
+    const first = (long as { error: string }).error.split('\n')[0]!
+    expect(first).toMatch(/^No unique ordinary session named "a bx+…?" in /)
     expect(handleOf(targetSession)!.sent).toEqual([])
     expect(w.card(caller)).toBeUndefined()
   })

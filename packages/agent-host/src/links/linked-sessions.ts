@@ -352,6 +352,14 @@ export function linkedSessions(
       })
     },
 
+    async sessionsMoved(project) {
+      const [m] = findProject(project.id)
+      if (!m || !m.reachable) return {}
+      // Best effort: an older build, a slow or a failed answer lists no time
+      const answer = await boundedAsk(m, 'host.sessions', {}).then((a) => rows(m, a), () => [])
+      return Object.fromEntries(answer.flatMap((r) => (r.lastActive ? [[r.sessionId, r.lastActive]] : [])))
+    },
+
     async createSession(project, opts) {
       const [m, refusal] = findProject(project.id)
       if (!m) return refusal

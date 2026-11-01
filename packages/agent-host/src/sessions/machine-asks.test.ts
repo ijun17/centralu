@@ -51,6 +51,12 @@ describe("a machine's ask, read again once the asked session is awake (#550)", (
     return { p, wake, delivered }
   }
 
+  it('refuses an unnamed session with when each last moved, as an ask here does', async () => {
+    w.store.messages.appendMessages([{ sessionId: target, seq: 1, role: 'assistant', kind: 'text', payload: { text: 'done' }, ts: Date.UTC(2026, 0, 2, 3, 4) }])
+    const r = await w.mgr.askFromMachine(machine, { caller, project: w.target.name, session: 'missing', task: 'export', depth: 1 })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('"lastActive":"2026-01-02 03:04"') })
+  })
+
   it.each([
     ['the person turns the machine\'s switch off', (cw: CrossWorld) => cw.store.machines.setLinkedMachineAsks(machine.id, false), 'does not let sessions on Remote box ask'],
     // Removed at the store, as another host would: the session stays, so only the read at delivery can see it

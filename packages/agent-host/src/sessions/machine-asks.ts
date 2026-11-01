@@ -8,6 +8,7 @@ import type { DelegationHost } from './delegation-host.js'
 import { MACHINE_ASKER } from './hub-sender.js'
 import { raceBound } from '../timing.js'
 import { turnAnswer } from './turn-answer.js'
+import { lastActiveOf } from './transcript-view.js'
 
 /**
  * What a linked machine's ask reaches of the session manager (#550), typed as the manager declares each member. The
@@ -74,7 +75,7 @@ export class MachineAsks {
   }
 
   /** An ordinary session of the project here, which an ask may reach (#614) */
-  private ordinary(projectId: string): { id: string; name: string; state: SessionState }[] {
+  private ordinary(projectId: string): { id: string; name: string; state: SessionState; lastActive?: string }[] {
     return [...this.host.meta.values()]
       .filter((s) => s.projectId === projectId && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s))
       .map((s) => ({ id: s.id, name: s.name, state: s.state }))
@@ -104,7 +105,7 @@ export class MachineAsks {
     const wantedSession = p.session?.trim()
     if (!p.task && !wantedSession && mine.length === 1) return this.awaitGiven(mine[0]!, signal)
     const sessions = this.ordinary(target.id)
-    const picked = pickAskedSession(sessions, wantedSession, label)
+    const picked = pickAskedSession(sessions, wantedSession, label, (s) => lastActiveOf(this.host.store.messages, s.id))
     if ('error' in picked) return { ok: false, error: picked.error }
     const chosen = picked.chosen
     const key = this.keyOf(machine.id, p.caller.sessionId, chosen.id)
