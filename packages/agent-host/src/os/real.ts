@@ -351,7 +351,7 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
   return asChild(() => spawnGrouped(command, args, options))
 }
 
-async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}): Promise<OsExit> {
+async function stop(child: OsChild, graceMs: number): Promise<OsExit> {
   if (!(child instanceof RealChild))
     throw new TypeError('realOs().processes.stop: a child the real OS started')
   const node = child.node
@@ -359,7 +359,7 @@ async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}
   if (node?.pid !== undefined && running()) stopTree(killHandle(node), graceMs, running)
   const exit = await child.exited
   // What it left, created between its spawn and its exit as seen then: never up to now, when its pid may be another's
-  if (child.started && o.sweep !== false) await sweepLeftovers(child.started)
+  if (child.started) await sweepLeftovers(child.started)
   return { code: exit.code, signal: exit.signal }
 }
 
