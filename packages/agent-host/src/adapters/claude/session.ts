@@ -338,12 +338,13 @@ export class ClaudeSession implements SessionHandle {
   /** One message of the stream, in the order the CLI sent it */
   private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
     const m = msg as StreamMsg
-    if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
+    if (!this.turnOpen && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
       this.cliTurnRan = true
       if (!this.cards.pending.size && !this.cards.questions.size) {
         // The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604)
-        this.startInputs = [m.user_message_uuid]
+        // A turn the CLI runs on its own (after a background task ends) names no input (#1830)
+        this.startInputs = m.user_message_uuid ? [m.user_message_uuid] : null
         this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
         this.startInputs = null
       }

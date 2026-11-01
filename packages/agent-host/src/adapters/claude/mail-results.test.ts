@@ -121,6 +121,25 @@ describe('a quiet input the CLI ran a turn for', () => {
   })
 })
 
+describe('a turn the CLI runs on its own', () => {
+  it('names no input, yet is a turn: working when its first output comes, ended by its result (#1830)', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await session(events)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    events.length = 0
+
+    // A background task ended: the CLI answers it by itself, with no input of ours to name
+    wire.say({ type: 'assistant', message: { id: 'a9', role: 'assistant', content: [{ type: 'text', text: 'the task finished' }] } })
+    await tick()
+    expect(events.filter((e) => e.type === 'state_change' && e.state === 'working')).toHaveLength(1)
+    wire.say(result([]))
+    await tick()
+    expect(events.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+    await handle.dispose()
+  })
+})
+
 describe('a wake that is tracked', () => {
   it('is taken when a turn runs for it, before that turn ends, and failed when the process closes with it still queued', async () => {
     const events: NormalizedEvent[] = []
