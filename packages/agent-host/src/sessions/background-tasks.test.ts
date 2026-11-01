@@ -128,7 +128,7 @@ describe('whether a session is idle (#290, for #297)', () => {
   it('not idle during a turn, or while an approval or a question waits', async () => {
     const { mgr, session, handles } = await setup()
     const h = handles[0]!
-    h.emit({ type: 'message_delta', sessionId: session.id, role: 'assistant', text: 'working' })
+    h.emit({ type: 'state_change', sessionId: session.id, state: 'working' })
     expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'turn' })
     h.emit({ type: 'approval_request', sessionId: session.id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
     expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'approval' })
@@ -148,13 +148,13 @@ describe('whether a session is idle (#290, for #297)', () => {
     const { mgr, session, handles, tasks } = await setup()
     const h = handles[0]!
     const busy = () => hostBusy({ sessions: mgr.listSessions(), terminals: 0, commandRuns: 0 })
-    h.emit({ type: 'message_delta', sessionId: session.id, role: 'assistant', text: 'working' })
+    h.emit({ type: 'state_change', sessionId: session.id, state: 'working' })
     expect(busy()).toBe(true)
     h.emit({ type: 'turn_complete', sessionId: session.id })
     expect(mgr.listSessions()[0]!.state).toBe('waiting_input')
     expect(busy()).toBe(false)
     // A question comes inside a turn; answered, the turn goes on (waiting_approval → working) until it ends (#428)
-    h.emit({ type: 'message_delta', sessionId: session.id, role: 'assistant', text: 'asking' })
+    h.emit({ type: 'state_change', sessionId: session.id, state: 'working' })
     h.emit({ type: 'question_request', sessionId: session.id, requestId: 'q2', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }] })
     expect(mgr.listSessions()[0]!.state).toBe('waiting_approval')
     expect(busy()).toBe(true)

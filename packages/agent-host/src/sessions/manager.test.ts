@@ -638,7 +638,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(m.limit?.resumeAt).toBe('2026-08-19T12:00:00Z')
 
     // Once deltas flow again (recovery), the basis for the limit banner must disappear.
-    h.emitDelta('working again')
+    h.emitEvent({ type: 'state_change', sessionId: s.id, state: 'working' })
     m = await listed(s.id)
     expect(m.limit).toBeNull()
   })

@@ -31,6 +31,7 @@ async function answer(page: Page, id: string, text: string) {
   await page.evaluate(
     ({ sid, t }) => {
       const m = (window as any).__mock as Mock
+      m.emit({ type: 'state_change', sessionId: sid, state: 'working' })
       m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: t })
       m.emit({ type: 'turn_complete', sessionId: sid })
     },
@@ -173,6 +174,7 @@ export function inboxDoneTests() {
       ({ a, e }) => {
         const m = (window as any).__mock as Mock
         void m.requestApproval(a, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' })
+        m.emit({ type: 'state_change', sessionId: e, state: 'working' })
         m.emit({ type: 'message_delta', sessionId: e, role: 'assistant', text: 'about to fail' })
         m.emit({ type: 'error', sessionId: e, error: { code: 'internal', message: 'boom', retryable: false } })
       },
@@ -202,6 +204,7 @@ export function inboxDoneTests() {
     page.evaluate(
       ({ sid, m }) => {
         const mock = (window as any).__mock as Mock
+        mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
         mock.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'working on it' })
         mock.emit({ type: 'error', sessionId: sid, error: { code: 'adapter_crashed', message: m, retryable: true } })
       },

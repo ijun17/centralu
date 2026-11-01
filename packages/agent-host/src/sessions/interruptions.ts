@@ -82,10 +82,6 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
       if (e.state === 'waiting_input' && e.reason === INTERRUPTED_BY_TOOL) return { reason: 'interrupted', at: now }
       if (e.state === 'waiting_input' && e.reason === 'interrupted') return null
       return undefined
-    case 'message_delta':
-    case 'tool_call':
-      // Output is a turn running: whatever stopped the last one is over
-      return null
     default:
       return undefined
   }

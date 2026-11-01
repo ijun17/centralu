@@ -851,7 +851,7 @@ describe("the orchestrator's app guide and settings (#30)", () => {
     })) as { id: string }
     const orc = await mgr.orchestrator()
     const worker = adapter.handleOf(s.id)!
-    worker.emitDelta('working')
+    worker.emitEvent({ type: 'state_change', sessionId: s.id, state: 'working' })
 
     const r = await mgr.runOrchestratorTool(orc.id, 'update_session_settings', {
       sessionId: s.id, effort: 'low',

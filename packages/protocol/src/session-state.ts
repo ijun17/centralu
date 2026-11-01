@@ -68,15 +68,13 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
   switch (event.type) {
     case 'state_change':
       return event.state
-    case 'message_delta':
-    case 'tool_call':
-      return 'working'
     /*
-     * Not tool_result: a result closes a call, it starts nothing. Results arrive after the turn ended too — a
-     * background agent's card released when its process closes (claude `releaseAgents`), or one a set-aside handle
-     * still sends (manager `onEvent`) — and read as work they moved a session at rest into working with nothing left
-     * to end it: never idle again for the keeper, an update or sleep, and "stopped by quit" at the next start (#428).
-     * In a turn the session is already working; a new turn announces itself (its first output or a state_change).
+     * Not message_delta, tool_call or tool_result: output is content, and only a turn's start (an adapter's
+     * `state_change: working`) and its end move the state (#1830). Output arrives after a turn ended too — a late
+     * update from an agent, a background agent's card released when its process closes (claude `releaseAgents`), a
+     * result a set-aside handle still sends (manager `onEvent`) — and read as work it moved a session at rest into
+     * working with nothing left to end it: never idle again for the keeper, an update or sleep, and "stopped by quit"
+     * at the next start (#428). Late output is shown and the session stays at the rest its turn ended in.
      */
     case 'approval_request':
       return 'waiting_approval'

@@ -31,7 +31,7 @@ describe('the instant a turn started (issue #23)', () => {
     mock.sessions.set('ws-s1', sessionInfo('ws-s1'))
     await useStore.getState().attach(mock)
 
-    useStore.getState().dispatchEvent(delta('ws-s1', 'first letter'))
+    useStore.getState().dispatchEvent({ sessionId: 'ws-s1', type: 'state_change', state: 'working' })
     const started = useStore.getState().workingSince['ws-s1']
     expect(started).toBeDefined()
     expect(useStore.getState().sessions['ws-s1']!.state).toBe('working')
@@ -45,7 +45,7 @@ describe('the instant a turn started (issue #23)', () => {
     mock.sessions.set('ws-s2', sessionInfo('ws-s2'))
     await useStore.getState().attach(mock)
 
-    useStore.getState().dispatchEvent(delta('ws-s2', 'reply'))
+    useStore.getState().dispatchEvent({ sessionId: 'ws-s2', type: 'state_change', state: 'working' })
     expect(useStore.getState().workingSince['ws-s2']).toBeDefined()
 
     useStore.getState().dispatchEvent({ sessionId: 'ws-s2', type: 'turn_complete' } as NormalizedEvent)

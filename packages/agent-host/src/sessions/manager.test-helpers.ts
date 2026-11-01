@@ -29,6 +29,7 @@ export class FakeHandle implements SessionHandle {
     this.sent.push(text)
     this.origins.push(opts?.origin)
     this.compacts.push(!!opts?.compact)
+    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
   }
   nudge(text: string): boolean {

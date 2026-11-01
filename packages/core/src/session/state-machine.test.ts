@@ -4,7 +4,7 @@
  * (One of the items where plan v2 replaced human review with automatic verification)
  */
 import { describe, expect, it } from 'vitest'
-import type { NormalizedEvent, SessionState } from '@cc/protocol'
+import { nextStateFor, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import { URGENCY, canTransition, isWaiting, needsAnswer, transition } from './state-machine.js'
 
 const ev = (e: Partial<NormalizedEvent> & { type: NormalizedEvent['type'] }) =>
@@ -29,8 +29,6 @@ describe('matches the FR-12 spec', () => {
 
 describe('event → transition', () => {
   it.each([
-    ['message_delta', 'idle', 'working'],
-    ['tool_call', 'idle', 'working'],
     ['approval_request', 'working', 'waiting_approval'],
     ['approval_resolved', 'waiting_approval', 'working'],
     ['turn_complete', 'working', 'waiting_input'],
@@ -51,6 +49,11 @@ describe('event → transition', () => {
       expect(transition('waiting_input', ev({ type })).state).toBe('waiting_input')
     }
   })
+})
+
+// #1830: output is content; only a turn's start and end change the state
+it.each(['message_delta', 'tool_call'] as const)('%s changes no state', (type) => {
+  expect(nextStateFor(ev({ type }))).toBeNull()
 })
 
 describe('blocking illegal transitions', () => {

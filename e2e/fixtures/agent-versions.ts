@@ -54,6 +54,7 @@ export function agentVersionsTests(): void {
       await expect(page.getByTestId('agent-version-notice')).toBeVisible()
 
       // Working: it keeps its version and the line
+      await emit(page, id, { type: 'state_change', state: 'working' })
       await emit(page, id, { type: 'message_delta', role: 'assistant', text: 'Working on it' })
       await page.getByTestId('agent-version-apply').click()
       await expect(page.getByTestId('toast')).toContainText('Nothing restarted: 1 session busy keeps its version for now')

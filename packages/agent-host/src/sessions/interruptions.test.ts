@@ -306,6 +306,17 @@ describe('a turn its tool interrupted (#698)', () => {
     expect(info(a, child).interruption).toMatchObject({ reason: 'interrupted' })
   })
 
+  it('stays marked when output comes after it: only a new turn clears it (#1830)', async () => {
+    const a = host()
+    const { child } = await parentAndChild(a)
+    const h = a.claude.handles.get(child)!
+    h.emit({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
+    h.emit({ type: 'message_delta', sessionId: child, role: 'assistant', text: 'late' })
+    expect(info(a, child)).toMatchObject({ state: 'waiting_input', interruption: { reason: 'interrupted' } })
+    h.emit({ type: 'state_change', sessionId: child, state: 'working' })
+    expect(info(a, child).interruption ?? null).toBeNull()
+  })
+
   it("the person's Stop is not an interruption to flag: they know", async () => {
     const a = host()
     const project = await a.mgr.addProject(root)
