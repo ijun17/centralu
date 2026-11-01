@@ -554,8 +554,8 @@ describe('handing off a session of a linked machine whose link drops', () => {
     expect(asked.mock.calls.length).toBe(calls)
     mock.emit({ type: 'machine_status', machine: box() })
     mockNote(mock, 'box.ho-m1', 'note from far')
-    mock.emit({ type: 'turn_complete', sessionId: 'box.ho-m1' } as NormalizedEvent)
-    mock.emit({ type: 'state_change', sessionId: 'box.ho-m1', state: 'waiting_input' } as NormalizedEvent)
+    mock.emit({ type: 'turn_complete', sessionId: 'box.ho-m1' })
+    mock.emit({ type: 'state_change', sessionId: 'box.ho-m1', state: 'waiting_input' })
     await done
     expect(mock.lastCreateParams?.handoff).toMatchObject({ note: 'note from far' })
   })
