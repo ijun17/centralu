@@ -155,8 +155,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const darwin = /- target: darwin-arm64\n\s+runner: (\S+)/.exec(release)![1]
     expect(mac).toMatch(new RegExp(`^ {4}runs-on: ${darwin}$`, 'm'))
     // The Node the release's platform jobs run `pnpm verify` on
-    const nodeOf = (text: string) => /node-version: (\d+)\n/.exec(text)![1]
-    expect(nodeOf(mac)).toBe(nodeOf(release.slice(release.indexOf('\n  platform:\n'))))
+    // (the job passes no Node of its own: it takes the setup action's default)
+    const nodeOf = (text: string) => /(?:node-version|default): '?(\d+)/.exec(text)![1]
+    expect(mac).toContain('uses: ./.github/actions/setup\n')
+    expect(mac).not.toContain('node-version')
+    expect(nodeOf(readFileSync(new URL('../.github/actions/setup/action.yml', import.meta.url), 'utf8'))).toBe(nodeOf(release.slice(release.indexOf('\n  platform:\n'))))
     // Never the real data folder (AGENTS.md)
     expect(mac.match(/CC_DATA_DIR: \$\{\{ runner\.temp \}\}\//g)).toHaveLength(2)
     // Three answers of `host_tests`: off (the quick tier) the small set, true the whole host, false (a full run it cannot affect) neither

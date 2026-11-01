@@ -109,8 +109,12 @@ describe('who reads the pin', () => {
     expect(j).toMatch(/runner: \[ubuntu-24\.04, windows-2022\]/)
     expect(j).toMatch(/vitest run packages\/agent-host packages\/protocol tooling\/launcher-/)
     // Added, not swapped: the app's own host still runs on the person's Node, 22 or later
-    expect(job(build, 'verify')).toContain('node-version: 22')
-    expect(job(build, 'windows-tests')).toContain('node-version: 22')
+    // (they pass no Node of their own: they take the setup action's default)
+    expect(readFileSync(root('.github/actions/setup/action.yml'), 'utf8')).toContain("default: '22'")
+    for (const name of ['verify', 'windows-tests']) {
+      expect(job(build, name)).toContain('uses: ./.github/actions/setup\n')
+      expect(job(build, name)).not.toContain('node-version')
+    }
   })
 
   it('the release checks the pin against Node’s signature before anything is built', () => {
