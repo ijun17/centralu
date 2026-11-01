@@ -8,8 +8,8 @@ import type { ToolLaunch } from './tool-process.js'
  * The seam between the session core and one tool (docs/plans/session-core.md §4, #1654): the core (`ledger.ts`) drives a
  * tool through `ToolWire`, and the tool answers through `CoreIo` and the `RunningTurn` it was handed. The core owns the
  * phase, the queue, the input receipts, the Stop and its timer, the exit (crash or asleep) and the process; the wire owns
- * the frames and what they mean. The decision order (PR 8) and the event hygiene (PR 9) are not in the seam yet: until
- * they move, a wire keeps its cards and only hears from the core when to release them. A tool that takes input mid-turn
+ * the frames and what they mean. The decision order is `grants.ts` (PR 8), which a wire asks; the event hygiene (PR 9) is
+ * not in the seam yet. A wire keeps its cards and only hears from the core when to release them. A tool that takes input mid-turn
  * (Codex, Claude) names its own turns, so it has a seam of its own (`MidTurnWire`, `mid-turn-ledger.ts`).
  */
 
