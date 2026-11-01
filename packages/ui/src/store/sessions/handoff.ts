@@ -1,4 +1,4 @@
-import { gridSessionIds, isInTurn, type SessionSummary } from '@cc/core'
+import { gridSessionIds, isAway, isInTurn, type SessionSummary } from '@cc/core'
 import { handoffOpening, handoffPrompt } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
@@ -98,7 +98,8 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
        * that follows is the handoff, whole.
        */
       const quietBy = Date.now() + 10 * 60_000
-      while (get().sessions[sessionId]?.state === 'working') {
+      // A machine that is away shows its turn as not working (#1822): what it does there is not known, so it is waited for
+      while (get().sessions[sessionId]?.state === 'working' || isAway(get().sessions[sessionId], get().machines)) {
         if (Date.now() > quietBy) throw new Error('the session never finished its current turn')
         await new Promise((r) => setTimeout(r, 500))
       }
@@ -141,7 +142,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         if (!cur) throw new Error('the session disappeared while writing the note')
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
         if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
-        if (st.connection !== 'connected') continue // No decision is made while disconnected
+        if (st.connection !== 'connected' || isAway(cur, st.machines)) continue // No decision is made while disconnected, here or there (#1822)
         if (isInTurn(cur.state)) continue
         /*
          * null is "no reply yet": asked again. A throw is not (#841 item 5): the host could not place the note (a

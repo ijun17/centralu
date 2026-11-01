@@ -7,7 +7,7 @@
  */
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import type { MachineInfo, NormalizedEvent } from '@cc/protocol'
 import { sessionGridPanel } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
@@ -516,5 +516,47 @@ describe('the first screen of a session born from a handoff (#172)', () => {
     expect(await readAll(info.id)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING', ...now().slice(2).map(line)])
     expect(now().filter((i) => i.kind === 'user' && i.text === 'OPENING')).toHaveLength(1)
     expect(now().filter((i) => i.kind === 'mark')).toHaveLength(1)
+  })
+})
+
+// #1822: a machine whose link drops shows its session as not working; the hand-off still waits for it, as before
+describe('handing off a session of a linked machine whose link drops', () => {
+  const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
+    id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
+  })
+  const sent = () => (useStore.getState().chat['box.ho-m1'] ?? []).some((i) => i.kind === 'user')
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  it('neither sends the request nor asks for the note while the machine is away', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const proj = await mock.projects.add('/srv/ho-m', 'box')
+    mock.sessions.set('box.ho-m1', sessionInfo('box.ho-m1', { projectId: proj.id, machine: 'box', name: 'Far', state: 'working' }))
+    await useStore.getState().attach(mock)
+    const asked = vi.spyOn(mock.agents, 'exportHandoffNote')
+
+    const done = useStore.getState().handoffSession('box.ho-m1', { mode: 'agent' })
+    // Its turn ran on when the link dropped: the request waits, though the row no longer says working
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
+    expect(useStore.getState().sessions['box.ho-m1']!.state).toBe('idle')
+    await pause(1_200)
+    expect(sent()).toBe(false)
+    // Back, its turn over: the request goes
+    mock.sessions.get('box.ho-m1')!.state = 'waiting_input'
+    mock.emit({ type: 'machine_status', machine: box() })
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(sent()).toBe(true), { timeout: 5_000 * SLOW })
+    // The link drops while the note is written: the note is not asked for until it is back
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
+    const calls = asked.mock.calls.length
+    await pause(1_200)
+    expect(asked.mock.calls.length).toBe(calls)
+    mock.emit({ type: 'machine_status', machine: box() })
+    mockNote(mock, 'box.ho-m1', 'note from far')
+    mock.emit({ type: 'turn_complete', sessionId: 'box.ho-m1' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'box.ho-m1', state: 'waiting_input' } as NormalizedEvent)
+    await done
+    expect(mock.lastCreateParams?.handoff).toMatchObject({ note: 'note from far' })
   })
 })
