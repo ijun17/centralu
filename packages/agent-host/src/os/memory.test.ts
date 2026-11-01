@@ -354,7 +354,8 @@ describe('processes in memory', () => {
     await os.clock.advance(CLOSE_AFTER_EXIT_MS - 1)
     abort.abort()
     await os.clock.advance(1)
-    expect(await run).toMatchObject({ code: 0, signal: null })
+    const r = await run
+    expect({ code: r.code, ended: r.ended }).toEqual({ code: 0, ended: undefined })
   })
 
   it('hands the child over as it starts, and stdout to its reader in place of the result', async () => {
