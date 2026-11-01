@@ -19,3 +19,7 @@ export const notReachable = (m: Pick<RoutedMachine, 'whyDown'>): string => (m.wh
  */
 export const awaySentence = (m: Pick<RoutedMachine, 'name' | 'whyDown' | 'waitsForPerson'>, tail: Tail): string =>
   m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}${tail === null ? '' : `; ${tail}`}`
+
+/** The same for the window, which a person reads: for a machine they disconnected, where to connect it (#1341) */
+export const windowAwaySentence = (m: Pick<RoutedMachine, 'name' | 'whyDown' | 'waitsForPerson'>, tail: Tail): string =>
+  m.waitsForPerson ? `${m.name} is not connected. Connect it in Settings → Machines, then try again.` : awaySentence(m, tail)

@@ -1,6 +1,6 @@
 import { RpcMethods, unheard, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, findMachine, qualifiedMachine } from './machine-ids.js'
-import { awaySentence } from './machine-reach.js'
+import { awaySentence, windowAwaySentence } from './machine-reach.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
 import { isObj, type Obj } from '../json-value.js'
@@ -89,9 +89,9 @@ export class MachineUnreachableError extends Error {
   readonly code = 'internal'
   readonly retryable = true
   readonly data: { machine: string; reason: 'unreachable' }
-  constructor(machine: RoutedMachine) {
+  constructor(machine: RoutedMachine, forWindow: boolean) {
     // The sentence `linked-sessions.ts` gives the model (#1341, #1532): a machine the person disconnected says to connect it
-    super(awaySentence(machine, 'this works again once its link is back'))
+    super((forWindow ? windowAwaySentence : awaySentence)(machine, 'this works again once its link is back'))
     this.data = { machine: machine.id, reason: 'unreachable' }
   }
 }
@@ -163,7 +163,7 @@ export class Router {
      * and the person has Connect for it
      */
     if (!m.reachable && ctx === undefined) await m.reachForCall?.()
-    if (!m.reachable) throw new MachineUnreachableError(m)
+    if (!m.reachable) throw new MachineUnreachableError(m, ctx !== undefined)
     return m.call(method, params)
   }
 
