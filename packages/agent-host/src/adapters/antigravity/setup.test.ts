@@ -187,6 +187,26 @@ describe('the setup line against its model', () => {
     expect(w.setup.current()).toMatchObject({ state: 'ready', plan: { name: 'Starter' } })
   })
 
+  it('a listener that throws is said on stderr, and neither breaks the action nor keeps the others from hearing the change', async () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const w = await world()
+      const heardBefore = w.seen.length
+      w.setup.onChange(() => {
+        throw new Error('a screen failed')
+      })
+      const later: ToolSetup[] = []
+      w.setup.onChange((s) => later.push(s))
+      expect(w.setup.install().state).toBe('installing')
+      await settle()
+      expect(w.seen.length).toBeGreaterThan(heardBefore)
+      expect(later.at(-1)?.state).toBe('installing')
+      expect(said).toHaveBeenCalledWith(expect.stringContaining('a setup listener failed: a screen failed'))
+    } finally {
+      said.mockRestore()
+    }
+  })
+
   it('a sign-in kept in the macOS Keychain (its settings, no token file) is signed in, until a session finds it no longer works', () => {
     const t = tempData()
     data.push(t)

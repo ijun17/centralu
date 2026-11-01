@@ -4,7 +4,8 @@ import { codexLaunch } from './native.js'
 import { toolCommand } from '../../tool-launch.js'
 import type { AgentProcess, ProcessSource } from '../contract.js'
 import { adoptToolProcess, logToolStderr, startToolProcess, stopToolProcess } from '../core/tool-process.js'
-import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
+import { PendingRequests } from '@cc/common'
+import { lineSplitter } from '../../transport/json-lines.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).

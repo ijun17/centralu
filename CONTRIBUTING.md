@@ -152,7 +152,7 @@ your change silently not working.
 | Changed | Reaches the app by |
 |---|---|
 | `packages/ui`, `packages/platform` | saving, under `app:dev` (HMR) |
-| `packages/agent-host`, `packages/protocol` | restarting the app — the host is not watched |
+| `packages/agent-host`, `packages/protocol`, `packages/common` | restarting the app — the host is not watched (the screen takes `packages/common` live) |
 | `apps/desktop/src-tauri` (Rust) | recompiling, then restarting itself |
 | anything touching PATH, the bundle, or native modules | `pnpm app` — those only reproduce in the packaged app |
 

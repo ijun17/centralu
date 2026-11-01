@@ -30,24 +30,33 @@
 │  pure domain │   ports/ ← what ui sees                 │
 │  (no IO)     │   web/ tauri/ mock/ ← only apps know    │
 ├──────────────┴─────────────────────────────────────────┤
+│  common     pure helpers both sides run (no domain)    │
 │  protocol   message and event schemas (zod)            │
 │             — everyone's shared language               │
 └────────────────────────────────────────────────────────┘
-   agent-host (separate Node process) ──→ shares protocol only
+   agent-host (separate Node process) ──→ shares protocol and common only
 ```
 
 **의존성 규칙 (위반은 리뷰 코멘트가 아니라 lint 에러다):**
 
 | 패키지 | 의존 가능 | 절대 금지 |
 |---|---|---|
-| `ui` | core, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, fetch/WebSocket 직접 사용 |
-| `core` | protocol | React, DOM, 모든 IO (순수 TS만) |
+| `ui` | core, common, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, fetch/WebSocket 직접 사용 |
+| `core` | common, protocol | React, DOM, 모든 IO (순수 TS만) |
+| `common` | 없음 (잎 패키지) | 다른 모든 패키지, React, DOM, 모든 IO |
 | `platform/ports` | protocol | 구현 코드 |
-| `platform/web` `platform/tauri` | ports, protocol | ui, core |
-| `agent-host` | protocol, 외부 SDK | ui, core, platform |
+| `platform/web` `platform/tauri` | ports, common, protocol | ui, core |
+| `agent-host` | common, protocol, 외부 SDK | ui, core, platform |
 | `apps/*` | 전부 (조립을 담당한다) | — |
 
 핵심은 이것이다: **구현을 아는 유일한 곳은 apps 엔트리 포인트다.** 나머지 전부는 인터페이스와 스키마만 안다.
+
+**프로세스 양쪽이 함께 쓰는 순수 도우미는 `packages/common`(`@cc/common`, #1143)에 둔다.** IO도 React도 도메인도 없고
+다른 패키지에 의존하지도 않으므로, 호스트, core, 화면, platform이 순환 없이 모두 가져올 수 있다. 한 번만 쓰여서 고치면
+모든 호출자에 닿는 것을 담는다: `createListeners`(구독자 집합, 한 구독자의 실패가 다른 구독자에게 번지지 않는다)와
+`PendingRequests`(보내고 아직 답을 못 받은 요청, 요청마다 제 시간 제한). dependency-cruiser의 `common-is-leaf`가 다른
+패키지를 가져오는 것을 막고, core의 순수성 lint가 여기에도 적용된다. 도메인 뜻이 있는 것(세션, wire가 적는 경로)은
+common의 것이 아니다: 다음 문단이 어디에 두는지 말한다. protocol은 이것을 가져오지 않는다(zod 말고는 의존성이 없다, `protocol-is-leaf`).
 
 **프로세스 양쪽이 함께 쓰는 순수 규칙은 core가 아니라 protocol에 둔다.** 호스트는 core를 가져올 수 없기 때문이다.
 경로를 wire에 적는 방식(`protocol/paths.ts`)과 세션 상태 기계(`protocol/session-state.ts`: 전이 표, `isWaiting`,

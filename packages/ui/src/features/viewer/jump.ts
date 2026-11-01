@@ -1,4 +1,4 @@
-import { createListeners } from '@cc/core'
+import { createListeners } from '@cc/common'
 import { useSyncExternalStore } from 'react'
 
 /**

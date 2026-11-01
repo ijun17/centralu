@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@cc/common": "workspace:*",
     "@cc/core": "workspace:*",
     "@cc/platform": "workspace:*",
     "@cc/protocol": "workspace:*",

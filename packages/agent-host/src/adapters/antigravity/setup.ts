@@ -1,4 +1,5 @@
-import type { ToolSetup } from '@cc/protocol'
+import { createListeners } from '@cc/common'
+import { errorMessage, type ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
 import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
@@ -43,7 +44,7 @@ export class AgySetup implements ToolSetupControl {
   private plan: ToolSetup['plan'] = undefined
   /** A session found the tool signed out (`-32000`) since the last sign-in: what is on disk no longer works */
   private signedOutSeen = false
-  private readonly listeners = new Set<(setup: ToolSetup) => void>()
+  private readonly listeners = createListeners<ToolSetup>((e) => console.error(`[Antigravity] a setup listener failed: ${errorMessage(e)}`))
 
   /** What an earlier host left of an install or a sign-in, removed as this host starts; every install and sign-in waits for it */
   private readonly tidied: Promise<void>
@@ -79,13 +80,11 @@ export class AgySetup implements ToolSetupControl {
   }
 
   onChange(listener: (setup: ToolSetup) => void): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return this.listeners.add(listener)
   }
 
   private changed(): void {
-    const now = this.current()
-    for (const l of this.listeners) l(now)
+    this.listeners.emit(this.current())
   }
 
   install(): ToolSetup {

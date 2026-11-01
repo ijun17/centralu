@@ -22,6 +22,9 @@
       "@cc/protocol": [
         "./packages/protocol/src/index.ts"
       ],
+      "@cc/common": [
+        "./packages/common/src/index.ts"
+      ],
       "@cc/core": [
         "./packages/core/src/index.ts"
       ],

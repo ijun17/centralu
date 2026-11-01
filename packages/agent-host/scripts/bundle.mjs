@@ -49,6 +49,7 @@ await build({
   // Resolves the workspace alias to source (bundles directly, without a build step)
   alias: {
     '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
+    '@cc/common': join(ROOT, 'packages/common/src/index.ts'),
   },
   define: {
     __CC_BUILD__: JSON.stringify(BUILD_ID),

@@ -1,3 +1,4 @@
+import { createListeners } from '@cc/common'
 import { APP_ID_MAX_LENGTH, appKeyOf } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
@@ -221,9 +222,9 @@ export class SessionAppsHub {
    */
   readonly detached = new Map<string, Detached>()
   private stopListening: () => void
-  private callListeners = new Set<(c: SessionAppCall) => void>()
-  private progressListeners = new Set<(p: SessionAppProgress) => void>()
-  private goneListeners = new Set<(sessionId: string) => void>()
+  private callListeners = createListeners<SessionAppCall>((err) => console.error(`[apps] session-call listener failed:`, err))
+  private progressListeners = createListeners<SessionAppProgress>((err) => console.error(`[apps] session-call progress listener failed:`, err))
+  private goneListeners = createListeners<string>((err) => console.error(`[apps] session-gone listener failed:`, err))
 
   constructor(
     readonly rt: ExternalApps,
@@ -292,8 +293,7 @@ export class SessionAppsHub {
    * announces.
    */
   onCall(listener: (c: SessionAppCall) => void): () => void {
-    this.callListeners.add(listener)
-    return () => void this.callListeners.delete(listener)
+    return this.callListeners.add(listener)
   }
 
   /**
@@ -303,47 +303,27 @@ export class SessionAppsHub {
    * only announces.
    */
   onCallProgress(listener: (p: SessionAppProgress) => void): () => void {
-    this.progressListeners.add(listener)
-    return () => void this.progressListeners.delete(listener)
+    return this.progressListeners.add(listener)
   }
 
   /** @internal The attachment announces one progress line */
   progress(p: SessionAppProgress): void {
-    for (const l of [...this.progressListeners]) {
-      try {
-        l(p)
-      } catch (err) {
-        console.error(`[apps] session-call progress listener failed:`, err)
-      }
-    }
+    this.progressListeners.emit(p)
   }
 
   /** A session has **been deleted** (different from being asleep — an asleep session wakes back up). The signal to tear down that session's UI */
   onSessionGone(listener: (sessionId: string) => void): () => void {
-    this.goneListeners.add(listener)
-    return () => void this.goneListeners.delete(listener)
+    return this.goneListeners.add(listener)
   }
 
   /** Called by the manager when it deletes a session */
   sessionGone(sessionId: string): void {
-    for (const l of [...this.goneListeners]) {
-      try {
-        l(sessionId)
-      } catch (err) {
-        console.error(`[apps] session-gone listener failed:`, err)
-      }
-    }
+    this.goneListeners.emit(sessionId)
   }
 
   /** @internal The attachment announces one call — a listener's failure does not block the call */
   announce(c: SessionAppCall): void {
-    for (const l of [...this.callListeners]) {
-      try {
-        l(c)
-      } catch (err) {
-        console.error(`[apps] session-call listener failed:`, err)
-      }
-    }
+    this.callListeners.emit(c)
   }
 
   /**
@@ -525,7 +505,7 @@ export class SessionAppsHub {
 
 /** The attachment for one handle — the implementation of `SessionApps` as the adapter sees it */
 class Attachment implements SessionApps {
-  private listeners = new Set<() => void>()
+  private listeners = createListeners((err) => console.error(`[apps] session ${this.session.id.slice(0, 8)} change listener failed:`, err))
   /**
    * Calls made by this handle that have not finished yet (including early-returned ones). When
    * the session stops or the handle closes, everything here is cancelled — the cancellation is
@@ -556,8 +536,7 @@ class Attachment implements SessionApps {
   }
 
   onChange(listener: () => void): () => void {
-    this.listeners.add(listener)
-    return () => void this.listeners.delete(listener)
+    return this.listeners.add(listener)
   }
 
   /** @internal The runtime says "something may have changed" — announce only if what this session sees actually changed */
@@ -566,13 +545,7 @@ class Attachment implements SessionApps {
     const now = JSON.stringify(this.current())
     if (now === this.seen) return
     this.seen = now
-    for (const l of [...this.listeners]) {
-      try {
-        l()
-      } catch (err) {
-        console.error(`[apps] session ${this.session.id.slice(0, 8)} change listener failed:`, err)
-      }
-    }
+    this.listeners.emit()
   }
 
   async tools(server: string): Promise<AppToolSpec[]> {

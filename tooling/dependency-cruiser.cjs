@@ -101,7 +101,7 @@ module.exports = {
     },
     {
       name: 'host-no-frontend',
-      comment: 'agent-host shares only protocol.',
+      comment: 'agent-host shares only protocol and common.',
       severity: 'error',
       from: { path: '^packages/agent-host/src' },
       to: { path: '^packages/(ui|core|platform)/src' },
@@ -126,6 +126,13 @@ module.exports = {
       severity: 'error',
       from: { path: '^(packages|apps)/', pathNot: ['\.test-helpers\.tsx?$'] },
       to: { path: '\.test-helpers\.tsx?$' },
+    },
+    {
+      name: 'common-is-leaf',
+      comment: 'common holds the pure helpers both sides of the process run: it depends on no other package, so the host, the screen and core can all take it without a cycle.',
+      severity: 'error',
+      from: { path: '^packages/common/src' },
+      to: { path: '^packages/(?!common)' },
     },
     {
       name: 'protocol-is-leaf',

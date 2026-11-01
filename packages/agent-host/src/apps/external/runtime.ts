@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
+import { createListeners } from '@cc/common'
 import { USER_APP_SCOPE, appKeyOf, appLabel, noSuchAppText, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import type { AppProcess } from './app-process.js'
@@ -91,7 +92,7 @@ export class ExternalApps {
   /** An app's resources and its fixed screen (`app-resources.ts`) */
   private resources: AppResources
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
-  private appsListeners = new Set<() => void>()
+  private appsListeners = createListeners((err) => console.error('[apps] apps-changed listener failed:', err))
   private appsNotePending = false
   /** Recent error bundles per app name (holdKey) and which were sent (C-6) — `error-log.ts` */
   private errorLog = new ErrorLog(() => this.appsChanged())
@@ -404,8 +405,7 @@ export class ExternalApps {
    * the two, that change would reach only one of the two kinds of listener.
    */
   onAppsChanged(listener: () => void): () => void {
-    this.appsListeners.add(listener)
-    return () => void this.appsListeners.delete(listener)
+    return this.appsListeners.add(listener)
   }
 
   /**
@@ -423,14 +423,8 @@ export class ExternalApps {
     queueMicrotask(() => {
       this.appsNotePending = false
       if (this.disposed) return
-      for (const l of [...this.appsListeners]) {
-        try {
-          l()
-        } catch (err) {
-          // One listener's failure never blocks another session's update
-          console.error('[apps] apps-changed listener failed:', err)
-        }
-      }
+      // One listener's failure never blocks another session's update
+      this.appsListeners.emit()
     })
   }
 

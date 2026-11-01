@@ -1,3 +1,4 @@
+import { createListeners } from '@cc/common'
 import { scriptLabel } from './script-label.js'
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { asObj, isObj } from '../json-value.js'
@@ -351,7 +352,7 @@ export class MailService {
   private readonly now: () => number
   private readonly policy: MailPolicy
   private cachedHost: string | undefined
-  private readonly listeners = new Set<(change: MailChange) => void>()
+  private readonly listeners = createListeners<MailChange>((e) => console.error(`[mail] a listener failed: ${errorMessage(e)}`))
   /** What changed in the transaction under way: told to the listeners once it has committed, and dropped if it did not */
   private queued: MailChange[] = []
 
@@ -403,8 +404,7 @@ export class MailService {
    * engine wakes its receivers from it (§5). A listener that throws is said on stderr and does not undo the change
    */
   onChange(listener: (change: MailChange) => void): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return this.listeners.add(listener)
   }
 
   /** The transaction of every change, and then what it queued for the listeners */
@@ -425,13 +425,7 @@ export class MailService {
     }
     this.queued = []
     for (const [threadId, recipients] of merged) {
-      for (const listener of this.listeners) {
-        try {
-          listener({ threadId, recipients: [...recipients] })
-        } catch (e) {
-          console.error(`[mail] a listener failed: ${errorMessage(e)}`)
-        }
-      }
+      this.listeners.emit({ threadId, recipients: [...recipients] })
     }
     return result
   }
@@ -441,13 +435,7 @@ export class MailService {
    * or the question about sleeping sessions (`threadId` ''). The state is written already; the listeners (the Inbox's news) are told now
    */
   announce(threadId: string): void {
-    for (const listener of this.listeners) {
-      try {
-        listener({ threadId, recipients: [PERSON] })
-      } catch (e) {
-        console.error(`[mail] a listener failed: ${errorMessage(e)}`)
-      }
-    }
+    this.listeners.emit({ threadId, recipients: [PERSON] })
   }
 
   /** `announce` for the threads these messages are in */

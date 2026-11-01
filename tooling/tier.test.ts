@@ -91,6 +91,7 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'the merge queue', paths: ['.centralu/apps/project-board/queue-driver.mjs'], tier: 'deep', rule: 'ci' },
   { name: 'the code that reads the tier rules', paths: ['scripts/tier.mjs'], tier: 'deep', rule: 'tier-rules' },
   { name: 'the protocol', paths: ['packages/protocol/src/entities.ts'], tier: 'deep', rule: 'protocol' },
+  { name: 'the shared helpers', paths: ['packages/common/src/pending-requests.ts'], tier: 'deep', rule: 'common' },
   { name: 'a protocol test', paths: ['packages/protocol/src/app-id.test.ts'], tier: 'deep', rule: 'protocol' },
   { name: 'a workflow', paths: ['.github/workflows/build.yml'], tier: 'deep', rule: 'ci' },
   { name: 'what CI skips', paths: ['.github/scripts/ci-changes.mjs'], tier: 'deep', rule: 'ci' },
