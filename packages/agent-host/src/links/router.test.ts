@@ -635,6 +635,19 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(list).toEqual([expect.objectContaining({ id: 'm1.a', live: true, unreachable: true, machine: 'm1' })])
     })
 
+    // #1822: the hub cannot know a turn it last heard of is still running there
+    it('does not list a session of an unreachable machine as working, and lists its real state once it answers again', async () => {
+      const { router, localAnswers, m1 } = rig()
+      localAnswers['sessions.list'] = []
+      m1.reachable = false
+      m1.mirror.sessions = [session('a', { state: 'working' }), session('b', { state: 'waiting_input' })]
+      expect(((await router.handle('sessions.list', {})) as { state: string }[]).map((s) => s.state)).toEqual(['idle', 'waiting_input'])
+      expect((m1.mirror.sessions as { state: string }[])[0]!.state).toBe('working')
+      m1.reachable = true
+      m1.answers['sessions.list'] = [session('a', { state: 'working' })]
+      expect(await router.handle('sessions.list', {})).toEqual([expect.objectContaining({ id: 'm1.a', state: 'working' })])
+    })
+
     it('falls back to the mirror when the machine fails mid-read', async () => {
       const { router, localAnswers, m1 } = rig()
       localAnswers['projects.list'] = []

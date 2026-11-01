@@ -755,6 +755,21 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     expect(away()).toEqual({ project: true, session: true })
   })
 
+  // #1822: a session working when the link dropped is not shown running while it is down, and its real state comes back
+  it('a session working on a machine whose link drops is no longer working, until the machine is read again', async () => {
+    const { mock } = await pair()
+    mock.sessions.get('box.cm-1')!.state = 'working'
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().sessions['box.cm-1']!.state).toBe('working')
+    expect(useStore.getState().workingSince['box.cm-1']).toBeDefined()
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
+    expect(useStore.getState().sessions['box.cm-1']!.state).toBe('idle')
+    expect(useStore.getState().workingSince['box.cm-1']).toBeUndefined()
+    mock.emit({ type: 'machine_status', machine: box() })
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.state).toBe('working'))
+  })
+
   it('a resync that lands while the window\'s own start-up lists are out is not undone by them', async () => {
     const { mock, remote } = await pair()
     // The start-up project list was read while the link was down; the link comes up, and its resync reaches the window
