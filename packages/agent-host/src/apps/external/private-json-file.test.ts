@@ -330,6 +330,20 @@ describe('PrivateJsonFile.create', () => {
 })
 
 describe('what the runtime keeps beside its private files', () => {
+  it('a damaged busy book is moved aside and said, not emptied, and the next hold is recorded in a new file', async () => {
+    const { BusyBook } = await import('./busy-book.js')
+    const file = join(dataRoot, 'app-busy.json')
+    writeFileSync(file, '{"p1/notes": {"appId": "notes", "pro')
+    const book = new BusyBook(file)
+    expect(book.list()).toEqual([])
+    const aside = readdirSync(dataRoot).filter((n) => n.startsWith('app-busy.json.unreadable-'))
+    expect(aside).toHaveLength(1)
+    expect(readFileSync(join(dataRoot, aside[0]!), 'utf8')).toBe('{"p1/notes": {"appId": "notes", "pro')
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('app-busy.json is unreadable'))
+    book.set('p1/notes', { projectId: 'p1', appId: 'notes', reason: 'merging', at: 1 })
+    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual(['p1/notes'])
+  })
+
   it('the busy book leaves no temp file when the rename fails', async () => {
     const { BusyBook } = await import('./busy-book.js')
     // A folder in the place of the file: the rename onto it fails after the temp file was written
