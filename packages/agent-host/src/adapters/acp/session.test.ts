@@ -474,5 +474,15 @@ describe('every turn ends (#1829)', () => {
       }
     })
   }
-  it.todo('an update the agent sends after its turn ended does not read as a turn with nothing to end it (#1830)')
+  it('an update the agent sends after its turn ended is shown, and the session stays at its rest (#1830)', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    await w.peers[0]!.next(isPrompt)
+    w.peers[0]!.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'turn_complete')
+    w.peers[0]!.update(SID, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'one more thing' } })
+    await w.event((e) => e.type === 'message_delta' && e.text === 'one more thing')
+    expect(stateOf(w.events)).toBe('waiting_input')
+  })
 })

@@ -370,7 +370,7 @@ describe('every turn ends (#1829)', () => {
     'output after the turn ended, then a Stop': [
       ...running,
       ['Codex ends the turn', say('turn/completed', { turn: { id: 'turn-7', status: 'completed' } }), false],
-      ['a command starts after it', say('item/started', { turnId: 'turn-7', item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: 'inProgress' } }), null],
+      ['a command starts after it', say('item/started', { turnId: 'turn-7', item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: 'inProgress' } }), false],
       ['Stop', (h) => h.interrupt(), false],
     ],
   }
@@ -385,5 +385,14 @@ describe('every turn ends (#1829)', () => {
       }
     })
   }
-  it.todo('output Codex sends after its turn ended does not read as a turn with nothing to end it (#1830)')
+  it('output Codex sends after its turn ended is shown, and the session stays at its rest (#1830)', async () => {
+    const events: NormalizedEvent[] = []
+    await session(events)
+    say('turn/started', { turn: { id: 'turn-7' } })()
+    say('turn/completed', { turn: { id: 'turn-7', status: 'completed' } })()
+    say('item/started', { turnId: 'turn-7', item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: 'inProgress' } })()
+    await tick()
+    expect(events.some((e) => e.type === 'tool_call')).toBe(true)
+    expect(stateOf(events)).toBe('waiting_input')
+  })
 })
