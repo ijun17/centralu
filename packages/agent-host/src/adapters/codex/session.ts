@@ -557,7 +557,7 @@ export class CodexSession implements SessionHandle {
   }
 
   interrupt(): void {
-    this.ledger.interrupt()
+    this.ledger.stopByPerson()
   }
 
   /** What a Stop releases besides the turns (`MidTurnLedger.interrupt`) */
