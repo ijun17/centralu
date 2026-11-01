@@ -56,7 +56,7 @@ function toSnap(r: {
 type Group = {
   live: ToolName[] | null
   /**
-   * The tools that are installed but signed out (owner, 2026-10-27): each gets a donut with a solid ring in the signal ink, so the same state
+   * The tools that are installed but signed out (owner, 2026-10-27): each gets a donut with a dashed ring in the signal ink (#1823), so the same state
    * looks the same for every tool. `tools` is what detect said of them, for the panel's sign-in line
    */
   signedOut: ToolName[]
@@ -529,7 +529,7 @@ function Donut({
   /** The linked machine it is for; null for this computer */
   machine: string | null
   snap?: Snap
-  /** Installed but signed out (owner, 2026-10-27): a solid ring in the signal ink, no reading */
+  /** Installed but signed out (owner, 2026-10-27): a dashed ring in the signal ink (#1823), no reading */
   signedOut?: boolean
   /** Came after the bar was first drawn: fades in. `leaving`: on its way out, still drawn for its exit */
   entering?: boolean
@@ -551,14 +551,14 @@ function Donut({
    */
   const unsupported = !known && !signedOut && snap?.unsupported === true
   const state = known ? 'known' : unsupported ? 'unsupported' : 'unknown'
-  // What is drawn: signed out is its own solid look (below), so it is neither the dashed unknown nor the dimmed unsupported
+  // What is drawn: signed out is its own look (below): the dashed ring of the unknown, in the signal colour, never the dimmed unsupported
   const look = signedOut ? 'signedOut' : state
   const percent = w?.percent ?? 0
   const R = 9
   const C = 2 * Math.PI * R
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * C
   const tone = known ? usageTone(percent) : 'text-ink-faint'
-  // Signed out waits on the person, which is the signal's white (design-system §1), not an error: a solid ring and its letter in `ink-signal` (a dashed ring means "unknown")
+  // Signed out waits on the person, which is the signal's white (design-system §1), not an error: a dashed ring and its letter in `ink-signal` (#1823)
   const ring = signedOut ? 'text-ink-signal' : 'text-line'
   const cacheLine = cacheTooltipLine(snap?.cache)
 
@@ -647,7 +647,7 @@ function Donut({
             stroke="currentColor"
             strokeWidth="2.5"
             strokeDasharray="2 3"
-            className={`text-line ${RING_FADE} ${look === 'unknown' ? 'opacity-100' : 'opacity-0'}`}
+            className={`${ring} ${RING_FADE} ${look === 'unknown' || look === 'signedOut' ? 'opacity-100' : 'opacity-0'}`}
           />
           <circle
             data-ring="solid"
@@ -657,7 +657,7 @@ function Donut({
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className={`${ring} ${RING_FADE} ${look === 'known' || look === 'signedOut' ? 'opacity-100' : 'opacity-0'}`}
+            className={`text-line ${RING_FADE} ${look === 'known' ? 'opacity-100' : 'opacity-0'}`}
           />
           <circle
             data-ring="dim"

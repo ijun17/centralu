@@ -2,7 +2,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
-import { HOST_PLATFORM, modesGuardFiles, type Platform } from './os.js'
+import { HOST_PLATFORM, traitsFor, type Platform } from './os.js'
 import { canonicalPath } from './dev-services/path-guard.js'
 
 /**
@@ -96,7 +96,7 @@ const PRIVATE_FILES = ['store.db', 'store.db-wal', 'store.db-shm', 'host.log', '
  * @returns what was changed, for one log line
  */
 export function keepDataFolderPrivate(dir: string, platform: Platform = HOST_PLATFORM): string[] {
-  if (!modesGuardFiles(platform)) return []
+  if (!traitsFor(platform).modesGuardFiles) return []
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const changed: string[] = []
   const uid = process.getuid?.()

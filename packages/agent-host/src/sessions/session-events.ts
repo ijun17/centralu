@@ -304,7 +304,9 @@ export class SessionEvents {
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.(), processWent) : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
-    const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
+    // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
+    const since = turnBy && e.sessionId ? this.host.children.turnRows(e.sessionId)?.after : undefined
+    const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: since === undefined ? turnBy : { ...turnBy, since } } : e
     // What the turn it opens ran for, said with it so a hub that follows this host reads whose it is (#1604)
     const said = started && e.type === 'state_change' ? { ...turnSaid, origin: started } : turnSaid
     this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)

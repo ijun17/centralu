@@ -173,7 +173,7 @@ export type AgentPlaces = {
 }
 
 /** How a wait on a remote child's turn ended; `taken`: the turn turned out not to be the caller's (`whose` became `other`) */
-type Step = { step: 'completed' } | { step: 'failed'; error: string } | { step: 'deleted' } | { step: 'unreachable'; machine: string } | { step: 'asking' } | { step: 'taken' }
+type Step = { step: 'completed'; since?: number } | { step: 'failed'; error: string } | { step: 'deleted' } | { step: 'unreachable'; machine: string } | { step: 'asking' } | { step: 'taken' }
 
 /** A call waiting on a remote child's turn: the turn's end as the machine's events tell it */
 type TurnWait = { busy: boolean; done: Promise<Step>; end(step: Step): void }
@@ -1029,7 +1029,8 @@ export class RemoteAgents {
     // The turn ended: what it said is the caller's only through the gate
     if (!this.gateNow(rec).owned) return this.notYours(rec, this.gateNow(rec), false, 'idle' as SessionState)
     if (r.step === 'failed') return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
-    const words = await this.lastWords(rec, reader)
+    // That turn's words (#1812), though the next one has begun or ended by the time the read is there
+    const words = await this.lastWords(rec, reader, r.since)
     // The turn left the child's own background work running there (#721): the report waits for that work's end
     const running: BackgroundTask[] = this.host.linkedTasksRunning(rec.sessionId)
     if (running.length) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false, paused: running })
@@ -1098,8 +1099,8 @@ export class RemoteAgents {
    * The child's last words, read there and cut as an answer is cut here, the cut naming the read that shows the rest
    * (#1186). A read that failed is said in the notice, where it used to come back as an empty answer
    */
-  private async lastWords(rec: RemoteAgent, reader: LinkedSessions | null): Promise<{ answer: string; notice: string }> {
-    const words = reader ? await reader.lastWords(rec.sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
+  private async lastWords(rec: RemoteAgent, reader: LinkedSessions | null, since?: number): Promise<{ answer: string; notice: string }> {
+    const words = reader ? await reader.lastWords(rec.sessionId, ANSWER_READ_MAX_CHARS, { turn: true, ...(since !== undefined ? { since } : {}) }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
     if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${rec.sessionId}") reads it once the machine answers.` }
     if (words.text === '') return { answer: NO_WORDS, notice: '' }
     return { answer: clipAnswer(words.text, rec.name, words.seq !== null ? { sessionId: rec.sessionId, seq: words.seq } : undefined), notice: '' }

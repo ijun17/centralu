@@ -58,7 +58,7 @@
 **어느 OS인지는 플랫폼 모듈에서만 묻는다** (`local/platform-checks`, `tooling/eslint-platform-checks.js`). 패키지, 앱,
 npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇이든 OS 이름과 비교하는 것(`=== 'win32'`,
 `case 'darwin':`)은 `tooling/os-layer.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는
-호스트의 질문들: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool`), `env-path.ts`와
+호스트의 질문들: `hasPs`, `clonesFiles`, `traitsFor`, `pathsOf`, `installedCopyPath`, `systemTool`), `env-path.ts`와
 `tool-launch.ts`(도구 찾기와 띄우기), `dev-services/kill-tree.ts`(프로세스 트리 끝내기, `hasProcessGroups`),
 `dev-services/terminal.ts`(셸), `adapters/claude/exe-link.ts`(Windows에서 Claude Code 띄우기, `windowsStart`), `dev-services/project-folder.ts`(새 프로젝트의 기본 위치 `~/Centralu`와 폴더 이름 규칙, #515), 그리고
 런처의 `platform.mjs`. 다른 곳의 코드는 그중 하나에 다른 점의 이름으로 묻는다. 그래서 OS마다의 답은 한 번만 쓰이고, 새

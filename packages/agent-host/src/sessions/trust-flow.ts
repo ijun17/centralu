@@ -146,31 +146,12 @@ export class TrustFlow {
 
   // ── Projects ──
 
-  private projects(rpc: WindowRpc): Promise<Projects> {
-    return readProjects(rpc)
-  }
-
-  /** A list's closing line when a linked machine is not connected: what it keeps is not in the list, and the list must not read as complete */
-  private awayLine(all: Projects, what: string): string[] {
-    return awayLine(all, what)
-  }
-
-  /** Where a project is, when it is not on this computer */
-  private where(p: { machine?: string | null }, machines: Map<string, string>): string {
-    return whereText(p, machines)
-  }
-
-  /** The project an argument names: its id, or its name when exactly one project has it */
-  private find(all: Projects, named: string): { project: ProjectInfo } | { error: string } {
-    return findProject(all, named)
-  }
-
   private async listProjects(rpc: WindowRpc): Promise<TrustAnswer> {
-    const all = await this.projects(rpc)
-    const away = this.awayLine(all, 'the projects')
+    const all = await readProjects(rpc)
+    const away = awayLine(all, 'the projects')
     if (!all.projects.length) return { ok: true, text: ['No project is registered. add_project and create_project make one.', ...away].join('\n') }
     const line = (p: ProjectInfo) =>
-      `- ${shown(p.name)} [${p.id}]${this.where(p, all.machines)}: ${shownPath(p.path)}; ${p.trusted ? 'trusted' : 'untrusted'}${p.unreachable ? ' (its machine is not reachable: as last known)' : ''}`
+      `- ${shown(p.name)} [${p.id}]${whereText(p, all.machines)}: ${shownPath(p.path)}; ${p.trusted ? 'trusted' : 'untrusted'}${p.unreachable ? ' (its machine is not reachable: as last known)' : ''}`
     return { ok: true, text: [`${all.projects.length} ${all.projects.length === 1 ? 'project' : 'projects'} (set_project_trust changes trust):`, ...rows(all.projects, line), ...away].join('\n') }
   }
 
@@ -189,11 +170,11 @@ export class TrustFlow {
   }
 
   private async projectTrust(rpc: WindowRpc, caller: string, named: string, trusted: boolean, signal?: AbortSignal): Promise<TrustAnswer> {
-    const all = await this.projects(rpc)
-    const found = this.find(all, named)
+    const all = await readProjects(rpc)
+    const found = findProject(all, named)
     if ('error' in found) return { ok: false, error: found.error }
     const p = found.project
-    const label = `${shown(p.name)} [${p.id}]${this.where(p, all.machines)}`
+    const label = `${shown(p.name)} [${p.id}]${whereText(p, all.machines)}`
     // A machine not reachable: its row is what the hub last knew, and nothing there can be changed or listed now
     if (p.unreachable) return { ok: false, error: `The machine of ${label} cannot be reached just now, so its trust is not changed from here; list_projects shows it as last known.` }
     if (p.trusted === trusted) return { ok: true, text: `${label} is already ${trusted ? 'trusted' : 'untrusted'}; nothing changed.` }
@@ -203,7 +184,7 @@ export class TrustFlow {
     // A linked machine's apps are what it listed just now, asked of it alone
     const listed = p.machine ? ', as its machine listed them just now' : ''
     const question = [
-      `Trust the project ${shown(p.name)}${this.where(p, all.machines)} at ${shownPath(p.path)}?`,
+      `Trust the project ${shown(p.name)}${whereText(p, all.machines)} at ${shownPath(p.path)}?`,
       "Trusting lets this project's apps run and its settings apply: its agents read the folder's own setting files. Trust it only if you trust the code in this folder.",
       ...(apps.length
         ? [`${apps.length === 1 ? 'Its app' : `Its ${apps.length} apps`}${listed}:`, ...apps.flatMap(appLines)]
@@ -212,7 +193,7 @@ export class TrustFlow {
     const refused = await this.ask(caller, question, signal, 'trusted')
     if (refused) return { ok: false, error: refused }
     // What the card named, still? The project may have gone, been trusted, or gained or changed an app while it stood
-    const now = (await this.projects(rpc)).projects.find((x) => x.id === p.id)
+    const now = (await readProjects(rpc)).projects.find((x) => x.id === p.id)
     if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was trusted.` }
     if (now.path !== p.path || (now.machine ?? null) !== (p.machine ?? null)) {
       return { ok: false, error: `${label} is not in the folder the card named any more, so nothing was trusted. Ask again to show the person where it is now.` }
@@ -235,14 +216,14 @@ export class TrustFlow {
    */
   private async untrust(rpc: WindowRpc, caller: string, p: ProjectInfo, label: string, all: Projects, signal?: AbortSignal): Promise<TrustAnswer> {
     const question = [
-      `Take trust away from the project ${shown(p.name)}${this.where(p, all.machines)} at ${shownPath(p.path)}?`,
+      `Take trust away from the project ${shown(p.name)}${whereText(p, all.machines)} at ${shownPath(p.path)}?`,
       "Its apps stop and attach nowhere, and its agents stop reading the folder's own setting files: any deny rules and hooks the project sets for its agents (its .claude settings and the like) then no longer apply, auto sessions included.",
       'Its idle sessions restart for it now, a busy one when its turn ends.',
     ].join('\n')
     const refused = await this.ask(caller, question, signal, 'changed')
     if (refused) return { ok: false, error: refused }
     // Still what the card named: the same project, in the same folder, trusted, reachable
-    const now = (await this.projects(rpc)).projects.find((x) => x.id === p.id)
+    const now = (await readProjects(rpc)).projects.find((x) => x.id === p.id)
     if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was changed.` }
     if (now.path !== p.path || (now.machine ?? null) !== (p.machine ?? null)) return { ok: false, error: `${label} is not in the folder the card named any more, so nothing was changed.` }
     if (now.unreachable) return { ok: false, error: `The machine of ${label} could not be reached after the card was answered, so nothing was changed.` }
@@ -267,7 +248,7 @@ export class TrustFlow {
 
   /** What a rule belongs to, by name: its project, or its session */
   private async owners(rpc: WindowRpc): Promise<{ all: Projects; sessions: Map<string, string> }> {
-    const [all, sessions] = await Promise.all([this.projects(rpc), callWindow(rpc, 'sessions.list', {}).catch(() => [])])
+    const [all, sessions] = await Promise.all([readProjects(rpc), callWindow(rpc, 'sessions.list', {}).catch(() => [])])
     return { all, sessions: new Map(sessions.map((s) => [s.id, s.name])) }
   }
 
@@ -290,12 +271,12 @@ export class TrustFlow {
     let shownRules = rules
     let of = ''
     if (named?.trim()) {
-      const found = this.find(o.all, named)
+      const found = findProject(o.all, named)
       if ('error' in found) return { ok: false, error: found.error }
       shownRules = rules.filter((r) => r.projectId === found.project.id)
       of = ` of ${shown(found.project.name)}`
     }
-    const away = this.awayLine(o.all, 'the rules kept')
+    const away = awayLine(o.all, 'the rules kept')
     if (!shownRules.length) return { ok: true, text: [`No approval rule${of}${away.length ? ' was listed' : ': every action that asks, asks'}.`, ...away].join('\n') }
     return {
       ok: true,
@@ -323,38 +304,23 @@ export class TrustFlow {
   // project reaching another (revoking one makes the next reach ask again), and sharing a project app with the person's
   // other projects, which widens who can attach it and so asks.
 
-  /** The app an argument names: its id or name, in the named project when one is given; refused when several match */
-  private findApp(apps: readonly ExternalAppInfo[], all: Projects, named: string, project?: string): { app: ExternalAppInfo } | { error: string } {
-    return findApp(apps, all, named, project)
-  }
-
-  /** An app as one name: its title and id, and the project or user folder it is in */
-  private appLabel(a: ExternalAppInfo, all: Projects): string {
-    return appLabel(a, all)
-  }
-
-  /** The window's call for one app's remembered answers, routed to its machine as the window routes it */
-  private on(a: ExternalAppInfo): { machine?: string } {
-    return onMachine(a)
-  }
-
   private async listAppGrants(rpc: WindowRpc, named?: string, project?: string): Promise<TrustAnswer> {
-    const [apps, all, consents] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc), callWindow(rpc, 'projectConsents.list', {}).catch(() => [])])
+    const [apps, all, consents] = await Promise.all([callWindow(rpc, 'apps.list', {}), readProjects(rpc), callWindow(rpc, 'projectConsents.list', {}).catch(() => [])])
     let pool = apps
     if (named?.trim()) {
-      const found = this.findApp(apps, all, named, project)
+      const found = findApp(apps, all, named, project)
       if ('error' in found) return { ok: false, error: found.error }
       pool = [found.app]
     } else if (project?.trim()) {
-      const found = this.find(all, project)
+      const found = findProject(all, project)
       if ('error' in found) return { ok: false, error: found.error }
       pool = apps.filter((a) => a.projectId === found.project.id && (a.machine ?? null) === (found.project.machine ?? null))
     }
     const out: string[] = []
     for (const a of pool.slice(0, ROWS)) {
-      const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...this.on(a) }).catch(() => null)
+      const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...onMachine(a) }).catch(() => null)
       const sharing = a.root ? 'reached through its project\'s trust' : a.projectId ? (a.shared ? 'shared with your other projects' : 'not shared') : 'a user-folder app, available everywhere'
-      out.push(`- ${this.appLabel(a, all)}: ${a.trusted ? 'trusted' : 'untrusted'}; ${sharing}`)
+      out.push(`- ${appLabel(a, all)}: ${a.trusted ? 'trusted' : 'untrusted'}; ${sharing}`)
       if (answers === null) out.push('  Its remembered answers could not be read just now.')
       for (const p of answers ?? []) {
         out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${plainQuoted(p.text, 300)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; no longer applies, its uses changed'}`)
@@ -368,29 +334,29 @@ export class TrustFlow {
     if (!named?.trim() && !project?.trim()) {
       lines.push(
         consents.length ? `${consents.length} remembered ${consents.length === 1 ? 'consent' : 'consents'} of one project reaching another (revoke_project_consent revokes one, so the next reach asks again):` : 'No remembered consent of one project reaching another.',
-        ...rows(consents, (c) => `- ${shown(c.fromName)} [${c.fromProjectId}] may ${consentWords(c.kind)} ${shown(c.toName)} [${c.toProjectId}]${this.where(c, all.machines)}, since ${new Date(c.decidedAt).toISOString().slice(0, 10)}`),
+        ...rows(consents, (c) => `- ${shown(c.fromName)} [${c.fromProjectId}] may ${consentWords(c.kind)} ${shown(c.toName)} [${c.toProjectId}]${whereText(c, all.machines)}, since ${new Date(c.decidedAt).toISOString().slice(0, 10)}`),
       )
     }
-    lines.push(...this.awayLine(all, 'the apps and answers kept'))
+    lines.push(...awayLine(all, 'the apps and answers kept'))
     return { ok: true, text: lines.join('\n') }
   }
 
   private async forgetAnswer(rpc: WindowRpc, named: string, project: string | undefined, capability: string): Promise<TrustAnswer> {
-    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc)])
-    const found = this.findApp(apps, all, named, project)
+    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), readProjects(rpc)])
+    const found = findApp(apps, all, named, project)
     if ('error' in found) return { ok: false, error: found.error }
     const a = found.app
-    const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...this.on(a) })
+    const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...onMachine(a) })
     const answer = answers.find((p) => p.capability === capability.trim())
-    if (!answer) return { ok: false, error: `${this.appLabel(a, all)} has no remembered answer for ${shown(capability.trim())}; list_app_grants names them.` }
-    await callWindow(rpc, 'apps.forgetPermission', { appId: a.appId, projectId: a.projectId, capability: answer.capability, ...this.on(a) })
-    return { ok: true, text: `Forgot the answer ${answer.decision === 'allow' ? 'allowing' : 'denying'} ${shown(answer.capability)} for ${this.appLabel(a, all)}: the next time it asks for that, the person is asked again.` }
+    if (!answer) return { ok: false, error: `${appLabel(a, all)} has no remembered answer for ${shown(capability.trim())}; list_app_grants names them.` }
+    await callWindow(rpc, 'apps.forgetPermission', { appId: a.appId, projectId: a.projectId, capability: answer.capability, ...onMachine(a) })
+    return { ok: true, text: `Forgot the answer ${answer.decision === 'allow' ? 'allowing' : 'denying'} ${shown(answer.capability)} for ${appLabel(a, all)}: the next time it asks for that, the person is asked again.` }
   }
 
   private async revokeConsent(rpc: WindowRpc, from: string, to: string, kind: 'delegate' | 'apps' | 'agents'): Promise<TrustAnswer> {
-    const [consents, all] = await Promise.all([callWindow(rpc, 'projectConsents.list', {}), this.projects(rpc)])
+    const [consents, all] = await Promise.all([callWindow(rpc, 'projectConsents.list', {}), readProjects(rpc)])
     const idOf = (named: string) => {
-      const found = this.find(all, named)
+      const found = findProject(all, named)
       return 'error' in found ? null : found.project.id
     }
     const match = (named: string, id: string, name: string) => named.trim() === id || idOf(named) === id || name.trim().toLowerCase() === named.trim().toLowerCase()
@@ -403,11 +369,11 @@ export class TrustFlow {
   }
 
   private async shareApp(rpc: WindowRpc, caller: string, named: string, project: string | undefined, shared: boolean, signal?: AbortSignal): Promise<TrustAnswer> {
-    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc)])
-    const found = this.findApp(apps, all, named, project)
+    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), readProjects(rpc)])
+    const found = findApp(apps, all, named, project)
     if ('error' in found) return { ok: false, error: found.error }
     const a = found.app
-    const label = this.appLabel(a, all)
+    const label = appLabel(a, all)
     if (!a.projectId) return { ok: false, error: `${label} is a user-folder app, available to every project already; it has no share switch.` }
     if (a.root) return { ok: false, error: `${label} is its project's root app: it is reached through its project's trust (set_project_trust) and has no share switch.` }
     if (!!a.shared === shared) return { ok: true, text: `${label} is already ${shared ? 'shared' : 'not shared'}; nothing changed.` }

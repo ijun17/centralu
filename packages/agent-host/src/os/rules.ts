@@ -43,7 +43,7 @@ export type OsTraits = {
   readonly cpKeepsLinks: boolean
   /** A folder can be cloned with `cp -c` (APFS clonefile) */
   readonly clonesFiles: boolean
-  /** Folder sizes come from `du` */
+  /** Folder sizes come from `du`: Windows has none on PATH, and a bare name would find a `du.exe` in the child's working folder first (#849) */
   readonly measuresWithDu: boolean
   /** `ps` and `lsof` can be asked about another process */
   readonly hasPs: boolean

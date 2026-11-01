@@ -174,7 +174,7 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 
 | Module | Subject |
 |---|---|
-| `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool` |
+| `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `traitsFor`, `pathsOf`, `installedCopyPath`, `systemTool` |
 | `agent-host/src/os/real.ts` | the `Os` of the machine itself (§7.1), built from the modules in this table |
 | `agent-host/src/env-path.ts`, `tool-launch.ts` | finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims) |
 | `agent-host/src/dev-services/kill-tree.ts` | ending a process tree: groups and signals, or taskkill and parent links |
@@ -204,7 +204,7 @@ is where the Windows-only bugs have come from (#1559: a link that is a junction,
 | Path form and case | separators; drive letters and UNC; `C:\a` and `c:\A` the same folder on Windows and macOS (by default), not on Linux; 8.3 short names; `realpath` through junctions | one path type the host passes around; `samePath(a, b)`, `isInside(root, p)` under the OS's case rule; the wire form stays `protocol/paths.ts` |
 | Line endings | git's `autocrlf` checks text out with CRLF on Windows; tools write either | `readText` returns what is on disk; `lines()` splits on both; writers say which they write |
 | Links and junctions | a directory symlink needs a privilege on Windows, so a junction stands in; `lstat` and `readlink` see them differently; deleting a junction must not follow it | `link(target, at)` makes the kind the OS allows and says which; `isLink`, `removeLink` that never recurse into the target |
-| Locks | Windows refuses to delete or rename an open or running file (`EBUSY`, `EPERM`), and a virus scanner holds new files for a moment | `rename`, `remove` with the retries Windows needs; `locksRunningPrograms` (exists today) |
+| Locks | Windows refuses to delete or rename an open or running file (`EBUSY`, `EPERM`), and a virus scanner holds new files for a moment | `rename`, `remove` with the retries Windows needs; `traits.locksRunningPrograms` (exists today) |
 | Quoting and shells | `cmd.exe` rules and `.cmd` shims vs POSIX `sh`; PowerShell's own | a command as an argument list; the layer quotes for the shell it starts, the caller never builds a command string |
 | Process trees and signals | process groups and signals on POSIX; no groups and no SIGTERM on Windows (taskkill, Job Objects) | `spawn` that contains the child, `stop(child, grace)`, `killTree`; exit reasons in one shape |
 | Environment | `PATH` vs `Path` (case-insensitive keys on Windows), `PATHEXT`, `HOME` vs `USERPROFILE`, temp folders | `env` read case-correctly; `homeDir`, `tempDir`, `findTool` |

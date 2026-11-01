@@ -1,7 +1,7 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
 import { dirname, join } from 'node:path'
-import { foldsPathCase } from '../os.js'
+import { traitsFor } from '../os.js'
 import { lstatSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
@@ -57,7 +57,7 @@ export const STOPPING_WAIT_MS = 10_000
 /** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
 function pathKey(path: string): string {
   const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
-  return foldsPathCase() ? key.toLowerCase() : key
+  return traitsFor().foldsPathCase ? key.toLowerCase() : key
 }
 
 /**

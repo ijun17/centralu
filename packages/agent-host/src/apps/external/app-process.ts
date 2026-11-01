@@ -60,6 +60,14 @@ export type SpawnSpec = {
  */
 const EXIT_AFTER_CLOSE_MS = 150
 
+/**
+ * How long a stop waits for the app's exit, past its kill, before it gives up on it (#1818): what it left running is
+ * swept, and an `awaitTree` caller goes on, only once it has exited. Generous, since a loaded machine reports an exit
+ * seconds late; bounded, since an app the kill cannot end would otherwise hold an app's or a project's removal forever
+ * with nothing on screen saying why. That caller's folder step then fails with its own error.
+ */
+export const EXIT_WAIT_MS = 30_000
+
 export type ExitInfo = { code: number | null; signal: string | null; error: string | null }
 
 /**
@@ -88,7 +96,7 @@ export class AppProcess {
   onUnexpectedExit?: (reason: string) => void
 
   private stopping: Promise<void> | null = null
-  /** Windows: the collection of what it left running, once it has ended (`stop`) */
+  /** Settles once it has exited (or `EXIT_WAIT_MS` has passed) and, on Windows, what it left running is collected (`stop`) */
   private leftovers: Promise<void> | null = null
   private exitWaiters: (() => void)[] = []
   private closeFd3Server: (() => void) | null = null
@@ -250,9 +258,13 @@ export class AppProcess {
    * and ended (`collectLeftovers`). That takes a process listing (~0.5 s), so by default it runs
    * after this returns; `awaitTree` waits for it, for a caller about to move or delete the app's
    * folder, which Windows refuses while a process has it as its working directory.
+   *
+   * `awaitTree` waits for the app's own exit too, up to `EXIT_WAIT_MS` (#1818): on a loaded machine the exit landed
+   * after the grace and the kill's wait, and the caller deleted a folder the app still held. What it left running is
+   * collected once it has exited, since only then is the window of its leftovers known.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
-    // A stop already under way, started by someone who did not wait for the leftovers: this caller still does
+    // A stop already under way, started by someone who did not wait for the tree: this caller still does
     if (this.stopping) return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
     this.stopping = (async () => {
       void this.client.close().catch(() => {})
@@ -267,12 +279,14 @@ export class AppProcess {
         void this.collectLeftovers()
       }
       this.fd3?.destroy()
-      const leftovers = !hasProcessGroups() && !this.alive ? this.collectLeftovers() : null
+      const leftovers = this.waitExit(EXIT_WAIT_MS).then(async (exited) => {
+        if (!exited) this.log.note(`still running ${EXIT_WAIT_MS}ms after it was stopped — going on without its exit`)
+        else if (!hasProcessGroups()) await this.collectLeftovers()
+      })
       this.leftovers = leftovers
-      if (leftovers && opts.awaitTree) await leftovers
-      // The log stays open for the leftovers' note, if they are collected after this returns
-      if (leftovers && !opts.awaitTree) void leftovers.finally(() => this.log.close())
-      else this.log.close()
+      if (opts.awaitTree) await leftovers
+      // The log stays open for the notes above, if they come after this returns
+      void leftovers.finally(() => this.log.close())
     })()
     return this.stopping
   }

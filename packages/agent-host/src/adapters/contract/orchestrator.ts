@@ -337,9 +337,9 @@ export type LinkedSessions = {
    * the machine does not say (an older one, read from its lines). A read that failed says why: it used to be an empty
    * answer, which read as "it said nothing". `turn` (#1604): the answer of the turn it last ran, not the last response of the
    * record (which a note stored in the turn before, run by this one, joins to that turn's); a machine that does not say where a
-   * turn began reads it as the last response
+   * turn began reads it as the last response. `since` (#1812): that turn's, the one that began after the row (`TurnWho.since`)
    */
-  lastWords(sessionId: string, maxChars: number, opts?: { turn?: boolean }): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
+  lastWords(sessionId: string, maxChars: number, opts?: { turn?: boolean; since?: number }): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
   list(): Promise<OrchestratedSession[]>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */

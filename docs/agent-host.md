@@ -762,7 +762,11 @@ reads it), not the last response of the record. A note's row is stored while the
 joined the two turns' words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's
 text ended that text, so a wait read only what followed the note. A caller's notes in a turn (a row that names its sender)
 are rows among its text (`turnAnswer`'s `acrossNotes`); the person's message ends it, as it always did. The next turn may
-have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. A turn
+have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. It
+may also have ended (#1812): the event that ends a turn says the row it began after (`TurnWho.since`), and the hub asks for
+that turn's words with it (`host.lastAnswer`'s `since`; an `agent_session` wait's read too), up to where the next turn began.
+The span keeps the last 8 starts (`starts`, beside `latest` and `previous`); a `since` that is not one of them (older than
+those, or a span an older build rewrote) reads as the last turn that ended, as does a machine that does not say or read it. A turn
 that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`processGone`): its words are those it said, or none, never the turn before's. A turn the host did not
 see begin (before this build) reads as the last response, and so does an older machine.
 
@@ -1051,7 +1055,7 @@ in five ways, each in one place:
 | `git`, `gh`, an app's command | by name | by absolute path: given a bare name, Windows looks in the working directory (the project) first. Never a `.cmd` (Node refuses to spawn one): the `.exe` its shim starts, or the first `.exe` on PATH. An app's command given as a path is taken from the app's folder, with PATHEXT tried when it has no extension (#849) | `tool-launch.ts` `programPath`, `resolveCommand` |
 | Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal, and only when taskkill could not end the tree: node-pty's own kill after it listed a console that was gone and killed the shell's pid 5 s later (#857). What an app left running after it ended is found by parent links and creation times (one PowerShell CIM listing, ~0.5 s) and ended the same way | `dev-services/kill-tree.ts` |
 | Terminal / Run button | login shell `-l` / `-lc` | `pwsh` or Windows PowerShell, `-NoLogo` / `cmd.exe /d /s /c`, on the ConPTY node-pty ships (`useConptyDll`, `conpty/` in the bundle): Windows' own left a `conhost.exe` per tab and command until the host exited (#849) | `dev-services/terminal.ts`, `dev-services/pty-slot.ts` `spawnPty`, `os.ts` `usesShippedConpty` |
-| Watching the file tree | one watcher per expanded folder | one recursive watcher on the project's root: a watched folder, and every folder above it, cannot be renamed or moved (#849) | `dev-services/watch.ts`, `os.ts` `locksWatchedFolders` |
+| Watching the file tree | one watcher per expanded folder | one recursive watcher on the project's root: a watched folder, and every folder above it, cannot be renamed or moved (#849) | `dev-services/watch.ts`, `os.ts` `traitsFor().locksWatchedFolders` |
 
 Quitting closes the host's stdin (it runs with `--watch-parent`, so EOF runs the same shutdown as
 TERM) and ends its tree with `taskkill` only if it is still running after the grace period. A

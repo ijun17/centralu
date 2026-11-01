@@ -8,7 +8,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, MissingPathError, pathParts, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
-import { clonesFiles, cpKeepsLinks, hasWindowsFileNames, HOST_PLATFORM, type Platform } from '../os.js'
+import { clonesFiles, HOST_PLATFORM, traitsFor, type Platform } from '../os.js'
 import { realOs } from '../os/real.js'
 import { retarget } from '../os/rules.js'
 import { rpcError } from '../rpc-error.js'
@@ -153,7 +153,7 @@ export async function importFile(
   platform: Platform = HOST_PLATFORM,
 ): Promise<{ path: string }> {
   const base = baseName(name)
-  if (hasWindowsFileNames(platform)) {
+  if (traitsFor(platform).hasWindowsFileNames) {
     const why = folderNameError(base, true)
     if (why) fail(why)
   }
@@ -431,7 +431,7 @@ export async function copyTree(
    * existed before the copy started is left untouched, since it was never ours to begin with.
    */
   if (!existed) await rm(dst, { recursive: true, force: true })
-  if (!cpKeepsLinks()) return copyTreeWindows(src, dst, links)
+  if (!traitsFor().cpKeepsLinks) return copyTreeWindows(src, dst, links)
   // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
   // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,

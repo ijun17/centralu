@@ -10,7 +10,7 @@ import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { canonicalPath } from '../dev-services/path-guard.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
-import { foldsPathCase } from '../os.js'
+import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -160,7 +160,7 @@ export class ProjectCreation {
     const exact = this.host.store.projects.findProjectByPath(path)
     if (exact) return { id: exact.id, path }
     const kept = this.host.store.projects.listProjects()
-    if (!foldsPathCase()) return kept.find((p) => resolve(p.path) === path)
+    if (!traitsFor().foldsPathCase) return kept.find((p) => resolve(p.path) === path)
     const ascii = (p: string) => p.replace(/[A-Z]/g, (c) => c.toLowerCase())
     const real = canonicalPath(path)
     const near = new Set([ascii(path), ascii(real)])

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { endsWorkWithJob, systemTool } from '../os.js'
 import { settle } from '../dev-services/process-tree.test-helpers.js'
-import { ownProcesses } from '../process.test-helpers.js'
+import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 import { WORK_JOB_LIMITS, joinWorkJob, workJobLine, workJobWanted } from './work-job.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -118,7 +118,7 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
     const up = await settle(() => names.filter((n) => pid(n) > 0), (got) => got.length === names.length, 30_000 * SLOW)
     started.push(...up.map(pid))
     expect(up.sort()).toEqual([...names].sort())
-    return { pid, job: JSON.parse(readFileSync(join(dir, 'job.json'), 'utf8')) }
+    return { pid, job: await fileHolding(join(dir, 'job.json'), (t) => JSON.parse(t) as { state: string; handle?: number; broker?: number }) }
   }
 
   it('the job the host holds ends its processes when closed, allows no breakaway, and has the host in it', { timeout: 60_000 * SLOW }, async () => {

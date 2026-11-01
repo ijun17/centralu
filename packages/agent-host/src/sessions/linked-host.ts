@@ -132,7 +132,7 @@ export class LinkedHost {
     sessions(): Promise<OrchestratedSession[]>
     read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number; before?: number; from?: number }): Promise<{ state: string; lines: string[]; maxChars: number }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
-    lastAnswer(sessionId: string, maxChars?: number, turn?: boolean): Promise<{ text: string; length: number; seq: number | null }>
+    lastAnswer(sessionId: string, maxChars?: number, turn?: boolean, since?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
     const view = this.host.orchestratorToolsFor('', undefined, undefined, true)
     return {
@@ -145,13 +145,13 @@ export class LinkedHost {
        * ran, is a row of the turn before's text, so reading the last response joined both turns' words; and a note in a turn
        * splits its text. A turn that ended with nothing to say has no answer, never the turn before's. The next turn may have
        * begun as the hub reads this one's end: then it is the turn before it that ended. A turn not seen to begin (before
-       * this build) reads as the last response does
+       * this build) reads as the last response does. `since` (#1812): the turn the hub was told ended, though a later one has
        */
-      lastAnswer: async (sessionId, maxChars, turn) => {
+      lastAnswer: async (sessionId, maxChars, turn, since) => {
         const m = this.host.meta.get(sessionId)
         if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
-        const span = turn ? this.host.children.turnRows(sessionId) : undefined
+        const span = turn ? this.host.children.turnRows(sessionId, since) : undefined
         const text = lastResponse(rows, span)
         return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows, span) }
       },

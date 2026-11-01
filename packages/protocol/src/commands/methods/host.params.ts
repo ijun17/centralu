@@ -279,12 +279,15 @@ export const hostParams = {
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
    * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown; a failure is the hub's answer,
    * not a read of the lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that
-   * turn begin, not the last response of the record (an older machine ignores it)
+   * turn begin, not the last response of the record (an older machine ignores it). `since` (#1812): with `turn`, the answer
+   * of the turn that began after that row (`TurnWho.since` on its end), not of a later one; a machine that does not read it
+   * answers for the turn it last ran
    */
   'host.lastAnswer': z.object({
     sessionId: SessionId,
     maxChars: z.number().int().positive().max(100_000).optional(),
     turn: z.boolean().optional(),
+    since: z.number().int().optional(),
   }),
   /**
    * An instruction from a hub's orchestrator to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4

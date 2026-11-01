@@ -218,7 +218,6 @@ packages/agent-host/src/lifecycle/work-job.test-helpers.ts
 packages/agent-host/src/lifecycle/work-job.test.ts
 packages/agent-host/src/lifecycle/work-job.ts
 packages/agent-host/src/link.test-helpers.ts
-packages/agent-host/src/links/auto-compact-link.test.ts
 packages/agent-host/src/links/auto-reconnect.test.ts
 packages/agent-host/src/links/autostart.test.ts
 packages/agent-host/src/links/dev-build.test.ts
@@ -236,7 +235,6 @@ packages/agent-host/src/links/remote-client.test.ts
 packages/agent-host/src/links/remote-client.ts
 packages/agent-host/src/links/remote-dev.ts
 packages/agent-host/src/links/remote-install.mjs
-packages/agent-host/src/links/reverse-asks.test.ts
 packages/agent-host/src/links/ssh-config.test.ts
 packages/agent-host/src/links/ssh-config.ts
 packages/agent-host/src/links/ssh-run.ts

@@ -872,8 +872,8 @@ export function createRpcHandler(
         ...(from !== undefined ? { from } : {}),
       })
     },
-    'host.lastAnswer': async ({ sessionId, maxChars, turn }) => {
-      return mgr.hostReader().lastAnswer(sessionId, maxChars, turn)
+    'host.lastAnswer': async ({ sessionId, maxChars, turn, since }) => {
+      return mgr.hostReader().lastAnswer(sessionId, maxChars, turn, since)
     },
     'host.recall': async ({ query, limit }) => {
       return mgr.hostReader().recall(query, limit)

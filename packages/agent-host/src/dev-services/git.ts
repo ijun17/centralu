@@ -4,7 +4,7 @@ import { assertExistingPath, isInside, isMissingPathError } from './path-guard.j
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, streamGit, type GitTrust } from './git-exec.js'
 import { duSizes, walkedSizes } from './entry-sizes.js'
-import { measuresWithDu } from '../os.js'
+import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -399,7 +399,7 @@ export async function gitIgnoredEntries(
    * size is only a nicety, and it would be backwards for that to freeze the window).
    */
   const listed = paths.slice(0, limit)
-  const sizes = measuresWithDu() ? await duSizes(cwd, listed) : await walkedSizes(cwd, listed)
+  const sizes = traitsFor().measuresWithDu ? await duSizes(cwd, listed) : await walkedSizes(cwd, listed)
 
   return paths
     .slice(0, limit)

@@ -46,6 +46,16 @@ function connect(port: number, origin?: string) {
   }
 }
 
+/** Connects, says hello with the launch token, and answers the first frame the host sends back */
+async function hello(port: number, origin?: string): Promise<Record<string, unknown>> {
+  const c = connect(port, origin)
+  await c.open()
+  c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+  await c.wait(() => c.frames.length > 0)
+  c.ws.close()
+  return c.frames[0]!
+}
+
 /**
  * A client below the WebSocket library: a TCP socket that does the upgrade by hand and then does only
  * what the test writes. The library's own client answers a close frame and stops sending, which is
@@ -83,58 +93,32 @@ function upgradeStatus(port: number): Promise<number> {
 const ev = (text: string): NormalizedEvent => ({ type: 'message_delta', sessionId: 's1', role: 'assistant', text })
 
 describe('handshake', () => {
-  it('allows the token handshake from a browser dev origin', async () => {
-    // Given: the supported Vite browser origin connects to the host.
+  it.each([
+    ['the browser dev origin', 'http://127.0.0.1:5174'],
+    ['the desktop dev origin', 'http://127.0.0.1:5173'],
+    ['the Tauri origin', 'http://tauri.localhost'],
+    ['the Tauri origin', 'https://tauri.localhost'],
+    ['the Tauri origin', 'tauri://localhost'],
+    ['a localhost dev origin', 'http://localhost:5173'],
+    ['a localhost dev origin', 'http://localhost:5174'],
+  ])('allows the token handshake from %s %s', async (_what, origin) => {
+    // Given: a supported origin (a dev server, the packaged WebView, localhost for 127.0.0.1) connects to the host.
     const { port } = await start()
-    const c = connect(port, 'http://127.0.0.1:5174')
 
     // When: it presents the shared launch token.
-    await c.open()
-    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-    await c.wait(() => c.frames.length > 0)
+    const said = await hello(port, origin)
 
-    // Then: the observable handshake succeeds.
-    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
-    c.ws.close()
+    // Then: origin allowlisting does not reject it and the handshake succeeds.
+    expect(said).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
   })
 
-  it('allows the token handshake from a desktop dev origin', async () => {
-    // Given: the Tauri desktop dev server origin connects to the host.
+  it.each([
+    ['a malicious origin is rejected at the upgrade, before it can ever send a valid token', 'http://evil.example'],
+    ['the literal null origin is not treated like a native no-origin connection', 'null'],
+  ])('%s', async (_name, origin) => {
+    // Given: a cross-site browser origin (or a sandboxed request's literal Origin: null) knows a valid token.
     const { port } = await start()
-    const c = connect(port, 'http://127.0.0.1:5173')
-
-    // When: it presents the shared launch token.
-    await c.open()
-    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-    await c.wait(() => c.frames.length > 0)
-
-    // Then: the observable handshake succeeds.
-    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
-    c.ws.close()
-  })
-
-  it.each(['http://tauri.localhost', 'https://tauri.localhost', 'tauri://localhost'])(
-    'allows the token handshake from the Tauri origin %s',
-    async (origin) => {
-      // Given: a supported packaged WebView origin connects to the host.
-      const { port } = await start()
-      const c = connect(port, origin)
-
-      // When: it presents the shared launch token.
-      await c.open()
-      c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-      await c.wait(() => c.frames.length > 0)
-
-      // Then: the observable handshake succeeds.
-      expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
-      c.ws.close()
-    },
-  )
-
-  it('a malicious origin is rejected at the upgrade, before it can ever send a valid token', async () => {
-    // Given: a cross-site browser origin knows a valid token.
-    const { port } = await start()
-    const c = connect(port, 'http://evil.example')
+    const c = connect(port, origin)
 
     // When: it attempts the WebSocket upgrade.
     const observed = await new Promise<string>((resolve) => {
@@ -149,103 +133,44 @@ describe('handshake', () => {
     c.ws.close()
   })
 
-  it('the literal null origin is not treated like a native no-origin connection', async () => {
-    // Given: a sandboxed/browser request sends the literal Origin: null value.
-    const { port } = await start()
-    const c = connect(port, 'null')
-
-    // When: it attempts the WebSocket upgrade.
-    const observed = await new Promise<string>((resolve) => {
-      c.ws.on('open', () => resolve('opened'))
-      c.ws.on('error', (err) => resolve(err.message))
-    })
-
-    // Then: the host rejects it at the origin boundary.
-    expect(observed).toContain('Unexpected server response')
-    expect(observed).not.toBe('opened')
-    c.ws.close()
-  })
-
   it('a correct token gets hello_ok', async () => {
     const { port } = await start()
-    const c = connect(port)
-    await c.open()
-    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-    await c.wait(() => c.frames.length > 0)
-    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false })
-    c.ws.close()
+    expect(await hello(port)).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false })
   })
 
   /** A window of another build can attach to this host through the keeper, and must be able to tell (#280) */
   it('hello_ok says which build the host is and where it came from', async () => {
     const build = { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, bundlePath: '/Applications/Centralu.app' }
     const { port } = await start(undefined, { build })
-    const c = connect(port)
-    await c.open()
-    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-    await c.wait(() => c.frames.length > 0)
-    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', build })
-    expect(parseServerFrame(c.frames[0]).success).toBe(true)
-    c.ws.close()
+    const said = await hello(port)
+    expect(said).toMatchObject({ kind: 'hello_ok', build })
+    expect(parseServerFrame(said).success).toBe(true)
   })
 
   /** A hub linked to this host tells its person that agents here run as an administrator (#702) */
   it('hello_ok says whether the host runs with administrator rights, once that is known, and nothing before', async () => {
     let elevated: boolean | null = null
     const { port } = await start(undefined, { elevated: () => elevated })
-    const hello = async () => {
-      const c = connect(port)
-      await c.open()
-      c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-      await c.wait(() => c.frames.length > 0)
-      c.ws.close()
-      return c.frames[0] as Record<string, unknown>
-    }
-    expect(await hello()).not.toHaveProperty('elevated')
+    expect(await hello(port)).not.toHaveProperty('elevated')
     elevated = true
-    const said = await hello()
+    const said = await hello(port)
     expect(said).toMatchObject({ kind: 'hello_ok', elevated: true })
     expect(parseServerFrame(said).success).toBe(true)
     elevated = false
-    expect(await hello()).toMatchObject({ elevated: false })
+    expect(await hello(port)).toMatchObject({ elevated: false })
   })
 
   /** A hub linked to this host tells its person when Git there cannot reach the Windows sign-in (#1224) */
   it('hello_ok says which Windows logon the host runs in, once that is known, and nothing before or off Windows', async () => {
     let logon: 'network' | 'interactive' | null = null
     const { port } = await start(undefined, { logon: () => logon })
-    const hello = async () => {
-      const c = connect(port)
-      await c.open()
-      c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-      await c.wait(() => c.frames.length > 0)
-      c.ws.close()
-      return c.frames[0] as Record<string, unknown>
-    }
-    expect(await hello()).not.toHaveProperty('logon')
+    expect(await hello(port)).not.toHaveProperty('logon')
     logon = 'network'
-    const said = await hello()
+    const said = await hello(port)
     expect(said).toMatchObject({ kind: 'hello_ok', logon: 'network' })
     expect(parseServerFrame(said).success).toBe(true)
     logon = 'interactive'
-    expect(await hello()).toMatchObject({ logon: 'interactive' })
-  })
-
-
-
-  it.each(['http://localhost:5173', 'http://localhost:5174'])('localhost dev origin %s is allowed with the token', async (origin) => {
-    // Given: a browser uses localhost instead of 127.0.0.1 for the supported dev port.
-    const { port } = await start()
-    const c = connect(port, origin)
-
-    // When: it presents the shared launch token.
-    await c.open()
-    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
-    await c.wait(() => c.frames.length > 0)
-
-    // Then: origin allowlisting does not reject the legitimate localhost variant.
-    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
-    c.ws.close()
+    expect(await hello(port)).toMatchObject({ logon: 'interactive' })
   })
 
   it('empty server tokens are rejected before listen', async () => {

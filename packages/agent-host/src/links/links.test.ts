@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fakeExe } from '../fake-exe.test-helpers.js'
-import { PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { PROTOCOL_VERSION, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -24,6 +24,7 @@ import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers
 import { activityCounts } from '../idle.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor as worldLine, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -48,11 +49,7 @@ vi.mock('./install.js', async (importOriginal) => {
   }
 })
 
-const TOKEN = 'tok'
-const cleanups: (() => Promise<void> | void)[] = []
-afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c()
-})
+afterEach(runCleanups)
 
 /** What `host.credentials` answers for a test's list, or a test's whole answer (#1405 review) */
 function reportOf(f: () => ListedCredential[] | null | Partial<CredentialsReport>): () => CredentialsReport {
@@ -197,24 +194,9 @@ async function ui(port: number) {
   return { call, frames, events }
 }
 
-const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLine => ({
-  v: 1,
-  port,
-  token: TOKEN,
-  version: RELEASE,
-  protocolVersion: PROTOCOL_VERSION,
-  dataDir: '/remote',
-  hostRunning: true,
-  ...over,
-})
+const lineFor = (port: number, over: Partial<ConnectionLine> = {}) => worldLine(port, { version: RELEASE, ...over })
 
 const status = (hub: Hub) => hub.links.list()[0]!.status
-
-function folder(): string {
-  const d = mkdtempSync(join(tmpdir(), 'cc-links-'))
-  cleanups.push(() => rmSync(d, { recursive: true, force: true }))
-  return d
-}
 
 /** A remote's store with one project and these sessions, written before its host reads it */
 function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boolean][]): { store: Store; projectId: string } {
@@ -223,37 +205,6 @@ function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boo
   store.projects.addProject({ id: projectId, path: folder(), name: 'remote-project' })
   for (const [id, kind, inProject] of sessions) seedSession(store, inProject ? projectId : null, id, kind)
   return { store, projectId }
-}
-
-function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
-  store.sessions.upsertSession({
-    id,
-    projectId,
-    kind,
-    tool: 'claude',
-    externalId,
-    name: id,
-    autoNamed: false,
-    state: 'idle',
-    lastReadSeq: 0,
-    lastSeq: 0,
-    createdAt: Date.now(),
-    waitingSince: null,
-    live: false,
-    model: null,
-    effort: null,
-    verbosity: null,
-    serviceTier: null,
-    permissionPreset: 'normal',
-    importedFrom: null,
-    worktree: null,
-    parentSessionId: null,
-    // A coordinator is a session with a visibility list (store.ts)
-    scopeSessionIds: kind === 'coordinator' ? ['worker1'] : null,
-    roleAppend: null,
-    appId: null,
-    ...sessionLiveDefaults(),
-  })
 }
 
 describe('a hub linked to another host (#82)', () => {
@@ -2821,8 +2772,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
     it('reads its question to the caller, and reports its end to the caller once', async () => {
       const { agent, r, reports } = await followUp()
-      // The first turn's end was reported; this one's is owed too
-      expect(reports()).toBe(1)
+      // The first turn's end is reported (its report may still be on the way); this one's is owed too
+      await eventually(() => reports() === 1)
       const asked = await agent(r.sessionId, 'status')
       if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
       expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
@@ -2872,7 +2823,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       }
 
       it("reports the note's turn, then takes the instruction's turn for the caller's: its end is owed and a note goes into it", async () => {
-        const { remote, agent, r, id, reports } = await inTheGap()
+        const { remote, agent, r, id, reports, told } = await inTheGap()
         // At rest as far as the hub can see: an instruction, not a note
         expect(await agent(r.sessionId, 'send', 'a question for you again')).toMatchObject({ ok: true, state: 'working' })
         remote.release(id)
@@ -2884,7 +2835,56 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         // The caller's turn: a note goes into it, and its end is owed
         expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
-        await eventually(() => reports() === 3)
+        // The instruction's turn ends and is reported; the note it did not read then runs as a turn of its own, reported after
+        // it. The count is 3 only until that turn ends, some 30 ms, which a wait under load can miss (#1809): wait for both
+        await eventually(() => reports() === 4)
+        const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+        expect(reported[3]).toContain('use the staging data')
+        // The two turns ran in that order there. Report 3's words are not checked: they are read once it is written, and
+        // by then the note's turn may have begun (#1809 review)
+        const answers = remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'assistant' && m.kind === 'text').map((m) => (m.payload as { text?: string }).text ?? '')
+        expect(answers.slice(-2)).toEqual(['answered: Yes', expect.stringContaining('use the staging data')])
+      })
+
+      /**
+       * #1812: the hub read a turn's words when its read reached the machine, by when the note's turn could have begun and
+       * ended. The hub's reads made slower than that turn (a busy hub, a slow link), then the instruction's turn run up to its
+       * card's answer, with a note queued behind it that runs as a turn of its own
+       */
+      async function slowReadsThenInstruction() {
+        const rigged = await inTheGap()
+        const { hub, remote, agent, r, id, reports } = rigged
+        const reader = (hub.mgr as unknown as { linkedReader: { lastWords: (...a: unknown[]) => Promise<unknown> } }).linkedReader
+        const read = reader.lastWords.bind(reader)
+        reader.lastWords = async (...a: unknown[]) => {
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          return read(...a)
+        }
+        expect(await agent(r.sessionId, 'send', 'a question for you again')).toMatchObject({ ok: true, state: 'working' })
+        remote.release(id)
+        await eventually(() => reports() === 2)
+        await eventually(() => (remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0) === 1)
+        const asked = await agent(r.sessionId, 'status')
+        if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+        expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+        expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+        return rigged
+      }
+
+      it("reads each report's words of the turn that ended, though the next turn has ended when the hub reads", async () => {
+        const { reports, told } = await slowReadsThenInstruction()
+        await eventually(() => reports() === 4)
+        const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+        expect(reported[2]).toContain('answered: Yes')
+        expect(reported[2]).not.toContain('use the staging data')
+        expect(reported[3]).toContain('use the staging data')
+      })
+
+      it('answers a wait with the words of the turn it waited on, though the next turn has ended when it reads', async () => {
+        const { agent, r } = await slowReadsThenInstruction()
+        const waited = await agent(r.sessionId, 'wait')
+        expect(waited).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('answered: Yes') })
+        expect(waited).not.toMatchObject({ answer: expect.stringContaining('use the staging data') })
       })
     })
   })
