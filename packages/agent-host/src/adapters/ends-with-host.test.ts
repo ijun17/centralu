@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -8,6 +8,7 @@ import { KILL_GRACE_MS } from '../dev-services/kill-tree.js'
 import { goneWithin, helperPid, killLeftovers } from './fake-agent-cli.test-helpers.js'
 import { FIND_CLI, HOST_WATCH, spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { pidIn } from '../process.test-helpers.js'
 
 /**
  * A CLI this host starts must not outlive it (#1562 review, measured on macOS): Cursor with Centralu's bridge attached
@@ -126,13 +127,6 @@ describe('a CLI that must end with its host', () => {
     command: process.execPath,
     args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); process.stdin.resume(); setInterval(() => {}, 1000)`],
   })
-  async function pidIn(file: string): Promise<number> {
-    for (let i = 0; i < 200; i++) {
-      if (existsSync(file) && readFileSync(file, 'utf8')) return Number(readFileSync(file, 'utf8'))
-      await new Promise((r) => setTimeout(r, 50 * SLOW))
-    }
-    throw new Error('the CLI wrote no pid')
-  }
   async function endsWithItsHost(lines: (cli: { command: string; args: string[] }) => string[]): Promise<void> {
     dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
     const host = join(dir, 'host.mts')

@@ -1,3 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { eventually } from '../../../tooling/test-timing.js'
+
+/** The file's content once it parses (#1821): a writer creates it before it writes, so a read may find it empty or half written */
+export const fileHolding = <T>(file: string, parse: (text: string) => T, ms = 10_000): Promise<T> => eventually(() => parse(readFileSync(file, 'utf8')), ms)
+
+/** The pid a process wrote to `file`: positive, never the 0 (`Number('')`) that `alive` answers true to on POSIX */
+export const pidIn = (file: string, ms?: number): Promise<number> => fileHolding(file, (text) => (/^\d+\s*$/.test(text) ? Number(text) : 0), ms)
+
 /**
  * Whether a process with this pid exists, for tests that wait on processes they started (#845).
  *
