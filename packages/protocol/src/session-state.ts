@@ -27,6 +27,15 @@ export function isInTurn(state: unknown): boolean {
   return state === 'working' || state === 'waiting_approval'
 }
 
+/**
+ * A linked machine's session as a hub shows it while it cannot ask that machine (#1822): as last heard, but not working.
+ * Nothing says whether that turn still runs, so it is not shown running; the machine's row says the link is down, and
+ * the machine's resync brings the real state back. The hub's lists from its mirror and the window's rows read this.
+ */
+export function unheard<T extends { state?: unknown }>(row: T): T {
+  return row.state === 'working' ? { ...row, state: 'idle' } : row
+}
+
 /** The legal transitions in the FR-12 table. Anything not here is illegal. */
 const ALLOWED: Record<SessionState, readonly SessionState[]> = {
   idle: ['working', 'error'],

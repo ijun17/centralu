@@ -161,6 +161,9 @@ by its `machine_status`.
   the machine is away (`isMirrored`). An away row stays listed and dimmed, and `wake` refuses it: waking would only
   fail at the hub, and the machine's own resync does the waking once it is back. The reconnect recovery
   (`recoverAfterReconnect`) skips away sessions for the same reason.
+- **An away session is not working** (#1822, `unheard` in `@cc/protocol`): nothing says its turn still runs. The hub
+  lists a mirrored `working` row as `idle`, and a `machine_status` that finds the machine away sets its rows the same
+  way, so the mark, the folded counts and the inbox agree. The machine's resync brings the real state back.
 - **`machine_resync {machineId}` runs a recovery scoped to that machine** (`recoverMachine`), not the global one:
   1. re-read `sessions.list` and `projects.list`, and replace **that machine's rows only**: a row of another machine or
      of this computer keeps its object (nothing re-renders, nothing the reducer derived is lost); a row the fresh list

@@ -1,4 +1,4 @@
-import { RpcMethods, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, unheard, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
@@ -358,7 +358,7 @@ export class Router {
   private present(m: RoutedMachine, kind: 'sessions' | 'projects', list: unknown[], unreachable: boolean): unknown[] {
     const mark = (x: unknown) => (unreachable && isObj(x) ? { ...x, unreachable: true } : x)
     if (kind === 'projects') return list.map((p) => mark(m.q.project(p)))
-    return list.filter((s) => !m.hides(s)).map((s) => mark(m.q.session(s)))
+    return list.filter((s) => !m.hides(s)).map((s) => mark(m.q.session(unreachable && isObj(s) ? unheard(s) : s)))
   }
 
   /**
