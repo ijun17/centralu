@@ -18,6 +18,28 @@ export function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
+/**
+ * Waits `ms`, or until `signal` aborts (and then rejects with its reason, as an Error). A signal already aborted rejects
+ * at once. The timer holds the process open unless `unref`: a settle before a shutdown step must not let the process
+ * leave first, while a poll that only matters to a live host need not keep it running.
+ */
+export function sleep(ms: number, signal?: AbortSignal, opts: { unref?: boolean } = {}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const why = () => (signal?.reason instanceof Error ? signal.reason : new Error(String(signal?.reason)))
+    if (signal?.aborted) return reject(why())
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (opts.unref) timer.unref?.()
+    function onAbort() {
+      clearTimeout(timer)
+      reject(why())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 /** A timer that never holds the process open */
 function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
   const t = setTimeout(fn, ms)

@@ -22,11 +22,14 @@ export const FONT_WAIT_MS = 3000
 export function prepareFirstPaint(doc: Pick<Document, 'fonts'> = document, waitMs = FONT_WAIT_MS): Promise<void> {
   applyCachedTheme()
   applyCachedTypography()
+  let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([
     Promise.all([doc.fonts?.load('13px Pretendard'), doc.fonts?.load('12px D2Coding')]).then(
       () => {},
       () => {},
     ),
-    new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
-  ])
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs)
+    }),
+  ]).finally(() => clearTimeout(timer))
 }

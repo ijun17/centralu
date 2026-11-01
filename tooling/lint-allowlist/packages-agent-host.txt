@@ -279,7 +279,6 @@ packages/agent-host/src/links/registry.ts @typescript-eslint/no-unsafe-type-asse
 packages/agent-host/src/links/remote-client.test.ts @typescript-eslint/no-base-to-string 3
 packages/agent-host/src/links/remote-client.ts @typescript-eslint/no-base-to-string 2
 packages/agent-host/src/links/remote-client.ts @typescript-eslint/no-non-null-assertion 1
-packages/agent-host/src/links/remote-client.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/links/reverse-asks.test.ts @typescript-eslint/await-thenable 1
 packages/agent-host/src/links/reverse-asks.test.ts @typescript-eslint/no-floating-promises 1
 packages/agent-host/src/links/reverse-asks.test.ts @typescript-eslint/no-unnecessary-type-assertion 1

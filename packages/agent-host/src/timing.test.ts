@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { durationText, raceBound, raceTimeout, waitForEvent, waitForExit, withTimeout } from './timing.js'
+import { durationText, raceBound, raceTimeout, sleep, waitForEvent, waitForExit, withTimeout } from './timing.js'
 
 /** Each bounded wait clears its timer however the race ends (#428): a finished wait held one for the whole bound */
 afterEach(() => {
@@ -87,5 +87,50 @@ describe('raceBound', () => {
     ctl.abort()
     expect(await r).toBe('aborted')
     expect(removed).toEqual(['abort'])
+  })
+})
+
+describe('sleep', () => {
+  it('waits its time', async () => {
+    vi.useFakeTimers()
+    try {
+      let done = false
+      const p = sleep(500).then(() => void (done = true))
+      await vi.advanceTimersByTimeAsync(499)
+      expect(done).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await p
+      expect(done).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects with the signal reason, as an Error, and leaves no timer behind', async () => {
+    vi.useFakeTimers()
+    try {
+      const ctl = new AbortController()
+      const p = sleep(60_000, ctl.signal)
+      ctl.abort('stop')
+      await expect(p).rejects.toThrow('stop')
+      expect(vi.getTimerCount()).toBe(0)
+      const own = new Error('mine')
+      await expect(sleep(5, AbortSignal.abort(own))).rejects.toBe(own)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('unrefs its timer only on request', () => {
+    const unref = vi.fn()
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((() => ({ unref })) as never)
+    try {
+      void sleep(10)
+      expect(unref).not.toHaveBeenCalled()
+      void sleep(10, undefined, { unref: true })
+      expect(unref).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

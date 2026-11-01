@@ -1,3 +1,4 @@
+import { createListeners } from '@cc/core'
 import { useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -86,7 +87,7 @@ export function watchDrags(win: EventTarget, set: (dragging: boolean) => void): 
 }
 
 let dragging = false
-const dragListeners = new Set<() => void>()
+const dragListeners = createListeners((e) => console.error('A drag listener threw', e))
 let watching = false
 
 function subscribeDrag(listener: () => void): () => void {
@@ -96,13 +97,10 @@ function subscribeDrag(listener: () => void): () => void {
     watchDrags(window, (now) => {
       if (dragging === now) return
       dragging = now
-      for (const l of dragListeners) l()
+      dragListeners.emit()
     })
   }
-  dragListeners.add(listener)
-  return () => {
-    dragListeners.delete(listener)
-  }
+  return dragListeners.add(listener)
 }
 
 const draggingNow = () => dragging
@@ -117,10 +115,8 @@ export function useAnyDrag(): boolean {
  * to an element React already fills. Keyed like slots.ts, by the view's key.
  */
 const hosts = new Map<string, HTMLElement>()
-const hostListeners = new Set<() => void>()
-const hostsChanged = () => {
-  for (const l of hostListeners) l()
-}
+const hostListeners = createListeners((e) => console.error('A shield-host listener threw', e))
+const hostsChanged = () => hostListeners.emit()
 
 /** A view laid over a panel offers this element for its cover. Returns the function that withdraws it */
 export function registerShieldHost(key: string, el: HTMLElement): () => void {
@@ -133,12 +129,7 @@ export function registerShieldHost(key: string, el: HTMLElement): () => void {
   }
 }
 
-function subscribeHosts(listener: () => void): () => void {
-  hostListeners.add(listener)
-  return () => {
-    hostListeners.delete(listener)
-  }
-}
+const subscribeHosts = (listener: () => void) => hostListeners.add(listener)
 
 /**
  * The cover over the view laid on this panel, while a drag is in progress. `dimmed` for the panel being dragged: its

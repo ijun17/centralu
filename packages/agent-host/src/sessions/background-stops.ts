@@ -7,6 +7,7 @@ import {
 import type { ChildRunResult } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import type { DelegationHost } from './delegation-host.js'
+import { sleep } from '../timing.js'
 
 /** Tasks named for another session's model: each description is a single framed field (#120), with how it ended */
 /** How long `agent_session stop` waits for the tool to report the end of the background work it stopped (#718) */
@@ -62,7 +63,7 @@ export class BackgroundStops {
      */
     const ids = new Set(stopped.map((t) => t.id))
     const stillListed = () => this.host.ownTasksRunning(child.id).filter((t) => ids.has(t.id))
-    for (const until = Date.now() + STOP_REPORTED_MS; stillListed().length && Date.now() < until;) await new Promise((r) => setTimeout(r, 25))
+    for (const until = Date.now() + STOP_REPORTED_MS; stillListed().length && Date.now() < until;) await sleep(25)
     const unreported = stillListed()
     const notice = [
       stopped.length ? `Stopped its background work: ${taskList(stopped)}.` : 'None of the background work it paused on was still running.',

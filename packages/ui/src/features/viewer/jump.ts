@@ -1,3 +1,4 @@
+import { createListeners } from '@cc/core'
 import { useSyncExternalStore } from 'react'
 
 /**
@@ -18,11 +19,8 @@ export type ViewerJump = { path: string; line: number; at: number }
 
 let current: ViewerJump | null = null
 let seq = 0
-const listeners = new Set<() => void>()
-
-function notify(): void {
-  for (const l of [...listeners]) l()
-}
+const listeners = createListeners((e) => console.error('A viewer-jump listener threw', e))
+const notify = () => listeners.emit()
 
 /** Ask the viewer to land on `line` (1-based) once `path` is on screen */
 export function requestViewerJump(path: string, line: number): void {
@@ -48,12 +46,7 @@ export function clearViewerJump(): void {
   notify()
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
+const subscribe = (listener: () => void) => listeners.add(listener)
 
 function snapshot(): ViewerJump | null {
   return current

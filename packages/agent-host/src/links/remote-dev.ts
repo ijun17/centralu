@@ -12,6 +12,7 @@ import type { MachineRecord } from './link-deps.js'
 import { connectionCommand, NOT_FOUND, parseConnectionLine, SshTunnel, type ConnectionLine, type RemoteSpec, type SshTunnelOptions } from './tunnel.js'
 import type { HostControl, UpdateStep } from './update.js'
 import { HOLD, HOLD_MS, holdCommand } from './swap-hold.js'
+import { sleep } from '../timing.js'
 
 /**
  * `pnpm remote-dev <machine> --ref <commit> --repo <path there>` (#1036, docs/plans/remote-hub.md §10.11): a
@@ -121,7 +122,7 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
           const now = await lineThere(tunnel, spec, target).catch(() => null)
           if (now?.hostRunning && now.version === version) return true
           if (Date.now() > deadline) return false
-          await new Promise((r) => setTimeout(r, 1_000))
+          await sleep(1_000)
         }
       },
       step: (s: UpdateStep) => log(`${record.name}: ${s}`),
