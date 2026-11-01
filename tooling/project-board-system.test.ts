@@ -20,7 +20,7 @@ const SYSTEM = new URL('../.centralu/apps/project-board/system.mjs', import.meta
 
 type ExecFile = (file: string, args: string[], options: Record<string, unknown>, callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void) => { stdin: { on(e: string, f: () => void): unknown; end(s?: string): void } }
 type Failure = Error & { code?: unknown; killed?: boolean; timedOut?: boolean; aborted?: boolean; stdout: string; stderr: string }
-type RunOptions = { timeoutMs?: number; input?: string; maxBuffer?: number; tree?: boolean; signal?: AbortSignal }
+type RunOptions = { timeoutMs?: number; input?: string; maxBuffer?: number; stderrTail?: number; tree?: boolean; signal?: AbortSignal }
 type System = { execFile: ExecFile; runProgram(file: string, args: string[], options?: RunOptions): Promise<{ stdout: string; stderr: string }> }
 type Gh = (args: string[], call: { input?: string | null; cwd?: string; env?: Record<string, string> }) => { code: number; stdout: string; stderr: string }
 
@@ -273,6 +273,46 @@ describe("the board app's runProgram", { timeout: 60_000 * SLOW }, () => {
     expect(Date.now() - started).toBeLessThan(30_000)
     // It was left running by design: end it now rather than wait out its 60 s
     process.kill(Number(stdout.slice(5)))
+  })
+
+  it('counts maxBuffer in bytes, and keeps only the tail of stderr when asked', async () => {
+    const sys = await system()
+    // 600 characters, 1200 bytes
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', 'process.stdout.write("é".repeat(600))'], { maxBuffer: 1000 }))
+    expect(failed.code).toBe('ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+    const noisy = 'process.stderr.write("a".repeat(50000) + "end"); process.exitCode = Number(process.argv[1])'
+    const ok = await sys.runProgram(NODE, ['-e', noisy, '0'], { stderrTail: 100 })
+    expect([ok.stderr.length, ok.stderr.endsWith('end')]).toEqual([100, true])
+    const bad = await failureOf(sys.runProgram(NODE, ['-e', noisy, '2'], { stderrTail: 100 }))
+    expect([bad.code, bad.stderr.length, bad.stderr.endsWith('end')]).toEqual([2, 100, true])
+  })
+
+  it('rejects with empty output when spawn itself throws (a NUL in an argument)', async () => {
+    const sys = await system()
+    const failed = await failureOf(sys.runProgram(NODE, ['a\0b']))
+    expect([failed.stdout, failed.stderr]).toEqual(['', ''])
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a stopped run as stopped even when the child exits 0 on the signal', async () => {
+    const sys = await system()
+    const trap = 'process.on("SIGTERM", () => process.exit(0)); process.stdout.write("up"); setInterval(() => {}, 1000)'
+    const timedOut = await failureOf(sys.runProgram(NODE, ['-e', trap], { timeoutMs: 2000 * SLOW }))
+    expect([timedOut.timedOut, timedOut.killed]).toEqual([true, true])
+    const controller = new AbortController()
+    const run = failureOf(sys.runProgram(NODE, ['-e', trap], { signal: controller.signal }))
+    await sleep(2000 * SLOW)
+    controller.abort()
+    expect((await run).aborted).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32')('ends the child alone, and throws nothing, when taskkill cannot be started', async () => {
+    const sys = await system()
+    const controller = new AbortController()
+    const run = failureOf(sys.runProgram(NODE, ['-e', 'setInterval(() => {}, 1000)'], { tree: true, signal: controller.signal }))
+    await sleep(1500 * SLOW)
+    vi.stubEnv('SystemRoot', join(tmpdir(), 'cc-no-system-root'))
+    controller.abort()
+    expect((await run).aborted).toBe(true)
   })
 
   // node's execFile does not pass `detached` on to spawn, so a group kill found no group and ended the child alone (Linux, macOS)

@@ -24,7 +24,7 @@ export function stopTree(child) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
   return new Promise((resolve) => {
     child.once('exit', () => resolve())
-    if (process.platform === 'win32') spawn(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    if (process.platform === 'win32') spawn(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => child.kill('SIGKILL'))
     else {
       try {
         process.kill(-child.pid, 'SIGKILL') // started detached (`tree`), so it leads a process group of its own
@@ -40,12 +40,13 @@ export function stopTree(child) {
  * 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') plus `stdout` and `stderr` as strings, so each caller keeps its own message. Other options go to spawn.
  * `timeoutMs` (0: none) or `signal` ends the run, which is then `timedOut` or `aborted` and `killed` whatever the child wrote or exited
  * with (a forced end exits with a code: #1842), after letting go of the pipes a process the child left running may hold.
- * `tree` ends all the child started too, and waits 5 s at most after its exit for such pipes. `input` goes to stdin.
+ * `stderrTail` keeps only that many last characters of stderr as it arrives. `tree` ends all the child started too, and waits 5 s at most after its exit for such pipes. `input` goes to stdin.
  */
-export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024 * 1024, tree = false, signal, ...options } = {}) {
+export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024 * 1024, stderrTail, tree = false, signal, ...options } = {}) {
   let child
   const run = new Promise((resolve, reject) => {
     const out = { stdout: '', stderr: '' }
+    const bytes = { stdout: 0, stderr: 0 }
     let error = null
     let stoppedBy = null
     let done = false
@@ -56,7 +57,7 @@ export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024
       clearTimeout(timer)
       clearTimeout(lingering)
       signal?.removeEventListener('abort', onAbort)
-      if (!error && (code || sig)) error = Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}\n${out.stderr}`), { code, signal: sig })
+      if (!error && (code || sig || stoppedBy)) error = Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}\n${out.stderr}`), { code, signal: sig })
       if (!error) return resolve(out)
       reject(Object.assign(error, out, { killed: Boolean(stoppedBy || child.killed), ...(stoppedBy && { [stoppedBy]: true }) }))
     }
@@ -82,8 +83,10 @@ export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024
         child[name].setEncoding('utf8')
         child[name].on('data', (text) => {
           out[name] += text
-          if (error || out[name].length <= maxBuffer) return
-          out[name] = out[name].slice(0, maxBuffer)
+          bytes[name] += Buffer.byteLength(text)
+          if (name === 'stderr' && stderrTail) out.stderr = out.stderr.slice(-stderrTail)
+          if (error || bytes[name] <= maxBuffer) return
+          out[name] = Buffer.from(out[name]).subarray(0, maxBuffer).toString()
           error = Object.assign(new RangeError(`${name} maxBuffer length exceeded`), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' })
           child.kill(options.killSignal)
         })
@@ -113,7 +116,9 @@ export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024
       child.stdin.end(input)
     }
   })
-  return Object.assign(run, { child })
+  // A throw of spawn itself (a NUL in an argument, EINVAL for a .cmd) has no output either
+  const failed = run.catch((e) => { throw Object.assign(e, { stdout: e.stdout ?? '', stderr: e.stderr ?? '' }) })
+  return Object.assign(failed, { child })
 }
 
 /** `execFile(file, args, options, callback)`'s shape over runProgram, for the tests that feed the child's stdin themselves; `options.timeout` is the limit */

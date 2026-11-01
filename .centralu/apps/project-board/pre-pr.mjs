@@ -47,8 +47,8 @@ async function runScript(args, cwd, { signal, limitMs, beat }) {
   const timer = setInterval(() => beat(Math.round((clock() - started) / 1000)), BEAT_MS)
   // The whole process tree is stopped (tsc, vitest and pnpm run under the script); stdin is closed, as `ignore` was
   try {
-    const { stdout, stderr } = await runProgram(process.execPath, args, { cwd, timeoutMs: limitMs, signal, tree: true, input: '', maxBuffer: Infinity, windowsHide: true })
-    return { stdout, stderr: stderr.slice(-20_000), code: 0, stopped: null }
+    const { stdout, stderr } = await runProgram(process.execPath, args, { cwd, timeoutMs: limitMs, signal, tree: true, input: '', maxBuffer: Infinity, stderrTail: 20_000, windowsHide: true })
+    return { stdout, stderr, code: 0, stopped: null }
   } catch (e) {
     // A script that did not start has nothing on stderr but node's message
     const said = typeof e.code === 'string' && !e.killed ? e.message : ''
