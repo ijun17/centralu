@@ -9,6 +9,7 @@ import { Router, keepUnseen, type RoutedMachine } from './router.js'
 class FakeMachine implements RoutedMachine {
   readonly q: Qualifier
   reachable = true
+  waitsForPerson = false
   calls: { method: string; params: unknown }[] = []
   answers: Record<string, unknown> = {}
   mirror: Record<'sessions' | 'projects', unknown[] | null> = { sessions: null, projects: null }
@@ -929,6 +930,16 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
         { sessionId: 'h1', seq: 1, snippet: 'x' },
         { sessionId: 'm1.a', seq: 2, snippet: 'y' },
       ])
+    })
+  })
+
+  describe('a machine that is down (#1341)', () => {
+    it('says a disconnected machine waits for the person to connect it, not that its link comes back', async () => {
+      const { router, m1 } = rig()
+      m1.reachable = false
+      m1.waitsForPerson = true
+      const refusal = await router.handle('agents.interrupt', { sessionId: 'm1.s' }, { client: 1 }).catch((e: Error) => e.message)
+      expect(refusal).toBe('Machine m1 is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect), then try again')
     })
   })
 })

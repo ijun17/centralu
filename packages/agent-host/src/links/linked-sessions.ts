@@ -1,8 +1,9 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
-import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
+import { NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
+import { awaySentence, notReachable, TAIL, type Tail } from './machine-reach.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj, tryParseJson } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
@@ -79,10 +80,6 @@ function notWithin(ms: number): string {
   return `did not answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`
 }
 
-/** How a sentence about a machine that is down ends, for the call that was refused (`away`): none for a bare statement */
-type Tail = string | null
-const TAIL = { tryAgain: 'try again once its link is back', readAgain: 'read it again once its link is back', none: null } as const satisfies Record<string, Tail>
-
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
 function cause(err: unknown): string {
   return oneLine(err instanceof Error ? err.message : String(err), 300)
@@ -105,18 +102,6 @@ export function linkedSessions(
   const owner = (qualifiedId: string): RoutedMachine | null => qualifiedMachine(machines(), qualifiedId)?.machine ?? null
   const machineById = (id: string): RoutedMachine | null => findMachine(machines(), id)
   /**
-   * Why a machine that is not connected cannot be asked, as the sentence the model reads (#1341). One that nothing here
-   * will connect (the person disconnected it, or its Auto reconnect is off and the attempt at the hub's start is over)
-   * says so at once and names who can: the person. No call connects a machine by itself
-   */
-  const away = (m: RoutedMachine, tail: Tail): string =>
-    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}${tail === null ? '' : `; ${tail}`}`
-  /**
-   * `NOT_REACHABLE`, with the attempt a call made to connect the machine (#1532): that it is still under way, or that it
-   * failed with the attempt's own words, so the agent can tell a machine that is off from one whose ssh is refused
-   */
-  const notReachable = (m: RoutedMachine): string => (m.whyDown ? `${NOT_REACHABLE}; ${oneLine(m.whyDown, 300)}` : NOT_REACHABLE)
-  /**
    * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
    * as it did when a need connected it. With nothing trying, the call is answered at once
    */
@@ -130,7 +115,7 @@ export function linkedSessions(
   /** A machine that is still down after `settle`, as the refusal the model reads (`tail`: see `away`); null when it is up */
   const reach = async (m: RoutedMachine, tail: Tail): Promise<Refusal | null> => {
     await settle(m)
-    return m.reachable ? null : { ok: false, error: away(m, tail) }
+    return m.reachable ? null : { ok: false, error: awaySentence(m, tail) }
   }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | Refusal> => {
