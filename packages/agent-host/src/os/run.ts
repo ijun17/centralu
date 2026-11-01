@@ -31,6 +31,7 @@ export function runChild(
     // The child has its own copy of the file now
     if (fd !== undefined) os.files.closeSync(fd)
   }
+  options.onChild?.(child)
   return new Promise<RunResult>((resolve, reject) => {
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
@@ -40,14 +41,20 @@ export function runChild(
     const stopFor = (why: NonNullable<RunResult['ended']>) => {
       if (ended || settled) return
       ended = why
-      void os.processes.stop(child, RUN_STOP_GRACE_MS).catch(() => {})
+      void os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS).catch(() => {})
     }
-    const onAbort = () => stopFor('aborted')
+    // Not once the program has exited: what it did then is done, and the answer is its own
+    const onAbort = () => {
+      if (child.exitCode === null && child.signalCode === null) stopFor('aborted')
+    }
     const done = (finish: () => void) => {
       if (settled) return
       settled = true
       for (const t of timers) t.cancel()
       options.signal?.removeEventListener('abort', onAbort)
+      // A program the run no longer waits for may still hold the pipes: let go of them
+      child.stdout?.destroy()
+      child.stderr?.destroy()
       finish()
     }
     // Each stream counted on its own, as `maxBuffer` says; past it, the rest is dropped while the tree ends
@@ -61,13 +68,33 @@ export function runChild(
         if (options.maxBuffer !== undefined && bytes > options.maxBuffer) stopFor('overflow')
       }
     }
-    child.stdout?.on('data', collect(stdout))
-    child.stderr?.on('data', collect(stderr))
+    // Kept in part (`stderrKeep`): the first or the last bytes, never an overflow
+    const keep = (into: Buffer[], { bytes: limit, from }: NonNullable<RunOptions['stderrKeep']>) => {
+      let kept = 0
+      return (chunk: Buffer | string) => {
+        const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+        if (from === 'head') {
+          if (kept >= limit) return
+          into.push(b.subarray(0, limit - kept))
+          kept += Math.min(b.length, limit - kept)
+          return
+        }
+        into.push(b)
+        kept += b.length
+        while (into.length > 1 && kept - (into[0]?.length ?? 0) >= limit) kept -= into.shift()?.length ?? 0
+      }
+    }
+    const handOver = (chunk: Buffer | string) => {
+      if (ended) return
+      if (options.onStdout?.(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)) stopFor('stopped')
+    }
+    child.stdout?.on('data', options.onStdout ? handOver : collect(stdout))
+    child.stderr?.on('data', options.stderrKeep ? keep(stderr, options.stderrKeep) : collect(stderr))
     const result = (code: number | null, signal: NodeJS.Signals | null): RunResult => ({
       code,
       signal,
       stdout: Buffer.concat(stdout),
-      stderr: Buffer.concat(stderr),
+      stderr: options.stderrKeep?.from === 'tail' ? Buffer.concat(stderr).subarray(-options.stderrKeep.bytes) : Buffer.concat(stderr),
       ...(ended ? { ended } : {}),
     })
     child.once('error', (error) => {

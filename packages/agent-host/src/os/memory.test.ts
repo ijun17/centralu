@@ -343,6 +343,55 @@ describe('processes in memory', () => {
     expect((await late).ended).toBe('aborted')
   })
 
+  it('an abort after the program has exited changes nothing: the answer is its own', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/daemon', (ctx) => (ctx.stdout.write('d'), waits(ctx)))
+    os.programs.add('/usr/bin/starts', (ctx) => {
+      ctx.start('/usr/bin/daemon', [], { stdio: ['ignore', 'inherit', 'inherit'] })
+    })
+    const abort = new AbortController()
+    const run = os.processes.run('starts', [], { signal: abort.signal })
+    await os.clock.advance(CLOSE_AFTER_EXIT_MS - 1)
+    abort.abort()
+    await os.clock.advance(1)
+    expect(await run).toMatchObject({ code: 0, signal: null })
+  })
+
+  it('hands the child over as it starts, and stdout to its reader in place of the result', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/says', (ctx) => (ctx.stdout.write('a b '), waits(ctx)))
+    const seen: string[] = []
+    const children: unknown[] = []
+    const run = os.processes.run('says', [], {
+      onChild: (child) => children.push(child),
+      // Not collected, and not counted by maxBuffer; true ends the program
+      maxBuffer: 1,
+      onStdout: (chunk) => {
+        seen.push(chunk.toString())
+        return true
+      },
+    })
+    await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
+    const r = await run
+    expect({ ended: r.ended, seen, stdout: r.stdout.length, children: children.length }).toEqual({
+      ended: 'stopped',
+      seen: ['a b '],
+      stdout: 0,
+      children: 1,
+    })
+  })
+
+  it('keeps the first or the last bytes of stderr as asked, never ending the run for them', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/says', (ctx) => {
+      for (const part of ['abcd', 'efgh', 'ijkl']) ctx.stderr.write(part)
+    })
+    const keep = (from: 'head' | 'tail') =>
+      os.processes.run('says', [], { maxBuffer: 5, stderrKeep: { bytes: 6, from } }).then((r) => [r.stderr.toString(), r.ended])
+    expect(await keep('head')).toEqual(['abcdef', undefined])
+    expect(await keep('tail')).toEqual(['ghijkl', undefined])
+  })
+
   it("a run's stdout file is made readable by its owner alone (0600)", async () => {
     const os = memoryOs({ as: 'posix' })
     os.programs.add('/usr/bin/say', (ctx) => void ctx.stdout.write('secret'))
