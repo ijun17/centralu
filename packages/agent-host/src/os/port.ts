@@ -315,13 +315,24 @@ export type RunOptions = {
   signal?: AbortSignal
   /** stdout goes to this file (made 0600) instead of the result */
   stdoutFile?: HostPath
+  /** The child as soon as it is started (the host keeps those it must end at its own shutdown) */
+  onChild?: (child: OsChild) => void
+  /**
+   * Each piece of stdout as it arrives, in place of collecting it (the result's stdout is empty, and `maxBuffer` does
+   * not count it); returning true ends the program (`ended: 'stopped'`)
+   */
+  onStdout?: (chunk: Buffer) => boolean | void
+  /** Keeps this many bytes of stderr, its first or its last, in place of all of it: `maxBuffer` does not count it */
+  stderrKeep?: { bytes: number; from: 'head' | 'tail' }
+  /** The grace an ending gives the program before the second shot (default `RUN_STOP_GRACE_MS`, 2 s) */
+  stopGraceMs?: number
 }
 
 export type RunResult = OsExit & {
   stdout: Buffer
   stderr: Buffer
   /** Why the host ended it, when it did */
-  ended?: 'timeout' | 'overflow' | 'aborted'
+  ended?: 'timeout' | 'overflow' | 'aborted' | 'stopped'
 }
 
 export type RunSyncOptions = Omit<RunOptions, 'signal' | 'stdoutFile'> & {
@@ -371,9 +382,10 @@ export interface OsProcesses {
   /**
    * Ends a child and everything it started: on POSIX TERM to every group in its tree, then KILL to what is left after
    * `graceMs`; on Windows at once (`taskkill /T /F`). Then sweeps what it left running (its group, or on Windows the
-   * processes it started, by parent links and creation time). Answers how it ended.
+   * processes it started, by parent links and creation time), unless `sweep` is false: for a caller that ended the
+   * tree on purpose and has nothing left to look for. Answers how it ended.
    */
-  stop(child: OsChild, graceMs: number): Promise<OsExit>
+  stop(child: OsChild, graceMs: number, options?: { sweep?: boolean }): Promise<OsExit>
   /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */
   alive(pid: number): boolean
   /**
