@@ -88,7 +88,7 @@ export class AppProcess {
   onUnexpectedExit?: (reason: string) => void
 
   private stopping: Promise<void> | null = null
-  /** Windows: the collection of what it left running, once it has ended (`stop`) */
+  /** Settles once it has exited and, on Windows, what it left running has been collected (`stop`) */
   private leftovers: Promise<void> | null = null
   private exitWaiters: (() => void)[] = []
   private closeFd3Server: (() => void) | null = null
@@ -250,31 +250,39 @@ export class AppProcess {
    * and ended (`collectLeftovers`). That takes a process listing (~0.5 s), so by default it runs
    * after this returns; `awaitTree` waits for it, for a caller about to move or delete the app's
    * folder, which Windows refuses while a process has it as its working directory.
+   *
+   * `awaitTree` waits for the app's own exit too, not for the bounded waits below (#1818): on a loaded machine the
+   * exit can land after them, and the caller then deleted a folder the app still held. What it left running is
+   * collected once it has exited, however late, since only then is the window of its leftovers known.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
-    // A stop already under way, started by someone who did not wait for the leftovers: this caller still does
-    if (this.stopping) return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
-    this.stopping = (async () => {
-      void this.client.close().catch(() => {})
-      this.closeFd3Server?.()
-      this.child.stdin?.end()
-      this.fd3?.end()
-      if (this.alive && !(await this.waitExit(graceMs))) {
-        this.log.note(`did not exit within ${graceMs}ms of stdin and fd 3 closing — stopping the process tree`)
-        stopTree(killHandle(this.child), KILL_GRACE_MS, () => this.alive)
-        if (opts.awaitKill !== false) await this.waitExit(KILL_GRACE_MS + 1000)
-      } else if (hasProcessGroups()) {
-        void this.collectLeftovers()
-      }
-      this.fd3?.destroy()
-      const leftovers = !hasProcessGroups() && !this.alive ? this.collectLeftovers() : null
-      this.leftovers = leftovers
-      if (leftovers && opts.awaitTree) await leftovers
-      // The log stays open for the leftovers' note, if they are collected after this returns
-      if (leftovers && !opts.awaitTree) void leftovers.finally(() => this.log.close())
-      else this.log.close()
-    })()
-    return this.stopping
+    this.stopping ??= this.end(graceMs, opts.awaitKill !== false)
+    // A stop already under way, started by someone who did not wait for the tree: this caller still does
+    return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
+  }
+
+  private async end(graceMs: number, awaitKill: boolean): Promise<void> {
+    void this.client.close().catch(() => {})
+    this.closeFd3Server?.()
+    this.child.stdin?.end()
+    this.fd3?.end()
+    if (this.alive && !(await this.waitExit(graceMs))) {
+      this.log.note(`did not exit within ${graceMs}ms of stdin and fd 3 closing — stopping the process tree`)
+      stopTree(killHandle(this.child), KILL_GRACE_MS, () => this.alive)
+      if (awaitKill) await this.waitExit(KILL_GRACE_MS + 1000)
+    } else if (hasProcessGroups()) {
+      void this.collectLeftovers()
+    }
+    this.fd3?.destroy()
+    const exited = this.waitExit().then(() => {})
+    if (hasProcessGroups()) {
+      this.leftovers = exited
+      this.log.close()
+    } else {
+      // The log stays open for the leftovers' note
+      this.leftovers = exited.then(() => this.collectLeftovers())
+      void this.leftovers.finally(() => this.log.close())
+    }
   }
 
   /** The failure text plus the last lines the app left on stderr — read by a person and the building agent */
@@ -297,11 +305,12 @@ export class AppProcess {
     this.tools = listed.tools
   }
 
-  private waitExit(ms: number): Promise<boolean> {
+  /** Whether it exited within `ms`; without `ms`, once it has exited, however long that takes */
+  private waitExit(ms?: number): Promise<boolean> {
     if (!this.alive) return Promise.resolve(true)
     return new Promise((resolve) => {
-      const t = setTimeout(() => resolve(false), ms)
-      t.unref()
+      const t = ms === undefined ? undefined : setTimeout(() => resolve(false), ms)
+      t?.unref()
       this.exitWaiters.push(() => {
         clearTimeout(t)
         resolve(true)
