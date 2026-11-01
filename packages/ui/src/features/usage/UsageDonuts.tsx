@@ -4,6 +4,7 @@ import { useDismiss } from '../../components/useDismiss.js'
 import type { CacheStats, MachineInfo, ToolName, ToolStatus, UsageSnapshot } from '@cc/protocol/client'
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useWhileVisible } from '../../app/useWhileVisible.js'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
@@ -268,27 +269,10 @@ export function UsageDonuts() {
    * of minutes, so polling every second would only hammer the tool's process without changing
    * the answer (claude asks a live session).
    */
-  useEffect(() => {
-    loadAll()
-    let last = Date.now()
-    const poll = () => {
-      // A hidden window shows nothing: asking would start a reading (a process, on a machine with no session) for nobody (#726)
-      if (document.hidden) return
-      last = Date.now()
-      loadAll()
-    }
-    const t = setInterval(poll, POLL_MS)
-    // Back in view after a tick was skipped: asked at once rather than shown stale until the next tick
-    const onVisible = () => {
-      if (!document.hidden && Date.now() - last >= POLL_MS) poll()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      clearInterval(t)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-    // connection: the moment it comes back is when to ask again (a login could have happened meanwhile)
-  }, [loadAll, connection])
+  // A hidden window shows nothing: asking would start a reading (a process, on a machine with no session) for nobody (#726).
+  // Back in view after a tick was skipped, it asks at once rather than showing stale figures until the next tick.
+  // connection: the moment it comes back is when to ask again (a login could have happened meanwhile)
+  useWhileVisible(() => loadAll(), POLL_MS, { immediate: true }, [loadAll, connection])
 
   /*
    * A linked machine whose link comes back (or that was just added) is asked then, rather than at the next 5-minute

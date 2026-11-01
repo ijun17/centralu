@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
 import { errorMessage } from '@cc/protocol/client'
-import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
+import { App, confirmKeyAction, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
   autoSwitch,
   buildBar,
@@ -324,7 +324,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
        * Enter pressed on a button (#181, `confirmKeyAction`). While Enter was read as quit
        * regardless of focus, pressing Enter after tabbing to Cancel also quit the app.
        */
-      const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON'
+      const onButton = pressesItself(e.target)
       const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, keyCode: e.keyCode, onButton })
       if (e.key === 'Enter' || e.key === 'Escape') e.stopPropagation()
       if (action === 'cancel') setAskQuit(false)

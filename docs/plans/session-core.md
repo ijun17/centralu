@@ -162,7 +162,7 @@ The order matters only where two steps answer differently. The "allow" steps com
 `auto`, and Claude puts Centralu's own tools before it on purpose (#382: an `ask` rule naming `mcp__centralu` used to
 refuse them in `auto`); ACP's `auto` allows, so its place does not change an outcome. Claude's extra steps
 (request-turn reads, unasked app tools, AskUserQuestion) are Claude features. **Right:** one ordered pipeline in the
-core, `own tool → tool's pre-steps → auto → edits → always → card`, where `auto`'s answer is the tool's (Claude: deny,
+core, `own tool → tool's pre-steps → auto → edits → always → card` (built as `… → always → edits → card`, §4.4), where `auto`'s answer is the tool's (Claude: deny,
 ACP and `agy`: allow) and each tool supplies only the classification of a call (its kind, paths, server). This keeps
 every current outcome (by reading): no behaviour change.
 
@@ -443,6 +443,42 @@ only by the turn's end, removed `StopConfirmation` and the answer's confirmation
 None of Claude's existing tests changed, #1831's invariant tables and `interrupt.test.ts` included; the core tests
 (`core/mid-turn-ledger.test.ts`) add a wire that writes its own inputs, with each policy.
 
+### 4.4 As built in PR 8
+
+`core/grants.ts` (`Grants`) holds the decision order of §2.7 and the person's saved rules (`AlwaysAllowRules`); each tool
+builds a `GrantQuery` from its own request and still raises and answers its own cards (their answer shapes differ: an SDK
+promise, a JSON-RPC answer, an ACP option). The order as built:
+
+`own tool → the tool's steps before auto → auto → the tool's steps after auto → always → edits → ask`
+
+| Proposal (§2.7, §4) | As built | Why |
+|---|---|---|
+| `edits → always` | `always → edits` | both allow, so the outcome is the same; the saved rule is a lookup and the grant reads the disk, so a call either allows is answered without the read, and an answer that needs no read is given at once (Codex's tests pin a synchronous answer; Codex already checked the rule first) |
+| `ToolWire.autoGrant` | `new Grants(auto)`: `allow` (ACP), `deny` (Claude), null (Codex: its `approvalPolicy: never` sends no request under `auto`, so there is no step) | a constructor argument, not part of the seam: Codex and Claude are not on `ToolWire` |
+| `GrantQuery.kind`, `server` | `edit: { folder, paths } \| null` and `ownTool`: the tool decides whether its call is an edit the grant may allow and whether it is Centralu's own | each tool's conditions for both differ (below); the core needs only the answer |
+| `CoreIo.grant` raises the card | `decide(query)` answers `allow` or `deny` with the step (`by`), or `ask`; the tool raises its card | the cards' answers are per tool; `PendingCards` and `CardIds` are already shared |
+| (none) | `answered(decision, matcher)`: "always" with a matcher is remembered | the one rule of `always-allow.ts`, once |
+
+The tools differ today, by reading, and each keeps its difference (none is a behaviour change of this move):
+
+| Step | ACP | Codex | Claude |
+|---|---|---|---|
+| reached when | the request offers `allow_once`; a question is a question card first | an approval request (`item/*/requestApproval`, `applyPatchApproval`); an elicitation is not an approval | every `canUseTool` call; `AskUserQuestion` is a question card first |
+| own tool | `profile.centraluToolOf` | not in the order: an elicitation from Centralu's own server is accepted | a `mcp__centralu__` name, with the server given to this session |
+| before auto | none | none | a read the request's turn asks about (may deny) |
+| auto | allow | no step | deny, with Claude's words |
+| after auto | none | none | an app tool nobody is asked about; a read another project granted |
+| edits | live `edits`; kind `edit` shown as a file edit; every path | live `edits` launched as `normal`; a file-change or patch request without `grantRoot` or `reason`, every change an add or an update | launched `normal` or `edits`, live `edits`, no ask rule for an edit in the settings, none matched, a benign reason; `Edit`, `MultiEdit`, `Write`, `NotebookEdit` |
+| a disk check that throws | would have failed the request; now asks (`insideFolder` catches its own disk errors; only `homedir()` could throw) | asks | would have failed the call; now asks (the same) |
+| an empty rule key | matched a saved empty rule; now never (as Codex and Claude): unreachable, since `rulesFor` drops an empty matcher and `answered` keeps none | never matches | never matches |
+
+ACP (PR 8a), Codex (PR 8b) and Claude (PR 8c) are on it. Codex's one difference in timing: under `edits`, a patch the
+grant cannot allow (a delete, a move, no change) is a card at once, where it used to wait one disk-check tick first; the
+same card, and Codex still ends it with its request. Claude's question (`AskUserQuestion`) is answered before the order,
+as ACP's is: no step answered it before (not Centralu's tool, a read, an app tool or an edit, and `auto` let it through).
+Claude's saved-rule key is read from the card's path without the disk (`newFile` changes what the card says, not the key),
+and a card that needs no wait is still raised before the callback yields (its tests pin that).
+
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
 The core reaches the OS only through `tool-process.ts`, which takes an `Os` (`os/port.ts` on `centralu/os-interface`,
@@ -579,7 +615,7 @@ estimates of changed lines without fixtures.
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
 | 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +62 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 
-| 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
+| 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers). Done (§4.4) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
 
 Row 7, measured against main at `4489459b8` by reading (code lines without blanks and comments): Claude's own copy is about 150 lines in `claude/session.ts` (the Stop and its timer 78, the exit 20, turn and receipt handling about 30, `sendTracked` 10, fields and `deliver`), but `MidTurnLedger` shares about 10 of them as they are (receipts failed on a Stop, the close and an exit; a Stop with no turn said at once; the refusal's words). The rest differs in behaviour pinned by tests: the Stop is confirmed by the interrupt's answer or the result, joins a Stop already waiting and starts its bound again once said (`interrupt.test.ts`); a turn's ending comes from the normalizer, among the goal's events and deferred card closures, with `turn_complete`'s `output`; receipts complete from the result's `user_message_uuids`, not from a turn id (Claude names none); `cancelQueued` empties the SDK's queue and counts what it held; a refused Stop with no turn is an error. Moved as it is, Claude's copy becomes Claude-only options of the ledger plus a wire of about 15 lines: about +55 lines, and never less than about +5. What would make it smaller, each a behaviour change of its own: one Stop wording and timer for Claude and ACP, a Stop confirmed only at the turn's end, and the ledger saying a turn's ending after the tool's own events. The idle exit (Q1) was the fourth; it is done. The owner chose to make the move all the same (2026-11-01), for one copy of the turn logic, within about +60 lines.

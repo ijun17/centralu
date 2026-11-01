@@ -88,12 +88,17 @@ export async function insideFolder(folder: string, targets: readonly string[]): 
 /** The Claude tools that write a file, with the input field holding its path */
 const CLAUDE_EDIT_PATH: Readonly<Record<string, string>> = { Edit: 'file_path', MultiEdit: 'file_path', Write: 'file_path', NotebookEdit: 'notebook_path' }
 
-/** Whether this Claude tool call is a file edit inside `folder` (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`) */
-export async function claudeEditInside(folder: string, toolName: string, input: Record<string, unknown>): Promise<boolean> {
+/** The file a Claude tool call edits (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`), or null for any other call */
+export function claudeEditPath(toolName: string, input: Record<string, unknown>): string | null {
   const field = CLAUDE_EDIT_PATH[toolName]
-  if (!field) return false
-  const path = input[field]
-  return typeof path === 'string' && (await insideFolder(folder, [path]))
+  const path = field ? input[field] : undefined
+  return typeof path === 'string' ? path : null
+}
+
+/** Whether this Claude tool call is a file edit inside `folder` (the decision order asks `claudeEditPath` and `insideFolder` apart) */
+export async function claudeEditInside(folder: string, toolName: string, input: Record<string, unknown>): Promise<boolean> {
+  const path = claudeEditPath(toolName, input)
+  return path !== null && (await insideFolder(folder, [path]))
 }
 
 /**

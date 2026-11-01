@@ -3,13 +3,13 @@ import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPrese
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
-import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
+import { alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
 import type { AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
+import { Grants, type GrantQuery } from '../core/grants.js'
 import { CoreSession } from '../core/ledger.js'
 import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from '../core/seam.js'
 import type { ToolStart } from '../core/tool-process.js'
-import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
@@ -118,7 +118,7 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
   }
 
   applyRules(matchers: readonly string[]): void {
-    this.wire.rules.addAll(matchers)
+    this.wire.grants.applyRules(matchers)
   }
 
   setPermissionPreset(preset: PermissionPreset): void {
@@ -154,7 +154,8 @@ class AcpWire implements ToolWire {
   /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
   readonly turns = { interruptEndsProcess: false } as const
   readonly launch: ToolWire['launch']
-  readonly rules = new AlwaysAllowRules()
+  /** ACP's `auto` allows (`core/grants.ts`) */
+  readonly grants = new Grants('allow')
   preset: PermissionPreset
   commands: { name: string; description?: string; argumentHint?: string }[] = []
   private io!: CoreIo
@@ -541,7 +542,7 @@ class AcpWire implements ToolWire {
     const detail = detailOf(call, this.opts.cwd)
     const edit = this.deps.shape?.editRunsAsNewCall && call.kind === 'edit' ? editPaths(call) : null
     const once = pick(req.options, 'allow_once')
-    const granted = once !== undefined && (await this.grantedWithoutCard(detail, call))
+    const granted = once !== undefined && (await this.grants.decide(this.grantQuery(detail, call))).grant === 'allow'
     // Stop, or the turn's end, may have come while the folder was being checked
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
     if (granted && once) {
@@ -620,23 +621,23 @@ class AcpWire implements ToolWire {
     return true
   }
 
-  /** `auto`, Centralu's own tool, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
-  private async grantedWithoutCard(detail: ApprovalDetail, call: ToolCallFields): Promise<boolean> {
-    if (this.preset === 'auto' || this.deps.centraluToolOf?.(call)) return true
+  /** The call as the decision order reads it (`core/grants.ts`): `auto`, Centralu's own tool, an `edits` grant inside the folder, or a rule the person saved */
+  private grantQuery(detail: ApprovalDetail, call: ToolCallFields): GrantQuery {
     // An edit only: a delete or a move is not one (`edit-grant.ts`), and a move's destination is not in its paths
-    if (this.preset === 'edits' && call.kind === 'edit' && detail.kind === 'file_edit') {
-      const paths = editPaths(call).map((p) => (isAbsolute(p) ? p : join(this.opts.cwd, p)))
-      if (await insideFolder(this.opts.cwd, paths)) return true
+    const edit = this.preset === 'edits' && call.kind === 'edit' && detail.kind === 'file_edit'
+    return {
+      ownTool: Boolean(this.deps.centraluToolOf?.(call)),
+      auto: this.preset === 'auto',
+      alwaysAllowKey: alwaysAllowKey(detail),
+      edit: edit ? { folder: this.opts.cwd, paths: editPaths(call).map((p) => (isAbsolute(p) ? p : join(this.opts.cwd, p))) } : null,
     }
-    const key = alwaysAllowKey(detail)
-    return key !== null && this.rules.allows(key)
   }
 
   respondApproval(requestId: string, decision: ApprovalDecision, matcher?: string): boolean {
     const card = this.cards.take(requestId)
     if (!card) return false
     // "Always" stays Centralu's rule: passing `allow_always` on would write it into the tool's own allowlist (§5.3)
-    if (decision === 'always' && matcher) this.rules.add(matcher)
+    this.grants.answered(decision, matcher)
     const option = pick(card.options, decision === 'deny' ? 'reject_once' : 'allow_once')
     if (decision === 'deny' || !option) this.normalizer.refuse(card.callId)
     else this.allowedEdit(card.callId, card.edit)

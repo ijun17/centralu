@@ -3,6 +3,7 @@ import type { ToolName, ToolSetup, ToolStatus } from '@cc/protocol/client'
 import type { MachineRef } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { loadErrorText } from '../../app/useLoad.js'
+import { useWhileVisible } from '../../app/useWhileVisible.js'
 import { useStore } from '../../store/store.js'
 import { setupStates, withLiveSetups } from './setupLine.js'
 
@@ -51,11 +52,8 @@ export function useToolSetupActions(tool: ToolName, machine: MachineRef | null |
     [linked, redetect, tool],
   )
 
-  useEffect(() => {
-    if (!linked || !installing || !redetect) return
-    const t = setInterval(redetect, LINKED_POLL_MS)
-    return () => clearInterval(t)
-  }, [linked, installing, redetect])
+  // Not while the window is hidden, and asked at once when it is shown again
+  useWhileVisible(() => redetect?.(), LINKED_POLL_MS, { onReturn: 'always', enabled: linked && installing && !!redetect }, [redetect])
 
   return {
     busy,

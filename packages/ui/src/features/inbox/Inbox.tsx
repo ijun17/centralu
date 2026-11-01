@@ -4,9 +4,10 @@ import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useKeepInView } from '../../app/useKeepInView.js'
+import { isTextEntry, pressesItself } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
 import { projectLabelOf, useInbox } from '../../store/selectors.js'
-import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
+import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import {
@@ -74,9 +75,9 @@ export function Inbox() {
     const onKey = (e: KeyboardEvent) => {
       // The list's keys only when nothing covers it and no field has the keyboard (#683 review, inboxKeys.ts)
       const action = inboxKeyAction(e, {
-        typing: typingTarget(e.target),
+        typing: isTextEntry(e.target),
         covered: inboxCovered(useStore.getState()),
-        onButton: buttonTarget(e.target),
+        onButton: pressesItself(e.target),
       })
       if (!action) return
       // A thread is open: Esc goes back to the list, and the sessions' keys wait for it

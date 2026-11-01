@@ -19,7 +19,7 @@ import {
 import { inFlightKey, useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { useShortcut } from '../../app/shortcut.js'
-import { composingKey, letterOf } from '../../app/keys.js'
+import { composingKey, isTextEntry, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { WaitCard, WaitFooter } from './WaitCard.jsx'
 
@@ -58,10 +58,9 @@ export function ApprovalCard({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
-        typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
+        typing: isTextEntry(e.target),
         // Ignored if the card is behind another screen or **is not the card of the focused session** —
         // when several cards are up in the grid, a single y must not approve all of them
         covered: approvalCardCovered(st, sessionId),

@@ -13,6 +13,8 @@ import { useFocusReturn } from '../../components/focusReturn.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
 import { useKeepInView } from '../../app/useKeepInView.js'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailedFold } from '../../components/LoadFailed.jsx'
 import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
 import { ShortcutTable } from './ShortcutTable.jsx'
 
@@ -62,30 +64,20 @@ export function CommandPalette() {
    */
   const [keys, setKeys] = useState(false)
   // The hits with the query they answer: until the answer to the latest keystroke comes, the rows are an earlier query's
-  const [found, setFound] = useState<FoundHits<{ sessionId: string; seq: number; snippet: string }>>(NO_HITS)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const asked = query.trim()
+  const searching = open && asked.length >= 2
+  // Searching conversation content asks the host (SQLite FTS). A new query reads over the rows of the last one; a failed search says so instead of showing no hits
+  const search = useLoad<FoundHits<{ sessionId: string; seq: number; snippet: string }>>(
+    () => (searching ? platform.search.messages(asked, 20).then((list) => ({ query: asked, list })) : null),
+    [searching, asked, platform],
+    [],
+    { delayMs: 150, keepLast: true },
+  )
+  // Shortening the box clears the rows at once, not when the next read would have started; a failed search leaves none
+  const found = searching && !search.error ? (search.data ?? NO_HITS) : NO_HITS
   const hits = found.list
   const hitsFresh = hitsAnswer(found, query)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  // Searching conversation content asks the host (SQLite FTS)
-  useEffect(() => {
-    if (!open || query.trim().length < 2) {
-      setFound(NO_HITS)
-      return
-    }
-    let alive = true
-    const asked = query.trim()
-    const t = setTimeout(() => {
-      void platform.search
-        .messages(asked, 20)
-        .then((r) => alive && setFound({ query: asked, list: r }))
-        .catch(() => alive && setFound({ query: asked, list: [] }))
-    }, 150)
-    return () => {
-      alive = false
-      clearTimeout(t)
-    }
-  }, [open, query, platform])
 
   /**
    * Clearing happens **on close**, not on open.
@@ -352,6 +344,7 @@ export function CommandPalette() {
               }}
               data-testid="palette-input"
             />
+            <LoadFailedFold what="the message search" error={searching ? search.error : null} onRetry={() => void search.reload()} className="px-4 py-2" testId="palette-search-failed" />
             <ul id={listId} role="listbox" aria-label="Results" className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
               {items.length === 0 ? (
                 <li role="presentation" className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">

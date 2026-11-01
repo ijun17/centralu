@@ -45,14 +45,3 @@ export function inboxCovered(st: CoveringLayers): boolean {
   return isCovered(st, 'inbox')
 }
 
-/** Whether a key press lands in a field that takes text */
-export function typingTarget(target: EventTarget | null): boolean {
-  const t = target as HTMLElement | null
-  return !!t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)
-}
-
-/** Whether a key press lands on a control that presses itself on Enter: a button or a link */
-export function buttonTarget(target: EventTarget | null): boolean {
-  const t = target as HTMLElement | null
-  return !!t && typeof t.closest === 'function' && t.closest('button, a[href], [role="button"]') !== null
-}
