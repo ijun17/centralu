@@ -97,13 +97,11 @@ export type MidTurnInput = { readonly text: string; readonly receipt: InputRecei
 /** How a turn the tool named ended, as it said: the core says it to the host and settles the inputs bound to it */
 export type ToolTurnEnding = { how: 'complete' | 'interrupted' } | { how: 'failed'; error: ProtocolErrorOf }
 
-/** How a Stop of the running turn is confirmed (§2.4), one value per tool: making the tools agree is a change of that value */
-export type StopConfirmation = {
-  /** The tool's answer to the interrupt confirms the Stop; otherwise only the turn's end does */
-  readonly byAnswer: boolean
-  /** How long a Stop waits for its confirmation, and the notice said when it has not come (`seconds`: the bound) */
-  readonly bound: { readonly ms: number; notice(seconds: number): string } | null
-}
+/**
+ * How a Stop of the running turn is confirmed (§2.4), one value per tool, so making the tools agree is a change of it: the tool's
+ * answer to the interrupt, or the turn's end, within `ms`, with `notice` (`seconds`: the bound) said when neither has come
+ */
+export type StopConfirmation = { readonly ms: number; notice(seconds: number): string }
 
 /**
  * What the core needs from a tool that takes input mid-turn (Codex, Claude). The tool merges an input into the turn it runs or
@@ -128,20 +126,20 @@ export interface MidTurnWire {
   write?(inputs: readonly MidTurnInput[], queued: boolean): { answer: Promise<unknown>; blocking?: boolean }
   /** The error said for a write the tool refused */
   refusal?(err: Error): ProtocolErrorOf
-  /** Asks the tool to stop one of its turns; rejects when it refused */
-  interrupt(toolTurnId: string): Promise<unknown>
-  /** How a Stop of the running turn is confirmed; none: by the turn's end, with no bound */
+  /** Asks the tool to stop one of its turns; rejects when it refused. `tracked`: a tracked input waited when the Stop came */
+  interrupt(toolTurnId: string, tracked: boolean): Promise<unknown>
+  /** How a Stop of the running turn is confirmed; none: by the turn's end only, with no bound (Codex, §9.2) */
   readonly stop?: StopConfirmation
   /** The tool refused a Stop under a bound: the turn goes on, and however it ends is its own ending (Claude's normalizer) */
   stopRefused?(): void
   /** A Stop with no turn running: what the tool is still told (Claude: the interrupt, which cancels what its stream holds) */
-  idleStop?(): void
+  idleStop?(tracked: boolean): void
   /** Work of the wire's own that an exit would lose, besides the ledger's (Claude: a queued or unanswered message, a card, background work) */
   inFlight?(): boolean
   /** What a tracked input fails with when the process ends under it; none: "The session process ended before the parent note finished" */
   readonly exitWords?: string
-  /** A Stop: the approval cards still open are denied, and the calls this session made are cancelled */
-  releaseCards(): void
+  /** A Stop: the approval cards still open are denied, and the calls this session made are cancelled (`tracked` as for `interrupt`) */
+  releaseCards(tracked: boolean): void
   /** The connection ended (an exit, the close): what lived in it ends with it */
   connectionEnded(): void
   /** The conversation's end: the connection closes */

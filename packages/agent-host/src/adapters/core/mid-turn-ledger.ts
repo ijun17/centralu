@@ -182,7 +182,7 @@ export class MidTurnLedger {
       }
       // Stopped while the write was in flight, before the turn was named: that turn is stopped as ours
       if (tracked.some((r) => r.cancelled)) {
-        if (!this.ended.includes(id)) this.stop(id, false)
+        if (!this.ended.includes(id)) this.stop(id, false, true)
         return false
       }
     }
@@ -218,6 +218,22 @@ export class MidTurnLedger {
   }
 
   /**
+   * A turn's end the tool says in its own events (Claude's result): the turn closes, `took` (the inputs it names by the host's
+   * names) is what `endingInputs` reads while they go out, and a Stop still waiting is confirmed by it once they are out
+   */
+  endSaid(events: readonly NormalizedEvent[], completes: readonly string[] | undefined, took: readonly string[] | null): void {
+    this.turnEnded(null, null)
+    this.ending = took
+    this.said(events, completes)
+    this.ending = null
+    this.confirmStop()
+  }
+
+  /** The inputs of the turn whose end is being said (`endSaid`), for the host to read as it handles it; null otherwise */
+  get endingInputs(): readonly string[] | null { return this.ending }
+  private ending: readonly string[] | null = null
+
+  /**
    * Events the tool says itself, in order, a turn's end among them (Claude: its normalizer's, where the end sits among the goal's
    * events and the cards it closes, and `turn_complete` carries the answer's `output`). `completes`: the inputs the end names,
    * completed after its `turn_complete`. A failure or a limit among them is how the turn ended: a Stop still waiting is let go
@@ -241,13 +257,13 @@ export class MidTurnLedger {
     if (this.receipts.size > 0) this.interrupt(reason)
   }
 
-  private stop(turnId: string, running: boolean): void {
+  private stop(turnId: string, running: boolean, tracked: boolean): void {
     if (!this.stopped.includes(turnId)) keep(this.stopped, turnId)
     const wait = running ? this.awaitStop() : null
     if (wait) wait.asks++
-    void this.wire.interrupt(turnId).then(
+    void this.wire.interrupt(turnId, tracked).then(
       () => {
-        if (wait && this.wire.stop?.byAnswer) this.confirmStop(wait)
+        if (wait) this.confirmStop(wait)
       },
       (err: Error) => {
         if (!running) return
@@ -270,7 +286,7 @@ export class MidTurnLedger {
    * confirmation); one after the bound was said starts it again on the same wait, which an answer to the first still confirms
    */
   private awaitStop(): StopWait | null {
-    const bound = this.wire.stop?.bound
+    const bound = this.wire.stop
     if (!bound) return null
     const current = this.stopWait
     if (current && !current.late) return current
@@ -292,7 +308,7 @@ export class MidTurnLedger {
   }
 
   /** The tool confirmed the Stop (the interrupt's answer, or the stopped turn's end the tool said itself): said stopped once */
-  confirmStop(wait = this.stopWait): void {
+  private confirmStop(wait = this.stopWait): void {
     if (!wait || this.stopWait !== wait) return
     this.endStopWait()
     if (!this.closed) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
@@ -303,19 +319,19 @@ export class MidTurnLedger {
    * meanwhile is dropped and no turn will come to say it stopped, so the stop is said here (#168). Once it exists, a turn may
    * run in it (an adopted one, still being looked up): what waits goes once it opens, as any message sent then
    */
-  interrupt(reason = new Error('The parent note was stopped before it finished')): void {
+  interrupt(reason = new Error('The parent note was stopped before it finished'), tracked = this.receipts.size > 0): void {
     const waking = this.phase === 'opening' && !this.wire.hasConversation?.() && this.queue.length > 0
     for (const turn of this.receipts.failAll(reason)) {
-      if (turn !== this.running && !this.ended.includes(turn)) this.stop(turn, false)
+      if (turn !== this.running && !this.ended.includes(turn)) this.stop(turn, false, tracked)
     }
     this.queue = this.queue.filter((q) => !q.receipt)
-    this.wire.releaseCards()
+    this.wire.releaseCards(tracked)
     if (waking) {
       this.queue = []
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
       return
     }
-    if (this.running !== null) this.stop(this.running, true)
+    if (this.running !== null) this.stop(this.running, true, tracked)
   }
 
   /**
@@ -323,9 +339,10 @@ export class MidTurnLedger {
    * says it with no turn open (#1829): a turn whose end was lost, or an adopted one with no id, otherwise read as running for good
    */
   stopByPerson(): void {
-    this.interrupt()
+    const tracked = this.receipts.size > 0
+    this.interrupt(undefined, tracked)
     if (this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0) {
-      this.wire.idleStop?.()
+      this.wire.idleStop?.(tracked)
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
     }
   }
@@ -357,13 +374,13 @@ export class MidTurnLedger {
     if (count > 0) this.emit(undeliveredError(this.sessionId, count, when))
   }
 
-  /** Said before the connection closes, while the session is still this one's (the manager drops a stale one's events) */
   /** The session is closed and says nothing more; `why`: what the tracked inputs still waiting fail with */
   close(why?: Error): void {
     this.phase = 'closed'
     if (why) this.receipts.failAll(why)
   }
 
+  /** Said before the connection closes, while the session is still this one's (the manager drops a stale one's events) */
   async dispose(): Promise<void> {
     const opening = this.phase === 'opening'
     this.close(new Error(PROCESS_ENDED))

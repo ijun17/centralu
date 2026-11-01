@@ -131,6 +131,16 @@ describe('a Claude process that exits on its own', () => {
     await expect(done).rejects.toThrow()
   })
 
+  it('fails a tracked input waiting at the exit in its own words, the ones a background agent card says too', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await idleAfterTurn(events)
+    const done = handle.sendTracked!('a parent note')
+    await tick()
+    wire.fail(new Error('Claude Code process exited with code 1'))
+    await exitSaid(events)
+    await expect(done).rejects.toThrow(/^The session process ended before this agent reported back$/)
+  })
+
   it('is a crash with background work still running: it goes with the process', async () => {
     const events: NormalizedEvent[] = []
     await idleAfterTurn(events)
