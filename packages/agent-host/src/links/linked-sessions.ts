@@ -601,7 +601,7 @@ export function linkedSessions(
       await settle(m)
       if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}` }
       try {
-        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}) })
+        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}), ...(opts?.since !== undefined ? { since: opts.since } : {}) })
         const r = HostLastAnswerResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
         // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did

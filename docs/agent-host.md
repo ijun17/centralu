@@ -762,7 +762,10 @@ reads it), not the last response of the record. A note's row is stored while the
 joined the two turns' words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's
 text ended that text, so a wait read only what followed the note. A caller's notes in a turn (a row that names its sender)
 are rows among its text (`turnAnswer`'s `acrossNotes`); the person's message ends it, as it always did. The next turn may
-have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. A turn
+have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. It
+may also have ended (#1812): the event that ends a turn says the row it began after (`TurnWho.since`), and the hub asks for
+that turn's words with it (`host.lastAnswer`'s `since`), up to where a later turn began; a machine that does not say it, or
+does not read it, answers for the last turn that ended, as before. A turn
 that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`processGone`): its words are those it said, or none, never the turn before's. A turn the host did not
 see begin (before this build) reads as the last response, and so does an older machine.
 

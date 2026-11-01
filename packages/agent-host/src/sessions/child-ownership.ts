@@ -704,10 +704,15 @@ export class ChildOwnership {
    * The rows of the last turn that ended, when this session's turns were seen to begin (#1604): the latest when it has ended,
    * else the one before it up to where the latest began (a hub reads a turn's end after the next one has begun). A turn that
    * ended with nothing to say has no words, and never the turn before's. None recorded (a turn from before this build, a
-   * session no hub gives messages): undefined
+   * session no hub gives messages): undefined. `since` (#1812): the turn that began after that row, the one a hub was told
+   * ended, up to where a later one began
    */
-  turnRows(sessionId: string): { after: number; through?: number } | undefined {
+  turnRows(sessionId: string, since?: number): { after: number; through?: number } | undefined {
     const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
+    if (since !== undefined) {
+      const later = [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined && s > since)
+      return later.length ? { after: since, through: Math.min(...later) } : { after: since }
+    }
     if (span.latest?.ended) return { after: span.latest.since }
     if (span.latest && span.previous) return { after: span.previous.since, through: span.latest.since }
     return span.latest ? { after: span.latest.since } : undefined

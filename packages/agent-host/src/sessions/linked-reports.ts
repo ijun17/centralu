@@ -68,6 +68,12 @@ function saidTurn(raw: unknown): TurnStarter | undefined {
   return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}) }
 }
 
+/** Where the turn that ended began there (#1812), said with whose it was: its words are read by it, not a later turn's */
+function saidSince(raw: unknown): number | undefined {
+  const since = typeof raw === 'object' && raw !== null && 'since' in raw ? raw.since : undefined
+  return typeof since === 'number' && Number.isInteger(since) ? since : undefined
+}
+
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
 function fromHub(from: unknown): boolean {
   const id = (from as { sessionId?: unknown } | null)?.sessionId
@@ -473,7 +479,7 @@ export class LinkedReports {
   private async report(
     sessionId: string,
     orchestratorId: string,
-    ending: { type: string; error?: { message?: string } },
+    ending: { type: string; error?: { message?: string }; turn?: unknown },
     work?: ReportWork,
     known?: { name: string; project: string },
     /** The person's part in the turn reported (#1377) */
@@ -494,7 +500,8 @@ export class LinkedReports {
      */
     // Nor its words once the person has taken it over: what is there now is not the assigned work's
     const tookOver = (!!work && 'tookOver' in work) || theirs
-    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const since = saidSince(ending.turn)
+    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true, ...(since !== undefined ? { since } : {}) }).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
       : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
