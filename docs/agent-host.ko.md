@@ -911,15 +911,16 @@ interface AdapterCapabilities {
   물리는 오류 하나 안에 그 메시지를 적는다.
   열린 카드는 `PendingCards`에 둔다: 카드가 닫히는 모든 길(답, CLI의 철회, 턴 정지, 핸들 닫힘)은 `take`나
   `release`를 거치고, 이 둘은 카드를 닫기 전에 먼저 빼며, 어댑터는 거기서 `approval_resolved` / `question_resolved`를
-  말한다. 턴은 도구가 정지를 확인한 뒤에야 멈췄다고 말한다: Codex는
-  `turn/completed`, Claude는 SDK `interrupt()`의 답이나 멈춘 턴의 결과 중 먼저 온 것. Claude는 전에는 곧바로 말해서,
+  말한다. 턴은 도구가 턴을 끝내 정지를 확인한 뒤에야 멈췄다고 말한다: Codex는
+  `turn/completed`, Claude는 멈춘 턴의 결과(#1654의 소유자 결정: 중단의 답은 받아들였다는 뜻일 뿐이다). Claude는 전에는 곧바로 말해서,
   거절된 중단이 CLI가 계속 일하는 동안 턴을 멈춘 것으로 보였다. 정지가 통하지 않으면(어느 도구든 중단을 거절하거나,
-  Claude의 중단이 `stopConfirmMs`(10초) 안에 확인되지 않으면) 턴은 계속 돌고, 그것은 오류가 아니라 알림으로 말한다
+  모든 도구에서 `stopConfirmMs`(10초) 안에 턴이 끝나지 않으면, "<도구> has not confirmed the stop; the turn may still
+  be running.") 턴은 계속 돌고, 그것은 오류가 아니라 알림으로 말한다
   (`stopNotConfirmed`, 라벨 `STOP_NOT_CONFIRMED_LABEL`): 오류는 세션을 `error`로 옮기고, 매니저는 그것을 턴의 끝으로
   읽으며(위임 기다림이 끝나고 대기열 요청이 들어간다), 턴 자신의 끝(`waiting_input`)은 `error`에서 허용되지 않는
   이동이다. 이 알림은 기다림의 `stoppedByPerson`도 지우므로(`AgentRunWait`), 그 뒤에 끝난 자식은 기다리는 쪽에 답을
   넘긴다. 두 번째 정지는 첫 정지의 기다림과 한도에 합류하고, 한도를 말한 뒤에 누른 정지는 같은 기다림에서 한도를 다시
-  시작한다. 한도 뒤에 온 확인도 턴을 멈춤으로 끝낸다. 정지를 기다리는 동안 턴이 실패하거나 한도에 걸리면 턴은 그대로
+  시작한다. 한도 뒤에 온 턴의 끝도 턴을 멈춤으로 끝낸다. 정지를 기다리는 동안 턴이 실패하거나 한도에 걸리면 턴은 그대로
   끝나고, 그 뒤에 멈췄다고 말하지 않는다. 쉬는 Claude 세션의 거절된 중단만 여전히, 멈췄다고 말한 뒤의
   `couldNotStop`이다. 창의 정지 버튼은 누른 때부터 턴이 끝날 때까지(그 안의 승인을 거쳐도) "Stopping…"이라 말하고,
   알림이 있으면 그 글을 보인다(`stopping`, ActivityRow). 카드는 여전히 정지가 통하는지 알기 전에 거절로 답하므로,

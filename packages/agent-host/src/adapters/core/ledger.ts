@@ -2,7 +2,7 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { withStderrTail } from '../../stream-text.js'
 import { INTERRUPTED_BY_TOOL, type AgentProcess, type EventSink, type InputObserver, type InputOrigin } from '../contract.js'
 import { InputReceipts } from '../input-receipts.js'
-import { stopNotConfirmed, undeliveredError } from '../session-kit.js'
+import { stopNotEnded, undeliveredError } from '../session-kit.js'
 import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from './seam.js'
 import { isMissingProgram, SessionProcess, toolNotInstalled, type ToolStart } from './tool-process.js'
 
@@ -234,7 +234,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     this.wire.releaseCards()
     if (!turn.stopTimer) {
       turn.stopTimer = setTimeout(() => {
-        if (this.turn === turn) this.emit(stopNotConfirmed(this.sessionId, `${this.wire.label} has not confirmed the stop; the turn may still be running.`))
+        if (this.turn === turn) this.emit(stopNotEnded(this.sessionId, this.wire.label))
       }, this.stopConfirmMs)
       turn.stopTimer.unref?.()
     }

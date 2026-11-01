@@ -143,9 +143,8 @@ export class ClaudeSession implements SessionHandle {
       label: 'Claude Code',
       // With a tracked input waiting, the interrupt also cancels what the SDK holds (`cancel_queued`)
       interrupt: (_turn, tracked) => this.askInterrupt(tracked),
-      // Said stopped once the CLI says so (said at once, a rejected interrupt showed a working turn as stopped); the CLI answers a
-      // control request as it reads it, so no answer within `stopConfirmMs` means the request is lost
-      stop: { ms: launch.stopConfirmMs, notice: (s) => `Claude Code has not confirmed the stop after ${s} s. The turn is still running.` },
+      // Said stopped at the turn's result (said at once, a rejected interrupt showed a working turn as stopped)
+      stopConfirmMs: launch.stopConfirmMs,
       // A refusal makes the turn's own ending its own again (the normalizer's `stopping`)
       stopRefused: () => this.stream.stopFailed(),
       idleStop: (tracked) => void this.askInterrupt(tracked).catch((err: Error) => this.emit(couldNotStop(this.sessionId, err))),

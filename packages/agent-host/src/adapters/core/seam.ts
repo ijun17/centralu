@@ -97,9 +97,6 @@ export type MidTurnInput = { readonly text: string; readonly receipt: InputRecei
 /** How a turn the tool named ended, as it said: the core says it to the host and settles the inputs bound to it */
 export type ToolTurnEnding = { how: 'complete' | 'interrupted' } | { how: 'failed'; error: ProtocolErrorOf }
 
-/** A Stop confirmed by the interrupt's answer or the turn's end within `ms`, else `notice` (§2.4): one value per tool to make agree */
-export type StopConfirmation = { readonly ms: number; notice(seconds: number): string }
-
 /**
  * What the core needs from a tool that takes input mid-turn (Codex, Claude). The tool merges an input into the turn it runs or
  * starts a turn for it, and names its turns, so the core binds each input to the turn the tool says took it instead of
@@ -125,8 +122,8 @@ export interface MidTurnWire {
   refusal?(err: Error): ProtocolErrorOf
   /** Asks the tool to stop one of its turns; rejects when it refused. `tracked`: a tracked input waited when the Stop came */
   interrupt(toolTurnId: string, tracked: boolean): Promise<unknown>
-  /** How a Stop of the running turn is confirmed; none: by the turn's end only, with no bound (Codex, §9.2) */
-  readonly stop?: StopConfirmation
+  /** How long a Stop of the running turn waits for its end before saying so (`STOP_CONFIRM_MS`, the same for every tool) */
+  readonly stopConfirmMs?: number
   /** The tool refused a Stop under a bound: the turn goes on, and however it ends is its own ending (Claude's normalizer) */
   stopRefused?(): void
   /** A Stop with no turn running: what the tool is still told (Claude: the interrupt, which cancels what its stream holds) */

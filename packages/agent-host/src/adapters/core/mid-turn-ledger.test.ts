@@ -471,7 +471,7 @@ function ownInputs(policy: { ms?: number; inFlight?: boolean } = {}) {
       answers.push(answer)
       return answer.promise
     },
-    ...(policy.ms ? { stop: { ms: policy.ms, notice: (s: number) => `not confirmed after ${s} s` } } : {}),
+    ...(policy.ms ? { stopConfirmMs: policy.ms } : {}),
     stopRefused: () => said.push('stopRefused'),
     idleStop: (tracked) => said.push(`idleStop:${tracked}`),
     releaseCards: (tracked) => said.push(`releaseCards:${tracked}`),
@@ -508,7 +508,7 @@ describe('a tool that writes its own inputs, on the ledger with its policies', (
     expect(said).toEqual(['a:accepted', 'usage_update', 'turn_complete', 'a:complete', 'notice:after'])
   })
 
-  it('a Stop confirmed by the answer is said once for two Stops; the bound is said once with its words, and a late answer still confirms', async () => {
+  it('two Stops are one wait: the bound is said once in every tool\'s words, the answers confirm nothing, and the turn\'s end does', async () => {
     vi.useFakeTimers()
     try {
       const { said, answers, ledger } = ownInputs({ ms: 10_000 })
@@ -516,10 +516,12 @@ describe('a tool that writes its own inputs, on the ledger with its policies', (
       ledger.stopByPerson()
       ledger.stopByPerson()
       vi.advanceTimersByTime(10_000)
-      expect(said.filter((x) => x.startsWith('notice'))).toEqual(['notice:not confirmed after 10 s'])
+      expect(said.filter((x) => x.startsWith('notice'))).toEqual(['notice:Tool has not confirmed the stop; the turn may still be running.'])
       answers[0]!.resolve(undefined)
       answers[1]!.resolve(undefined)
       await vi.advanceTimersByTimeAsync(0)
+      expect(said.filter((x) => x.startsWith('waiting_input'))).toEqual([])
+      ledger.endSaid([], undefined, null)
       expect(said.filter((x) => x.startsWith('waiting_input'))).toEqual(['waiting_input:interrupted'])
       vi.advanceTimersByTime(20_000)
       expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(1)
@@ -541,7 +543,26 @@ describe('a tool that writes its own inputs, on the ledger with its policies', (
     expect(said.slice(-2)).toEqual(['stopRefused', 'notice:Could not stop: still no. The turn is still running.'])
   })
 
-  it('without a StopConfirmation (Codex, §9.2) the answer says nothing: only the turn\'s end does', async () => {
+  it('a tool that names its turns (Codex) gets the same bound and words; its turn\'s end, said or not, lets the Stop go', () => {
+    vi.useFakeTimers()
+    try {
+      const { said, ledger } = ownInputs()
+      ledger.turnStarted('t')
+      ledger.stopByPerson()
+      vi.advanceTimersByTime(10_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toEqual(['notice:Tool has not confirmed the stop; the turn may still be running.'])
+      ledger.turnEnded('t', { how: 'interrupted' })
+      ledger.turnStarted('u')
+      ledger.stopByPerson()
+      ledger.turnEnded('u', null)
+      vi.advanceTimersByTime(20_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the interrupt\'s answer says nothing: only the turn\'s end does', async () => {
     const { said, answers, ledger } = ownInputs()
     ledger.turnStarted('t')
     ledger.stopByPerson()
