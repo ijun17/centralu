@@ -57,25 +57,17 @@ export function classify(text) {
  */
 export async function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
   try {
-    const { stdout } = await runProgram('gh', args, {
-      cwd,
-      timeoutMs,
-      input, // gh may exit before reading it all (a bad flag); that is its answer, not a crash here
-      maxBuffer: 64 * 1024 * 1024,
-      // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
-      env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' },
-    })
+    // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
+    const env = { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' }
+    const { stdout } = await runProgram('gh', args, { cwd, timeoutMs, input, maxBuffer: 64 * 1024 * 1024, env })
     return stdout
   } catch (error) {
     if (error.code === 'ENOENT')
       throw new GitHubError('gh-missing', 'The GitHub CLI (gh) was not found on this machine. Install it from https://cli.github.com, run `gh auth login`, then refresh.')
     if (error.killed) throw new GitHubError('network', `gh did not answer within ${Math.round(timeoutMs / 1000)} s. Check the network, then refresh.`)
     // A GraphQL error comes back as JSON on stdout with a non-zero exit; keep it for the caller.
-    const err = classify(`${error.stderr}
-${error.stdout}`)
-    err.stdout = error.stdout
-    err.stderr = error.stderr
-    throw err
+    throw Object.assign(classify(`${error.stderr}
+${error.stdout}`), { stdout: error.stdout, stderr: error.stderr })
   }
 }
 

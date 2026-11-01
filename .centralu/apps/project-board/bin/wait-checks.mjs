@@ -28,19 +28,18 @@ if (!validTimeout || (!ref && !pr)) {
   console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs <pr|owner/repo#pr|PR URL> | --ref <branch|sha> [--timeout-minutes <minutes>]')
   process.exit(2)
 }
-const gh = async (args, { timeoutMs }) => {
-  try {
-    const { stdout } = await runProgram('gh', args, {
-      env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
-      maxBuffer: 16 * 1024 * 1024,
-      timeoutMs: Math.max(1, Math.ceil(timeoutMs)), // 0 would mean no limit
-      killSignal: 'SIGKILL',
-    })
-    return stdout
-  } catch (error) {
-    throw new Error(String(error.stderr || error.message).trim())
-  }
-}
+const gh = (args, { timeoutMs }) =>
+  runProgram('gh', args, {
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
+    maxBuffer: 16 * 1024 * 1024,
+    timeoutMs: Math.max(1, Math.ceil(timeoutMs)), // 0 would mean no limit
+    killSignal: 'SIGKILL',
+  }).then(
+    (r) => r.stdout,
+    (e) => {
+      throw new Error(String(e.stderr || e.message).trim())
+    },
+  )
 const result = await waitForChecks({
   repo: pr?.repo ?? config.repository,
   ref,

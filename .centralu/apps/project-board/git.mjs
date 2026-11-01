@@ -49,21 +49,14 @@ const firstLine = (s) =>
 /** Runs git in `cwd`; answers stdout. `input` goes to stdin. */
 export async function git(cwd, args, { input, timeoutMs = 120_000, env } = {}) {
   try {
-    const { stdout } = await runProgram('git', args, {
-      cwd,
-      timeoutMs,
-      input,
-      maxBuffer: 256 * 1024 * 1024,
-      // Nobody is at a terminal: no prompts, no editor, and messages in English to read them
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', LC_ALL: 'C', LANG: 'C', ...env },
-    })
+    // Nobody is at a terminal: no prompts, no editor, and messages in English to read them
+    const { stdout } = await runProgram('git', args, { cwd, timeoutMs, input, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', LC_ALL: 'C', LANG: 'C', ...env } })
     return stdout
   } catch (error) {
     if (error.code === 'ENOENT') throw new GitError('git was not found on this machine.')
     if (error.killed) throw new GitError(`git ${args[0]} did not finish within ${Math.round(timeoutMs / 1000)} s.`)
-    const { stdout, stderr } = error
     const verb = args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? ''
-    throw new GitError(`git ${verb} failed: ${firstLine(stderr) || firstLine(stdout) || `exit ${error.code}`}`, stderr, error.code)
+    throw new GitError(`git ${verb} failed: ${firstLine(error.stderr) || firstLine(error.stdout) || `exit ${error.code}`}`, error.stderr, error.code)
   }
 }
 

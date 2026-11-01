@@ -275,6 +275,14 @@ describe("the board app's runProgram", { timeout: 60_000 * SLOW }, () => {
     process.kill(Number(stdout.slice(5)))
   })
 
+  // node's execFile does not pass `detached` on to spawn, so a group kill found no group and ended the child alone (Linux, macOS)
+  it.skipIf(process.platform === 'win32')('starts a tree run as the leader of a process group of its own, and any other in its parent\'s', async () => {
+    const sys = await system()
+    const probe = 'try { process.kill(-process.pid, 0); process.stdout.write("leader") } catch { process.stdout.write("member") }'
+    expect((await sys.runProgram(NODE, ['-e', probe], { tree: true })).stdout).toBe('leader')
+    expect((await sys.runProgram(NODE, ['-e', probe])).stdout).toBe('member')
+  })
+
   it('stopTree answers at once for a process that has ended', async () => {
     const sys = (await system()) as System & { stopTree(child: unknown): Promise<void> }
     const done = await new Promise<unknown>((resolve) => {

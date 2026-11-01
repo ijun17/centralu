@@ -42,14 +42,8 @@ function runJudge(source, files) {
       const dir = await realpath(made)
       const file = join(dir, 'ci-changes.mjs')
       await writeFile(file, source)
-      const out = await runProgram(node, [file, '--screen'], {
-        cwd: dir,
-        timeoutMs: JUDGE_MS,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-        env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) },
-        input: JSON.stringify(files),
-      }).catch((error) => {
+      const env = { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) }
+      const out = await runProgram(node, [file, '--screen'], { cwd: dir, timeoutMs: JUDGE_MS, maxBuffer: 1024 * 1024, windowsHide: true, env, input: JSON.stringify(files) }).catch((error) => {
         const how = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'more output than it may print' : error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
         throw new Error(`the judge ended with ${how}: ${errorLine(error.stderr) || error.message}`)
       })
