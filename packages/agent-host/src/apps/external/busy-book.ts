@@ -1,7 +1,6 @@
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { realOs } from '../../os/real.js'
-import { writeFileWhole } from '../../os/write-file-whole.js'
+import { PrivateJsonFile } from './private-json-file.js'
 
 /** One app that held busy when it was last heard from (#1236) */
 export type BusyRecord = { projectId: string | null; appId: string; reason: string; at: number }
@@ -11,10 +10,21 @@ export type BusyRecord = { projectId: string | null; appId: string; reason: stri
  * starts them again (`ExternalApps.resumeBusy`): the idle rule's exception is meant to outlive the host, or a merge
  * queue stands still from a restart until something calls its app. Written when an app takes or releases a hold, when
  * the person stops it, and when it crashes; not when the host stops its apps on the way out, which is the case it
- * exists for. A file, not the store: it is the runtime's own state, like the notice key, and needs no store step.
+ * exists for. A file, not the store: it is the runtime's own state, like the notice key, and needs no store step. A damaged
+ * file is moved aside and logged, and one that cannot be read is left alone and refuses the write (`PrivateJsonFile`).
  */
 export class BusyBook {
-  constructor(private readonly file: string) {}
+  private readonly doc: PrivateJsonFile<Record<string, unknown>>
+
+  constructor(private readonly file: string) {
+    this.doc = new PrivateJsonFile(file, {
+      label: 'app-busy.json',
+      empty: () => ({}),
+      valid: (d): d is Record<string, unknown> => !!d && typeof d === 'object' && !Array.isArray(d),
+      lost: 'The apps that were busy are not started again.',
+      indent: 2,
+    })
+  }
 
   list(): BusyRecord[] {
     return Object.values(this.read())
@@ -28,22 +38,15 @@ export class BusyBook {
     else all[key] = rec
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      writeFileWhole(realOs().files, this.file, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
+      this.doc.write(all)
     } catch (e) {
       console.error(`[apps] could not record which apps are busy in ${this.file}: ${(e as Error).message}`)
     }
   }
 
   private read(): Record<string, BusyRecord> {
-    let raw: unknown
-    try {
-      raw = JSON.parse(readFileSync(this.file, 'utf8'))
-    } catch {
-      return {}
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
     const out: Record<string, BusyRecord> = {}
-    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(this.doc.read())) {
       const r = v as Partial<BusyRecord> | null
       if (r && typeof r.appId === 'string' && (r.projectId === null || typeof r.projectId === 'string') && typeof r.reason === 'string') {
         out[k] = { projectId: r.projectId, appId: r.appId, reason: r.reason, at: typeof r.at === 'number' ? r.at : 0 }
