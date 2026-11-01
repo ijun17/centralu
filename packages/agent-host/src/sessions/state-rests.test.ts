@@ -38,6 +38,7 @@ class Handle implements SessionHandle {
     if (!this.quiet) this.ev({ type: 'state_change', state: 'working' })
   }
   turn() {
+    this.ev({ type: 'state_change', state: 'working' })
     this.ev({ type: 'message_delta', role: 'assistant', text: 'done' })
     this.ev({ type: 'turn_complete' })
   }
@@ -161,7 +162,7 @@ describe('a session at rest stays at rest (#428)', () => {
     // A turn that started while the card was open owns the session too: no rest is restored under it
     h.turn()
     h.ev({ type: 'question_request', requestId: 'q2', questions: QUESTION })
-    h.ev({ type: 'message_delta', role: 'assistant', text: 'a new turn' })
+    h.ev({ type: 'state_change', state: 'working' })
     h.ev({ type: 'question_request', requestId: 'q3', questions: QUESTION })
     mgr.answerQuestion(s.id, 'q2', [{ question: 'Which?', answers: ['A'] }])
     mgr.answerQuestion(s.id, 'q3', [{ question: 'Which?', answers: ['A'] }])

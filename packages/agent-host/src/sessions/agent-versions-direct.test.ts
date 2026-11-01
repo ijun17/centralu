@@ -113,7 +113,7 @@ describe('moving a session to a newly installed CLI without a keeper (#297)', ()
     const handleOf = (id: string) => h.adapter.created.filter((c) => c.sessionId === id).at(-1)!
     // One finished its turn; the other is in the middle of one
     handleOf(idle).emit({ type: 'turn_complete', sessionId: idle })
-    handleOf(busy).emit({ type: 'message_delta', sessionId: busy, role: 'assistant', text: 'working' })
+    handleOf(busy).emit({ type: 'state_change', sessionId: busy, state: 'working' })
 
     h.adapter.cli = '2.1.290'
     await h.svc.check(true)

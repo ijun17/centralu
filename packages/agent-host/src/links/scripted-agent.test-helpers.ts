@@ -74,6 +74,7 @@ class ScriptedHandle implements SessionHandle {
       return
     }
     if (this.queueBehind) this.taking = opts?.id ? [opts.id] : []
+    else this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     if (this.immediate) return this.turn(text)
     setTimeout(() => this.turn(text), 20)
   }

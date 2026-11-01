@@ -71,6 +71,7 @@ export class CrossHandle implements SessionHandle {
   }
   /** The turn ends with this as its final text */
   answer(text: string, completeInputs = true) {
+    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
     if (completeInputs) for (const receipt of this.receipts.splice(0)) receipt.resolve()

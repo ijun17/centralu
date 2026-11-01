@@ -104,12 +104,10 @@ async function sessionWithPublicApps(page: Page): Promise<{ pid: string; sid: st
 
 /** The adapter's card for an MCP tool call — what the agent's call looks like in the conversation */
 const toolCard = (page: Page, sid: string, callId: string, tool: string) =>
-  page.evaluate((ev) => (window as any).__mock.emit(ev), {
-    type: 'tool_call',
-    sessionId: sid,
-    callId,
-    summary: { tool, title: callId, paths: [] },
-  })
+  page.evaluate((evs) => evs.forEach((ev) => (window as any).__mock.emit(ev)), [
+    { type: 'state_change', sessionId: sid, state: 'working' },
+    { type: 'tool_call', sessionId: sid, callId, summary: { tool, title: callId, paths: [] } },
+  ])
 
 const rowOf = (page: Page, callId: string): Locator =>
   page.locator('[data-index]').filter({ has: page.getByTestId('tool-card').filter({ hasText: callId }) })

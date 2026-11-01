@@ -7,6 +7,7 @@ async function workingCodex(page: Page) {
     const { __mock: mock, __store: store } = window as any
     const project = Object.values(store.getState().projects).find((p: any) => p.name === 'alpha') as any
     const session = await mock.agents.createSession({ projectId: project.id, tool: 'codex', permissionPreset: 'normal' })
+    mock.emit({ type: 'state_change', sessionId: session.id, state: 'working' })
     mock.emit({ type: 'message_delta', sessionId: session.id, role: 'assistant', text: 'Still running' })
     return session.id as string
   })

@@ -17,7 +17,9 @@ const TURN: NormalizedEvent[] = [
   ev({ type: 'turn_complete' }),
 ]
 
-const replay = (events: NormalizedEvent[], now = NOW) => events.reduce((s, e) => applyEvent(s, e, now), s0())
+const WORKING = ev({ type: 'state_change', state: 'working' })
+/** A turn the tool announced, as every adapter does, then these events (#1830: output alone starts nothing) */
+const replay = (events: NormalizedEvent[], now = NOW) => [WORKING, ...events].reduce((s, e) => applyEvent(s, e, now), s0())
 
 describe('replaying an event sequence', () => {
   it('replaying one turn ends in awaiting response', () => {
@@ -52,7 +54,7 @@ describe('when a wait started (what the inbox order is based on)', () => {
   })
 
   it('keeps the first time across transitions between waiting states', () => {
-    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    let s = applyEvent(s0(), WORKING, NOW)
     s = applyEvent(s, ev({ type: 'approval_request', requestId: 'r', detail: { kind: 'other', raw: '{}' } }), NOW)
     const first = s.waitingSince
     s = applyEvent(s, ev({ type: 'error', error: { code: 'internal', message: 'x', retryable: false } }), NOW + 5000)
@@ -61,7 +63,7 @@ describe('when a wait started (what the inbox order is based on)', () => {
 
   it('is reset when work resumes', () => {
     let s = replay(TURN)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'again' }), NOW + 1000)
+    s = applyEvent(s, WORKING, NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.waitingSince).toBeNull()
   })
@@ -191,7 +193,7 @@ describe('cards are cleared on recovery (back to idle or working)', () => {
   })
 
   it('waiting_approval → working resuming clears the card (the host sends a still-valid request again)', () => {
-    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'message_delta', role: 'assistant', text: 'continuing' }), NOW)
+    const s = applyEvent(replay(TURN.slice(0, 3)), WORKING, NOW)
     expect(s.state).toBe('working')
     expect(s.pendingApproval).toBeNull()
   })
@@ -265,14 +267,14 @@ describe('what it is busy with (activity)', () => {
 
 describe('limits, context and errors', () => {
   it('limit_reached leaves the limited state and the information about when it lifts', () => {
-    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    let s = applyEvent(s0(), WORKING, NOW)
     s = applyEvent(s, ev({ type: 'limit_reached', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 }), NOW)
     expect(s.state).toBe('limited')
     expect(s.limit).toEqual({ resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 })
   })
 
   it('the limit information is cleared on returning to working', () => {
-    let s = applyEvent(applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW), ev({ type: 'limit_reached' }), NOW)
+    let s = applyEvent(applyEvent(s0(), WORKING, NOW), ev({ type: 'limit_reached' }), NOW)
     s = applyEvent(s, ev({ type: 'state_change', state: 'working' }), NOW)
     expect(s.limit).toBeNull()
   })
@@ -283,7 +285,7 @@ describe('limits, context and errors', () => {
   })
 
   it('a conversation reset empties the context gauge without moving the state (#304)', () => {
-    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    let s = applyEvent(s0(), WORKING, NOW)
     s = applyEvent(s, ev({ type: 'context_update', used: 15967, window: 200000, exactness: 'exact' }), NOW)
     s = applyEvent(s, ev({ type: 'conversation_reset', trigger: 'clear' }), NOW)
     expect(s.context).toBeNull()
@@ -308,16 +310,16 @@ describe('limits, context and errors', () => {
   })
 
   it('resuming from limited with a message_delta also clears the limit banner', () => {
-    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    let s = applyEvent(s0(), WORKING, NOW)
     s = applyEvent(s, ev({ type: 'limit_reached', resumeAt: '2026-08-15T14:30:00Z' }), NOW)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'resuming' }), NOW + 1000)
+    s = applyEvent(s, WORKING, NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.limit).toBeNull()
   })
 
   it('recovering from error clears the lastError banner', () => {
     let s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: 'died', retryable: true } }), NOW)
-    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: 'survived' }), NOW + 1000)
+    s = applyEvent(s, WORKING, NOW + 1000)
     expect(s.state).toBe('working')
     expect(s.lastError).toBeNull()
   })

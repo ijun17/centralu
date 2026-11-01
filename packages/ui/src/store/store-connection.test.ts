@@ -203,7 +203,7 @@ describe('reconnect recovery against live events', () => {
     expect(useStore.getState().sessions[id]).toMatchObject({ state: 'working', live: true })
   })
 
-  it.each(['reattached', 'streaming'] as const)('keeps a mid-turn Codex session %s during a host swap over the stale startup list (#640)', async (signal) => {
+  it.each(['reattached'] as const)('keeps a mid-turn Codex session %s during a host swap over the stale startup list (#640)', async (signal) => {
     const mock = new MockPlatform()
     const id = `swap-${signal}`
     mock.sessions.set(id, sessionInfo(id, { tool: 'codex', projectId: 'background', state: 'working', live: true }))
@@ -218,9 +218,7 @@ describe('reconnect recovery against live events', () => {
     // These reaffirm the pre-swap values: a value comparison alone cannot see that they are newer.
     mock.sessions.get(id)!.state = 'working'
     mock.emit({ type: 'session_live', sessionId: id, live: true })
-    mock.emit(signal === 'reattached'
-      ? { type: 'state_change', sessionId: id, state: 'working', reason: 'reattached' }
-      : delta(id, 'still running'))
+    mock.emit({ type: 'state_change', sessionId: id, state: 'working', reason: signal })
     expect(useStore.getState().sessions[id]).toMatchObject({ state: 'working', live: true })
     list.release()
     await recovery
