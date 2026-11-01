@@ -1296,7 +1296,7 @@ pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 �
 스트림으로 디코딩하므로 두 조각에 걸쳐 나뉜 글자도 온전하다. Claude의 `adapter_crashed`와 Codex의 "codex app-server exited"는
 keeper 아래에서도 그 끝을 싣는다.
 할 일이 없을 때 스스로 끝난 프로세스는 충돌이 아니다(#1397). Codex의 app-server도, Claude Code도(#1654의 소유자 결정 Q1,
-`ClaudeSession.exitEvent`) 열린 턴, 기다리는 추적 입력이나 카드, CLI가 아직 읽거나 답하지 않은 메시지(조용한 입력 포함)가
+`ClaudeSession.exitEvent`) 열린 턴, 기다리는 추적 입력이나 카드, CLI가 아직 읽거나 답하지 않은 메시지(조용한 입력 포함), 아직 도는 백그라운드 에이전트나 셸(프로세스와 함께 사라진다)이
 없으면 종료 코드와 상관없이 `adapter_crashed` 대신 `session_live`(`live: false`, `reason: 'asleep'`)를 말하고, 다음 메시지가
 대화를 다시 연다. 턴 중이거나 CLI가 아직 아무 말도 하지 않았을 때(시작하지 못했을 수 있다)의 종료는 그대로 `adapter_crashed`다.
 넘겨받은 Claude 프로세스는 다음 턴까지 말하지 않으므로, 그때까지의 종료는 여전히 충돌이다.

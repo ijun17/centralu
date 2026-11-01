@@ -336,11 +336,11 @@ export class ClaudeSession implements SessionHandle {
    * How an exit this side did not cause is said, whatever its code (#1397, owner decision Q1 on #1654): asleep when nothing was
    * in flight, as Codex and ACP say it, since a logout, a shutdown or a kill lands on idle sessions too, and the next message
    * resumes the conversation. A crash, with `crash` as its message, while a turn is open, an input or a card waits, a message
-   * is not yet read or answered (it is lost with the process), or before the CLI said anything (it may not have started)
+   * is not yet read or answered (it is lost with the process), background work still runs (it goes with it), or before the CLI said anything (it may not have started)
    */
   private exitEvent(crash: string): NormalizedEvent {
     const busy = this.turnOpen || !this.spoke || this.inputReceipts.size > 0 || this.cards.pending.size > 0 || this.cards.questions.size > 0 ||
-      this.queue.length > 0 || this.quietInputs.size > 0 || this.raceRetry.held.length > 0 || this.sendGate !== null
+      this.queue.length > 0 || this.quietInputs.size > 0 || this.stream.backgroundRunning || this.raceRetry.held.length > 0 || this.sendGate !== null
     return busy
       ? { type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: crash, retryable: true } }
       : { type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' }

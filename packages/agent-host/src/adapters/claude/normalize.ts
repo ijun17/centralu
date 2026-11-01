@@ -528,6 +528,11 @@ export class ClaudeStreamNormalizer {
    * all. Left alone, the card would stay marked "still working" forever. This is the same rule as
    * releasing approval and question cards in `dispose`.
    */
+  /** A background agent or task still runs in the process (the session's exit takes it along) */
+  get backgroundRunning(): boolean {
+    return this.background.size > 0 || this.tasks.running
+  }
+
   release(why: string): NormalizedEvent[] {
     // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
     const out: NormalizedEvent[] = this.deferred.splice(0)

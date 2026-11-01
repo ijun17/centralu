@@ -53,7 +53,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 const tick = () => new Promise((r) => setTimeout(r, 20))
 
-const init = { type: 'system', subtype: 'init', session_id: 'conv-1', claude_code_version: '2.1.296', slash_commands: [] }
+const init = { type: 'system', subtype: 'init', session_id: 'conv-1', claude_code_version: '2.1.296', slash_commands: [], capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] }
 const result = { type: 'result', subtype: 'success', is_error: false, result: 'done', user_message_uuids: [] }
 
 async function session(events: NormalizedEvent[]) {
@@ -73,13 +73,15 @@ async function idleAfterTurn(events: NormalizedEvent[]) {
 
 const asleep = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'session_live' && !e.live && e.reason === 'asleep')
 const crashes = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'error' && e.error.code === 'adapter_crashed')
+/** Waits for how the exit was said, either way, rather than for a fixed time */
+const exitSaid = (events: NormalizedEvent[]) => vi.waitFor(() => expect(asleep(events).length + crashes(events).length).toBeGreaterThan(0))
 
 describe('a Claude process that exits on its own', () => {
   it('is asleep when its stream ends with nothing in flight: no crash', async () => {
     const events: NormalizedEvent[] = []
     await idleAfterTurn(events)
     wire.end()
-    await tick()
+    await exitSaid(events)
     expect(asleep(events)).toHaveLength(1)
     expect(crashes(events)).toHaveLength(0)
   })
@@ -88,7 +90,7 @@ describe('a Claude process that exits on its own', () => {
     const events: NormalizedEvent[] = []
     await idleAfterTurn(events)
     wire.fail(new Error('Claude Code process exited with code 143'))
-    await tick()
+    await exitSaid(events)
     expect(asleep(events)).toHaveLength(1)
     expect(crashes(events)).toHaveLength(0)
   })
@@ -99,7 +101,7 @@ describe('a Claude process that exits on its own', () => {
     handle.send('another')
     await tick()
     wire.fail(new Error('Claude Code process exited with code 1'))
-    await tick()
+    await exitSaid(events)
     expect(crashes(events)).toHaveLength(1)
     expect(asleep(events)).toHaveLength(0)
   })
@@ -110,7 +112,32 @@ describe('a Claude process that exits on its own', () => {
     handle.nudge!('a note')
     await tick()
     wire.end()
+    await exitSaid(events)
+    expect(crashes(events)).toHaveLength(1)
+    expect(asleep(events)).toHaveLength(0)
+  })
+
+  it('is a crash with a tracked input its result did not name: it waits for an answer the process took along', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await idleAfterTurn(events)
+    const done = handle.sendTracked!('a parent note')
     await tick()
+    wire.say(result)
+    await tick()
+    wire.end()
+    await exitSaid(events)
+    expect(crashes(events)).toHaveLength(1)
+    expect(asleep(events)).toHaveLength(0)
+    await expect(done).rejects.toThrow()
+  })
+
+  it('is a crash with background work still running: it goes with the process', async () => {
+    const events: NormalizedEvent[] = []
+    await idleAfterTurn(events)
+    wire.say({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'sh-1', task_type: 'local_bash', description: 'npm run dev' }] })
+    await tick()
+    wire.end()
+    await exitSaid(events)
     expect(crashes(events)).toHaveLength(1)
     expect(asleep(events)).toHaveLength(0)
   })
@@ -119,7 +146,7 @@ describe('a Claude process that exits on its own', () => {
     const events: NormalizedEvent[] = []
     await session(events)
     wire.fail(new Error('Claude Code process exited with code 1'))
-    await tick()
+    await exitSaid(events)
     expect(crashes(events)).toHaveLength(1)
     expect(asleep(events)).toHaveLength(0)
   })

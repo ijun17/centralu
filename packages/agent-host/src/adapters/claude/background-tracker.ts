@@ -157,6 +157,11 @@ export class ClaudeBackgroundTracker {
     return []
   }
 
+  /** A shell or an agent of the CLI's still runs: it would go with the process */
+  get running(): boolean {
+    return this.live.length > 0
+  }
+
   /** The process went away and took its tasks with it — each live one ends as stopped, with the reason. */
   release(why: string): NormalizedEvent[] {
     const timers = this.schedules.release().map((t) => ({ ...t, status: 'stopped' as const, summary: why }))
