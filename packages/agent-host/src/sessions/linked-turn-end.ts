@@ -21,7 +21,7 @@ export type LinkedTurnEvent = {
 export type LinkedTurnStep =
   | { step: 'busy'; waits?: 'approval' | 'question' }
   | { step: 'card_closed' }
-  | { step: 'completed' }
+  | { step: 'completed'; since?: number }
   | { step: 'failed'; error: string }
   | { step: 'deleted' }
   | null
@@ -41,7 +41,7 @@ export function linkedTurnEnd(busy: boolean, e: LinkedTurnEvent): LinkedTurnStep
   if (e.type === 'message_delta' || e.type === 'tool_call' || (e.type === 'state_change' && isInTurn(e.state))) return { step: 'busy' }
   if (e.type === 'error') return { step: 'failed', error: e.error?.message ?? 'the session reported an error' }
   if (e.type === 'limit_reached') return { step: 'failed', error: 'the session reached its usage limit' }
-  if (e.type === 'turn_complete') return { step: 'completed' }
+  if (e.type === 'turn_complete') return completed(e)
   /*
    * Any other end of a turn counts only for a turn the wait saw running: a stop the machine reports before then ends
    * the turn that was running when the instruction went in, not the one it starts. An interrupted turn ends with no
@@ -51,5 +51,16 @@ export function linkedTurnEnd(busy: boolean, e: LinkedTurnEvent): LinkedTurnStep
   if (e.state === 'waiting_input' && (e.reason === 'interrupted' || e.reason === INTERRUPTED_BY_TOOL)) {
     return { step: 'failed', error: e.reason === INTERRUPTED_BY_TOOL ? 'its tool interrupted the turn before it finished' : 'the turn was stopped before it finished' }
   }
-  return { step: 'completed' }
+  return completed(e)
+}
+
+/** Where the turn that ended began there (#1812), said with whose it was: its words are read by it, not a later turn's */
+export function turnSince(e: LinkedTurnEvent): number | undefined {
+  const since = typeof e.turn === 'object' && e.turn !== null && 'since' in e.turn ? e.turn.since : undefined
+  return typeof since === 'number' && Number.isInteger(since) ? since : undefined
+}
+
+function completed(e: LinkedTurnEvent): LinkedTurnStep {
+  const since = turnSince(e)
+  return since === undefined ? { step: 'completed' } : { step: 'completed', since }
 }

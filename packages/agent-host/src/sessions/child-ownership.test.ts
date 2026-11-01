@@ -834,6 +834,33 @@ describe('where the last turn that ended began', () => {
     expect(own.turnRows('s')).toEqual({ after: 4, through: 9 })
   })
 
+  // #1812: a hub reads a turn's words after its end, by when more than one turn may have followed it
+  it('is the turn a hub names by where it began, up to where the next began, though later turns have begun and ended', () => {
+    followed()
+    for (const start of [1, 3, 5, 7]) {
+      own.noteTurnStart('s', start)
+      own.turnEnded('s')
+    }
+    expect(own.turnRows('s', 1)).toEqual({ after: 1, through: 3 })
+    expect(own.turnRows('s', 5)).toEqual({ after: 5, through: 7 })
+    expect(own.turnRows('s', 7)).toEqual({ after: 7 })
+  })
+
+  it('is the last turn that ended for a start no longer kept, or a list a build before it left behind', () => {
+    followed()
+    for (let start = 1; start <= 10; start++) {
+      own.noteTurnStart('s', start)
+      own.turnEnded('s')
+    }
+    // Eight are kept: the first two are gone
+    expect(own.turnRows('s', 2)).toEqual({ after: 10 })
+    expect(own.turnRows('s', 3)).toEqual({ after: 3, through: 4 })
+    // An older build wrote the span since: its list does not end at the latest start, so only the two it keeps are read
+    store.settings.setAppSetting('turn_span:s', JSON.stringify({ latest: { since: 12, ended: true }, previous: { since: 11 }, starts: [3, 4, 10] }))
+    expect(own.turnRows('s', 3)).toEqual({ after: 12 })
+    expect(own.turnRows('s', 11)).toEqual({ after: 11, through: 12 })
+  })
+
   it('is the latest turn once it has ended, even when it said nothing: never the turn before it', () => {
     followed()
     own.noteTurnStart('s', 4)

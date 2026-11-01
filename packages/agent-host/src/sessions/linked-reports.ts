@@ -1,7 +1,7 @@
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { HUB_SENDER } from './hub-sender.js'
-import { linkedTurnEnd } from './linked-turn-end.js'
+import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { NO_WORDS } from './ask-project.js'
 
@@ -66,12 +66,6 @@ function partOf(turn: { wrote?: true; added?: true }): { wrote?: true; added?: t
 function saidTurn(raw: unknown): TurnStarter | undefined {
   if (typeof raw !== 'object' || raw === null || !('by' in raw) || (raw.by !== 'person' && raw.by !== 'work')) return undefined
   return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}) }
-}
-
-/** Where the turn that ended began there (#1812), said with whose it was: its words are read by it, not a later turn's */
-function saidSince(raw: unknown): number | undefined {
-  const since = typeof raw === 'object' && raw !== null && 'since' in raw ? raw.since : undefined
-  return typeof since === 'number' && Number.isInteger(since) ? since : undefined
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -500,7 +494,7 @@ export class LinkedReports {
      */
     // Nor its words once the person has taken it over: what is there now is not the assigned work's
     const tookOver = (!!work && 'tookOver' in work) || theirs
-    const since = saidSince(ending.turn)
+    const since = turnSince(ending)
     const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true, ...(since !== undefined ? { since } : {}) }).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"

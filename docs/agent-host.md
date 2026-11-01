@@ -764,8 +764,9 @@ text ended that text, so a wait read only what followed the note. A caller's not
 are rows among its text (`turnAnswer`'s `acrossNotes`); the person's message ends it, as it always did. The next turn may
 have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. It
 may also have ended (#1812): the event that ends a turn says the row it began after (`TurnWho.since`), and the hub asks for
-that turn's words with it (`host.lastAnswer`'s `since`), up to where a later turn began; a machine that does not say it, or
-does not read it, answers for the last turn that ended, as before. A turn
+that turn's words with it (`host.lastAnswer`'s `since`; an `agent_session` wait's read too), up to where the next turn began.
+The span keeps the last 8 starts (`starts`, beside `latest` and `previous`); a `since` that is not one of them (older than
+those, or a span an older build rewrote) reads as the last turn that ended, as does a machine that does not say or read it. A turn
 that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`processGone`): its words are those it said, or none, never the turn before's. A turn the host did not
 see begin (before this build) reads as the last response, and so does an older machine.
 

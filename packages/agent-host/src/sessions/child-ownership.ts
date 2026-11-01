@@ -129,17 +129,28 @@ const MAX_INPUT_ORIGINS = 64
  * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub
  * reads a turn's words after the turn: by then the next one may have begun, and a host that takes the session over after a
  * swap must know where the running turn began. `latest`: the row the last turn that began began after, and whether it has
- * ended; `previous`: the same for the turn before it
+ * ended; `previous`: the same for the turn before it. `starts` (#1812): the rows the last turns began after, oldest first, up to
+ * `TURN_STARTS_KEPT`, so a turn a hub reads after more than one turn has followed it ends where the next began. Kept beside
+ * `latest` and `previous`, which a build before it reads; a list that does not end at `latest` (that build wrote the span
+ * since) is not read
  */
 export const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
-type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number } }
+const TURN_STARTS_KEPT = 8
+type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number }; starts?: readonly number[] }
 function readTurnSpan(raw: string | null): TurnSpan {
   if (raw === null) return {}
   const p = asObj(tryParseJson(raw))
   const [l, before] = [asObj(p.latest), asObj(p.previous)]
   const latest = typeof l.since === 'number' ? { since: l.since, ...(l.ended === true ? { ended: true as const } : {}) } : undefined
   const previous = typeof before.since === 'number' ? { since: before.since } : undefined
-  return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}) }
+  const listed: unknown[] = Array.isArray(p.starts) ? p.starts : []
+  const starts = listed.filter((s): s is number => typeof s === 'number')
+  const kept = latest && starts.length === listed.length && starts.at(-1) === latest.since
+  return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}), ...(kept ? { starts } : {}) }
+}
+/** The turn starts a span keeps, oldest first: its list, or the two a build before it kept */
+function startsOf(span: TurnSpan): readonly number[] {
+  return span.starts ?? [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined)
 }
 function readInputOrigins(raw: string | null): Map<string, TurnOrigin> {
   const held = new Map<string, TurnOrigin>()
@@ -687,7 +698,8 @@ export class ChildOwnership {
     if (!this.followedByHub(sessionId)) return
     this.store.settings.updateAppSetting(turnSpanKey(sessionId), (raw) => {
       const was = readTurnSpan(raw)
-      return JSON.stringify({ latest: { since: seq }, ...(was.latest ? { previous: { since: was.latest.since } } : {}) })
+      const starts = [...startsOf(was), seq].slice(-TURN_STARTS_KEPT)
+      return JSON.stringify({ latest: { since: seq }, ...(was.latest ? { previous: { since: was.latest.since } } : {}), starts })
     })
   }
   /** The turn ended: its words are settled, and the turn after it begins where they stop (`turnRows`) */
@@ -705,13 +717,15 @@ export class ChildOwnership {
    * else the one before it up to where the latest began (a hub reads a turn's end after the next one has begun). A turn that
    * ended with nothing to say has no words, and never the turn before's. None recorded (a turn from before this build, a
    * session no hub gives messages): undefined. `since` (#1812): the turn that began after that row, the one a hub was told
-   * ended, up to where a later one began
+   * ended, up to where the next began. A row that is not a start kept (one more than `TURN_STARTS_KEPT` turns ago, or a span a
+   * build before it wrote) reads as with none: the last turn that ended
    */
   turnRows(sessionId: string, since?: number): { after: number; through?: number } | undefined {
     const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
-    if (since !== undefined) {
-      const later = [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined && s > since)
-      return later.length ? { after: since, through: Math.min(...later) } : { after: since }
+    const kept = startsOf(span)
+    if (since !== undefined && kept.includes(since)) {
+      const next = kept.find((s) => s > since)
+      return next === undefined ? { after: since } : { after: since, through: next }
     }
     if (span.latest?.ended) return { after: span.latest.since }
     if (span.latest && span.previous) return { after: span.previous.since, through: span.latest.since }

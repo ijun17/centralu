@@ -2846,12 +2846,16 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         expect(answers.slice(-2)).toEqual(['answered: Yes', expect.stringContaining('use the staging data')])
       })
 
-      // #1812: the hub read a turn's words when its read reached the machine, by when the note's turn could have begun and ended
-      it("reads each report's words of the turn that ended, though the next turn has ended when the hub reads", async () => {
-        const { hub, remote, agent, r, id, reports, told } = await inTheGap()
+      /**
+       * #1812: the hub read a turn's words when its read reached the machine, by when the note's turn could have begun and
+       * ended. The hub's reads made slower than that turn (a busy hub, a slow link), then the instruction's turn run up to its
+       * card's answer, with a note queued behind it that runs as a turn of its own
+       */
+      async function slowReadsThenInstruction() {
+        const rigged = await inTheGap()
+        const { hub, remote, agent, r, id, reports } = rigged
         const reader = (hub.mgr as unknown as { linkedReader: { lastWords: (...a: unknown[]) => Promise<unknown> } }).linkedReader
         const read = reader.lastWords.bind(reader)
-        // A busy hub or a slow link: longer than the note's turn takes there
         reader.lastWords = async (...a: unknown[]) => {
           await new Promise((resolve) => setTimeout(resolve, 40))
           return read(...a)
@@ -2864,12 +2868,23 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
         expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
-        // The instruction's turn, then the note's run as a turn of its own: each report holds its own turn's words
+        return rigged
+      }
+
+      it("reads each report's words of the turn that ended, though the next turn has ended when the hub reads", async () => {
+        const { reports, told } = await slowReadsThenInstruction()
         await eventually(() => reports() === 4)
         const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
         expect(reported[2]).toContain('answered: Yes')
         expect(reported[2]).not.toContain('use the staging data')
         expect(reported[3]).toContain('use the staging data')
+      })
+
+      it('answers a wait with the words of the turn it waited on, though the next turn has ended when it reads', async () => {
+        const { agent, r } = await slowReadsThenInstruction()
+        const waited = await agent(r.sessionId, 'wait')
+        expect(waited).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('answered: Yes') })
+        expect(waited).not.toMatchObject({ answer: expect.stringContaining('use the staging data') })
       })
     })
   })
