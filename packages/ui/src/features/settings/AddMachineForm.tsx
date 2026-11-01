@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protocol/client'
 import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineChoice } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { useLoad } from '../../app/useLoad.js'
 import { offerFocus } from '../../components/offerFocus.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { Button } from '../../components/Button.jsx'
@@ -49,8 +50,9 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
   const add = useStore((s) => s.addMachine)
   const readHosts = useStore((s) => s.machineSshHosts)
   const probeMachine = useStore((s) => s.probeMachine)
-  /** The config's hosts: undefined while they are read, null when the host could not say */
-  const [hosts, setHosts] = useState<SshHostList | null | undefined>(undefined)
+  /** The config's hosts: undefined while they are read, null when the host could not say (`readHosts` never rejects) */
+  const read = useLoad<SshHostList | null>(() => readHosts(), [readHosts])
+  const hosts = read.loading ? undefined : (read.data ?? null)
   const [manual, setManual] = useState(false)
   const [probing, setProbing] = useState<Probing | null>(null)
   const [choiceKey, setChoiceKey] = useState<string | null>(null)
@@ -67,16 +69,12 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
   /** The alias whose probe is the one on screen; null once the dialog is gone */
   const asking = useRef<string | null>(null)
 
-  useEffect(() => {
-    let live = true
-    void readHosts().then((list) => {
-      if (live) setHosts(list)
-    })
-    return () => {
-      live = false
+  useEffect(
+    () => () => {
       asking.current = null
-    }
-  }, [readHosts])
+    },
+    [readHosts],
+  )
 
   const listed = hosts && hosts.hosts.length > 0
   const byHand = manual || hosts === null || (hosts !== undefined && !listed)

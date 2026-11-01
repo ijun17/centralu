@@ -24,6 +24,12 @@ describe('prepareFirstPaint (#850 item 16)', () => {
     expect(settled).toBe(true)
   })
 
+  it('leaves no timer behind once the fonts are in', async () => {
+    vi.useFakeTimers()
+    await prepareFirstPaint(fontsOf(async () => {}), 3000)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('settles rather than rejects when a font fails, and without a font API at all', async () => {
     await expect(prepareFirstPaint(fontsOf(() => Promise.reject(new Error('404'))), 60_000)).resolves.toBeUndefined()
     await expect(prepareFirstPaint({ fonts: undefined } as unknown as Pick<Document, 'fonts'>, 60_000)).resolves.toBeUndefined()

@@ -2,7 +2,6 @@ import { TrustProjectButton } from './TrustCard.jsx'
 import { useEffect, useState } from 'react'
 import { newAppIdProblem } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -97,10 +96,6 @@ ${parent?.trim() ?? ''}`
     <Modal onClose={onClose} testId="new-app-dialog" align="top">
       <form
         className="flex w-[440px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
-        onKeyDown={(e) => {
-          // Not the Esc that cancels a composition in the name field (#181)
-          if (isPlainEscape(e.nativeEvent)) onClose()
-        }}
         onSubmit={async (e) => {
           e.preventDefault()
           if (!canCreate) return

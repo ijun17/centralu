@@ -1,6 +1,7 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol/client'
 import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy } from '@cc/protocol/client'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
+import { readStored, writeStored } from './stored.js'
 import type { Emit } from './event-bus.js'
 
 /** The workspace snapshot and the screen preferences, both kept in localStorage when the page has one */
@@ -20,28 +21,17 @@ export class PreferencesMock {
   readonly workspace = {
     save: async (s: WorkspaceSnapshot) => {
       this.workspaceSnapshot = s
-      try {
-        localStorage.setItem('cc-mock-workspace', JSON.stringify(s))
-      } catch {
-        /* node, or storage denied — the in-memory copy still works */
-      }
+      writeStored('cc-mock-workspace', s)
     },
     load: async (): Promise<WorkspaceSnapshot | null> => {
       if (this.workspaceSnapshot) return this.workspaceSnapshot
-      try {
-        const raw = localStorage.getItem('cc-mock-workspace')
-        const stored: unknown = raw ? JSON.parse(raw) : null
-        return isRecord(stored) ? stored : null
-      } catch {
-        return null
-      }
+      const stored = readStored('cc-mock-workspace')
+      return isRecord(stored) ? stored : null
     },
   }
 
   /** Public so tests can look inside — and set it up without going through the port */
   uiPrefs: UiPreferences = parseUiPreferences(undefined)
-  /** Whether anything has been written since the page loaded — the in-memory twin of a stored record */
-  private uiPrefsStored = false
 
   /**
    * Screen preferences (UiPreferences).
@@ -54,16 +44,8 @@ export class PreferencesMock {
    */
   readonly prefs: PreferencesPort = {
     load: async () => {
-      let stored: unknown = this.uiPrefsStored ? this.uiPrefs : undefined
-      try {
-        const raw = localStorage.getItem('cc-mock-prefs')
-        if (raw) {
-          stored = JSON.parse(raw)
-          this.uiPrefs = parseUiPreferences(stored)
-        }
-      } catch {
-        /* node, or storage denied — the in-memory copy still works */
-      }
+      const kept = readStored('cc-mock-prefs')
+      if (kept !== undefined) this.uiPrefs = parseUiPreferences(kept)
       // The notification switches (#1306): a record with none takes the snapshot's, or the defaults, once
       if (this.uiPrefs.notifyPolicy === undefined) {
         const snapshot: unknown = await this.workspace.load()
@@ -87,11 +69,6 @@ export class PreferencesMock {
     const notifyPolicy = patch.notifyPolicy ? { ...(this.uiPrefs.notifyPolicy ?? readNotifyPolicy(undefined)), ...patch.notifyPolicy } : undefined
     const autoCompact = patch.autoCompact ? { ...readAutoCompact(this.uiPrefs.autoCompact), ...patch.autoCompact } : undefined
     this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch, ...(notifyPolicy ? { notifyPolicy } : {}), ...(autoCompact ? { autoCompact } : {}) })
-    this.uiPrefsStored = true
-    try {
-      localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
-    } catch {
-      /* node, or storage denied — the in-memory copy still works */
-    }
+    writeStored('cc-mock-prefs', this.uiPrefs)
   }
 }

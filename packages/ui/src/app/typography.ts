@@ -1,4 +1,5 @@
 import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences } from '@cc/protocol/client'
+import { readStored, writeStored } from './stored.js'
 
 /**
  * Fonts, line height and text size (#312 step 5), written on `<html>` next to the theme.
@@ -164,12 +165,9 @@ export function applyTypography(t: Typography, root: HTMLElement = document.docu
 
 const CACHE_KEY = 'cc-typography'
 
+/** Storage denied: the next start shows the default fonts until the preferences arrive */
 export function cacheTypography(t: Typography): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(t))
-  } catch {
-    /* storage denied — the next start shows the default fonts until the preferences arrive */
-  }
+  writeStored(CACHE_KEY, t)
 }
 
 /**
@@ -179,9 +177,9 @@ export function cacheTypography(t: Typography): void {
  */
 export function applyCachedTypography(): void {
   try {
-    const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return
-    applyTypography(typographyOf(JSON.parse(raw) as Partial<UiPreferences>))
+    const cached = readStored(CACHE_KEY) as Partial<UiPreferences> | undefined
+    if (cached === undefined) return
+    applyTypography(typographyOf(cached))
   } catch {
     /* a broken cache is the same as none */
   }
