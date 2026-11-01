@@ -31,6 +31,19 @@ export function splitQualified(value: string): { machine: string; id: string } |
   return isMachineId(machine) ? { machine, id: value.slice(dot + 1) } : null
 }
 
+/** The machine of `machines` with this id */
+export function findMachine<M extends { id: string }>(machines: Iterable<M>, id: string): M | null {
+  for (const m of machines) if (m.id === id) return m
+  return null
+}
+
+/** The machine of `machines` a qualified id names, with the id inside it; null for an id with no such machine (the hub's own) */
+export function qualifiedMachine<M extends { id: string }>(machines: Iterable<M>, value: string): { machine: M; id: string } | null {
+  const split = splitQualified(value)
+  const machine = split ? findMachine(machines, split.machine) : null
+  return split && machine ? { machine, id: split.id } : null
+}
+
 /**
  * The room one machine gets in the negative numbers. Row ids and pids stay far below 2^32 (SQLite
  * rowids of rules number in the hundreds; Linux pids stop at 2^22), and 2^53 / 2^32 leaves room for

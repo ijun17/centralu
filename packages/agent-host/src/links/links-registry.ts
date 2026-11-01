@@ -9,7 +9,7 @@ import type {
 } from '@cc/protocol'
 import { probeTarget } from './probe.js'
 import { listSshHosts, resolveAlias, type ResolvedHost } from './ssh-config.js'
-import { newMachineId, splitQualified } from './machine-ids.js'
+import { qualifiedMachine, newMachineId } from './machine-ids.js'
 import { wslDistroError, type RemoteSpec } from './tunnel.js'
 import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
@@ -44,9 +44,8 @@ export class Links {
   /** Whether a qualified id names a session the hub has heard of on a linked machine (grid panels, #82) */
   /** The linked machine a qualified project id is on, when the hub's mirror knows that project (grid panels of its apps) */
   projectMachine(id: string): string | null {
-    const split = splitQualified(id)
-    const m = split ? this.machines.get(split.machine) : undefined
-    return m && (m.lastKnown('projects') ?? []).some((p) => isObj(p) && p.id === split!.id) ? m.id : null
+    const at = qualifiedMachine(this.machines.values(), id)
+    return at && (at.machine.lastKnown('projects') ?? []).some((p) => isObj(p) && p.id === at.id) ? at.machine.id : null
   }
 
   /** Whether a machine id is one the person linked */
@@ -55,9 +54,8 @@ export class Links {
   }
 
   knowsSession(id: string): boolean {
-    const split = splitQualified(id)
-    const m = split ? this.machines.get(split.machine) : undefined
-    return !!m && (m.lastKnown('sessions') ?? []).some((s) => isObj(s) && s.id === split!.id)
+    const at = qualifiedMachine(this.machines.values(), id)
+    return !!at && (at.machine.lastKnown('sessions') ?? []).some((s) => isObj(s) && s.id === at.id)
   }
 
   add(spec: { name: string; sshTarget: string; shell?: RemoteSpec['shell']; wslDistro?: string | null; command?: string | null }): MachineInfo {

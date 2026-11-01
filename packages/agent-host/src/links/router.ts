@@ -1,5 +1,5 @@
 import { RpcMethods, unheard, type RpcMethodName } from '@cc/protocol'
-import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
+import { decodeNumber, encodeNumber, findMachine, qualifiedMachine } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
 import { isObj, type Obj } from '../json-value.js'
@@ -148,17 +148,11 @@ export class Router {
 
   /** The linked machine an id names, or null for the hub's own (an unprefixed id, or a prefix no link has) */
   private owner(value: unknown): RoutedMachine | null {
-    if (typeof value !== 'string') return null
-    const split = splitQualified(value)
-    if (!split) return null
-    for (const m of this.opts.machines()) if (m.id === split.machine) return m
-    return null
+    return typeof value === 'string' ? (qualifiedMachine(this.opts.machines(), value)?.machine ?? null) : null
   }
 
   private machineById(id: unknown): RoutedMachine | null {
-    if (typeof id !== 'string') return null
-    for (const m of this.opts.machines()) if (m.id === id) return m
-    return null
+    return typeof id === 'string' ? findMachine(this.opts.machines(), id) : null
   }
 
   private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {

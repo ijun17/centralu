@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@cc/protocol'
-import { decodeNumber, encodeNumber, newMachineId, qualify, splitQualified } from './machine-ids.js'
+import { decodeNumber, encodeNumber, findMachine, qualifiedMachine, newMachineId, qualify, splitQualified } from './machine-ids.js'
 
 describe('machine-qualified ids (#82)', () => {
   it('a qualified id is still a valid session id, and splits back at its first dot', () => {
@@ -38,5 +38,25 @@ describe('machine-qualified ids (#82)', () => {
     expect(newMachineId('My.Box', new Set())).toBe('my-box')
     // Nothing usable in the name: a random one, still a machine id
     expect(newMachineId('서버', new Set())).toMatch(/^m-[0-9a-f]{6}$/)
+  })
+})
+
+describe('finding the machine an id names', () => {
+  const machines = [{ id: 'ubuntu' }, { id: 'mac' }]
+
+  it('finds a machine by its id, and none by another', () => {
+    expect(findMachine(machines, 'mac')).toBe(machines[1])
+    expect(findMachine(machines, 'win')).toBeNull()
+  })
+
+  it('finds the machine a qualified id names, with the id inside it', () => {
+    expect(qualifiedMachine(machines, 'ubuntu.s-1')).toEqual({ machine: machines[0], id: 's-1' })
+    // Any iterable of machines reads the same
+    expect(qualifiedMachine(new Set(machines).values(), 'mac.p.2')).toEqual({ machine: machines[1], id: 'p.2' })
+  })
+
+  it('is null for the hub’s own id, and for a prefix no link has', () => {
+    expect(qualifiedMachine(machines, '7dd9d2ba-8d4e-47e7-9083-299051f6ecba')).toBeNull()
+    expect(qualifiedMachine(machines, 'win.s-1')).toBeNull()
   })
 })
