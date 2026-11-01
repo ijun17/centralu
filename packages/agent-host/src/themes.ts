@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import {
   THEME_SCHEMA_FILE,
@@ -10,6 +10,8 @@ import {
   type ThemeFileContent,
   type ThemeFileEntry,
 } from '@cc/protocol'
+import { realOs } from './os/real.js'
+import { replaceFileSync } from './os/replace-file.js'
 import { rpcError } from './rpc-error.js'
 
 /** A theme file bigger than this is not a theme (the full token set written out is about 4KB) */
@@ -79,7 +81,7 @@ export class ThemeFiles {
     const path = join(this.dir, THEME_SCHEMA_FILE)
     const text = `${JSON.stringify(themeFileJsonSchema(), null, 2)}\n`
     const current = await readFile(path, 'utf8').catch(() => null)
-    if (current !== text) await this.atomicWrite(path, text)
+    if (current !== text) replaceFileSync(realOs().files, path, text)
   }
 
   /** Every `<id>.json` in the folder, read and checked. A file that cannot be read is listed with the reason. */
@@ -113,7 +115,7 @@ export class ThemeFiles {
   async save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry> {
     const target = id ?? (await this.freeId(content.name))
     await mkdir(this.dir, { recursive: true })
-    await this.atomicWrite(this.pathOf(target), formatThemeFile(content))
+    replaceFileSync(realOs().files, this.pathOf(target), formatThemeFile(content))
     return this.read(target)
   }
 
@@ -128,7 +130,7 @@ export class ThemeFiles {
     const fromName = basename(source).replace(/\.json$/i, '')
     const id = await this.freeId(parsed.name !== 'import' ? parsed.name : fromName)
     // The text is copied as it is (comments of a sort, key order, `$schema`), not re-serialised
-    await this.atomicWrite(this.pathOf(id), text)
+    replaceFileSync(realOs().files, this.pathOf(id), text)
     return this.read(id)
   }
 
@@ -155,17 +157,5 @@ export class ThemeFiles {
       if (!taken) return id
     }
     return `${base}-${randomBytes(4).toString('hex')}`
-  }
-
-  /** Temp file and rename: a reader (the watcher, an editor, an agent) never sees half a file */
-  private async atomicWrite(path: string, text: string): Promise<void> {
-    const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`
-    try {
-      await writeFile(tmp, text, 'utf8')
-      await rename(tmp, path)
-    } catch (e) {
-      await unlink(tmp).catch(() => {})
-      throw e
-    }
   }
 }

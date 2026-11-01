@@ -1,7 +1,8 @@
-import { randomBytes } from 'node:crypto'
-import { chmodSync, linkSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { errnoCode } from '../../os/errors.js'
+import { realOs } from '../../os/real.js'
+import { createFileSync, replaceFileSync } from '../../os/replace-file.js'
 
 /**
  * One small JSON document kept in the host's data folder that only this user may read (app secrets,
@@ -105,27 +106,12 @@ export class PrivateJsonFile<T> {
     if (this.standIn) {
       throw new Error(`${this.opts.label} could not be read, so it was not overwritten. Fix or remove ${this.path}`)
     }
-    /*
-     * The temp file is created **at 0600 from the start** and then moved into place. Writing first
-     * and chmod-ing afterward would leave a window where it is readable at the default permissions
-     * (usually 0644). Tightening it once more after the move covers the case where someone had
-     * already loosened the permissions on an existing file.
-     */
-    const tmp = `${this.path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
-    try {
-      writeFileSync(tmp, JSON.stringify(doc, null, this.opts.indent), { mode: 0o600, flag: 'wx' })
-      if (how === 'replace') renameSync(tmp, this.path)
-      else {
-        try {
-          linkSync(tmp, this.path)
-        } catch (e) {
-          if (errnoCode(e) === 'EEXIST') return false
-          throw e
-        }
-      }
-    } finally {
-      rmSync(tmp, { force: true })
-    }
+    // The temp file is created at 0600 from the start (os/replace-file.ts); tightening the file once more after the move
+    // covers someone having loosened the permissions on an existing one
+    const text = JSON.stringify(doc, null, this.opts.indent)
+    const files = realOs().files
+    if (how === 'replace') replaceFileSync(files, this.path, text, { mode: 0o600 })
+    else if (!createFileSync(files, this.path, text, { mode: 0o600 })) return false
     // What the person re-entered is the file now: the line about the one moved aside has done its job
     this.lastTrouble = null
     chmodSync(this.path, 0o600)

@@ -1,5 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { realOs } from '../../os/real.js'
+import { replaceFileSync } from '../../os/replace-file.js'
 
 /** One app that held busy when it was last heard from (#1236) */
 export type BusyRecord = { projectId: string | null; appId: string; reason: string; at: number }
@@ -24,17 +26,10 @@ export class BusyBook {
     if (rec === null && !(key in all)) return
     if (rec === null) delete all[key]
     else all[key] = rec
-    const tmp = `${this.file}.${process.pid}.tmp`
     try {
       mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
-      renameSync(tmp, this.file)
+      replaceFileSync(realOs().files, this.file, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 })
     } catch (e) {
-      try {
-        rmSync(tmp, { force: true })
-      } catch {
-        // Held open by a scanner: the leftover is not worth failing `set()` for, and the next write replaces it
-      }
       console.error(`[apps] could not record which apps are busy in ${this.file}: ${(e as Error).message}`)
     }
   }
