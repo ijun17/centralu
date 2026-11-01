@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { eventually } from '../../../../tooling/test-timing.js'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { scriptedAdapters } from '../links/scripted-agent.test-helpers.js'
+import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
 
 /**
@@ -15,15 +13,15 @@ import { SessionManager } from './manager.js'
  * so an ask that goes through never waits for it. The machine here is a stand-in; links.test.ts runs the real one.
  */
 
-const cleanup: (() => void)[] = []
-afterEach(() => {
-  for (const c of cleanup.splice(0)) c()
+const cleanup: (() => unknown)[] = []
+afterEach(async () => {
+  for (const c of cleanup.splice(0)) await c()
 })
 
 async function hub() {
   const store = new Store()
-  const path = mkdtempSync(join(tmpdir(), 'cc-ask-refusal-'))
-  cleanup.push(() => rmSync(path, { recursive: true, force: true }))
+  const path = tempRoot('cc-ask-refusal-')
+  cleanup.push(() => removeTree(path))
   store.projects.addProject({ id: 'p-hub', path, name: 'hub-project' })
   store.sessions.upsertSession({
     id: 'h1', projectId: 'p-hub', kind: 'worker', tool: 'claude', externalId: 'ext-h1', name: 'Asker', autoNamed: false,
