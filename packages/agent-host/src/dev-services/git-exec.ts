@@ -276,9 +276,14 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
   // A git that finished before the cancel reached it did the write: that is the answer, not "cancelled"
   if ((!ended || ended === 'aborted') && code === 0) return out
   if (ended === 'aborted') throw Object.assign(gitCancelled(), { signal, stdout: out, stderr: err })
-  const message =
-    ended === 'timeout' ? `git did not answer within ${timeout} ms` : ended === 'overflow' ? 'Git output exceeded maxBuffer' : err || `Git exited with ${code ?? signal}`
-  throw Object.assign(new Error(message), { code, signal, stdout: out, stderr: err, ...(ended === 'timeout' ? { timedOut: true, killed: true } : {}) })
+  // **Our own bound is the answer, whatever git printed or exited with.** The callers read `stderr` before the message,
+  // and git ended by the bound says things of its own: Windows ends the tree child first, and git reports "fatal: Could
+  // not read from remote repository" and exits 128 before it is itself gone. So the failure carries no output then.
+  if (ended === 'timeout' || ended === 'overflow') {
+    const message = ended === 'timeout' ? `git did not answer within ${timeout} ms` : 'Git output exceeded maxBuffer'
+    throw Object.assign(new Error(message), { code, signal, stdout: '', stderr: '', ...(ended === 'timeout' ? { timedOut: true, killed: true } : {}) })
+  }
+  throw Object.assign(new Error(err || `Git exited with ${code ?? signal}`), { code, signal, stdout: out, stderr: err })
 }
 
 /** What `runGit` rejects with when its `signal` fires: git was ended, or never started */
@@ -338,7 +343,8 @@ export async function streamGit(
   })
   const message = r.stderr.toString('utf8')
   if (stopped) return 'stopped'
-  if (r.ended === 'timeout') throw Object.assign(new Error('git did not answer in time'), { timedOut: true, stderr: message })
+  // Our own bound is the answer, not what git printed while it was being ended (`runGit`)
+  if (r.ended === 'timeout') throw Object.assign(new Error('git did not answer in time'), { timedOut: true, stderr: '' })
   // The last entry, when git ended its answer without a NUL. git has exited: nothing is left to stop
   if (r.code === 0) return rest.length > 0 && onEntry(rest) ? 'stopped' : 'done'
   throw Object.assign(new Error(message || `Git exited with ${r.code ?? r.signal}`), { code: r.code, stderr: message })
