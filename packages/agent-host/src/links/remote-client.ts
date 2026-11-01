@@ -1,9 +1,10 @@
 import WebSocket from 'ws'
-import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
+import { CANCEL_CALL_METHOD, errorMessage, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
 import { proofNonce, provesCredential, provesToken } from '../transport/host-proof.js'
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
-import { tryParseJson } from '../json-value.js'
+import { asObj, str, tryParseJson } from '../json-value.js'
+import { PendingRequests } from '../transport/json-lines.js'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
@@ -111,13 +112,11 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 
 const DEFAULT_CALL_TIMEOUT_MS = 200_000
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
-
 const linkError = (message: string, retryable: boolean) => rpcError(message, 'internal', { retryable })
 
 export class RemoteClient {
   private ws: WebSocket | null = null
-  private pending = new Map<string, Pending>()
+  private readonly pending = new PendingRequests()
   private nextId = 1
   private lastSeq = 0
   private epoch: string | undefined
@@ -200,8 +199,8 @@ export class RemoteClient {
   private onProof(ws: WebSocket, raw: string): void {
     const nonce = this.proving!
     this.proving = null
-    const f = tryParseJson(raw) as { kind?: unknown; nonce?: unknown; mac?: unknown } | null | undefined
-    const proven = this.opts.credential ? provesCredential(verifierOf(this.opts.token), nonce, f?.mac) : provesToken(this.opts.token, nonce, f?.mac)
+    const f = asObj(tryParseJson(raw))
+    const proven = this.opts.credential ? provesCredential(verifierOf(this.opts.token), nonce, f.mac) : provesToken(this.opts.token, nonce, f.mac)
     if (f?.kind === 'proof' && f.nonce === nonce && proven) return this.sendHello(ws)
     // Something else holds the port (another account's program, #838): it never gets the token
     if (this.opts.credential) {
@@ -272,13 +271,15 @@ export class RemoteClient {
     if (!this.ready || !this.ws) return Promise.reject(linkError('The machine is not reachable right now', true))
     const ws = this.ws
     const id = String(this.nextId++)
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(rpcError(`The machine did not answer ${method} in time`, 'internal', { retryable: true }))
-      }, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS)
-      this.pending.set(id, { resolve, reject, timer })
+    const answer = this.pending.wait(id, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, () =>
+      rpcError(`The machine did not answer ${method} in time`, 'internal', { retryable: true }),
+    )
+    try {
       ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
-    })
+    } catch (e) {
+      this.pending.reject(id, e instanceof Error ? e : new Error(errorMessage(e)))
+    }
+    return answer
   }
 
   close(): void {
@@ -297,10 +298,9 @@ export class RemoteClient {
     const parsed = parseServerFrame(json)
     if (!parsed.success) {
       // A failure answer the schema could not read still ends its call (the UI client's `salvage`, 2026-09-10)
-      const f = json as { kind?: unknown; id?: unknown; ok?: unknown; error?: { message?: unknown } }
-      if (f?.kind === 'res' && f.ok === false && typeof f.id === 'string') {
-        const p = this.take(f.id)
-        p?.reject(linkError(typeof f.error?.message === 'string' ? f.error.message : 'Malformed answer from the machine', false))
+      const f = asObj(json)
+      if (f.kind === 'res' && f.ok === false && typeof f.id === 'string') {
+        this.pending.reject(f.id, linkError(str(asObj(f.error).message, 'Malformed answer from the machine'), false))
       }
       // Anything else is dropped
       return
@@ -334,10 +334,8 @@ export class RemoteClient {
         this.refusal = frame.error
         return
       }
-      const p = this.take(frame.id)
-      if (!p) return
-      if (frame.ok) p.resolve(frame.result)
-      else p.reject(Object.assign(new Error(frame.error.message), { code: frame.error.code, retryable: frame.error.retryable, ...(frame.error.data !== undefined ? { data: frame.error.data } : {}) }))
+      if (frame.ok) this.pending.resolve(frame.id, frame.result)
+      else this.pending.reject(frame.id, Object.assign(new Error(frame.error.message), { code: frame.error.code, retryable: frame.error.retryable, ...(frame.error.data !== undefined ? { data: frame.error.data } : {}) }))
       return
     }
     if (!this.ready) return
@@ -363,7 +361,7 @@ export class RemoteClient {
     if (!handle) return
     const ws = this.ws
     if (method === CANCEL_CALL_METHOD) {
-      const target = (params as { id?: unknown } | null)?.id
+      const target = asObj(params).id
       if (typeof target === 'string') this.incoming.get(target)?.abort()
       return
     }
@@ -380,8 +378,8 @@ export class RemoteClient {
       .then(
         (result) => answer({ ok: true, result: result ?? null }),
         (err: unknown) => {
-          const e = err as { message?: unknown; code?: unknown; retryable?: unknown }
-          refuse(typeof e?.message === 'string' ? e.message : 'The hub could not answer', typeof e?.code === 'string' ? e.code : 'internal', e?.retryable === true)
+          const e = asObj(err)
+          refuse(typeof e.message === 'string' ? e.message : 'The hub could not answer', typeof e.code === 'string' ? e.code : 'internal', e.retryable === true)
         },
       )
       .finally(() => {
@@ -395,20 +393,9 @@ export class RemoteClient {
     this.incoming.clear()
   }
 
-  private take(id: string): Pending | undefined {
-    const p = this.pending.get(id)
-    if (!p) return undefined
-    this.pending.delete(id)
-    clearTimeout(p.timer)
-    return p
-  }
-
   /** Every call in flight gets an answer: its outcome on the remote is unknown, and it is not sent again (#82, #173) */
   private failAll(reason: string): void {
-    for (const [id, p] of [...this.pending]) {
-      this.take(id)
-      p.reject(linkError(`${reason} before the machine answered; it may or may not have done this`, false))
-    }
+    this.pending.rejectAll(linkError(`${reason} before the machine answered; it may or may not have done this`, false))
   }
 
   private lost(ws: WebSocket, reason: string): void {

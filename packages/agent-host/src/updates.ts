@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
+import { sleep } from './timing.js'
 
 /**
  * The in-app update check (issue #43).
@@ -347,7 +348,7 @@ export class UpdateService {
       // Off when nothing is given (tests); the host passes the stored switch, on unless turned off (update-switches.ts)
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
-      wait: deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+      wait: deps.wait ?? sleep,
       globalPackage: deps.globalPackage ?? npmGlobalPackage,
       node: deps.node ?? process.execPath,
     }

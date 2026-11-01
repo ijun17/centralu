@@ -9,6 +9,7 @@ import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, SshRunFailure, type SshExpectedLine, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
+import { sleep } from '../timing.js'
 
 /**
  * The way from the hub to a linked machine's host (docs/plans/remote-hub.md §2).
@@ -911,7 +912,7 @@ export class SshTunnel implements Tunnel {
         await this.stopChild()
         throw new Error(`Centralu on ${this.opts.target} did not start serving in time`)
       }
-      await new Promise((r) => setTimeout(r, 500))
+      await sleep(500)
     }
   }
 
@@ -1050,7 +1051,7 @@ export class SshTunnel implements Tunnel {
             void endChild(child)
             return fail(`The ssh forward to ${this.opts.target} did not come up in time`)
           }
-          await new Promise((r) => setTimeout(r, 100))
+          await sleep(100)
         }
       }
       void poll()
