@@ -67,7 +67,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
   )
 
-  // What the host stored over the last days (§6.2): independent of the limits too, and absent from a host that predates it
+  // What the host stored over the last days (§6.2): independent of the limits too; a host that predates it, or a failed read, says so in a line
   const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
 
   /*

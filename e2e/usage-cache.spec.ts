@@ -201,6 +201,27 @@ test('a near-perfect cache rate stays distinct in the tooltip and dropdown (#587
   await expect(page.getByTestId('usage-cache-rate')).toHaveText('99.8%')
 })
 
+test('a usage history that could not be read says so, and Retry reads it again (#1143)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work', { tool: 'claude' })
+  await page.evaluate(() => {
+    const m = (window as unknown as MockWindow).__mock
+    m.usageState = { supported: true, usage: { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent: 41, resetsAt: null, scope: null }], daily: [] } }
+    m.usageHistoryError = 'the host did not answer'
+  })
+  await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+  await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+  await page.getByTestId('usage-donut-claude').click()
+
+  await expect(page.getByTestId('usage-history-failed')).toContainText('Could not read the usage history: the host did not answer')
+  await expect(page.getByTestId('usage-history')).toHaveCount(0)
+
+  await page.evaluate(() => ((window as unknown as MockWindow).__mock.usageHistoryError = null))
+  await page.getByTestId('usage-history-failed-retry').click()
+  await expect(page.getByTestId('usage-history')).toBeVisible()
+  await expect(page.getByTestId('usage-history-failed')).toHaveCount(0)
+})
+
 test('the dropdown shows the last 7 days: the weekly window over time and the sessions that used most, regrouped by project', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const here = await newSession(page, 'alpha', 'the expensive one', { tool: 'claude' })

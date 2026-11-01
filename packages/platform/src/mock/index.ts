@@ -292,6 +292,8 @@ export class MockPlatform implements Platform {
   set usageCalls(value: UsageMock['usageCalls']) { this.usageMock.usageCalls = value }
   get usageHistoryState() { return this.usageMock.usageHistoryState }
   set usageHistoryState(value: UsageMock['usageHistoryState']) { this.usageMock.usageHistoryState = value }
+  get usageHistoryError() { return this.usageMock.usageHistoryError }
+  set usageHistoryError(value: UsageMock['usageHistoryError']) { this.usageMock.usageHistoryError = value }
   get usageHistoryCalls() { return this.usageMock.usageHistoryCalls }
   set usageHistoryCalls(value: UsageMock['usageHistoryCalls']) { this.usageMock.usageHistoryCalls = value }
   get cacheStats() { return this.usageMock.cacheStats }
@@ -486,6 +488,8 @@ export class MockPlatform implements Platform {
   // rules.ts
   get searchResults() { return this.rulesMock.searchResults }
   set searchResults(value: RulesMock['searchResults']) { this.rulesMock.searchResults = value }
+  get searchMessagesError() { return this.rulesMock.searchMessagesError }
+  set searchMessagesError(value: RulesMock['searchMessagesError']) { this.rulesMock.searchMessagesError = value }
   get searchHold() { return this.rulesMock.searchHold }
   set searchHold(value: RulesMock['searchHold']) { this.rulesMock.searchHold = value }
   get rulesList() { return this.rulesMock.rulesList }

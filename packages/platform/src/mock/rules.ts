@@ -17,9 +17,12 @@ export class RulesMock {
 
   /** For tests: when set, a message search answers only once this settles (an answer that arrives late) */
   searchHold: Promise<void> | null = null
+  /** For tests: when set, the message search fails with this reason */
+  searchMessagesError: string | null = null
   readonly search = {
     messages: async (query: string) => {
       await this.searchHold
+      if (this.searchMessagesError !== null) throw new Error(this.searchMessagesError)
       return this.searchResults.filter((r) => r.snippet.includes(query))
     },
   }
