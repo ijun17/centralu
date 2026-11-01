@@ -125,7 +125,7 @@ notice in a case that today shows nothing: a behaviour change, its own pull requ
 
 | | Idle exit | Exit in a turn or while opening | Message |
 |---|---|---|---|
-| Claude | `adapter_crashed` (any exit not ours) | `adapter_crashed` | the SDK's error + `withStderrTail` (last 2,000 chars) |
+| Claude | `adapter_crashed` (any exit not ours; asleep since the Q1 fix, §7.3) | `adapter_crashed` | the SDK's error + `withStderrTail` (last 2,000 chars) |
 | Codex | `session_live asleep` (#1397) | `adapter_crashed` | `codex app-server exited (code N)` + `withStderrTail` |
 | ACP | `session_live asleep` | `adapter_crashed` | `<label> exited (code N): <last 5 stderr lines>` |
 
@@ -540,6 +540,9 @@ estimates of changed lines without fixtures.
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
 | 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
+
+Row 7, measured against main at `4489459b8` by reading (code lines without blanks and comments): Claude's own copy is about 150 lines in `claude/session.ts` (the Stop and its timer 78, the exit 20, turn and receipt handling about 30, `sendTracked` 10, fields and `deliver`), but `MidTurnLedger` shares about 10 of them as they are (receipts failed on a Stop, the close and an exit; a Stop with no turn said at once; the refusal's words). The rest differs in behaviour pinned by tests: the Stop is confirmed by the interrupt's answer or the result, joins a Stop already waiting and starts its bound again once said (`interrupt.test.ts`); a turn's ending comes from the normalizer, among the goal's events and deferred card closures, with `turn_complete`'s `output`; receipts complete from the result's `user_message_uuids`, not from a turn id (Claude names none); `cancelQueued` empties the SDK's queue and counts what it held; a refused Stop with no turn is an error. Moved as it is, Claude's copy becomes Claude-only options of the ledger plus a wire of about 15 lines: about +55 lines, and never less than about +5. What would make it smaller, each a behaviour change of its own: one Stop wording and timer for Claude and ACP, a Stop confirmed only at the turn's end, and the ledger saying a turn's ending after the tool's own events. The idle exit (Q1) was the fourth; it is done.
+
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
 
@@ -557,7 +560,7 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | ACP caps inline images (`inlineImageEvent`) | §2.9 | now |
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
-| Claude's idle exit is asleep, not crashed | §2.5 | after 7, owner's call (§9.1) |
+| Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `ClaudeSession.exitEvent`, asleep with no turn open, no tracked input or card, no message unread or unanswered, once the CLI has said anything |
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
@@ -597,7 +600,7 @@ wire, may still need a Stop to deny every open request first (`GateRequests`).
 ## 9. Open questions
 
 1. **Claude's idle exit** (§2.5): asleep like Codex and ACP (#1397's reasoning), or does Claude have a reason to call
-   it a crash?
+   it a crash? Decided (2026-10-27): asleep; done in its own pull request before PR 7 (§7.3).
 2. **Codex and the Stop timer** (§2.4): add the 10 s notice where Codex accepted the interrupt and the turn goes on?
 3. **`endsWithHost` for Claude and Codex** (§2.6): the stronger guarantee, at the cost of an `sh` wrapper per CLI on
    macOS and Linux and a real-OS test each.

@@ -2,7 +2,7 @@ import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { centraluInputId, InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalScope, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
@@ -81,6 +81,8 @@ export class ClaudeSession implements SessionHandle {
   private closed = false
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
   private turnOpen = false
+  /** The CLI has said something on its stream: it is running, so an exit with nothing in flight is no failure to start (see `exitEvent`) */
+  private spoke = false
   /** The CLI ran a turn on its own (it took a quiet input into one): the result that ends it ends a turn, though it names only quiet inputs */
   private cliTurnRan = false
   /** The live query — the channel for asking about slash commands and context. */
@@ -283,6 +285,7 @@ export class ClaudeSession implements SessionHandle {
          * own record.
          */
         if (this.closed) break
+        this.spoke = true
         this.onMessage(q, msg)
       }
       /*
@@ -297,12 +300,9 @@ export class ClaudeSession implements SessionHandle {
       this.settleGoalKnown()
       // A stream that ends because this host let go of the process is not a death (#280 step 2)
       if (!this.closed && !this.detaching) {
+        const ended = this.exitEvent('claude process ended unexpectedly')
         this.releaseAgents('The session process ended before this agent reported back')
-        this.emit({
-          type: 'error',
-          sessionId: this.sessionId,
-          error: { code: 'adapter_crashed', message: 'claude process ended unexpectedly', retryable: true },
-        })
+        this.emit(ended)
       }
     } catch (err) {
       liveQueries.delete(q)
@@ -316,23 +316,34 @@ export class ClaudeSession implements SessionHandle {
        * had just started as dead and close it.
        */
       if (this.closed || this.detaching) return
-      this.releaseAgents('The session process ended before this agent reported back')
       /*
        * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
        * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
        * added the same way, so a CLI that fails to start still says why.
        */
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: { code: 'adapter_crashed', message: withStderrTail((err as Error).message, this.proc), retryable: true },
-      })
+      const ended = this.exitEvent(withStderrTail((err as Error).message, this.proc))
+      this.releaseAgents('The session process ended before this agent reported back')
+      this.emit(ended)
     } finally {
       // The process is gone (or another host holds it now): its link may go once nothing else runs from it
       this.launch.links.release(this.runKey)
       this.runKey = null
       this.markEnded()
     }
+  }
+
+  /**
+   * How an exit this side did not cause is said, whatever its code (#1397, owner decision Q1 on #1654): asleep when nothing was
+   * in flight, as Codex and ACP say it, since a logout, a shutdown or a kill lands on idle sessions too, and the next message
+   * resumes the conversation. A crash, with `crash` as its message, while a turn is open, an input or a card waits, a message
+   * is not yet read or answered (it is lost with the process), or before the CLI said anything (it may not have started)
+   */
+  private exitEvent(crash: string): NormalizedEvent {
+    const busy = this.turnOpen || !this.spoke || this.inputReceipts.size > 0 || this.cards.pending.size > 0 || this.cards.questions.size > 0 ||
+      this.queue.length > 0 || this.quietInputs.size > 0 || this.raceRetry.held.length > 0 || this.sendGate !== null
+    return busy
+      ? { type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: crash, retryable: true } }
+      : { type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' }
   }
 
   /** One message of the stream, in the order the CLI sent it */

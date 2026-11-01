@@ -1295,6 +1295,11 @@ pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 �
 `stream-text.ts`). 호스트가 띄운 자식과 keeper의 자식은 각각 stderr의 마지막 8 KiB를 쥐고(`AgentProcess.stderrTail`), 한
 스트림으로 디코딩하므로 두 조각에 걸쳐 나뉜 글자도 온전하다. Claude의 `adapter_crashed`와 Codex의 "codex app-server exited"는
 keeper 아래에서도 그 끝을 싣는다.
+할 일이 없을 때 스스로 끝난 프로세스는 충돌이 아니다(#1397). Codex의 app-server도, Claude Code도(#1654의 소유자 결정 Q1,
+`ClaudeSession.exitEvent`) 열린 턴, 기다리는 추적 입력이나 카드, CLI가 아직 읽거나 답하지 않은 메시지(조용한 입력 포함)가
+없으면 종료 코드와 상관없이 `adapter_crashed` 대신 `session_live`(`live: false`, `reason: 'asleep'`)를 말하고, 다음 메시지가
+대화를 다시 연다. 턴 중이거나 CLI가 아직 아무 말도 하지 않았을 때(시작하지 못했을 수 있다)의 종료는 그대로 `adapter_crashed`다.
+넘겨받은 Claude 프로세스는 다음 턴까지 말하지 않으므로, 그때까지의 종료는 여전히 충돌이다.
 
 **떠나기** (`main.ts`, `stopServices(mode)`). *detach* — SIGTERM, SIGINT, 키퍼 파이프가 닫힘, 잡히지 않은 예외,
 교체의 드레인 — 는 모든 세션 핸들·터미널·명령 실행에 `detach()`를 부른다: 도구에는 아무것도 보내지 않고, 기다리는
