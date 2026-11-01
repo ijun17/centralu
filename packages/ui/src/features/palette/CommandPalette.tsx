@@ -12,6 +12,7 @@ import { Button } from '../../components/Button.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
+import { useKeepInView } from '../../app/useKeepInView.js'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailedFold } from '../../components/LoadFailed.jsx'
 import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
@@ -277,6 +278,7 @@ export function CommandPalette() {
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
   useFocusReturn(open, panelRef)
   const dialog = useDialogFocus(panelRef, open)
+  useKeepInView(panelRef, cursor)
   // The table takes the field's place, and the field leaves with its focus: the panel keeps the keyboard (for Esc)
   useEffect(() => {
     if (keys) panelRef.current?.focus({ preventScroll: true })
@@ -355,6 +357,7 @@ export function CommandPalette() {
                       id={optionId(i)}
                       role="option"
                       aria-selected={i === cursor}
+                      data-cursor={i === cursor || undefined}
                       tabIndex={-1}
                       className={`flex w-full items-baseline gap-2 border-l-2 px-3 py-1.5 text-left transition-colors ${
                         i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'

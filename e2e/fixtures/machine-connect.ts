@@ -26,6 +26,20 @@ async function addMachine(page: Page, name: string): Promise<void> {
 }
 
 export function machineConnectTests(): void {
+  test('Connect cannot be pressed again while an attempt is under way (#1143)', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    await openMachines(page)
+    await addMachine(page, 'Laptop')
+    await page.getByTestId('machine-disconnect-laptop').click()
+    await expect(page.getByTestId('machine-reconnect-laptop')).toHaveText('Connect')
+    // The attempt is held open, as a slow ssh would be
+    await page.evaluate(() => ((window as unknown as MockWindow).__mock.reconnectPlan = { status: 'connected', error: null }))
+    await page.getByTestId('machine-reconnect-laptop').click()
+    await expect(page.getByTestId('machine-row-status-laptop')).toHaveAttribute('data-status', 'connecting')
+    await expect(page.getByTestId('machine-reconnect-laptop')).toBeDisabled()
+    await expect(page.getByTestId('machine-reconnect-laptop')).toHaveText('Connecting…')
+  })
+
   test('Auto reconnect is on unless turned off, and a machine is disconnected and connected again from its row', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     await openMachines(page)
