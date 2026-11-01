@@ -3,7 +3,7 @@ import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { RowMenu } from '../sidebar/menus/RowMenu.jsx'
 import { ActionRow } from '../sidebar/menus/ActionRow.jsx'
 import { MachineStatusMark } from './MachineStatusMark.jsx'
-import { connectAction } from '../settings/MachinesSection.jsx'
+import { connectAction, isTrying } from '../settings/MachinesSection.jsx'
 
 /**
  * What the sidebar's machine badge opens (owner, 2026-10-20): the link's state where the badge is, and Connect beside
@@ -19,7 +19,7 @@ export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; a
   const action = connectAction(status)
   // An install, update or rollback is under way there: Settings → Machines hides Connect and Disconnect then, and so does this menu
   const busy = !!info?.operation
-  const trying = status === 'connecting' || status === 'starting' || status === 'updating'
+  const trying = isTrying(status)
   const pick = (fn: () => void) => () => {
     fn()
     onClose()

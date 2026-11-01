@@ -3,6 +3,7 @@ import { isInTurn } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useKeepInView } from '../../app/useKeepInView.js'
 import { useStore } from '../../store/store.js'
 import { projectLabelOf, useInbox } from '../../store/selectors.js'
 import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
@@ -49,6 +50,7 @@ export function Inbox() {
   // Done removes a row, so the cursor can end up past the end: keep it on the last row
   const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
   const panelRef = useRef<HTMLDivElement>(null)
+  useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
   useFocusReturn(open, panelRef)
   // No row answers an approval while the list is still moving (#543): the order is part of what moves it
@@ -182,6 +184,7 @@ export function Inbox() {
             {items.map((it, i) => (
               <li
                 key={it.id}
+                data-cursor={i === cursor || undefined}
                 className={`rounded-field transition-colors ${
                   i === cursor ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
                 }`}

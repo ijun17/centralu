@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useCopied } from '../../app/useCopied.js'
 import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol/client'
 import {
   asksRow,
@@ -79,6 +80,9 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
   )
 }
 
+/** An attempt to connect is under way: the link opening, a host being started, or an update holding it */
+export const isTrying = (status: MachineInfo['status'] | undefined): boolean => status === 'connecting' || status === 'starting' || status === 'updating'
+
 /**
  * The row's button that opens the link (`machines.reconnect`): Connect for a disconnected machine (#1134), Start where
  * Centralu is stopped (#1143), which this computer then starts there, Reconnect otherwise
@@ -118,10 +122,12 @@ export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCatego
                 variant="ghost"
                 size="sm"
                 onClick={() => void reconnect(m.id)}
+                // An attempt under way: pressing again would only start the same one
+                disabled={isTrying(m.status)}
                 data-testid={`machine-reconnect-${m.id}`}
-                title={connectAction(m.status).title}
+                title={isTrying(m.status) ? undefined : connectAction(m.status).title}
               >
-                {connectAction(m.status).label}
+                {isTrying(m.status) ? 'Connecting…' : connectAction(m.status).label}
               </Button>
             )}
             {m.status !== 'disconnected' && !m.operation && (
@@ -565,7 +571,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
   const applyUpdate = useStore((s) => s.applyUpdate)
   const checkUpdate = useStore((s) => s.checkUpdate)
   const change = useStore((s) => s.changeMachineInstall)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopied()
   const [confirming, setConfirming] = useState(false)
   const p = versionPrompt(m)
   if (!p) return null
@@ -631,12 +637,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
               variant="ghost"
               size="sm"
               className="shrink-0"
-              onClick={() =>
-                void navigator.clipboard?.writeText(p.remoteCommand!).then(
-                  () => setCopied(true),
-                  () => setCopied(false),
-                )
-              }
+              onClick={() => copy(p.remoteCommand!)}
             >
               {copied ? 'Copied' : 'Copy'}
             </Button>

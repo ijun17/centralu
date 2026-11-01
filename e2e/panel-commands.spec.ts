@@ -323,6 +323,52 @@ test('command aliases: the name leads and the command backs it up — in the lis
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
 })
 
+test('Renaming a command saves once, and the name it already has saves nothing (#1143)', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', 'task')
+  await page.getByTestId('run-open').click()
+  await page.getByTestId('run-add-input').fill('pnpm dev')
+  await page.getByTestId('run-add-name').fill('Dev server')
+  await page.getByTestId('run-add').click()
+  await expect(page.getByTestId('run-command-0')).toContainText('Dev server')
+  await page.evaluate(() => {
+    const w = window as any
+    const saved = w.__mock.projects.setCommands
+    w.__saves = 0
+    w.__mock.projects.setCommands = (...args: unknown[]) => {
+      w.__saves++
+      return saved(...args)
+    }
+  })
+  const saves = () => page.evaluate(() => (window as any).__saves as number)
+
+  await page.getByTestId('run-command-0').hover()
+  await page.getByTestId('run-rename-0').click()
+  await page.getByTestId('run-rename-input-0').fill('Local server')
+  await page.getByTestId('run-rename-input-0').press('Enter')
+  await expect(page.getByTestId('run-command-0')).toContainText('Local server')
+  // The field going away fires one more blur; it must not save the name a second time
+  await page.waitForTimeout(200)
+  expect(await saves()).toBe(1)
+
+  await page.getByTestId('run-command-0').hover()
+  await page.getByTestId('run-rename-0').click()
+  await page.getByTestId('run-rename-input-0').press('Enter')
+  await expect(page.getByTestId('run-rename-input-0')).toHaveCount(0)
+  await page.waitForTimeout(200)
+  expect(await saves()).toBe(1)
+
+  // Esc cancels the edit: what was typed is not saved when the field goes away
+  await page.getByTestId('run-command-0').hover()
+  await page.getByTestId('run-rename-0').click()
+  await page.getByTestId('run-rename-input-0').fill('Typed then abandoned')
+  await page.getByTestId('run-rename-input-0').press('Escape')
+  await expect(page.getByTestId('run-rename-input-0')).toHaveCount(0)
+  await page.waitForTimeout(200)
+  expect(await saves()).toBe(1)
+  await expect(page.getByTestId('run-command-0')).toContainText('Local server')
+})
+
 /*
  * ── The terminal panel projection of a running command (#60's final form, user decision 2026-09-06) ──
  *

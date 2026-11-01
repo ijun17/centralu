@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '../components/Button.jsx'
+import { useCopied } from './useCopied.js'
 import { APP_VERSION } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
 
@@ -77,16 +78,20 @@ export class ErrorBoundary extends Component<{ children: ReactNode; platform: Pl
           <Button variant="secondary" size="md" data-testid="app-crashed-reload" onClick={() => location.reload()}>
             Reload
           </Button>
-          <Button
-            variant="quiet"
-            size="md"
-            data-testid="app-crashed-copy"
-            onClick={() => void navigator.clipboard?.writeText(`${error.message}\n${error.stack ?? ''}`)}
-          >
-            Copy details
-          </Button>
+          <CopyDetails text={`${error.message}
+${error.stack ?? ''}`} />
         </div>
       </div>
     )
   }
+}
+
+/** The crash screen's copy button: says "Copied" like every other copy button (`useCopied`) */
+function CopyDetails({ text }: { text: string }) {
+  const { copied, copy } = useCopied()
+  return (
+    <Button variant="quiet" size="md" data-testid="app-crashed-copy" onClick={() => copy(text)}>
+      {copied ? 'Copied' : 'Copy details'}
+    </Button>
+  )
 }

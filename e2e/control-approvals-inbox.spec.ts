@@ -262,6 +262,40 @@ test('Scrubbing up and down through 10 inbox items never pushes the cursor out o
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
+test('The arrow keys keep the inbox row and the palette row they are on in view (#1143)', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 420 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `task ${i}`)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    for (const id of m.sessions.keys()) {
+      m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: id })
+    }
+  })
+  const cursorInView = (panel: string) =>
+    page.evaluate((testId) => {
+      const row = document.querySelector(`[data-testid="${testId}"] [data-cursor]`)
+      const list = row?.closest('ul')
+      if (!row || !list) return false
+      const r = row.getBoundingClientRect()
+      const l = list.getBoundingClientRect()
+      return r.top >= l.top - 1 && r.bottom <= l.bottom + 1
+    }, panel)
+
+  await page.keyboard.press('Meta+i')
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(10)
+  for (let i = 0; i < 9; i++) await page.keyboard.press('j')
+  await expect.poll(() => cursorInView('inbox')).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('inbox')).toBeHidden()
+
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('palette-input')).toBeFocused()
+  for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowDown')
+  await expect.poll(() => cursorInView('palette-panel')).toBe(true)
+})
+
 /**
  * The top bar is a dashboard — it states status, not instructions (issue #33).
  *

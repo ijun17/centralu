@@ -177,6 +177,8 @@ export function CommandRunnerOverlay({
   const rename = (command: string, label: string) => {
     setRenaming(null)
     const clean = label.trim()
+    // The name it already has: nothing to save, as in SessionNameInput
+    if (clean === (commands.find((c) => c.command === command)?.label ?? '')) return
     void save(
       projectId,
       commands.map((c) => (c.command === command ? { command, ...(clean ? { label: clean } : {}) } : c)),
@@ -411,6 +413,19 @@ function CommandRow({
   // Stop was pressed and the exit has not come back yet
   const stopping = running && !!r?.stopped
   const name = c.label ?? c.command
+  /*
+   * Enter saves and takes the field away, and its going fires one more blur: the same name must not be saved twice
+   * (SessionNameInput's guard). Reset each time the field opens.
+   */
+  const renamed = useRef(false)
+  useEffect(() => {
+    if (renaming) renamed.current = false
+  }, [renaming])
+  const finishRename = (label: string) => {
+    if (renamed.current) return
+    renamed.current = true
+    onRenamed(label)
+  }
 
   // The row the keys move to, and a log just opened, are brought into view in a list that scrolls
   useEffect(() => {
@@ -456,10 +471,11 @@ function CommandRow({
               className="w-full"
               onKeyDown={(e) => {
                 // An Enter that ends a composition does not save (#181) — the last syllable of a Korean name was dropped
-                if (isPlainEnter(e.nativeEvent)) onRenamed((e.target as HTMLInputElement).value)
-                // Esc is only cleared from `renaming` by the window's listener
+                if (isPlainEnter(e.nativeEvent)) finishRename((e.target as HTMLInputElement).value)
+                // Esc is cleared from `renaming` by the window's listener; the field going away must not save what was typed
+                else if (isPlainEscape(e.nativeEvent)) renamed.current = true
               }}
-              onBlur={(e) => onRenamed(e.target.value)}
+              onBlur={(e) => finishRename(e.target.value)}
             />
           </div>
         ) : (

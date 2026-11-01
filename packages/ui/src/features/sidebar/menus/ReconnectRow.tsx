@@ -1,13 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { machineProblem } from '@cc/core'
-import type { MachineInfo } from '@cc/protocol/client'
 import { useStore } from '../../../store/store.js'
 import { ActionRow } from './ActionRow.jsx'
 import { menuTrigger } from './RowMenu.jsx'
-import { connectAction } from '../../settings/MachinesSection.jsx'
-
-/** An attempt to connect is under way: the link opening, a host being started, or an update holding it */
-const isTrying = (status: MachineInfo['status'] | undefined): boolean => status === 'connecting' || status === 'starting' || status === 'updating'
+import { connectAction, isTrying } from '../../settings/MachinesSection.jsx'
 
 /**
  * Reconnect, first in the menu of a project whose machine is not connected (#1533). The person finds the project, not the
