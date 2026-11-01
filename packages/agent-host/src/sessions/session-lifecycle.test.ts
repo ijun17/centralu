@@ -148,6 +148,18 @@ describe('a process that goes while its session is idle (#1397)', () => {
     expect(s.interruption ?? null).toBeNull()
   })
 
+  // #1829: an update the tool sent after its turn's end read as work (ACP's late `session/update`); with the process gone, nothing else ends it
+  it('ends a turn the session still reads as running, since no process is left to end it', async () => {
+    const id = await newSession()
+    const gone = claude.last
+    gone.emit({ type: 'turn_complete', sessionId: id })
+    gone.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'late' })
+    expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('working')
+    gone.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('waiting_input')
+    expect(events.at(-1)).toEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+  })
+
   it('resumes the conversation on the next message: a new process is started for the same thread', async () => {
     const id = await newSession()
     const gone = claude.last

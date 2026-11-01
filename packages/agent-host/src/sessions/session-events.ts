@@ -266,6 +266,9 @@ export class SessionEvents {
         void from.dispose().catch(() => {})
         this.host.handles.delete(e.sessionId)
         this.host.running.delete(e.sessionId)
+        // The tool said it is idle, so a turn the session still reads as running had its end lost, and no process is left to send one (#1829)
+        const m = this.host.meta.get(e.sessionId)
+        if (m && inTurn(m.state)) this.onEvent({ type: 'state_change', sessionId: e.sessionId, state: 'waiting_input' })
       }
       // A lock error after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread — the same as a crash
       if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
