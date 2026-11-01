@@ -41,7 +41,8 @@ export function runChild(
     const stopFor = (why: NonNullable<RunResult['ended']>) => {
       if (ended || settled) return
       ended = why
-      void os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS).catch(() => {})
+      // Ended because the reader had enough: its group went with it, and a sweep for leftovers would only cost a listing
+      void os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS, { sweep: why !== 'stopped' }).catch(() => {})
     }
     // Not once the program has exited: what it did then is done, and the answer is its own
     const onAbort = () => {
@@ -73,6 +74,7 @@ export function runChild(
       let kept = 0
       return (chunk: Buffer | string) => {
         const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+        if (limit <= 0) return
         if (from === 'head') {
           if (kept >= limit) return
           into.push(b.subarray(0, limit - kept))
@@ -90,13 +92,17 @@ export function runChild(
     }
     child.stdout?.on('data', options.onStdout ? handOver : collect(stdout))
     child.stderr?.on('data', options.stderrKeep ? keep(stderr, options.stderrKeep) : collect(stderr))
-    const result = (code: number | null, signal: NodeJS.Signals | null): RunResult => ({
-      code,
-      signal,
-      stdout: Buffer.concat(stdout),
-      stderr: options.stderrKeep?.from === 'tail' ? Buffer.concat(stderr).subarray(-options.stderrKeep.bytes) : Buffer.concat(stderr),
-      ...(ended ? { ended } : {}),
-    })
+    const result = (code: number | null, signal: NodeJS.Signals | null): RunResult => {
+      const err = Buffer.concat(stderr)
+      const tailBytes = options.stderrKeep?.from === 'tail' ? options.stderrKeep.bytes : undefined
+      return {
+        code,
+        signal,
+        stdout: Buffer.concat(stdout),
+        stderr: tailBytes === undefined ? err : err.subarray(Math.max(0, err.length - tailBytes)),
+        ...(ended ? { ended } : {}),
+      }
+    }
     child.once('error', (error) => {
       if (child.pid === undefined) done(() => reject(error))
     })

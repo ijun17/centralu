@@ -382,9 +382,10 @@ export interface OsProcesses {
   /**
    * Ends a child and everything it started: on POSIX TERM to every group in its tree, then KILL to what is left after
    * `graceMs`; on Windows at once (`taskkill /T /F`). Then sweeps what it left running (its group, or on Windows the
-   * processes it started, by parent links and creation time). Answers how it ended.
+   * processes it started, by parent links and creation time), unless `sweep` is false: for a caller that ended the
+   * tree on purpose and has nothing left to look for. Answers how it ended.
    */
-  stop(child: OsChild, graceMs: number): Promise<OsExit>
+  stop(child: OsChild, graceMs: number, options?: { sweep?: boolean }): Promise<OsExit>
   /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */
   alive(pid: number): boolean
   /**

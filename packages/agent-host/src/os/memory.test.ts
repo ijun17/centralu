@@ -3,7 +3,8 @@ import { CONTRACT, expectedFor, memoryContext, outcome } from './contract.test-h
 import { memoryOs, type MemoryOs, type ProgramContext } from './memory.js'
 import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import type { OsFamily } from './rules.js'
-import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS } from './run.js'
+import type { OsChild } from './port.js'
+import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS, runChild } from './run.js'
 
 /**
  * The in-memory OS (#1599, docs/plans/os-layer.md §7.1) answering as each family does, on whatever OS this runs: the
@@ -391,6 +392,32 @@ describe('processes in memory', () => {
       os.processes.run('says', [], { maxBuffer: 5, stderrKeep: { bytes: 6, from } }).then((r) => [r.stderr.toString(), r.ended])
     expect(await keep('head')).toEqual(['abcdef', undefined])
     expect(await keep('tail')).toEqual(['ghijkl', undefined])
+  })
+
+  it('keeps no stderr at all when asked for no bytes', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/says', (ctx) => void ctx.stderr.write('abcd'))
+    for (const from of ['head', 'tail'] as const)
+      expect((await os.processes.run('says', [], { stderrKeep: { bytes: 0, from } })).stderr.length).toBe(0)
+  })
+
+  it('sweeps what a run left only when it ended the run for a reason of its own, not when the reader had enough', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/says', (ctx) => (ctx.stdout.write('x'), waits(ctx)))
+    const sweeps: Array<boolean | undefined> = []
+    const spy = {
+      processes: { stop: (child: OsChild, grace: number, o?: { sweep?: boolean }) => (sweeps.push(o?.sweep), os.processes.stop(child, grace, o)) },
+      clock: os.clock,
+      files: os.files,
+    }
+    const start = (stdio: ['pipe' | 'ignore', 'pipe' | number, 'pipe']) => os.processes.start('says', [], { stdio })
+    const reader = runChild(spy, start, { onStdout: () => true })
+    await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
+    expect((await reader).ended).toBe('stopped')
+    const slow = runChild(spy, start, { timeoutMs: 10 })
+    await os.clock.advance(10 + RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
+    expect((await slow).ended).toBe('timeout')
+    expect(sweeps).toEqual([false, true])
   })
 
   it("a run's stdout file is made readable by its owner alone (0600)", async () => {
