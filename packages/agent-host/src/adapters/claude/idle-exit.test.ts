@@ -109,7 +109,7 @@ describe('a Claude process that exits on its own', () => {
   it('is a crash with a quiet input read but not answered: it is lost with the process', async () => {
     const events: NormalizedEvent[] = []
     const handle = await idleAfterTurn(events)
-    handle.nudge!('a note')
+    void handle.nudge!('a note')
     await tick()
     wire.end()
     await exitSaid(events)
