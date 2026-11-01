@@ -56,7 +56,7 @@ function toSnap(r: {
 type Group = {
   live: ToolName[] | null
   /**
-   * The tools that are installed but signed out (owner, 2026-10-27): each gets a donut with a solid ring in the signal ink, so the same state
+   * The tools that are installed but signed out (owner, 2026-10-27): each gets a donut with a dashed ring in the signal ink (#1823), so the same state
    * looks the same for every tool. `tools` is what detect said of them, for the panel's sign-in line
    */
   signedOut: ToolName[]
@@ -529,7 +529,7 @@ function Donut({
   /** The linked machine it is for; null for this computer */
   machine: string | null
   snap?: Snap
-  /** Installed but signed out (owner, 2026-10-27): a solid ring in the signal ink, no reading */
+  /** Installed but signed out (owner, 2026-10-27): a dashed ring in the signal ink (#1823), no reading */
   signedOut?: boolean
   /** Came after the bar was first drawn: fades in. `leaving`: on its way out, still drawn for its exit */
   entering?: boolean
