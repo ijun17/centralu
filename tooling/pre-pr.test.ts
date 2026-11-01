@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failedTests, failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeModulesDirs, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeModulesDirs, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -111,11 +111,6 @@ describe('what pre-pr reads', () => {
     const tests = vitestTests({ testResults: [{ name: join(root, 'a', 'x.test.ts'), assertionResults: [{ ancestorTitles: ['outer'], title: 'one', status: 'passed' }, { ancestorTitles: [], title: 'two', status: 'failed' }, { ancestorTitles: [], title: 'three', status: 'passed' }] }] }, root)
     expect(tests[0]).toEqual({ file: 'a/x.test.ts', name: 'outer > one', status: 'passed' })
     expect(passingNewTests({ reverted: tests, base: [{ file: 'a/x.test.ts', name: 'three', status: 'passed' }] })).toEqual([tests[0]])
-  })
-
-  it('counts only the tests that failed as failing: a skipped or todo test is neither (#1806)', () => {
-    const t = (status: string) => ({ file: 'a.test.ts', name: status, status })
-    expect(failedTests(['passed', 'failed', 'skipped', 'todo', 'pending', 'failed'].map(t)).map((x: { status: string }) => x.status)).toEqual(['failed', 'failed'])
   })
 
   it('mirrors the checkout\'s dependencies into a worktree with the same lockfile, workspace packages pointing at the worktree, and unlinks them without touching the checkout (#1254)', () => {
@@ -332,6 +327,21 @@ describe('pre-pr on a stack of two pull requests', () => {
     // The changed file ran at the head's version, then at the base's to learn which tests were there
     expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs'], ['src/a.test.mjs']])
     expect(r.ok).toBe(false)
+  })
+
+  it('counts a failed test and a file that did not load as failing without the change, a skipped test as neither (#1806)', () => {
+    const fake = fakeRunners()
+    const vitest = (dir: string, files: string[]) => ({
+      testResults: files.map((file) => ({
+        name: join(dir, file),
+        status: file === 'src/a.test.mjs' ? 'failed' : 'passed',
+        message: 'beforeAll threw',
+        // The reverted tree: a.test.mjs did not load, so its tests are skipped; b.test.mjs has one failure and one skipped test
+        assertionResults: file === 'src/a.test.mjs' ? [{ title: 'one', status: 'skipped' }, { title: 'two', status: 'skipped' }] : [{ title: 'x', status: 'failed', failureMessages: ['no'] }, { title: 'y', status: 'skipped' }, { title: 'z', status: 'todo' }],
+      })),
+    })
+    const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest } })
+    expect(r.notes).toContain('2 test(s) of 2 changed file(s) fail without the change; no new test passes without it.')
   })
 
   it('answers the pull request\'s risk tier by the paths it changes over its base (#1259)', () => {
