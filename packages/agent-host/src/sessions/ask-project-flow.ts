@@ -1,6 +1,7 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { tryAgainAfter } from '../links/machine-reach.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
@@ -219,7 +220,7 @@ export class AskProjectFlow {
       const slash = wanted.indexOf('/')
       const prefix = slash > 0 ? wanted.slice(0, slash).trim().toLowerCase() : null
       const down = awayAll.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
-      if (down) return { ok: false, error: `${down.machine} ${awayPhrase(down.why)}, so "${wanted}" cannot be asked there. Try again once its link is back.` }
+      if (down) return { ok: false, error: `${down.machine} ${awayPhrase(down.why)}, so "${wanted}" cannot be asked there. ${tryAgainAfter(down.why)}` }
       const others = [
         ...projects.filter((p) => p.id !== caller.projectId).map((p) => (elsewhere ? `${p.name} (this computer)` : p.name)),
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
@@ -397,7 +398,7 @@ export class AskProjectFlow {
       // A task already given there: the machine is down, and what became of it is the answer, not a refusal to ask
       const given = [...this.linkedAsks.values()].filter((a) => a.callerId === callerId && a.project === project && (!opts.session || a.sessionId === opts.session.trim()))
       if (!opts.task && given.length === 1) return this.awaitLinkedAsk(given[0]!, reader, signal)
-      return { ok: false, error: `${target.machine} ${awayPhrase(target.away)}, so ${label} cannot be asked. Try again once its link is back.` }
+      return { ok: false, error: `${target.machine} ${awayPhrase(target.away)}, so ${label} cannot be asked. ${tryAgainAfter(target.away)}` }
     }
     const listed = await reader.projectSessions(target)
     if (!listed.ok) return listed
@@ -510,7 +511,7 @@ export class AskProjectFlow {
   ): Promise<AskProjectResult> {
     const label = `${target.name} on ${target.hub}`
     const project = `${target.hubId}/${target.name}`
-    if (target.away) return { ok: false, error: `${target.hub} ${awayPhrase(target.away)}, so ${label} cannot be asked. Try again once its link is back.` }
+    if (target.away) return { ok: false, error: `${target.hub} ${awayPhrase(target.away)}, so ${label} cannot be asked. ${tryAgainAfter(target.away)}` }
     const prefix = `${target.hubId}.`
     const session = opts.session?.trim()
     const r = await hubs.ask(

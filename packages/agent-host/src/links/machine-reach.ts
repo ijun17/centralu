@@ -23,3 +23,6 @@ export const awaySentence = (m: Pick<RoutedMachine, 'name' | 'whyDown' | 'waitsF
 /** The same for the window, which a person reads: for a machine they disconnected, where to connect it (#1341) */
 export const windowAwaySentence = (m: Pick<RoutedMachine, 'name' | 'whyDown' | 'waitsForPerson'>, tail: Tail): string =>
   m.waitsForPerson ? `${m.name} is not connected. Connect it in Settings → Machines, then try again.` : awaySentence(m, tail)
+
+/** How a refusal about a machine that is `away` (its reason, as `awayPhrase` reads it) ends: a machine that waits for the person is not waited for */
+export const tryAgainAfter = (away: string): string => (away === NOT_CONNECTED ? 'Try again once the person has connected it.' : 'Try again once its link is back.')

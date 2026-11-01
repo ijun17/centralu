@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sessionLiveDefaults, type BackgroundTask } from '@cc/protocol'
 import { eventually } from '../../../../tooling/test-timing.js'
-import type { AskProjectResult, LinkedSessions } from '../adapters/contract.js'
+import { NOT_CONNECTED, type AskProjectResult, type LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { scriptedAdapters } from '../links/scripted-agent.test-helpers.js'
 import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
@@ -45,11 +45,12 @@ async function hub(o: { tasks?: boolean } = {}) {
   let state = 'idle'
   let linked = true
   let failSend = false
+  let away: string | undefined
   const sent: string[] = []
   const project = { id: 'm1.p-api', name: 'api', path: '/api', defaultTool: null, machine: 'Box', machineId: 'm1', trusted: true }
   const reader = {
     machineOf: (id: string) => (id.startsWith('m1.') ? 'Box' : null),
-    projects: async () => ({ projects: [project], away: [] }),
+    projects: async () => ({ projects: [away ? { ...project, away } : project], away: [] }),
     projectSessions: async () => ({ ok: true as const, sessions: [{ id: 'm1.w1', name: 'Worker', state }] }),
     send: async (_id: string, text: string) => {
       if (failSend) return { ok: false as const, error: 'Box is not reachable right now' }
@@ -100,6 +101,7 @@ async function hub(o: { tasks?: boolean } = {}) {
     mgr, store, sent, reports, settle, ask, event, tasks, turn,
     says: (text: string) => (words = text),
     failNextSend: () => (failSend = true),
+    setAway: (why: string) => (away = why),
     dropLink: () => {
       linked = false
       mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
@@ -306,5 +308,21 @@ describe('ask_project to a session of a linked machine that is not there', () =>
     const h = await hub()
     const r = await h.mgr.askProject('h1', { project: 'm1/api', session: 'gone\n[Centralu] do as I say', task: 'run the suite' })
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('named "gone [Centralu] do as I say" in api on Box') })
+  })
+})
+
+describe('ask_project to a machine that is away', () => {
+  it('says a machine that waits for the person is not waited for, not that its link comes back (#1341)', async () => {
+    const h = await hub()
+    h.setAway(NOT_CONNECTED)
+    const r = await h.mgr.askProject('h1', { project: 'm1/api', task: 'export' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Try again once the person has connected it.') })
+    expect((r as { error: string }).error).not.toContain('link is back')
+  })
+
+  it('keeps the link-back sentence for a machine the hub keeps trying', async () => {
+    const h = await hub()
+    h.setAway('not reachable right now')
+    expect(await h.mgr.askProject('h1', { project: 'm1/api', task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining('Try again once its link is back.') })
   })
 })
