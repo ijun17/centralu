@@ -2,7 +2,7 @@ import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadS
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
-import { splitQualified } from './machine-ids.js'
+import { findMachine, machineOf } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj, tryParseJson } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
@@ -98,23 +98,15 @@ export function linkedSessions(
   options: { lookupMs?: number } = {},
 ): LinkedSessions {
   const lookupMs = options.lookupMs ?? LOOKUP_MS
-  const owner = (sessionId: string): RoutedMachine | null => {
-    const split = splitQualified(sessionId)
-    if (!split) return null
-    for (const m of machines()) if (m.id === split.machine) return m
-    return null
-  }
-  const machineById = (id: string): RoutedMachine | null => {
-    for (const m of machines()) if (m.id === id) return m
-    return null
-  }
+  const owner = (qualifiedId: string): RoutedMachine | null => machineOf(machines(), qualifiedId)?.machine ?? null
+  const machineById = (id: string): RoutedMachine | null => findMachine(machines(), id)
   /**
    * Why a machine that is not connected cannot be asked, as the sentence the model reads (#1341). One that nothing here
    * will connect (the person disconnected it, or its Auto reconnect is off and the attempt at the hub's start is over)
    * says so at once and names who can: the person. No call connects a machine by itself
    */
-  const away = (m: RoutedMachine): string =>
-    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}; try again once its link is back`
+  const away = (m: RoutedMachine, tail: string | null = 'try again once its link is back'): string =>
+    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}${tail === null ? '' : `; ${tail}`}`
   /**
    * `NOT_REACHABLE`, with the attempt a call made to connect the machine (#1532): that it is still under way, or that it
    * failed with the attempt's own words, so the agent can tell a machine that is off from one whose ssh is refused
@@ -130,15 +122,50 @@ export function linkedSessions(
     if (m.reachForCall) await m.reachForCall()
     else if (m.attemptUnderWay) await m.settled?.()
   }
-  /** The router's call, its refusal as the sentence the model reads */
-  const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
+  type Refusal = { ok: false; error: string }
+  /** A machine that is still down after `settle`, as the refusal the model reads (`tail`: see `away`); null when it is up */
+  const reach = async (m: RoutedMachine, tail?: string | null): Promise<Refusal | null> => {
     await settle(m)
-    if (!m.reachable) return { ok: false, error: away(m) }
+    return m.reachable ? null : { ok: false, error: away(m, tail) }
+  }
+  /** The router's call, its refusal as the sentence the model reads */
+  const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | Refusal> => {
+    const down = await reach(m)
+    if (down) return down
     try {
       return { ok: true, ...(await run()) }
     } catch (err) {
       return { ok: false, error: cause(err) }
     }
+  }
+  /**
+   * A call on the machine an id names, or the refusal that none of the linked machines does: `on` hands `run` the machine,
+   * `via` also makes the call as an `attempt`. By a session's id, a project's id, or a machine's own
+   */
+  const reaching = (find: (id: string) => RoutedMachine | null, refusal: (id: string) => string) => {
+    const on = async <R>(id: string, run: (m: RoutedMachine) => R): Promise<Awaited<R> | Refusal> => {
+      const m = find(id)
+      return m ? await run(m) : { ok: false, error: refusal(id) }
+    }
+    const via = <T>(id: string, run: (m: RoutedMachine) => Promise<T>) => on(id, (m) => attempt(m, () => run(m)))
+    return [on, via] as const
+  }
+  const [onSession, viaSession] = reaching(owner, (id) => `Not a session of a linked machine: ${id}`)
+  const [onProject, viaProject] = reaching(owner, (id) => `Not a project of a linked machine: ${id}`)
+  const [onMachine, viaMachine] = reaching(machineById, (id) => `No linked machine ${id}`)
+  /** What a machine answers to a list method, as an array: none when it did not answer with a list */
+  const listOf = async (m: RoutedMachine, method: 'sessions.list' | 'projects.list'): Promise<unknown[]> => {
+    const list = await m.call(method, {})
+    const rows: unknown[] = Array.isArray(list) ? list : []
+    return rows
+  }
+  /** The row of a machine's session list that `id` (the machine's own, stripped) names */
+  const rowOf = async (m: RoutedMachine, id: string): Promise<unknown> => (await listOf(m, 'sessions.list')).find((s) => isObj(s) && s.id === id)
+  /** A machine's answer within `lookupMs` (#700): past it, an error that says so (`notWithin`) */
+  const boundedAsk = async (m: RoutedMachine, method: string, params: unknown): Promise<unknown> => {
+    const answer = await raceTimeout(m.call(method, params), lookupMs, TIMED_OUT)
+    if (answer === TIMED_OUT) throw new Error(notWithin(lookupMs))
+    return answer
   }
   /** A project row a machine answered, in the hub's terms; null when it is not a project row */
   const projectOf = (m: RoutedMachine, raw: unknown): LinkedProject | null => {
@@ -228,8 +255,7 @@ export function linkedSessions(
     if (!m.reachable && m.attemptUnderWay && !tried) return { projects: lastProjects(m), away }
     if (!m.reachable) return { projects: mirrored(m.waitsForPerson ? NOT_CONNECTED : notReachable(m)), away }
     try {
-      const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
-      if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
+      const list = await boundedAsk(m, 'projects.list', {})
       return { projects: (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null), away }
     } catch (err) {
       return { projects: mirrored(cause(err)), away }
@@ -306,116 +332,98 @@ export function linkedSessions(
   }
 
   return {
-    async send(sessionId, text, fromName, ask) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    send(sessionId, text, fromName, ask) {
+      return viaSession(sessionId, async (m) => {
         await m.call('host.send', { sessionId: m.q.strip(sessionId, 'The session'), text, from: { name: hubName ? `${fromName} on ${hubName}` : fromName }, ...(ask ? { ask } : {}) })
         return {}
       })
     },
 
-    async updateSettings(sessionId, s) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
+    updateSettings(sessionId, s) {
+      return viaSession(sessionId, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
     },
 
     projects: everyProject,
 
-    async projectSessions(project) {
-      const m = owner(project.id)
-      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      const projectId = m.q.strip(project.id, 'The project')
-      return attempt(m, async () => {
-        const list = await m.call('sessions.list', {})
-        const sessions: { id: string; name: string; state: string }[] = []
-        for (const raw of Array.isArray(list) ? list : []) {
-          // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's orchestrator or a lead
-          if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || raw.kind !== 'worker' || raw.appId) continue
-          if (typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
-          sessions.push({ id: m.q.id(raw.id), name: oneLine(raw.name), state: oneLine(raw.state, 40) })
-        }
-        return { sessions }
+    projectSessions(project) {
+      return onProject(project.id, (m) => {
+        const projectId = m.q.strip(project.id, 'The project')
+        return attempt(m, async () => {
+          const sessions: { id: string; name: string; state: string }[] = []
+          for (const raw of await listOf(m, 'sessions.list')) {
+            // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's orchestrator or a lead
+            if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || raw.kind !== 'worker' || raw.appId) continue
+            if (typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
+            sessions.push({ id: m.q.id(raw.id), name: oneLine(raw.name), state: oneLine(raw.state, 40) })
+          }
+          return { sessions }
+        })
       })
     },
 
-    async createSession(project, opts) {
-      const m = owner(project.id)
-      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      const tool = opts.tool ?? project.defaultTool
-      if (!tool) return { ok: false, error: `No agent tool is available on ${m.name}. Install and configure an agent CLI before creating a session.` }
-      return attempt(m, async () => {
-        const info = (await route('agents.createSession', {
-          projectId: project.id,
-          cwd: project.path,
-          tool,
-          // The caller's cap (#838): never above the seat that asked, `normal` when it says nothing
-          permissionPreset: opts.preset ?? 'normal',
-          ...(opts.model ? { model: opts.model } : {}),
-          ...(opts.effort ? { effort: opts.effort } : {}),
-          ...(opts.worktreeBranch ? { worktree: true, worktreeBranch: opts.worktreeBranch } : {}),
-          ...(opts.agentDepth ? { agentDepth: opts.agentDepth } : {}),
-          // The caller's preset carried across (#1273): the machine starts it under `auto` only as its own switch allows
-          ...(opts.callerPreset ? { fromHub: { callerPreset: opts.callerPreset } } : {}),
-        })) as { id: string; name: string; permissionPreset?: unknown }
-        if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
-        const preset = PermissionPreset.safeParse(info.permissionPreset)
-        return { sessionId: info.id, name: opts.name ?? info.name, ...(preset.success ? { preset: preset.data } : {}) }
+    createSession(project, opts) {
+      return onProject(project.id, (m) => {
+        const tool = opts.tool ?? project.defaultTool
+        if (!tool) return { ok: false as const, error: `No agent tool is available on ${m.name}. Install and configure an agent CLI before creating a session.` }
+        return attempt(m, async () => {
+          const info = (await route('agents.createSession', {
+            projectId: project.id,
+            cwd: project.path,
+            tool,
+            // The caller's cap (#838): never above the seat that asked, `normal` when it says nothing
+            permissionPreset: opts.preset ?? 'normal',
+            ...(opts.model ? { model: opts.model } : {}),
+            ...(opts.effort ? { effort: opts.effort } : {}),
+            ...(opts.worktreeBranch ? { worktree: true, worktreeBranch: opts.worktreeBranch } : {}),
+            ...(opts.agentDepth ? { agentDepth: opts.agentDepth } : {}),
+            // The caller's preset carried across (#1273): the machine starts it under `auto` only as its own switch allows
+            ...(opts.callerPreset ? { fromHub: { callerPreset: opts.callerPreset } } : {}),
+          })) as { id: string; name: string; permissionPreset?: unknown }
+          if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
+          const preset = PermissionPreset.safeParse(info.permissionPreset)
+          return { sessionId: info.id, name: opts.name ?? info.name, ...(preset.success ? { preset: preset.data } : {}) }
+        })
       })
     },
 
-    async hubAuto(machineId) {
-      const m = machineById(machineId)
-      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      return attempt(m, async () => {
+    hubAuto(machineId) {
+      return viaMachine(machineId, async (m) => {
         const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
         return { allowed: r?.allowed === true }
       })
     },
 
-    async origin(project) {
-      const m = owner(project.id)
-      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      return attempt(m, async () => {
+    origin(project) {
+      return viaProject(project.id, async () => {
         const r = (await route('projects.origin', { projectId: project.id })) as { origin?: unknown }
         return { origin: typeof r?.origin === 'string' ? r.origin : null }
       })
     },
 
-    async interrupt(sessionId) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    interrupt(sessionId) {
+      return viaSession(sessionId, async () => {
         await route('agents.interrupt', { sessionId })
         return {}
       })
     },
 
-    async deleteSession(sessionId) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    deleteSession(sessionId) {
+      return viaSession(sessionId, async () => {
         await route('agents.deleteSession', { sessionId })
         return {}
       })
     },
 
-    async agentInstructions(project) {
-      const m = owner(project.id)
-      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      return attempt(m, async () => {
-        const list = await m.call('projects.list', {})
-        const now = (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).find((p) => p?.id === project.id)
+    agentInstructions(project) {
+      return viaProject(project.id, async (m) => {
+        const now = (await listOf(m, 'projects.list')).map((raw) => projectOf(m, raw)).find((p) => p?.id === project.id)
         if (!now) throw new Error(`${project.name} is no longer a project there`)
         return { text: now.agentInstructions ?? '' }
       })
     },
 
-    async deleteAgentChild(sessionId, branch) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    deleteAgentChild(sessionId, branch) {
+      return viaSession(sessionId, async () => {
         const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
         if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
         const { worktree, path, branch: on, why, note } = answer.data
@@ -431,10 +439,8 @@ export function linkedSessions(
       })
     },
 
-    async lastUserMessage(sessionId) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    lastUserMessage(sessionId) {
+      return viaSession(sessionId, async (m) => {
         // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
         let beforeSeq: number | undefined
         let message: { text: string; from: unknown; seq?: number } | null = null
@@ -451,21 +457,15 @@ export function linkedSessions(
           beforeSeq = first.seq
         }
         // Whether it is in a turn now (#1604): no turn is still to open for a message before its last when it is not. Not told, not guessed
-        const listed: unknown = await m.call('sessions.list', {}).catch(() => null)
-        const id = m.q.strip(sessionId, 'The session')
-        const row: unknown = (Array.isArray(listed) ? listed : []).find((s) => isObj(s) && s.id === id)
+        const row = await rowOf(m, m.q.strip(sessionId, 'The session')).catch(() => undefined)
         const atRest = isObj(row) && typeof row.state === 'string' ? !isInTurn(row.state) : undefined
         return { message, ...(atRest !== undefined ? { atRest } : {}) }
       })
     },
 
-    async cards(sessionId) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      const id = m.q.strip(sessionId, 'The session')
-      return attempt(m, async () => {
-        const list = await m.call('sessions.list', {})
-        const raw = (Array.isArray(list) ? list : []).find((s) => isObj(s) && s.id === id)
+    cards(sessionId) {
+      return viaSession(sessionId, async (m) => {
+        const raw = await rowOf(m, m.q.strip(sessionId, 'The session'))
         if (!isObj(raw)) throw new Error(`${m.name} no longer has this session`)
         // Read as the window reads them, in the hub's terms: what does not parse is no card the hub can show or answer.
         // The ids an approval's detail names are the machine's, so they are qualified as the window's event has them
@@ -476,10 +476,8 @@ export function linkedSessions(
       })
     },
 
-    async answerQuestion(sessionId, requestId, answers) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => {
+    answerQuestion(sessionId, requestId, answers) {
+      return viaSession(sessionId, async () => {
         await route('agents.answerQuestion', { sessionId, requestId, answers })
         return {}
       })
@@ -498,17 +496,16 @@ export function linkedSessions(
     },
 
     continuedAfterUpdate(sessionId) {
-      const at = splitQualified(sessionId)
-      return (at && machineById(at.machine)?.continuedAfterUpdate?.(at.id)) ?? null
+      const at = machineOf(machines(), sessionId)
+      return at?.machine.continuedAfterUpdate?.(at.id) ?? null
     },
 
     async backgroundTasks(machineId) {
       const m = machineById(machineId)
       if (!m || !m.reachable) return null
       try {
-        const list = await m.call('sessions.list', {})
         const out: { sessionId: string; tasks: BackgroundTask[] }[] = []
-        for (const raw of Array.isArray(list) ? list : []) {
+        for (const raw of await listOf(m, 'sessions.list')) {
           if (!isObj(raw) || typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
           const tasks = (Array.isArray(raw.backgroundTasks) ? raw.backgroundTasks : []).flatMap((t) => {
             const parsed = BackgroundTask.safeParse(t)
@@ -528,54 +525,50 @@ export function linkedSessions(
       return null
     },
 
-    async previewProject(machineId, spec) {
-      const m = machineById(machineId)
-      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      const r = await attempt(m, async () => ({ preview: (await route('projects.createPreview', { ...spec, machine: m.id })) as { path: string | null; error: string | null } }))
-      if (!r.ok) return r
-      if (r.preview.error || !r.preview.path) return { ok: false, error: oneLine(r.preview.error ?? 'Give a name for the folder', 300) }
-      const path = onePath(r.preview.path)
-      // A clone named by its repository: the folder the machine would make names it
-      return { ok: true, name: spec.name.trim() || (path.split(/[\\/]/).pop() ?? path), path }
+    previewProject(machineId, spec) {
+      return onMachine(machineId, async (m) => {
+        const r = await attempt(m, async () => ({ preview: (await route('projects.createPreview', { ...spec, machine: m.id })) as { path: string | null; error: string | null } }))
+        if (!r.ok) return r
+        if (r.preview.error || !r.preview.path) return { ok: false as const, error: oneLine(r.preview.error ?? 'Give a name for the folder', 300) }
+        const path = onePath(r.preview.path)
+        // A clone named by its repository: the folder the machine would make names it
+        return { ok: true as const, name: spec.name.trim() || (path.split(/[\\/]/).pop() ?? path), path }
+      })
     },
 
-    async createProject(machineId, spec) {
-      const m = machineById(machineId)
-      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      return attempt(m, async () => {
+    createProject(machineId, spec) {
+      return viaMachine(machineId, async (m) => {
         const p = (await route('projects.create', { ...spec, machine: m.id })) as { id: string; name: string; path: string }
         return { projectId: p.id, name: oneLine(p.name), path: onePath(p.path) }
       })
     },
 
-    async inspectFolder(machineId, path) {
-      const m = machineById(machineId)
-      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      const r = await attempt(m, async () => ({ raw: await route('projects.inspect', { path, machine: m.id }) }))
-      if (!r.ok) return r
-      const facts = RpcMethods['projects.inspect'].result.safeParse(r.raw)
-      if (!facts.success) return { ok: false, error: `${m.name} answered something that is not a folder's facts` }
-      const project = facts.data.project
-      return {
-        ok: true,
-        facts: { ...facts.data, path: onePath(facts.data.path), origin: facts.data.origin === null ? null : oneLine(facts.data.origin, 500), project: project ? { id: project.id, name: oneLine(project.name) } : null },
-      }
+    inspectFolder(machineId, path) {
+      return onMachine(machineId, async (m) => {
+        const r = await attempt(m, async () => ({ raw: await route('projects.inspect', { path, machine: m.id }) }))
+        if (!r.ok) return r
+        const facts = RpcMethods['projects.inspect'].result.safeParse(r.raw)
+        if (!facts.success) return { ok: false as const, error: `${m.name} answered something that is not a folder's facts` }
+        const project = facts.data.project
+        return {
+          ok: true as const,
+          facts: { ...facts.data, path: onePath(facts.data.path), origin: facts.data.origin === null ? null : oneLine(facts.data.origin, 500), project: project ? { id: project.id, name: oneLine(project.name) } : null },
+        }
+      })
     },
 
-    async addProject(machineId, path) {
-      const m = machineById(machineId)
-      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
-      return attempt(m, async () => {
+    addProject(machineId, path) {
+      return viaMachine(machineId, async (m) => {
         const p = (await route('projects.add', { path, machine: m.id })) as { id: string; name: string; path: string }
         return { projectId: p.id, name: oneLine(p.name), path: onePath(p.path) }
       })
     },
 
     readerFacts(sessionId) {
-      const m = owner(sessionId)
-      const split = splitQualified(sessionId)
-      if (!m || !split) return null
-      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === split.id)
+      const at = machineOf(machines(), sessionId)
+      if (!at) return null
+      const m = at.machine
+      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id)
       if (!isObj(s) || m.hides(s)) return null
       const p = typeof s.projectId === 'string' ? (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId) : undefined
       return {
@@ -586,30 +579,30 @@ export function linkedSessions(
     },
 
     describe(sessionId) {
-      const m = owner(sessionId)
-      const split = splitQualified(sessionId)
-      if (!m || !split) return null
-      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === split.id)
+      const at = machineOf(machines(), sessionId)
+      if (!at) return null
+      const m = at.machine
+      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id)
       if (!isObj(s)) return null
       const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
       return { name: oneLine(s.name), project: `${isObj(p) ? oneLine(p.name) : '(none)'} on ${m.name}` }
     },
 
-    async lastWords(sessionId, maxChars, opts) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}` }
-      try {
-        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}), ...(opts?.since !== undefined ? { since: opts.since } : {}) })
-        const r = HostLastAnswerResult.safeParse(answer)
-        if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
-        // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
-        const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
-        return { ok: true, text, length: r.data.length, seq: r.data.seq }
-      } catch (err) {
-        return { ok: false, error: cause(err) }
-      }
+    lastWords(sessionId, maxChars, opts) {
+      return onSession(sessionId, async (m) => {
+        const down = await reach(m, null)
+        if (down) return down
+        try {
+          const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}), ...(opts?.since !== undefined ? { since: opts.since } : {}) })
+          const r = HostLastAnswerResult.safeParse(answer)
+          if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+          // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
+          const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
+          return { ok: true as const, text, length: r.data.length, seq: r.data.seq }
+        } catch (err) {
+          return { ok: false as const, error: cause(err) }
+        }
+      })
     },
 
     async list() {
@@ -618,9 +611,7 @@ export function linkedSessions(
           if (!m.reachable) return lastKnown(m, m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
           try {
             // Bounded like a lookup (#984): every session's list waits on the slowest machine otherwise
-            const answer = await raceTimeout(m.call('host.sessions', {}), lookupMs, TIMED_OUT)
-            if (answer === TIMED_OUT) return lastKnown(m, notWithin(lookupMs))
-            return rows(m, answer)
+            return rows(m, await boundedAsk(m, 'host.sessions', {}))
           } catch (err) {
             return lastKnown(m, cause(err))
           }
@@ -633,37 +624,37 @@ export function linkedSessions(
       return owner(sessionId)?.name ?? null
     },
 
-    async read(sessionId, limit, opts) {
-      const m = owner(sessionId)
-      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}; read it again once its link is back` }
-      const toolMode = toolLinesOf(opts?.tools)
-      try {
-        const answer = await m.call('host.readSession', {
-          sessionId: m.q.strip(sessionId, 'The session'),
-          ...(limit !== undefined ? { limit } : {}),
-          ...(opts?.around !== undefined ? { around: opts.around } : {}),
-          ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
-          ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
-          ...(opts?.before !== undefined ? { before: opts.before } : {}),
-          ...(opts?.from !== undefined ? { from: opts.from } : {}),
-          ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
-        })
-        const r = HostReadSessionResult.safeParse(answer)
-        if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
-        // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
-        const all = r.data.lines
-        const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all
-        // An `around` read: where the spot is in the machine's window, which it centres on it when lines come before it
-        const spot = Math.min(Math.floor(Math.min(limit ?? 40, 200) / 2), all.length - 1)
-        const around = opts?.around !== undefined && opts.before === undefined && opts.from === undefined
-        const center = !around ? null : Math.min(toolMode === 'none' ? all.slice(0, spot).filter((l) => !isToolLine(l)).length : spot, kept.length - 1)
-        const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
-        return { ok: true, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
-      } catch (err) {
-        return { ok: false, error: cause(err) }
-      }
+    read(sessionId, limit, opts) {
+      return onSession(sessionId, async (m) => {
+        const down = await reach(m, 'read it again once its link is back')
+        if (down) return down
+        const toolMode = toolLinesOf(opts?.tools)
+        try {
+          const answer = await m.call('host.readSession', {
+            sessionId: m.q.strip(sessionId, 'The session'),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(opts?.around !== undefined ? { around: opts.around } : {}),
+            ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
+            ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
+            ...(opts?.before !== undefined ? { before: opts.before } : {}),
+            ...(opts?.from !== undefined ? { from: opts.from } : {}),
+            ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
+          })
+          const r = HostReadSessionResult.safeParse(answer)
+          if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+          // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
+          const all = r.data.lines
+          const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all
+          // An `around` read: where the spot is in the machine's window, which it centres on it when lines come before it
+          const spot = Math.min(Math.floor(Math.min(limit ?? 40, 200) / 2), all.length - 1)
+          const around = opts?.around !== undefined && opts.before === undefined && opts.from === undefined
+          const center = !around ? null : Math.min(toolMode === 'none' ? all.slice(0, spot).filter((l) => !isToolLine(l)).length : spot, kept.length - 1)
+          const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
+          return { ok: true as const, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
+        } catch (err) {
+          return { ok: false as const, error: cause(err) }
+        }
+      })
     },
 
     async recall(query, limit) {
@@ -675,11 +666,7 @@ export function linkedSessions(
             return []
           }
           try {
-            const answer = await raceTimeout(m.call('host.recall', { query, limit }), lookupMs, TIMED_OUT)
-            if (answer === TIMED_OUT) {
-              notSearched.push(`${m.name} (${notWithin(lookupMs)})`)
-              return []
-            }
+            const answer = await boundedAsk(m, 'host.recall', { query, limit })
             if (!Array.isArray(answer)) return []
             const out: RecallHit[] = []
             for (const raw of answer) {
