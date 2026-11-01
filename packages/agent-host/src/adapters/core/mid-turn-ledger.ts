@@ -93,20 +93,13 @@ export class MidTurnLedger {
     return receipt.done
   }
 
-  /** A receipt for an input the wire writes itself (Claude); `id` as for `sendTracked` */
+  /** A receipt for an input the wire writes itself (Claude); `id` as for `sendTracked`. `accept`: the tool took it */
   track(observer?: InputObserver, id?: string): InputReceipt {
     return this.receipts.create(observer, id !== undefined && isUuid(id) ? id : undefined)
   }
-
-  /** The tool took the input (Claude: a turn ran for it) */
-  accept(id: string): void {
-    this.receipts.accept(id)
-  }
-
+  accept(id: string): void { this.receipts.accept(id) }
   /** How many tracked inputs wait for their end */
-  get tracking(): number {
-    return this.receipts.size
-  }
+  get tracking(): number { return this.receipts.size }
 
   /** Every tracked input fails, and nothing is stopped (the turn already failed): the ids that did */
   failTracked(reason: Error): string[] {
@@ -116,9 +109,7 @@ export class MidTurnLedger {
   }
 
   /** A turn runs: one the tool started, or one an input of ours started */
-  get turnRunning(): boolean {
-    return this.running !== null
-  }
+  get turnRunning(): boolean { return this.running !== null }
 
   /** Written on a later tick, as a message sent then always was: a Stop in the same tick keeps a tracked one from going */
   private enqueue(input: MidTurnInput): void {
@@ -274,9 +265,8 @@ export class MidTurnLedger {
   }
 
   /**
-   * Waits for the tool to confirm a Stop of the running turn under the wire's bound (none: no wait), saying so once the bound
-   * passes. A second Stop while the first waits joins its wait: one bound, and one confirmation ends both. A Stop after the
-   * bound was said starts it again on the same wait, and an answer to the first still confirms it
+   * Waits for the tool to confirm a Stop under the wire's bound (none: no wait). A second Stop joins the wait (one bound, one
+   * confirmation); one after the bound was said starts it again on the same wait, which an answer to the first still confirms
    */
   private awaitStop(): StopWait | null {
     const bound = this.wire.stop?.bound

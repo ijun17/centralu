@@ -66,10 +66,7 @@ const MID_TURN_READ_GAP_MS = 2_000
 export class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: ClaudeInput[] = []
-  /**
-   * The turns, the input receipts, the Stop and the exit (`MidTurnLedger`, docs/plans/session-core.md §4.3): a turn runs from the
-   * message that starts it, or the CLI's own start, to its result
-   */
+  /** The turns (from the message or the CLI's own start to the result), the receipts, the Stop and the exit (§4.3 of session-core.md) */
   private readonly ledger: MidTurnLedger
   /** Whether the Stop being asked also cancels what the SDK holds (`cancel_queued`): when a tracked input waits */
   private cancelQueued = false
@@ -147,11 +144,8 @@ export class ClaudeSession implements SessionHandle {
     this.ledger = new MidTurnLedger(sessionId, (e) => this.emit(e), {
       label: 'Claude Code',
       interrupt: () => this.askInterrupt(),
-      /*
-       * **A running turn is said stopped once the CLI says so**: the interrupt's answer or the stopped turn's result, whichever
-       * comes first. Said at once, a rejected interrupt showed the turn as stopped while the CLI kept working. The CLI answers a
-       * control request as it reads it, mid-turn or not, so no answer within `stopConfirmMs` means the request is lost
-       */
+      // Said stopped once the CLI says so (said at once, a rejected interrupt showed a working turn as stopped); the CLI answers a
+      // control request as it reads it, so no answer within `stopConfirmMs` means the request is lost
       stop: { byAnswer: true, bound: { ms: launch.stopConfirmMs, notice: (s) => `Claude Code has not confirmed the stop after ${s} s. The turn is still running.` } },
       // A refusal makes the turn's own ending its own again (the normalizer's `stopping`)
       stopRefused: () => this.stream.stopFailed(),
@@ -353,11 +347,7 @@ export class ClaudeSession implements SessionHandle {
     }
   }
 
-  /**
-   * Besides a running turn, what an exit this side did not cause would lose, so it is a crash and not asleep (#1397, owner decision
-   * Q1 on #1654; the ledger decides): a tracked input or a card that waits, a message not yet read or answered, background work, or
-   * a CLI that has said nothing yet (it may not have started)
-   */
+  /** Besides a running turn, what an exit would lose, so it is a crash, not asleep (#1397, Q1 on #1654): or a CLI not yet started */
   private inFlight(): boolean {
     return !this.spoke || this.ledger.tracking > 0 || this.cards.pending.size > 0 || this.cards.questions.size > 0 || this.queue.length > 0 ||
       this.quietInputs.size > 0 || this.stream.backgroundRunning || this.raceRetry.held.length > 0 || this.sendGate !== null
@@ -412,10 +402,7 @@ export class ClaudeSession implements SessionHandle {
     }
     // The turn goes again instead of failing: its error marker would end the turn on screen
     if (retrying) events = events.filter((e) => e.type !== 'error')
-    /*
-     * The turn's end is the normalizer's, among its events. A failure or a limit while a Stop waited is how the turn ended: the
-     * session is in `error` or `limited` now, which `waiting_input` may not follow, and the Stop has nothing left to confirm
-     */
+    // The turn's end is the normalizer's; after a failure or a limit (`error`, `limited`) a waiting Stop has nothing to confirm
     this.ledger.said(events, completedInputs)
     this.resultInputs = null
     // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it
@@ -723,10 +710,8 @@ export class ClaudeSession implements SessionHandle {
    *   2) SDK interrupt: this actually cuts the turn. We can call this method because we pass the
    *      prompt as an async generator, in streaming input mode.
    *
-   * The ledger fails every tracked input, releases (`releaseForStop`), and asks the interrupt (`askInterrupt`). A Stop that has
-   * not taken effect (the interrupt refused, or no confirmation within `stopConfirmMs`) is a notice, not an error
-   * (`stopNotConfirmed`): the turn is still running, and an error would end it for the host and the screen. With no turn
-   * open there is nothing to wait on, and the session is said stopped at once, as before.
+   * The ledger fails the tracked inputs, releases (`releaseForStop`), asks (`askInterrupt`) and waits for the confirmation; a Stop
+   * not taken is a notice, not an error (the turn still runs). With no turn open the session is said stopped at once.
    */
   interrupt(): void {
     // The SDK's plain interrupt leaves queued commands alive; cancelQueued maps to control-request cancel_queued.
