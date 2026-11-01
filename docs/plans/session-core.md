@@ -436,7 +436,7 @@ Left on Claude's side, as Claude's own rules on the core: quiet inputs and the r
 runs for a quiet input (`cliTurnRan`), `cancel_queued` and the person's inputs its answer names, a failed turn's parent notes
 (`cancelAsyncMessage`), the goal gate, the sign-in race, an adopted process's lost calls, and the cards (PR 8).
 
-Size: +250 −190 lines outside tests (+60): `claude/` −69, `core/` +129; tests +147 −1. The owner chose one copy of the turn logic over
+Size: +252 −190 lines outside tests (+62): `claude/` −70, `core/` +132; tests +147 −1. The owner chose one copy of the turn logic over
 fewer lines. What each open decision would remove later: one Stop wording for Claude and ACP leaves `bound.notice` one
 function of the label (about −2 lines); a Stop confirmed only at the turn's end removes the answer's confirmation (about
 −3); with Q2, Codex gets a `stop` (one line, then confirmed by its `turn/interrupt` answer as Claude is, or by its end once the
@@ -578,7 +578,7 @@ estimates of changed lines without fixtures.
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
-| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +60 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
+| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +62 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
