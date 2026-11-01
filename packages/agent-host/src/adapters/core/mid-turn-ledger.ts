@@ -1,11 +1,11 @@
+import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type EventSink, type InputObserver } from '../contract.js'
-import { InputReceipts, isUuid } from '../input-receipts.js'
+import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import { stopNotConfirmed, undeliveredError } from '../session-kit.js'
 import type { MidTurnInput, MidTurnWire, ToolTurnEnding } from './seam.js'
 
 /**
- * The ledger for a tool that takes input mid-turn (docs/plans/session-core.md §4.2, §7.2 PR 6, #1654): Codex, and Claude in
- * PR 7. The tool merges an input into the turn it runs or starts a turn for it, and names its turns, so the inputs are bound
+ * The ledger for a tool that takes input mid-turn (docs/plans/session-core.md §4.2, §4.3, #1654): Codex and Claude. The tool merges an input into the turn it runs or starts a turn for it, and names its turns, so the inputs are bound
  * to the turn the tool says took them, not to one the core began. What it keeps: the phase, the inputs that wait (while the
  * conversation opens, and behind a turn no input may join), the receipts and the turn each is bound to, the turn a Stop
  * targets, the Stop, "interrupted by the tool", and the exit, a crash with work in flight and asleep when idle (#1397). The
@@ -23,9 +23,15 @@ const keep = (list: string[], id: string): void => {
 
 const trackedOf = (inputs: readonly MidTurnInput[]) => inputs.flatMap((i) => (i.receipt ? [i.receipt] : []))
 
+/** A Stop of the running turn waiting to be confirmed: `late` once its bound was said, `asks` the interrupts not answered yet */
+type StopWait = { bound: ReturnType<typeof setTimeout> | undefined; late: boolean; asks: number }
+
+/** What a tracked input fails with when the process ends under it, unless the wire says otherwise (`MidTurnWire.exitWords`) */
+const PROCESS_ENDED = 'The session process ended before the parent note finished'
+
 export class MidTurnLedger {
   readonly ready: Promise<void>
-  private phase: 'opening' | 'ready' | 'closed' = 'opening'
+  private phase: 'opening' | 'ready' | 'closed'
   /** Inputs not written yet: sent while the conversation opens, behind a blocking turn, or in the tick they were sent */
   private queue: MidTurnInput[] = []
   private readonly receipts = new InputReceipts()
@@ -45,13 +51,17 @@ export class MidTurnLedger {
    * with success during one and dropped the input. What is sent waits, and goes as one message at its end
    */
   private blocking = false
+  /** The Stop of the running turn the tool has not confirmed yet, under a bound (`MidTurnWire.stop`) */
+  private stopWait: StopWait | null = null
 
   constructor(
     private readonly sessionId: string,
     private readonly emit: EventSink,
     private readonly wire: MidTurnWire,
   ) {
-    this.ready = wire.open().then(() => {
+    // A wire with no `open` writes its own inputs, on a conversation that exists from the start (Claude: the SDK's input stream)
+    this.phase = wire.open ? 'opening' : 'ready'
+    this.ready = (wire.open?.() ?? Promise.resolve()).then(() => {
       if (this.phase === 'opening') this.phase = 'ready'
       this.drain()
     })
@@ -78,9 +88,36 @@ export class MidTurnLedger {
 
   /** `id`: the host's name for the input, which becomes its receipt's id when it is a UUID, so the tool names it back */
   sendTracked(text: string, observer?: InputObserver, id?: string): Promise<void> {
-    const receipt = this.receipts.create(observer, id !== undefined && isUuid(id) ? id : undefined)
+    const receipt = this.track(observer, id)
     this.enqueue({ text, receipt })
     return receipt.done
+  }
+
+  /** A receipt for an input the wire writes itself (Claude); `id` as for `sendTracked` */
+  track(observer?: InputObserver, id?: string): InputReceipt {
+    return this.receipts.create(observer, id !== undefined && isUuid(id) ? id : undefined)
+  }
+
+  /** The tool took the input (Claude: a turn ran for it) */
+  accept(id: string): void {
+    this.receipts.accept(id)
+  }
+
+  /** How many tracked inputs wait for their end */
+  get tracking(): number {
+    return this.receipts.size
+  }
+
+  /** Every tracked input fails, and nothing is stopped (the turn already failed): the ids that did */
+  failTracked(reason: Error): string[] {
+    const ids = this.receipts.ids
+    this.receipts.failAll(reason)
+    return ids
+  }
+
+  /** A turn runs: one the tool started, or one an input of ours started */
+  get turnRunning(): boolean {
+    return this.running !== null
   }
 
   /** Written on a later tick, as a message sent then always was: a Stop in the same tick keeps a tracked one from going */
@@ -105,9 +142,9 @@ export class MidTurnLedger {
 
   private write(inputs: MidTurnInput[], queued: boolean): void {
     this.unanswered += 1
-    let written: ReturnType<MidTurnWire['write']>
+    let written: ReturnType<NonNullable<MidTurnWire['write']>>
     try {
-      written = this.wire.write(inputs, queued)
+      written = this.wire.write!(inputs, queued)
     } catch (err) {
       written = { answer: Promise.reject(err instanceof Error ? err : new Error(String(err))) }
     }
@@ -129,7 +166,7 @@ export class MidTurnLedger {
     const tracked = trackedOf(inputs)
     if (tracked.length > 0 && tracked.every((r) => r.cancelled || r.completed)) return
     if (queued ? this.receipts.size > 0 : tracked.length > 0) this.interrupt(err)
-    this.emit({ type: 'error', sessionId: this.sessionId, error: this.wire.refusal(err) })
+    this.emit({ type: 'error', sessionId: this.sessionId, error: this.wire.refusal!(err) })
   }
 
   /** A turn the tool started: the one a Stop targets */
@@ -170,6 +207,7 @@ export class MidTurnLedger {
     this.running = null
     if (id) keep(this.ended, id)
     if (!ending) return
+    this.endStopWait()
     if (this.blocking) this.unblock()
     const sessionId = this.sessionId
     switch (ending.how) {
@@ -187,6 +225,20 @@ export class MidTurnLedger {
     if (id) this.receipts.endTurn(id)
   }
 
+  /**
+   * Events the tool says itself, in order, a turn's end among them (Claude: its normalizer's, where the end sits among the goal's
+   * events and the cards it closes, and `turn_complete` carries the answer's `output`). `completes`: the inputs the end names,
+   * completed after its `turn_complete`. A failure or a limit among them is how the turn ended: a Stop still waiting is let go
+   */
+  said(events: readonly NormalizedEvent[], completes?: readonly string[]): void {
+    for (const e of events) {
+      this.emit(e)
+      // Before a later turn's frames can overwrite the host's answer
+      if (e.type === 'turn_complete' && completes) this.receipts.complete(completes)
+      if (e.type === 'error' || e.type === 'limit_reached') this.endStopWait()
+    }
+  }
+
   /** Our Stop was sent to this turn (#698) */
   stopSent(turnId: string): boolean {
     return this.stopped.includes(turnId)
@@ -199,10 +251,60 @@ export class MidTurnLedger {
 
   private stop(turnId: string, running: boolean): void {
     if (!this.stopped.includes(turnId)) keep(this.stopped, turnId)
-    void this.wire.interrupt(turnId).catch((err: Error) => {
-      // As a notice (#1060): the turn is still running, and an error would end it for the host
-      if (running) this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`))
-    })
+    const wait = running ? this.awaitStop() : null
+    if (wait) wait.asks++
+    void this.wire.interrupt(turnId).then(
+      () => {
+        if (wait && this.wire.stop?.byAnswer) this.confirmStop(wait)
+      },
+      (err: Error) => {
+        if (!running) return
+        if (wait) {
+          wait.asks--
+          // Confirmed already, closed, or another Stop's interrupt may still land
+          if (this.stopWait !== wait || this.closed || wait.asks > 0) return
+          this.endStopWait()
+          this.wire.stopRefused?.()
+          if (wait.late) return
+        }
+        // As a notice (#1060): the turn is still running, and an error would end it for the host
+        this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`))
+      },
+    )
+  }
+
+  /**
+   * Waits for the tool to confirm a Stop of the running turn under the wire's bound (none: no wait), saying so once the bound
+   * passes. A second Stop while the first waits joins its wait: one bound, and one confirmation ends both. A Stop after the
+   * bound was said starts it again on the same wait, and an answer to the first still confirms it
+   */
+  private awaitStop(): StopWait | null {
+    const bound = this.wire.stop?.bound
+    if (!bound) return null
+    const current = this.stopWait
+    if (current && !current.late) return current
+    const wait: StopWait = current ?? { late: false, asks: 0, bound: undefined }
+    wait.late = false
+    wait.bound = setTimeout(() => {
+      wait.late = true
+      if (!this.closed) this.emit(stopNotConfirmed(this.sessionId, bound.notice(Math.round(bound.ms / 1000))))
+    }, bound.ms)
+    wait.bound.unref?.()
+    this.stopWait = wait
+    return wait
+  }
+
+  /** The turn ended otherwise (its end said, a failure, a limit): a Stop still waiting is let go without a word */
+  private endStopWait(): void {
+    if (this.stopWait) clearTimeout(this.stopWait.bound)
+    this.stopWait = null
+  }
+
+  /** The tool confirmed the Stop (the interrupt's answer, or the stopped turn's end the tool said itself): said stopped once */
+  confirmStop(wait = this.stopWait): void {
+    if (!wait || this.stopWait !== wait) return
+    this.endStopWait()
+    if (!this.closed) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
   /**
@@ -211,7 +313,7 @@ export class MidTurnLedger {
    * run in it (an adopted one, still being looked up): what waits goes once it opens, as any message sent then
    */
   interrupt(reason = new Error('The parent note was stopped before it finished')): void {
-    const waking = this.phase === 'opening' && !this.wire.hasConversation() && this.queue.length > 0
+    const waking = this.phase === 'opening' && !this.wire.hasConversation!() && this.queue.length > 0
     for (const turn of this.receipts.failAll(reason)) {
       if (turn !== this.running && !this.ended.includes(turn)) this.stop(turn, false)
     }
@@ -232,16 +334,19 @@ export class MidTurnLedger {
   stopByPerson(): void {
     this.interrupt()
     if (this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0) {
+      this.wire.idleStop?.()
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
     }
   }
 
   /** The connection ended. `expected`: this side closed it; `crash`: what is said when it ended with work in flight */
   exited(expected: boolean, crash: string): void {
-    this.receipts.failAll(new Error('The session process ended before the parent note finished'))
+    // Read before the receipts fail and the connection's work ends with it
+    const held = !expected && !!this.wire.inFlight?.()
+    this.receipts.failAll(new Error(this.wire.exitWords ?? PROCESS_ENDED))
     this.wire.connectionEnded()
     if (expected) return
-    const busy = this.phase !== 'ready' || this.running !== null || this.unanswered > 0 || this.queue.length > 0 || this.blocking
+    const busy = held || this.phase !== 'ready' || this.running !== null || this.unanswered > 0 || this.queue.length > 0 || this.blocking
     this.emit(
       busy
         ? { type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: crash, retryable: true } }
@@ -262,22 +367,27 @@ export class MidTurnLedger {
   }
 
   /** Said before the connection closes, while the session is still this one's (the manager drops a stale one's events) */
+  /** The session is closed and says nothing more; `why`: what the tracked inputs still waiting fail with */
+  close(why?: Error): void {
+    this.phase = 'closed'
+    if (why) this.receipts.failAll(why)
+  }
+
   async dispose(): Promise<void> {
     const opening = this.phase === 'opening'
-    this.phase = 'closed'
-    this.receipts.failAll(new Error('The session process ended before the parent note finished'))
+    this.close(new Error(PROCESS_ENDED))
     this.wire.connectionEnded()
     if (opening || this.blocking) this.dropQueue(opening ? 'were sent while it was opening' : 'were sent during compaction')
     // One sent in this tick with nothing to wait behind: a tracked one has failed and is not written; any other is, and the
     // closed connection refuses it
     this.queue = this.queue.filter((q) => !q.receipt)
-    await this.wire.close()
+    await this.wire.close?.()
   }
 
   /** A host swap: the next host resumes the conversation, but not what this one held while it opened (#428) */
   async detach(): Promise<void> {
     if (this.phase === 'opening') this.dropQueue('were sent while it was opening, as Centralu restarted,')
-    await this.wire.detach()
+    await this.wire.detach?.()
     this.phase = 'closed'
   }
 }

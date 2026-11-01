@@ -1,8 +1,8 @@
 import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
-import { centraluInputId, InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
+import { centraluInputId, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
@@ -11,7 +11,8 @@ import { spawnLocalAgent } from '../local-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
-import { adapterNotice, couldNotStop, stopNotConfirmed, undeliveredError } from '../session-kit.js'
+import { adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
+import { MidTurnLedger } from '../core/mid-turn-ledger.js'
 import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
 import { appToolOf, editAskRuleExists, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
@@ -30,8 +31,11 @@ function isGoalCommand(text: string): boolean {
   return /^\/goal(\s|$)/.test(text.trim())
 }
 
-/** A Stop waiting for the CLI to confirm it (see `ClaudeSession.interrupt`): `late` once its bound passed, `asks` the interrupts not answered yet */
-type StopWait = { bound: ReturnType<typeof setTimeout> | undefined; late: boolean; asks: number }
+/** Claude names no turns and runs one at a time: its running turn's name in the ledger */
+const CLAUDE_TURN = 'claude'
+
+/** What a tracked input fails with, and a background agent's card says, when the process ends under them */
+const PROCESS_LOST = 'The session process ended before this agent reported back'
 
 /** A message as the stream loop reads it */
 type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; user_message_uuids?: unknown; parent_tool_use_id?: string | null }
@@ -62,7 +66,13 @@ const MID_TURN_READ_GAP_MS = 2_000
 export class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: ClaudeInput[] = []
-  private inputReceipts = new InputReceipts()
+  /**
+   * The turns, the input receipts, the Stop and the exit (`MidTurnLedger`, docs/plans/session-core.md §4.3): a turn runs from the
+   * message that starts it, or the CLI's own start, to its result
+   */
+  private readonly ledger: MidTurnLedger
+  /** Whether the Stop being asked also cancels what the SDK holds (`cancel_queued`): when a tracked input waits */
+  private cancelQueued = false
   /** Person messages already handed to the SDK, so an interrupt receipt can report cancellations. */
   private personInputs = new Set<string>()
   /**
@@ -78,10 +88,10 @@ export class ClaudeSession implements SessionHandle {
   /** The init message's command list was compared with the adapter's limitations (#270): once per process */
   private surfaceNoted = false
   private notify: (() => void) | null = null
-  private closed = false
-  /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
-  private turnOpen = false
-  /** The CLI has said something on its stream: it is running, so an exit with nothing in flight is no failure to start (see `exitEvent`) */
+  private get closed(): boolean {
+    return this.ledger.closed
+  }
+  /** The CLI has said something on its stream: it is running, so an exit with nothing in flight is no failure to start (see `inFlight`) */
   private spoke = false
   /** The CLI ran a turn on its own (it took a quiet input into one): the result that ends it ends a turn, though it names only quiet inputs */
   private cliTurnRan = false
@@ -134,6 +144,23 @@ export class ClaudeSession implements SessionHandle {
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
+    this.ledger = new MidTurnLedger(sessionId, (e) => this.emit(e), {
+      label: 'Claude Code',
+      interrupt: () => this.askInterrupt(),
+      /*
+       * **A running turn is said stopped once the CLI says so**: the interrupt's answer or the stopped turn's result, whichever
+       * comes first. Said at once, a rejected interrupt showed the turn as stopped while the CLI kept working. The CLI answers a
+       * control request as it reads it, mid-turn or not, so no answer within `stopConfirmMs` means the request is lost
+       */
+      stop: { byAnswer: true, bound: { ms: launch.stopConfirmMs, notice: (s) => `Claude Code has not confirmed the stop after ${s} s. The turn is still running.` } },
+      // A refusal makes the turn's own ending its own again (the normalizer's `stopping`)
+      stopRefused: () => this.stream.stopFailed(),
+      idleStop: () => void this.askInterrupt().catch((err: Error) => this.emit(couldNotStop(this.sessionId, err))),
+      releaseCards: () => this.releaseForStop(),
+      inFlight: () => this.inFlight(),
+      exitWords: PROCESS_LOST,
+      connectionEnded: () => this.releaseAgents(PROCESS_LOST),
+    })
     this.servers = new ClaudeServers({
       sessionId,
       opts,
@@ -157,7 +184,7 @@ export class ClaudeSession implements SessionHandle {
       retryDelay: () => this.launch.retryDelay(),
       resend: (sent) => {
         this.queue.push(...sent)
-        this.turnOpen = true
+        this.ledger.turnStarted(CLAUDE_TURN)
         this.notify?.()
         this.notify = null
       },
@@ -299,11 +326,7 @@ export class ClaudeSession implements SessionHandle {
       liveQueries.delete(q)
       this.settleGoalKnown()
       // A stream that ends because this host let go of the process is not a death (#280 step 2)
-      if (!this.closed && !this.detaching) {
-        const ended = this.exitEvent('claude process ended unexpectedly')
-        this.releaseAgents('The session process ended before this agent reported back')
-        this.emit(ended)
-      }
+      if (!this.closed && !this.detaching) this.ledger.exited(false, 'claude process ended unexpectedly')
     } catch (err) {
       liveQueries.delete(q)
       this.settleGoalKnown()
@@ -321,9 +344,7 @@ export class ClaudeSession implements SessionHandle {
        * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
        * added the same way, so a CLI that fails to start still says why.
        */
-      const ended = this.exitEvent(withStderrTail((err as Error).message, this.proc))
-      this.releaseAgents('The session process ended before this agent reported back')
-      this.emit(ended)
+      this.ledger.exited(false, withStderrTail((err as Error).message, this.proc))
     } finally {
       // The process is gone (or another host holds it now): its link may go once nothing else runs from it
       this.launch.links.release(this.runKey)
@@ -333,24 +354,20 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * How an exit this side did not cause is said, whatever its code (#1397, owner decision Q1 on #1654): asleep when nothing was
-   * in flight, as Codex and ACP say it, since a logout, a shutdown or a kill lands on idle sessions too, and the next message
-   * resumes the conversation. A crash, with `crash` as its message, while a turn is open, an input or a card waits, a message
-   * is not yet read or answered (it is lost with the process), background work still runs (it goes with it), or before the CLI said anything (it may not have started)
+   * Besides a running turn, what an exit this side did not cause would lose, so it is a crash and not asleep (#1397, owner decision
+   * Q1 on #1654; the ledger decides): a tracked input or a card that waits, a message not yet read or answered, background work, or
+   * a CLI that has said nothing yet (it may not have started)
    */
-  private exitEvent(crash: string): NormalizedEvent {
-    const busy = this.turnOpen || !this.spoke || this.inputReceipts.size > 0 || this.cards.pending.size > 0 || this.cards.questions.size > 0 ||
-      this.queue.length > 0 || this.quietInputs.size > 0 || this.stream.backgroundRunning || this.raceRetry.held.length > 0 || this.sendGate !== null
-    return busy
-      ? { type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: crash, retryable: true } }
-      : { type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' }
+  private inFlight(): boolean {
+    return !this.spoke || this.ledger.tracking > 0 || this.cards.pending.size > 0 || this.cards.questions.size > 0 || this.queue.length > 0 ||
+      this.quietInputs.size > 0 || this.stream.backgroundRunning || this.raceRetry.held.length > 0 || this.sendGate !== null
   }
 
   /** One message of the stream, in the order the CLI sent it */
   private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
     const m = msg as StreamMsg
-    if (!this.turnOpen && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
-      this.turnOpen = true
+    if (!this.ledger.turnRunning && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
+      this.ledger.turnStarted(CLAUDE_TURN)
       this.cliTurnRan = true
       if (!this.cards.pending.size && !this.cards.questions.size) {
         // The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604)
@@ -361,11 +378,11 @@ export class ClaudeSession implements SessionHandle {
       }
     }
     // The first thing the CLI says for an input is a turn run for it (`user_message_uuid`): it took it
-    if (m.user_message_uuid) this.inputReceipts.accept(m.user_message_uuid)
+    if (m.user_message_uuid) this.ledger.accept(m.user_message_uuid)
     if (m.type === 'system' && m.subtype === 'init') this.onInit(m)
     this.servers.noteAppCalls(msg)
     if (m.type === 'assistant') this.raceRetry.seen(msg as RaceMsg)
-    if (m.type === 'result') this.turnOpen = false
+    if (m.type === 'result') this.ledger.turnEnded(null, null)
     let events = this.stream.push(msg)
     if (m.type === 'result') {
       const named = Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((x): x is string => typeof x === 'string') : []
@@ -385,7 +402,7 @@ export class ClaudeSession implements SessionHandle {
       for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
     }
     let completedInputs: string[] | undefined
-    if (m.type === 'result' && !retrying && this.inputReceipts.size && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
+    if (m.type === 'result' && !retrying && this.ledger.tracking && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
       const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
       const ids = result.user_message_uuids ?? []
       const failure = events.find((e) => e.type === 'error')
@@ -395,19 +412,14 @@ export class ClaudeSession implements SessionHandle {
     }
     // The turn goes again instead of failing: its error marker would end the turn on screen
     if (retrying) events = events.filter((e) => e.type !== 'error')
-    for (const e of events) {
-      this.emit(e)
-      // Capture this result before a later turn's frames can overwrite the host's answer.
-      if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.complete(completedInputs)
-      /*
-       * The turn failed or hit a limit while a Stop waited: that is how it ended, and the session is in `error` or
-       * `limited` now, which `waiting_input` may not follow. The Stop has nothing left to confirm.
-       */
-      if (e.type === 'error' || e.type === 'limit_reached') this.endStopWait()
-    }
+    /*
+     * The turn's end is the normalizer's, among its events. A failure or a limit while a Stop waited is how the turn ended: the
+     * session is in `error` or `limited` now, which `waiting_input` may not follow, and the Stop has nothing left to confirm
+     */
+    this.ledger.said(events, completedInputs)
     this.resultInputs = null
-    // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it (see `interrupt`)
-    if (m.type === 'result') this.confirmStop()
+    // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it
+    if (m.type === 'result') this.ledger.confirmStop()
     this.schedules.arm()
     // Once a turn ends, asks what is currently in the context window (FR-14).
     if (m.type === 'result' && !retrying) {
@@ -454,7 +466,7 @@ export class ClaudeSession implements SessionHandle {
       this.trackedInputKnown = true
       if (tracksInputs(m)) {
         this.sendTracked = (text, observer, opts) => {
-          const receipt = this.inputReceipts.create(observer, opts?.id !== undefined && isUuid(opts.id) ? opts.id : undefined)
+          const receipt = this.ledger.track(observer, opts?.id)
           this.sendInput(text, receipt.id, receipt, opts?.origin)
           return receipt.done
         }
@@ -500,7 +512,7 @@ export class ClaudeSession implements SessionHandle {
     const open = this.opts.processSource?.adopt?.openCalls ?? []
     const lost = open.filter((c) => isOrchestratorTool(c.tool) || appToolOf(c.tool) !== null)
     if (lost.length === 0) return
-    this.turnOpen = true
+    this.ledger.turnStarted(CLAUDE_TURN)
     this.stream.stopped()
     this.emit({
       type: 'error',
@@ -528,7 +540,7 @@ export class ClaudeSession implements SessionHandle {
     // An adopted process the SDK has not taken yet is let go of all the same
     const proc = this.proc ?? (this.adopted ? null : (this.opts.processSource?.adopt?.process ?? null))
     await proc?.detach?.()
-    this.closed = true
+    this.ledger.close()
     this.notify?.()
   }
 
@@ -614,14 +626,14 @@ export class ClaudeSession implements SessionHandle {
           this.sessionId,
           "This Claude Code does not offer /goal to Centralu (it is not in the CLI's command list) — update Claude Code to use goals here. Sent as a message, the model would only pretend to keep one.",
         ))
-        if (!this.turnOpen) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+        if (!this.ledger.turnRunning) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
         return
       }
       this.stream.goal.commandSent()
     }
-    const starting = !this.turnOpen
+    const starting = !this.ledger.turnRunning
     this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}) })
-    this.turnOpen = true
+    this.ledger.turnStarted(CLAUDE_TURN)
     this.notify?.()
     this.notify = null
     // A note queued while a tool awaits approval must leave that card and state intact.
@@ -710,13 +722,23 @@ export class ClaudeSession implements SessionHandle {
    *      no point to clean up at even once the interrupt signal arrives. So it is released first.
    *   2) SDK interrupt: this actually cuts the turn. We can call this method because we pass the
    *      prompt as an async generator, in streaming input mode.
+   *
+   * The ledger fails every tracked input, releases (`releaseForStop`), and asks the interrupt (`askInterrupt`). A Stop that has
+   * not taken effect (the interrupt refused, or no confirmation within `stopConfirmMs`) is a notice, not an error
+   * (`stopNotConfirmed`): the turn is still running, and an error would end it for the host and the screen. With no turn
+   * open there is nothing to wait on, and the session is said stopped at once, as before.
    */
-  interrupt(cancelQueued = this.inputReceipts.size > 0, reason = new Error('The parent note was stopped before it finished')): void {
+  interrupt(): void {
     // The SDK's plain interrupt leaves queued commands alive; cancelQueued maps to control-request cancel_queued.
-    this.inputReceipts.failAll(reason)
-    const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote).length : 0) +
+    this.cancelQueued = this.ledger.tracking > 0
+    this.ledger.stopByPerson()
+  }
+
+  /** What a Stop releases besides the turn, after the tracked inputs failed */
+  private releaseForStop(): void {
+    const held = (this.cancelQueued ? this.queue.filter((input) => !input.parentNote).length : 0) +
       this.raceRetry.held.filter((input) => !input.parentNote).length
-    if (cancelQueued) this.queue.length = 0
+    if (this.cancelQueued) this.queue.length = 0
     this.reportUndelivered(held)
     /*
      * This also stops any app calls this session made (M4 A-5). The SDK makes no promise about
@@ -735,90 +757,25 @@ export class ClaudeSession implements SessionHandle {
      * running** — if pressing Stop on an idle session left the flag set, it would swallow a real
      * failure on the next turn.
      */
-    if (this.turnOpen) this.stream.stopped()
-
-    /*
-     * **A running turn is said stopped once the CLI says so**, the way Codex waits for its `turn/completed`: the
-     * interrupt's answer or the stopped turn's result, whichever comes first (`confirmStop`). Said at once, a rejected
-     * interrupt showed the turn as stopped while the CLI kept working. A Stop that has not taken effect (the interrupt
-     * refused, or no confirmation within `stopConfirmMs`) is a notice, not an error (`stopNotConfirmed`): the turn is
-     * still running, and an error would end it for the host and the screen. A refusal also makes the turn's own ending
-     * its own again (`stopFailed`); a confirmation after the bound still ends the turn as stopped. With no turn open
-     * there is nothing to wait on, and the session is said stopped at once, as before.
-     */
-    const wait = this.turnOpen && this.query ? this.awaitStop() : null
-    if (wait) wait.asks++
-    void this.query?.interrupt(cancelQueued ? { cancelQueued: true } : undefined).then((response) => {
-      // cancel_queued sweeps SDK-held messages too, including the person's. The CLI's receipt
-      // identifies exactly which did not run; do not silently discard their already-visible rows.
-      const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
-      if (Array.isArray(cancelled)) {
-        let count = 0
-        for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
-        this.reportUndelivered(count)
-      }
-      if (wait) this.confirmStop(wait)
-    }).catch((err: Error) => {
-      if (!wait) {
-        this.emit(couldNotStop(this.sessionId, err))
-        return
-      }
-      wait.asks--
-      // Confirmed already (an answer or the turn's result), closed, or another Stop's interrupt may still land
-      if (this.stopWait !== wait || this.closed || wait.asks > 0) return
-      clearTimeout(wait.bound)
-      this.stopWait = null
-      this.stream.stopFailed()
-      if (!wait.late) this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`))
-    })
-
-    if (!wait) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+    if (this.ledger.turnRunning) this.stream.stopped()
   }
 
-  /** A Stop of the running turn the CLI has not confirmed yet (see `interrupt`) */
-  private stopWait: StopWait | null = null
-
-  /**
-   * Waits for the CLI to confirm a Stop of the running turn, saying so once `stopConfirmMs` passes. A second Stop while
-   * the first waits joins its wait: the bound does not start again, and one confirmation ends both. A Stop pressed
-   * after the bound was said starts it again on the same wait, so it is said again if nothing answers this one either
-   * (the window's button is "Stopping…" again from that click), and an answer to the first still confirms it.
-   */
-  private awaitStop(): StopWait {
-    const current = this.stopWait
-    if (current && !current.late) return current
-    const wait: StopWait = current ?? { late: false, asks: 0, bound: undefined }
-    wait.late = false
-    wait.bound = setTimeout(() => {
-      wait.late = true
-      if (this.closed) return
-      const s = Math.round(this.launch.stopConfirmMs / 1000)
-      this.emit(stopNotConfirmed(this.sessionId, `Claude Code has not confirmed the stop after ${s} s. The turn is still running.`))
-    }, this.launch.stopConfirmMs)
-    wait.bound.unref?.()
-    this.stopWait = wait
-    return wait
-  }
-
-  /** The turn ended otherwise (a failure, a limit): a Stop still waiting is let go without a word */
-  private endStopWait(): void {
-    if (!this.stopWait) return
-    clearTimeout(this.stopWait.bound)
-    this.stopWait = null
-  }
-
-  /** The CLI confirmed the Stop (the interrupt answered, or the stopped turn's result came): the turn is said stopped once */
-  private confirmStop(wait = this.stopWait): void {
-    if (!wait || this.stopWait !== wait) return
-    clearTimeout(wait.bound)
-    this.stopWait = null
-    if (!this.closed) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+  /** The SDK's interrupt; with `cancelQueued` it also sweeps what the SDK holds, and its answer names what did not run */
+  private async askInterrupt(): Promise<void> {
+    const response = await this.query?.interrupt(this.cancelQueued ? { cancelQueued: true } : undefined)
+    // cancel_queued sweeps SDK-held messages too, including the person's. The CLI's receipt
+    // identifies exactly which did not run; do not silently discard their already-visible rows.
+    const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
+    if (Array.isArray(cancelled)) {
+      let count = 0
+      for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
+      this.reportUndelivered(count)
+    }
   }
 
   /** A failed turn is already over. Cancel its parent notes without interrupting the person's next turn. */
   private cancelParentNotes(reason: Error): void {
-    const ids = this.inputReceipts.ids
-    this.inputReceipts.failAll(reason)
+    const ids = this.ledger.failTracked(reason)
     this.queue = this.queue.filter((input) => !input.parentNote)
     this.raceRetry.dropNotes()
     const query = this.query
@@ -856,8 +813,8 @@ export class ClaudeSession implements SessionHandle {
    * same way; only swapping the process was missing it.
    */
   async dispose(): Promise<void> {
-    this.inputReceipts.failAll(new Error('The session closed before the parent note finished'))
-    this.closed = true
+    this.ledger.failTracked(new Error('The session closed before the parent note finished'))
+    this.ledger.close()
     this.stopMidTurnRead()
     this.notify?.()
     // A message held behind an unanswered /goal is reported as undelivered, like the queue below
@@ -911,7 +868,6 @@ export class ClaudeSession implements SessionHandle {
    * the process (#98) — and ends every background task the session listed (#290), for the same reason.
    */
   private releaseAgents(why: string): void {
-    this.inputReceipts.failAll(new Error(why))
     this.schedules.stop()
     for (const e of this.stream.release(why)) this.emit(e)
   }

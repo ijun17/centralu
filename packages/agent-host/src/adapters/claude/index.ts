@@ -22,6 +22,7 @@ import { ClaudeSession, type ClaudeLaunch } from './session.js'
 import { launchPreset } from '../edit-grant.js'
 import { personsDefaultMode } from './permissions.js'
 import { CLAUDE_SURFACE } from './surface.js'
+import { STOP_CONFIRM_MS } from '../core/ledger.js'
 
 export { personsDefaultMode }
 
@@ -160,12 +161,6 @@ export type ClaudeAdapterOptions = {
  */
 const WINDOWS_START_GAP_MS = 1500
 
-/**
- * How long a Stop waits for the CLI's answer to the interrupt (`ClaudeSession.interrupt`). The CLI answers a control
- * request as it reads it, mid-turn or not, so a wait this long means the request is lost; past it the person is told
- * the turn could not be stopped, rather than left looking at a turn that never ends.
- */
-const STOP_CONFIRM_MS = 10_000
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
