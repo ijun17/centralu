@@ -788,13 +788,17 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         unlinkLinks(top)
         runners.prepare(top, root)
       }
+      let failed = 0
       const run = (files) => {
         check()
         const report = runners.vitest(top, files)
         if (!report) notes.push(`vitest gave no report for ${files.join(', ')}.`)
+        // Failures, not "not passed": a skipped or todo test is neither, and a file that did not load fails with no test of its own
+        failed = failuresOf(report, top).length
         return vitestTests(report, top)
       }
       const reverted = run(tests.map((t) => t.path))
+      const failing = failed
       const existed = tests.filter((t) => t.status !== 'A').map((t) => t.path)
       for (const p of existed) git(top, ['checkout', fork, '--', p])
       const before = existed.length ? run(existed) : []
@@ -802,7 +806,7 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       for (const t of loose) {
         findings.push({ check: 'revert', message: `${t.file}: "${t.name}" passes with this pull request's other changes reverted to ${base}, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.` })
       }
-      if (!loose.length) notes.push(`${reverted.filter((t) => t.status !== 'passed').length} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
+      if (!loose.length) notes.push(`${failing} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
     }
 
     // guards: only a warning. The guards this branch adds or changes, against the open pull requests with it merged in

@@ -329,6 +329,21 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.ok).toBe(false)
   })
 
+  it('counts a failed test and a file that did not load as failing without the change, a skipped test as neither (#1806)', () => {
+    const fake = fakeRunners()
+    const vitest = (dir: string, files: string[]) => ({
+      testResults: files.map((file) => ({
+        name: join(dir, file),
+        status: file === 'src/a.test.mjs' ? 'failed' : 'passed',
+        message: 'beforeAll threw',
+        // The reverted tree: a.test.mjs did not load, so its tests are skipped; b.test.mjs has one failure and one skipped test
+        assertionResults: file === 'src/a.test.mjs' ? [{ title: 'one', status: 'skipped' }, { title: 'two', status: 'skipped' }] : [{ title: 'x', status: 'failed', failureMessages: ['no'] }, { title: 'y', status: 'skipped' }, { title: 'z', status: 'todo' }],
+      })),
+    })
+    const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest } })
+    expect(r.notes).toContain('2 test(s) of 2 changed file(s) fail without the change; no new test passes without it.')
+  })
+
   it('answers the pull request\'s risk tier by the paths it changes over its base (#1259)', () => {
     // No rules anywhere: nothing to judge by, so deep
     expect(run().tier).toMatchObject({ name: 'deep', because: [], line: expect.stringMatching(/^Tier: deep \(no \.centralu\/tiers\.json at /) })
