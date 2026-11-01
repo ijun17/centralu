@@ -7,7 +7,7 @@
 // PATH costs a process start per call (on Windows a launcher and Node, about 60 ms), and a merge queue test makes
 // dozens; in this process a call costs well under a millisecond. Whatever the module does not name is started as
 // always. The real start (quoting, PATH lookup, a launcher, stdin) keeps tests of its own that start real programs.
-import { execFile as startProgram } from 'node:child_process'
+import { execFile as startProgram, spawn } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -44,6 +44,43 @@ export function execFile(file, args, options, callback) {
   return { stdin, pid: undefined, kill: () => false }
 }
 
+/**
+ * `execFile`'s contract (`callback(error, stdout, stderr)`, the same error) over `spawn`, for a child that leads a process group
+ * of its own (`detached`): execFile passes spawn only some of its options, and that one is not among them, so a group
+ * kill (`stopTree`) would find no group and end the child alone.
+ */
+function spawnDetached(file, args, { maxBuffer, killSignal, ...options }, callback) {
+  const child = spawn(file, args, options)
+  const out = { stdout: '', stderr: '' }
+  let error = null
+  let done = false
+  const finish = () => {
+    if (done) return
+    done = true
+    callback(error, out.stdout, out.stderr)
+  }
+  for (const name of ['stdout', 'stderr']) {
+    child[name].setEncoding('utf8')
+    child[name].on('data', (text) => {
+      out[name] += text
+      if (error || out[name].length <= maxBuffer) return
+      out[name] = out[name].slice(0, maxBuffer)
+      error = Object.assign(new RangeError(`${name} maxBuffer length exceeded`), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' })
+      child.kill(killSignal)
+    })
+  }
+  child.once('error', (e) => {
+    error ??= e
+    if (child.pid === undefined) finish() // it did not start: nothing else will come
+  })
+  child.once('close', (code, signal) => {
+    if (!error && (code || signal)) error = Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}
+${out.stderr}`), { code, signal, killed: child.killed })
+    finish()
+  })
+  return child
+}
+
 /** Stops a process and everything it started (tsc, vitest and pnpm run under a script); resolves when it has exited. */
 export function stopTree(child) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
@@ -75,7 +112,8 @@ export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024
     let stoppedBy = null
     let timer
     let lingering
-    const child = execFile(file, args, { maxBuffer, ...options, ...(tree && process.platform !== 'win32' ? { detached: true } : {}) }, (error, stdout, stderr) => {
+    const detached = tree && process.platform !== 'win32' // so that it leads a process group of its own, which stopTree ends whole
+    const child = (detached ? spawnDetached : execFile)(file, args, { maxBuffer, ...options, detached }, (error, stdout, stderr) => {
       clearTimeout(timer)
       clearTimeout(lingering)
       signal?.removeEventListener('abort', onAbort)
