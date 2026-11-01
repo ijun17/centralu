@@ -323,7 +323,6 @@ describe('codex: how an interrupted turn ends (#698)', () => {
  * `turn/completed` was then an illegal move from `error`. The states are read through the shared state machine.
  */
 describe('codex stop that Codex refuses', () => {
-
   it('keeps the turn working with a notice, and the turn ends as it does', async () => {
     state.interruptRefused = 'turn not found'
     const events: NormalizedEvent[] = []

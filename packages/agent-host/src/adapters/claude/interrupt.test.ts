@@ -18,7 +18,7 @@ const cli = vi.hoisted(() => {
   const inbox: unknown[] = []
   let wake: (() => void) | null = null
   /** How the stream stops, once the test ends it: done (the process exited) or a throw (it failed) */
-  let ending: { error?: Error } | null = null
+  const state = { ending: null as { error?: Error } | null }
   return {
     /** What the SDK's interrupt answers; a test replaces it, `afterEach` puts back the one that confirms at once */
     interrupt: async (): Promise<unknown> => undefined,
@@ -31,14 +31,16 @@ const cli = vi.hoisted(() => {
       wake = null
     },
     end(error?: Error) {
-      ending = error ? { error } : {}
+      state.ending = error ? { error } : {}
       wake?.()
       wake = null
     },
     async *stream() {
-      ending = null
+      state.ending = null
       for (;;) {
         while (inbox.length > 0) yield inbox.shift()
+        // Widened: set by `end` while this generator waits, which narrowing cannot see
+        const ending = state.ending as { error?: Error } | null
         if (ending?.error) throw ending.error
         if (ending) return
         await new Promise<void>((r) => (wake = r))
@@ -344,7 +346,7 @@ describe('every turn ends (#1829)', () => {
   const ended = (uuids: string[]) => ({ type: 'result', subtype: 'success', is_error: false, result: '', user_message_uuids: uuids, modelUsage: {} })
   const lastInput = () => String(cli.written.at(-1)?.uuid)
   const card = () => void cli.canUseTool!('Bash', { command: 'rm -rf build' }, { toolUseID: 'tu-1', signal: new AbortController().signal }).catch(() => {})
-  type Step = [what: string, act: (h: Awaited<ReturnType<ClaudeAdapter['createSession']>>) => void, turnOpen: boolean]
+  type Step = [what: string, act: (h: Awaited<ReturnType<InstanceType<typeof ClaudeAdapter>['createSession']>>) => void, turnOpen: boolean]
   const running: Step[] = [
     ['a message is sent', (h) => h.send('do a long task'), true],
     ['the model answers', () => cli.push(delta('working on it')), true],
