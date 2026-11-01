@@ -81,6 +81,8 @@ export class ClaudeSession implements SessionHandle {
   private closed = false
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
   private turnOpen = false
+  /** The CLI ran a turn on its own (it took a quiet input into one): the result that ends it ends a turn, though it names only quiet inputs */
+  private cliTurnRan = false
   /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
   private readonly stream: ClaudeStreamNormalizer
@@ -338,6 +340,7 @@ export class ClaudeSession implements SessionHandle {
     const m = msg as StreamMsg
     if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
+      this.cliTurnRan = true
       if (!this.cards.pending.size && !this.cards.questions.size) {
         // The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604)
         this.startInputs = [m.user_message_uuid]
@@ -355,7 +358,9 @@ export class ClaudeSession implements SessionHandle {
     if (m.type === 'result') {
       const named = Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((x): x is string => typeof x === 'string') : []
       const ids = named.length > 0 ? named : m.user_message_uuid ? [m.user_message_uuid] : []
-      const quietOnly = ids.length > 0 && ids.every((id) => this.quietInputs.has(id))
+      // Not when the CLI ran a turn for it: the state went to working then, and only this result can end it
+      const quietOnly = ids.length > 0 && ids.every((id) => this.quietInputs.has(id)) && !this.cliTurnRan
+      this.cliTurnRan = false
       for (const id of ids) this.quietInputs.delete(id)
       // A result that answers only quiet inputs ended no turn: no finished turn, and no second reading of the same usage
       if (quietOnly) events = events.filter((e) => e.type !== 'turn_complete' && e.type !== 'usage_update')

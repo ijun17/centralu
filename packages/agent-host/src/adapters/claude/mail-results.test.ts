@@ -92,6 +92,27 @@ describe('the answer to a quiet input', () => {
   })
 })
 
+describe('a quiet input the CLI ran a turn for', () => {
+  it('is a turn: the session went to working and its result, naming only the quiet input, ends it (#1827)', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await session(events)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    events.length = 0
+
+    handle.send('<centralu-nudge/>', { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    await tick()
+    const quiet = uuidOfLast()
+    wire.say({ type: 'assistant', user_message_uuid: quiet, message: { id: 'a2', role: 'assistant', content: [{ type: 'text', text: 'carrying on' }] } })
+    await tick()
+    expect(events.filter((e) => e.type === 'state_change' && e.state === 'working')).toHaveLength(1)
+    wire.say(result([quiet]))
+    await tick()
+    expect(events.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+    await handle.dispose()
+  })
+})
+
 describe('a wake that is tracked', () => {
   it('is taken when a turn runs for it, before that turn ends, and failed when the process closes with it still queued', async () => {
     const events: NormalizedEvent[] = []
