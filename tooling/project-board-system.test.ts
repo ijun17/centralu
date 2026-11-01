@@ -1,4 +1,5 @@
 import { mkdtempSync, realpathSync } from 'node:fs'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +7,7 @@ import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 // @ts-expect-error -- a plain .mjs of tooling without types
 import { inProcessGh as untypedInProcessGh } from './fake-gh-in-process.mjs'
-import { SLOW } from './test-timing.js'
+import { SLOW, eventually } from './test-timing.js'
 
 /**
  * The board app's door to the OS for starting programs (.centralu/apps/project-board/system.mjs, #1599): what the merge
@@ -18,7 +19,9 @@ import { SLOW } from './test-timing.js'
 const SYSTEM = new URL('../.centralu/apps/project-board/system.mjs', import.meta.url).href
 
 type ExecFile = (file: string, args: string[], options: Record<string, unknown>, callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void) => { stdin: { on(e: string, f: () => void): unknown; end(s?: string): void } }
-type System = { execFile: ExecFile }
+type Failure = Error & { code?: unknown; killed?: boolean; timedOut?: boolean; aborted?: boolean; stdout: string; stderr: string }
+type RunOptions = { timeoutMs?: number; input?: string; maxBuffer?: number; stderrTail?: number; tree?: boolean; signal?: AbortSignal }
+type System = { execFile: ExecFile; runProgram(file: string, args: string[], options?: RunOptions): Promise<{ stdout: string; stderr: string }> }
 type Gh = (args: string[], call: { input?: string | null; cwd?: string; env?: Record<string, string> }) => { code: number; stdout: string; stderr: string }
 
 /** system.mjs as the app loads it, with `env` set while it is read (it reads PROJECT_BOARD_FAKE_PROGRAMS then) */
@@ -148,6 +151,185 @@ describe("the board app's door for starting programs", { timeout: 60_000 * SLOW 
     expect(gh.calls()).toHaveLength(2)
   })
 
+})
+
+/** What `runProgram` rejects with, or fails the test when it resolves */
+const failureOf = async (run: Promise<unknown>) => {
+  try {
+    await run
+  } catch (e) {
+    return e as Failure
+  }
+  throw new Error('it did not fail')
+}
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+const NODE = process.execPath
+
+describe("the board app's runProgram", { timeout: 60_000 * SLOW }, () => {
+  it('answers stdout and stderr, and puts the input on stdin', async () => {
+    const sys = await system()
+    const echo = 'process.stdin.pipe(process.stdout); process.stderr.write("seen")'
+    const input = '{"body":"line one\\nline two é 한"}'
+    expect(await sys.runProgram(NODE, ['-e', echo], { input })).toEqual({ stdout: input, stderr: 'seen' })
+    // A child that never reads its input is not a crash here: its exit code is the answer
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', 'process.exit(3)'], { input: 'x'.repeat(8 * 1024 * 1024) }))
+    expect(failed.code).toBe(3)
+  })
+
+  it('rejects with the exit code and both streams as strings, ENOENT for a program that is not there', async () => {
+    const sys = await system()
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', 'process.stdout.write("part"); process.stderr.write("bad\\n"); process.exit(5)']))
+    expect([failed.code, failed.stdout, failed.stderr, failed.killed, failed.timedOut]).toEqual([5, 'part', 'bad\n', false, undefined])
+    const missing = await failureOf(sys.runProgram(join(tmpdir(), 'cc-no-such-program-here'), []))
+    expect([missing.code, missing.stdout, missing.stderr]).toEqual(['ENOENT', '', ''])
+  })
+
+  it('refuses output past maxBuffer, and takes more than node\'s own 1 MB without one', async () => {
+    const sys = await system()
+    const write = (n: number) => `process.stdout.write("x".repeat(${n}))`
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', write(5000)], { maxBuffer: 1000 }))
+    expect(failed.code).toBe('ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+    expect(failed.timedOut).toBeUndefined()
+    expect((await sys.runProgram(NODE, ['-e', write(3 * 1024 * 1024)])).stdout).toHaveLength(3 * 1024 * 1024)
+  })
+
+  it('reports a time-out as the time-out, whatever the child wrote and however it ended (#1842)', async () => {
+    const sys = await system()
+    // It says something that reads like a failure of its own, then hangs: the caller maps `killed` before it reads the code or stderr
+    const hang = 'process.stderr.write("fatal: the child own message\\n"); setInterval(() => {}, 1000)'
+    for (const tree of [false, true]) {
+      const failed = await failureOf(sys.runProgram(NODE, ['-e', hang], { timeoutMs: 1000 * SLOW, tree }))
+      expect([failed.timedOut, failed.killed, failed.aborted], `tree ${tree}`).toEqual([true, true, undefined])
+    }
+    // Not ended early: a run that finishes in time is no time-out, and its timer does not keep the process
+    expect((await sys.runProgram(NODE, ['-e', 'process.stdout.write("ok")'], { timeoutMs: 60_000 * SLOW })).stdout).toBe('ok')
+  })
+
+  it('lets go of the pipes at a time-out, so a process the child left running does not hold the call (#1842)', async () => {
+    const sys = await system()
+    // The child starts a detached grandchild that keeps its pipes for 60 s, and hangs: git's helpers and a cmd.exe shim's pnpm do this
+    const parent = `
+      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit', detached: true })
+      g.unref()
+      process.stdout.write(String(g.pid))
+      setInterval(() => {}, 1000)`
+    const started = Date.now()
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', parent], { timeoutMs: 2000 * SLOW }))
+    expect(failed.timedOut).toBe(true)
+    expect(Date.now() - started).toBeLessThan(30_000)
+    // A grandchild's id is only in stdout when the pipe was still open when it was written
+    if (failed.stdout) process.kill(Number(failed.stdout))
+  })
+
+  it('takes a time-out of 0 as no limit, as node does', async () => {
+    const sys = await system()
+    expect((await sys.runProgram(NODE, ['-e', 'setTimeout(() => process.stdout.write("late"), 1500)'], { timeoutMs: 0 })).stdout).toBe('late')
+  })
+
+  it('ends the whole process tree on a time-out, or an abort, with `tree`: the child and what it started', async () => {
+    const sys = await system()
+    // The child starts a grandchild that holds its pipes and prints its id; without the tree's end the call would wait for it
+    const parent = `
+      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' })
+      process.stdout.write(String(g.pid))
+      setInterval(() => {}, 1000)`
+    const grandchild = async (stdout: string) => {
+      const pid = Number(stdout)
+      expect(pid).toBeGreaterThan(0)
+      await eventually(() => !alive(pid), 15_000)
+    }
+    const timedOut = await failureOf(sys.runProgram(NODE, ['-e', parent], { timeoutMs: 2000 * SLOW, tree: true }))
+    expect(timedOut.timedOut).toBe(true)
+    await grandchild(timedOut.stdout)
+    const controller = new AbortController()
+    const run = failureOf(sys.runProgram(NODE, ['-e', parent], { tree: true, signal: controller.signal }))
+    await sleep(2000 * SLOW)
+    controller.abort()
+    const aborted = await run
+    expect([aborted.aborted, aborted.killed, aborted.timedOut]).toEqual([true, true, undefined])
+    await grandchild(aborted.stdout)
+    // Already aborted: it is stopped at once, not started to run
+    const early = await failureOf(sys.runProgram(NODE, ['-e', 'setInterval(() => {}, 1000)'], { tree: true, signal: AbortSignal.abort() }))
+    expect(early.aborted).toBe(true)
+  })
+
+  it('does not wait for ever for the pipes of a process the child left running, with `tree`', async () => {
+    const sys = await system()
+    // The child ends at once; a grandchild it leaves holds the pipes for 60 s
+    const parent = `
+      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit', detached: true })
+      g.unref()
+      process.stdout.write('done ' + g.pid)`
+    const started = Date.now()
+    const { stdout } = await sys.runProgram(NODE, ['-e', parent], { tree: true })
+    expect(stdout).toMatch(/^done \d+$/)
+    expect(Date.now() - started).toBeLessThan(30_000)
+    // It was left running by design: end it now rather than wait out its 60 s
+    process.kill(Number(stdout.slice(5)))
+  })
+
+  it('counts maxBuffer in bytes, and keeps only the tail of stderr when asked', async () => {
+    const sys = await system()
+    // 600 characters, 1200 bytes
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', 'process.stdout.write("é".repeat(600))'], { maxBuffer: 1000 }))
+    expect(failed.code).toBe('ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+    const noisy = 'process.stderr.write("a".repeat(50000) + "end"); process.exitCode = Number(process.argv[1])'
+    const ok = await sys.runProgram(NODE, ['-e', noisy, '0'], { stderrTail: 100 })
+    expect([ok.stderr.length, ok.stderr.endsWith('end')]).toEqual([100, true])
+    const bad = await failureOf(sys.runProgram(NODE, ['-e', noisy, '2'], { stderrTail: 100 }))
+    expect([bad.code, bad.stderr.length, bad.stderr.endsWith('end')]).toEqual([2, 100, true])
+  })
+
+  it('rejects with empty output when spawn itself throws (a NUL in an argument)', async () => {
+    const sys = await system()
+    const failed = await failureOf(sys.runProgram(NODE, ['a\0b']))
+    expect([failed.stdout, failed.stderr]).toEqual(['', ''])
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a stopped run as stopped even when the child exits 0 on the signal', async () => {
+    const sys = await system()
+    const trap = 'process.on("SIGTERM", () => process.exit(0)); process.stdout.write("up"); setInterval(() => {}, 1000)'
+    const timedOut = await failureOf(sys.runProgram(NODE, ['-e', trap], { timeoutMs: 2000 * SLOW }))
+    expect([timedOut.timedOut, timedOut.killed]).toEqual([true, true])
+    const controller = new AbortController()
+    const run = failureOf(sys.runProgram(NODE, ['-e', trap], { signal: controller.signal }))
+    await sleep(2000 * SLOW)
+    controller.abort()
+    expect((await run).aborted).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32')('ends the child alone, and throws nothing, when taskkill cannot be started', async () => {
+    const sys = await system()
+    const controller = new AbortController()
+    const run = failureOf(sys.runProgram(NODE, ['-e', 'setInterval(() => {}, 1000)'], { tree: true, signal: controller.signal }))
+    await sleep(1500 * SLOW)
+    vi.stubEnv('SystemRoot', join(tmpdir(), 'cc-no-system-root'))
+    controller.abort()
+    expect((await run).aborted).toBe(true)
+  })
+
+  // node's execFile does not pass `detached` on to spawn, so a group kill found no group and ended the child alone (Linux, macOS)
+  it.skipIf(process.platform === 'win32')('starts a tree run as the leader of a process group of its own, and any other in its parent\'s', async () => {
+    const sys = await system()
+    const probe = 'try { process.kill(-process.pid, 0); process.stdout.write("leader") } catch { process.stdout.write("member") }'
+    expect((await sys.runProgram(NODE, ['-e', probe], { tree: true })).stdout).toBe('leader')
+    expect((await sys.runProgram(NODE, ['-e', probe])).stdout).toBe('member')
+  })
+
+  it('stopTree answers at once for a process that has ended', async () => {
+    const sys = (await system()) as System & { stopTree(child: unknown): Promise<void> }
+    const done = await new Promise<unknown>((resolve) => {
+      const c = sys.execFile(NODE, ['-e', ''], {}, () => resolve(c))
+    })
+    await sys.stopTree(done)
+  })
 })
 
 const inProcessGh = untypedInProcessGh as (script: string) => Gh

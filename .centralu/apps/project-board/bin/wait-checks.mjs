@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Wait outside an MCP call: agents can start this in the background and keep working.
 import { readFile } from 'node:fs/promises'
-import { execFile } from '../system.mjs'
+import { runProgram } from '../system.mjs'
 import { DEFAULT_TIMEOUT_MS, waitForChecks } from '../wait-checks.mjs'
 import { parseItemRef } from '../github.mjs'
 
@@ -29,15 +29,16 @@ if (!validTimeout || (!ref && !pr)) {
   process.exit(2)
 }
 const gh = (args, { timeoutMs }) =>
-  new Promise((resolve, reject) =>
-    execFile('gh', args, {
-      env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: Math.max(1, Math.min(2_147_483_647, Math.ceil(timeoutMs))),
-      killSignal: 'SIGKILL',
-    }, (error, stdout, stderr) =>
-      error ? reject(new Error(String(stderr || error.message).trim())) : resolve(stdout),
-    ),
+  runProgram('gh', args, {
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
+    maxBuffer: 16 * 1024 * 1024,
+    timeoutMs: Math.max(1, Math.ceil(timeoutMs)), // 0 would mean no limit
+    killSignal: 'SIGKILL',
+  }).then(
+    (r) => r.stdout,
+    (e) => {
+      throw new Error(String(e.stderr || e.message).trim())
+    },
   )
 const result = await waitForChecks({
   repo: pr?.repo ?? config.repository,

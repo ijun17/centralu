@@ -3,7 +3,7 @@
 // holds no token: gh keeps its login in the system keychain, and
 // nothing here reads, stores or prints it. GitHub is the only copy of the board; board.mjs keeps a
 // short in-memory cache and nothing on disk.
-import { execFile } from './system.mjs'
+import { runProgram } from './system.mjs'
 import { tmpdir } from 'node:os'
 import { CANCELED_NOTE, LOST_RUNNER_NOTE, shutdownAt } from './run-failure.mjs'
 import { short } from './util.mjs'
@@ -55,38 +55,20 @@ export function classify(text) {
  * Runs `gh` with arguments (never a shell), and returns its stdout. `input` goes to its stdin (with
  * `--input -`), so a long text never rides on the command line.
  */
-export function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      'gh',
-      args,
-      {
-        timeout: timeoutMs,
-        ...(cwd ? { cwd } : {}),
-        maxBuffer: 64 * 1024 * 1024,
-        // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
-        env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' },
-      },
-      (error, stdout, stderr) => {
-        if (!error) return resolve(stdout)
-        if (error.code === 'ENOENT')
-          return reject(
-            new GitHubError('gh-missing', 'The GitHub CLI (gh) was not found on this machine. Install it from https://cli.github.com, run `gh auth login`, then refresh.'),
-          )
-        if (error.killed) return reject(new GitHubError('network', `gh did not answer within ${Math.round(timeoutMs / 1000)} s. Check the network, then refresh.`))
-        // A GraphQL error comes back as JSON on stdout with a non-zero exit; keep it for the caller.
-        const err = classify(`${stderr}\n${stdout}`)
-        err.stdout = stdout
-        err.stderr = stderr
-        reject(err)
-      },
-    )
-    if (input !== undefined) {
-      // gh may exit before reading it all (a bad flag); that is its answer, not a crash here
-      child.stdin.on('error', () => {})
-      child.stdin.end(input)
-    }
-  })
+export async function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
+  try {
+    // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
+    const env = { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' }
+    const { stdout } = await runProgram('gh', args, { cwd, timeoutMs, input, maxBuffer: 64 * 1024 * 1024, env })
+    return stdout
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      throw new GitHubError('gh-missing', 'The GitHub CLI (gh) was not found on this machine. Install it from https://cli.github.com, run `gh auth login`, then refresh.')
+    if (error.killed) throw new GitHubError('network', `gh did not answer within ${Math.round(timeoutMs / 1000)} s. Check the network, then refresh.`)
+    // A GraphQL error comes back as JSON on stdout with a non-zero exit; keep it for the caller.
+    throw Object.assign(classify(`${error.stderr}
+${error.stdout}`), { stdout: error.stdout, stderr: error.stderr })
+  }
 }
 
 /** One GraphQL request through `gh api graphql`. Strings go as -f (raw), numbers as -F (typed). */

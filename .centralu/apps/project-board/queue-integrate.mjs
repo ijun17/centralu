@@ -9,7 +9,7 @@
 // touched), and main's own scripts/tier.mjs runs with main's .centralu/tiers.json over what the branch
 // adds since it left main. A judge or rules missing on main, a branch not on GitHub, or anything else
 // that keeps the change from being judged answers deep, so it is refused, never let through.
-import { execFile } from './system.mjs'
+import { runProgram } from './system.mjs'
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,11 +37,10 @@ async function runJudge(root, script, base, head) {
   try {
     const file = join(tmp, 'tier.mjs')
     await writeFile(file, script)
-    const { stdout, stderr, error } = await new Promise((resolve) => {
-      execFile(process.execPath, [file, '--base', base, '--head', head, '--json'], { cwd: root, timeout: JUDGE_MS, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }, (error, out, err) =>
-        resolve({ stdout: String(out ?? ''), stderr: String(err ?? ''), error }),
-      )
-    })
+    const { stdout, stderr, error } = await runProgram(process.execPath, [file, '--base', base, '--head', head, '--json'], { cwd: root, timeoutMs: JUDGE_MS, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }).then(
+      (r) => ({ ...r, error: null }),
+      (e) => ({ stdout: e.stdout, stderr: e.stderr, error: e }),
+    )
     try {
       return JSON.parse(stdout.trim().split('\n').at(-1) ?? '')
     } catch {

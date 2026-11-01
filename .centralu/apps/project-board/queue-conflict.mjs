@@ -26,7 +26,7 @@
 // Every step answers how long it took, for the queue's events (the daily metrics count conflicts the
 // queue handled without a person).
 import { now } from './clock.mjs'
-import { execFile } from './system.mjs'
+import { runProgram } from './system.mjs'
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
@@ -270,14 +270,7 @@ export const statLine = (s) => `${s.file} ${s.added === null ? '(binary)' : `+${
  */
 function run(cwd, argv, timeoutMs, extraEnv = {}) {
   const once = (file, args, extra = {}) =>
-    new Promise((resolve, reject) => {
-      execFile(file, args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...commandEnv(), ...extraEnv }, ...extra }, (error, stdout, stderr) => {
-        if (!error) return resolve()
-        error.stderr = String(stderr ?? '')
-        error.stdout = String(stdout ?? '')
-        reject(error)
-      })
-    })
+    runProgram(file, args, { cwd, timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...commandEnv(), ...extraEnv }, ...extra })
   const [file, ...args] = argv
   return once(file, args).catch((e) => {
     if (process.platform !== 'win32' || !['ENOENT', 'EINVAL'].includes(e.code)) throw e

@@ -6,7 +6,7 @@
 // in git.mjs does): no branch or remote-tracking ref of the person's moves. The script works in
 // temporary worktrees, so the checkout is not touched either. Cancelled or out of time, the script's
 // whole process tree is stopped and its `--cleanup` removes what it left (worktrees, dependency links).
-import { execFile, spawn } from './system.mjs'
+import { runProgram } from './system.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { git, remoteFor, topLevel } from './git.mjs'
@@ -41,60 +41,21 @@ export function answerOf(stdout) {
   return null
 }
 
-/** Stops a process and everything it started: tsc, vitest and pnpm run under the script. */
-function stopTree(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    child.once('exit', () => resolve())
-    if (process.platform === 'win32') execFile(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], () => {})
-    else {
-      try {
-        // Started detached, so it leads a process group of its own
-        process.kill(-child.pid, 'SIGKILL')
-      } catch {
-        child.kill('SIGKILL')
-      }
-    }
-  })
-}
-
 /** Runs the script; answers { stdout, stderr, code, stopped } where `stopped` is 'cancelled' or 'timed out'. */
-function runScript(args, cwd, { signal, limitMs, beat }) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, args, { cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-    let stdout = ''
-    let stderr = ''
-    let stopped = null
-    child.stdout.on('data', (d) => (stdout += d))
-    child.stderr.on('data', (d) => (stderr = (stderr + d).slice(-20_000)))
-    const started = clock()
-    const timer = setInterval(() => beat(Math.round((clock() - started) / 1000)), BEAT_MS)
-    const stop = (why) => {
-      if (stopped) return
-      stopped = why
-      void stopTree(child)
-    }
-    const limit = setTimeout(() => stop('timed out'), limitMs)
-    const onAbort = () => stop('cancelled')
-    if (signal?.aborted) onAbort()
-    signal?.addEventListener('abort', onAbort, { once: true })
-    child.once('error', (e) => {
-      stderr += String(e.message)
-    })
-    let done = false
-    const finish = (code) => {
-      if (done) return
-      done = true
-      clearInterval(timer)
-      clearTimeout(limit)
-      signal?.removeEventListener('abort', onAbort)
-      resolve({ stdout, stderr, code, stopped })
-    }
-    child.once('close', finish)
-    // On Windows a process the script left running keeps its output open, and 'close' never comes:
-    // its own exit, and a moment for the last output, are enough
-    child.once('exit', (code) => setTimeout(() => finish(code), 5_000).unref())
-  })
+async function runScript(args, cwd, { signal, limitMs, beat }) {
+  const started = clock()
+  const timer = setInterval(() => beat(Math.round((clock() - started) / 1000)), BEAT_MS)
+  // The whole process tree is stopped (tsc, vitest and pnpm run under the script); stdin is closed, as `ignore` was
+  try {
+    const { stdout, stderr } = await runProgram(process.execPath, args, { cwd, timeoutMs: limitMs, signal, tree: true, input: '', maxBuffer: Infinity, stderrTail: 20_000, windowsHide: true })
+    return { stdout, stderr, code: 0, stopped: null }
+  } catch (e) {
+    // A script that did not start has nothing on stderr but node's message
+    const said = typeof e.code === 'string' && !e.killed ? e.message : ''
+    return { stdout: e.stdout, stderr: (e.stderr + said).slice(-20_000), code: e.code, stopped: e.timedOut ? 'timed out' : e.aborted ? 'cancelled' : null }
+  } finally {
+    clearInterval(timer)
+  }
 }
 
 /**
