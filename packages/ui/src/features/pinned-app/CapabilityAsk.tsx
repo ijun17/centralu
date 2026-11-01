@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isTextEntry } from '../../app/keys.js'
 import type { AppQuestion } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
@@ -28,7 +29,7 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
       const t = e.target as HTMLElement
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
-        typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
+        typing: isTextEntry(e.target),
         covered: capabilityAskCovered(st),
       })
       // There is no "always allow" — the answer is remembered either way

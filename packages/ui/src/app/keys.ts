@@ -89,6 +89,12 @@ export function isTextEntry(target: EventTarget | null): boolean {
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type)
 }
 
+/** Whether a key press lands on a control that presses itself on Enter: a button or a link */
+export function pressesItself(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return !!el && typeof el.closest === 'function' && el.closest('button, a[href], [role="button"]') !== null
+}
+
 /**
  * What a single key press means in a confirmation dialog (quit confirmation) (#181) — a pure
  * function, so it is tested without a browser.

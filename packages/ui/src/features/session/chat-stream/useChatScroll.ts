@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { isTextEntry } from '../../../app/keys.js'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import type { SessionSummary } from '@cc/core'
 import { useStore, type ChatItem } from '../../../store/store.js'
@@ -112,7 +113,7 @@ export function useChatScroll({
       const el = scrollRef.current
       const t = e.target
       if (!el || !isScrollUpKey(e) || !(t instanceof Node)) return
-      if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (isTextEntry(t)) return
       if (el.contains(t) || t === document.body || t === document.documentElement) noteInput()
     }
     window.addEventListener('pointerup', release)

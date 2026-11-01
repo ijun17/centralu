@@ -4,7 +4,7 @@ import { parseAppLink } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from './shortcut.js'
-import { letterOf, navButtonOf, navKeyOf } from './keys.js'
+import { isTextEntry, letterOf, navButtonOf, navKeyOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
@@ -631,8 +631,7 @@ function GlobalKeys() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement
-      const typing = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT'
+      const typing = isTextEntry(e.target)
       /*
         Letters get their meaning asked for the same reason as digits (app/keys.ts). The digit
         comment below says "e.key becomes a symbol when Shift is held", and the same thing

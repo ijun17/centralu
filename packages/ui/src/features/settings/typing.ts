@@ -3,6 +3,7 @@
  * (apply-update.ts) and an agent's "Apply now" that went with no card (store/updates.ts, #1509). A module of its own so the store
  * can read it without importing the hook file that imports the store.
  */
+import { isTextEntry } from '../../app/keys.js'
 
 /**
  * How long after the last keystroke in a text field the window counts as "someone is typing". A
@@ -17,15 +18,11 @@ export const TYPING_QUIET_MS = 20_000
  */
 let lastTypedAt = 0
 let typingTracked = false
-function isEditable(t: EventTarget | null): boolean {
-  if (!(t instanceof HTMLElement)) return false
-  return t.isContentEditable || t.tagName === 'TEXTAREA' || (t instanceof HTMLInputElement && t.type !== 'checkbox')
-}
 export function trackTyping(): void {
   if (typingTracked || typeof window === 'undefined') return
   typingTracked = true
   const mark = (e: Event) => {
-    if (isEditable(e.target)) lastTypedAt = Date.now()
+    if (isTextEntry(e.target)) lastTypedAt = Date.now()
   }
   window.addEventListener('keydown', mark, true)
   window.addEventListener('compositionupdate', mark, true)
