@@ -241,6 +241,19 @@ describe('a tool that takes input mid-turn: turns and receipts', () => {
     expect(said.filter((s) => s.startsWith('waiting_input'))).toEqual(['waiting_input:interrupted', `waiting_input:${INTERRUPTED_BY_TOOL}`])
   })
 
+  // #1829: a turn whose end was lost (or one adopted with no id), its card answered by the Stop, read as running for good
+  it('a Stop with no turn running and nothing in flight says the stop itself, as no turn will', async () => {
+    const { wire, ledger, said } = await ready()
+    ledger.stopByPerson()
+    expect(wire.interrupts).toEqual([])
+    expect(said).toEqual(['waiting_input:interrupted'])
+    // A write still unanswered may yet start a turn, whose end says it
+    ledger.send('a')
+    await tick()
+    ledger.stopByPerson()
+    expect(said).toEqual(['waiting_input:interrupted', 'write:a'])
+  })
+
   it('a write refused after a Stop failed its tracked input says nothing more: that Stop already did', async () => {
     const { wire, ledger, events, observe } = await ready()
     void ledger.sendTracked('a', observe('a')).catch(() => {})

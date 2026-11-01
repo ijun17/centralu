@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
+import { isInTurn, transition, type AdapterCapabilities, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
 import { failureSentence, isNetworkFailure } from '../../sessions/interruptions.js'
 import { AcpAdapter } from './adapter.js'
@@ -433,4 +433,46 @@ describe('the ACP session against a scripted agent', () => {
     expect((spawned[0] as FakeAcpPeer).methods()).toEqual(['initialize', 'session/load'])
     expect(w.events.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'call-9', ok: false }])
   })
+})
+
+/**
+ * Every turn ends (#1829): whatever is lost or cut on the way, a session the agent has no turn open for, or with no process,
+ * does not read as in a turn. After each step (each waits for what it makes the adapter say) the session's state is read through
+ * the shared state machine: in a turn exactly while the agent has one open.
+ */
+describe('every turn ends (#1829)', () => {
+  type World = ReturnType<typeof world>
+  type Session = Awaited<ReturnType<World['start']>>
+  const stateOf = (events: NormalizedEvent[]) => events.reduce<SessionState>((s, e) => transition(s, e).state, 'idle')
+  const options = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }]
+  const running: [string, (w: World, s: Session) => Promise<unknown>, boolean][] = [
+    ['a message is sent', async (w, s) => (s.send('go'), w.peers[0]!.next(isPrompt)), true],
+    ['the agent answers', async (w) => (w.peers[0]!.update(SID, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'on it' } }), w.event((e) => e.type === 'message_delta')), true],
+  ]
+  const card: (typeof running)[number] = ['a card is raised', async (w) => {
+    void w.peers[0]!.ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: 'call-1', kind: 'execute', title: 'ls', rawInput: { command: 'ls' } } }).catch(() => {})
+    return w.event((e) => e.type === 'approval_request')
+  }, true]
+  const exits: (typeof running)[number] = ['the agent exits', async (w) => (w.peers[0]!.exit(1), w.event((e) => e.type === 'error')), false]
+  const cases: Record<string, typeof running> = {
+    'the agent exits mid-turn': [...running, exits],
+    'the agent exits with a card open': [...running, card, exits],
+    'a Stop with a card open': [
+      ...running,
+      card,
+      ['Stop', async (w, s) => (s.interrupt(), w.peers[0]!.next((m) => m.method === 'session/cancel')), true],
+      ['the agent ends the turn', async (w) => (w.peers[0]!.release('session/prompt', { result: { stopReason: 'cancelled' } }), w.event((e) => e.type === 'state_change' && e.state === 'waiting_input')), false],
+    ],
+  }
+  for (const [name, steps] of Object.entries(cases)) {
+    it(name, async () => {
+      const w = world()
+      const s = await w.start()
+      for (const [what, act, turnOpen] of steps) {
+        await act(w, s)
+        expect(isInTurn(stateOf(w.events)), `after: ${what}`).toBe(turnOpen)
+      }
+    })
+  }
+  it.todo('an update the agent sends after its turn ended does not read as a turn with nothing to end it (#1830)')
 })

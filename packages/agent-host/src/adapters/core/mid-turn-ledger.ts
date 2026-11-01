@@ -225,6 +225,17 @@ export class MidTurnLedger {
     if (this.running !== null) this.stop(this.running, true)
   }
 
+  /**
+   * The person's Stop. With no turn running and none that can start, no end will come to say it, so it is said here, as Claude
+   * says it with no turn open (#1829): a turn whose end was lost, or an adopted one with no id, otherwise read as running for good
+   */
+  stopByPerson(): void {
+    this.interrupt()
+    if (this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0) {
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+    }
+  }
+
   /** The connection ended. `expected`: this side closed it; `crash`: what is said when it ended with work in flight */
   exited(expected: boolean, crash: string): void {
     this.receipts.failAll(new Error('The session process ended before the parent note finished'))

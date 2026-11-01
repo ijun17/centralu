@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { isInTurn, STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
 
 /**
  * The bug where stop did not work (dogfooding 2026-09-07: "only the tool call stops, and a few
@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   handlers: null as null | {
     onNotification: (n: { method: string; params?: unknown }) => void
     onServerRequest: (r: { id: number | string; method: string; params?: unknown }) => void
+    onExit: (code: number | null, expected: boolean) => void
   },
   /** The turn to load into the turn/start response (the test decides whether the notification or the response comes first) */
   startTurnId: null as string | null,
@@ -63,6 +64,17 @@ beforeEach(() => {
   state.holdStart = null
   state.interruptRefused = null
 })
+
+/** The session's state after these events, from idle, through the shared state machine; an illegal move is a failure */
+const stateOf = (events: NormalizedEvent[]): SessionState => {
+  let s: SessionState = 'idle'
+  for (const e of events) {
+    const step = transition(s, e)
+    expect(step.illegal, `${e.type} from ${s}`).toBe(false)
+    s = step.state
+  }
+  return s
+}
 
 async function session(events: NormalizedEvent[] = []) {
   const adapter = new CodexAdapter()
@@ -311,16 +323,6 @@ describe('codex: how an interrupted turn ends (#698)', () => {
  * `turn/completed` was then an illegal move from `error`. The states are read through the shared state machine.
  */
 describe('codex stop that Codex refuses', () => {
-  const stateOf = (events: NormalizedEvent[]): SessionState => {
-    let s: SessionState = 'idle'
-    for (const e of events) {
-      const step = transition(s, e)
-      expect(step.illegal, `${e.type} from ${s}`).toBe(false)
-      s = step.state
-    }
-    return s
-  }
-
   it('keeps the turn working with a notice, and the turn ends as it does', async () => {
     state.interruptRefused = 'turn not found'
     const events: NormalizedEvent[] = []
@@ -341,4 +343,47 @@ describe('codex stop that Codex refuses', () => {
     state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'turn-7', items: [], status: 'completed' } } })
     expect(stateOf(events)).toBe('waiting_input')
   })
+})
+
+/**
+ * Every turn ends (#1829): whatever is lost or cut on the way, a session Codex has no turn open for, or with no process, does
+ * not read as in a turn. After each step the session's state is read through the shared state machine: in a turn exactly while
+ * Codex has one open (null: not checked, a known gap).
+ */
+describe('every turn ends (#1829)', () => {
+  type Handle = Awaited<ReturnType<typeof session>>
+  const say = (method: string, params: Record<string, unknown>) => () => state.handlers!.onNotification({ method, params: { threadId: 't1', ...params } })
+  const card = () => state.handlers!.onServerRequest({ id: 41, method: 'item/commandExecution/requestApproval', params: { threadId: 't1', turnId: 'turn-7', itemId: 'item-41', command: 'rm -rf build' } })
+  const running: [string, (h: Handle) => void, boolean | null][] = [
+    ['a message is sent', (h) => h.send('a long-running task'), null],
+    ['Codex starts its turn', say('turn/started', { turn: { id: 'turn-7' } }), true],
+  ]
+  const cases: Record<string, typeof running> = {
+    'the app-server exits mid-turn': [...running, ['it exits', () => state.handlers!.onExit(1, false), false]],
+    'the app-server exits with a card open': [...running, ['a card is raised', card, true], ['it exits', () => state.handlers!.onExit(1, false), false]],
+    'a Stop with a card open': [
+      ...running,
+      ['a card is raised', card, true],
+      ['Stop', (h) => h.interrupt(), true],
+      ['Codex ends the turn', say('turn/completed', { turn: { id: 'turn-7', status: 'interrupted' } }), false],
+    ],
+    'output after the turn ended, then a Stop': [
+      ...running,
+      ['Codex ends the turn', say('turn/completed', { turn: { id: 'turn-7', status: 'completed' } }), false],
+      ['a command starts after it', say('item/started', { turnId: 'turn-7', item: { type: 'commandExecution', id: 'cmd-1', command: 'ls', cwd: '/tmp', status: 'inProgress' } }), null],
+      ['Stop', (h) => h.interrupt(), false],
+    ],
+  }
+  for (const [name, steps] of Object.entries(cases)) {
+    it(name, async () => {
+      const events: NormalizedEvent[] = []
+      const h = await session(events)
+      for (const [what, act, turnOpen] of steps) {
+        act(h)
+        await tick()
+        if (turnOpen !== null) expect(isInTurn(stateOf(events)), `after: ${what}`).toBe(turnOpen)
+      }
+    })
+  }
+  it.todo('output Codex sends after its turn ended does not read as a turn with nothing to end it (#1830)')
 })

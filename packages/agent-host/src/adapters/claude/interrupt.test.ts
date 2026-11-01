@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { isInTurn, STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import type { CanUseTool, QueryOptions } from './claude-sdk-fake.test-helpers.js'
 
 /**
  * What Stop leaves behind (#168). The CLI closes an interrupted turn with an
@@ -16,17 +17,32 @@ import { SLOW } from '../../../../../tooling/test-timing.js'
 const cli = vi.hoisted(() => {
   const inbox: unknown[] = []
   let wake: (() => void) | null = null
+  /** How the stream stops, once the test ends it: done (the process exited) or a throw (it failed) */
+  const state = { ending: null as { error?: Error } | null }
   return {
     /** What the SDK's interrupt answers; a test replaces it, `afterEach` puts back the one that confirms at once */
     interrupt: async (): Promise<unknown> => undefined,
+    /** What the adapter wrote to the CLI, and the permission callback it passed */
+    written: [] as Record<string, unknown>[],
+    canUseTool: null as CanUseTool | null,
     push(m: unknown) {
       inbox.push(m)
       wake?.()
       wake = null
     },
+    end(error?: Error) {
+      state.ending = error ? { error } : {}
+      wake?.()
+      wake = null
+    },
     async *stream() {
+      state.ending = null
       for (;;) {
         while (inbox.length > 0) yield inbox.shift()
+        // Widened: set by `end` while this generator waits, which narrowing cannot see
+        const ending = state.ending as { error?: Error } | null
+        if (ending?.error) throw ending.error
+        if (ending) return
         await new Promise<void>((r) => (wake = r))
       }
     },
@@ -34,13 +50,19 @@ const cli = vi.hoisted(() => {
 })
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => ({
-    [Symbol.asyncIterator]: () => cli.stream(),
-    interrupt: () => cli.interrupt(),
-    close: () => {},
-    supportedCommands: async () => [],
-    getContextUsage: async () => undefined,
-  }),
+  query: ({ prompt, options }: { prompt: AsyncIterable<Record<string, unknown>>; options: QueryOptions }) => {
+    cli.canUseTool = options.canUseTool ?? null
+    void (async () => {
+      for await (const u of prompt) cli.written.push(u)
+    })()
+    return {
+      [Symbol.asyncIterator]: () => cli.stream(),
+      interrupt: () => cli.interrupt(),
+      close: () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+  },
 }))
 
 const { ClaudeAdapter } = await import('./index.js')
@@ -52,6 +74,17 @@ const delta = (text: string) => ({
   event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
 })
 const interrupted = { type: 'result', subtype: 'error_during_execution', is_error: true, modelUsage: {} }
+
+/** The session's state after these events, from idle, through the shared state machine; an illegal move is a failure */
+const stateOf = (events: NormalizedEvent[]): SessionState => {
+  let state: SessionState = 'idle'
+  for (const e of events) {
+    const step = transition(state, e)
+    expect(step.illegal, `${e.type} from ${state}`).toBe(false)
+    state = step.state
+  }
+  return state
+}
 
 async function session(options: ConstructorParameters<typeof ClaudeAdapter>[0] = {}) {
   const events: NormalizedEvent[] = []
@@ -124,16 +157,6 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
   })
   const stoppedStates = (events: NormalizedEvent[]) =>
     events.filter((e) => e.type === 'state_change' && e.state === 'waiting_input' && e.reason === 'interrupted')
-  /** The session's state after these events, from idle, through the shared state machine; an illegal move is a failure */
-  const stateOf = (events: NormalizedEvent[]): SessionState => {
-    let state: SessionState = 'idle'
-    for (const e of events) {
-      const step = transition(state, e)
-      expect(step.illegal, `${e.type} from ${state}`).toBe(false)
-      state = step.state
-    }
-    return state
-  }
   const stopNotices = (events: NormalizedEvent[]) =>
     events.flatMap((e) => (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL ? [e.text] : []))
   /** A turn running: sent, and the model's first words arrived */
@@ -311,4 +334,50 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
     expect(stateOf(events)).toBe('waiting_input')
     await handle.dispose()
   })
+})
+
+/**
+ * Every turn ends (#1829): whatever is lost or cut on the way, a session the CLI has no turn open for, or with no process,
+ * does not read as in a turn. Each case drives the CLI through its steps; after each one that leaves the CLI with no open turn,
+ * the session's state, read through the shared state machine, is out of its turn by the time the adapter has spoken.
+ */
+describe('every turn ends (#1829)', () => {
+  const said = (uuid: string, text: string) => ({ type: 'assistant', user_message_uuid: uuid, parent_tool_use_id: null, message: { id: `m-${uuid}`, role: 'assistant', content: [{ type: 'text', text }] } })
+  const ended = (uuids: string[]) => ({ type: 'result', subtype: 'success', is_error: false, result: '', user_message_uuids: uuids, modelUsage: {} })
+  const lastInput = () => String(cli.written.at(-1)?.uuid)
+  const card = () => void cli.canUseTool!('Bash', { command: 'rm -rf build' }, { toolUseID: 'tu-1', signal: new AbortController().signal }).catch(() => {})
+  type Step = [what: string, act: (h: Awaited<ReturnType<InstanceType<typeof ClaudeAdapter>['createSession']>>) => void, turnOpen: boolean]
+  const running: Step[] = [
+    ['a message is sent', (h) => h.send('do a long task'), true],
+    ['the model answers', () => cli.push(delta('working on it')), true],
+  ]
+  const cases: Record<string, Step[]> = {
+    'the process exits mid-turn': [...running, ['the stream ends', () => cli.end(), false]],
+    'the process fails mid-turn': [...running, ['the stream throws', () => cli.end(new Error('killed')), false]],
+    'the process exits with a card open': [...running, ['a card is raised', card, true], ['the stream ends', () => cli.end(), false]],
+    'a Stop with a card open': [...running, ['a card is raised', card, true], ['Stop', (h) => h.interrupt(), false]],
+    'a quiet input the CLI ran a turn for': [
+      ['a quiet input is sent', (h) => h.send('<centralu-nudge/>', { quiet: true }), false],
+      ['the CLI runs a turn for it', () => cli.push(said(lastInput(), 'carrying on')), true],
+      ['its result', () => cli.push(ended([lastInput()])), false],
+    ],
+    'a turn for an input the host did not send': [
+      ['the CLI runs a turn of its own', () => cli.push(said('00000000-0000-4000-8000-000000000001', 'a task finished')), true],
+      ['its result', () => cli.push(ended(['00000000-0000-4000-8000-000000000001'])), false],
+    ],
+  }
+  for (const [name, steps] of Object.entries(cases)) {
+    it(name, async () => {
+      cli.written.length = 0
+      const events: NormalizedEvent[] = []
+      const handle = await new ClaudeAdapter().createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+      for (const [what, act, turnOpen] of steps) {
+        act(handle)
+        await tick()
+        // An open turn is checked too, so a case that never reached its fault does not pass
+        await vi.waitFor(() => expect(isInTurn(stateOf(events)), `after: ${what}`).toBe(turnOpen), { timeout: 2_000 * SLOW })
+      }
+      await handle.dispose()
+    })
+  }
 })
