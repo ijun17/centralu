@@ -97,10 +97,7 @@ export type MidTurnInput = { readonly text: string; readonly receipt: InputRecei
 /** How a turn the tool named ended, as it said: the core says it to the host and settles the inputs bound to it */
 export type ToolTurnEnding = { how: 'complete' | 'interrupted' } | { how: 'failed'; error: ProtocolErrorOf }
 
-/**
- * How a Stop of the running turn is confirmed (§2.4), one value per tool, so making the tools agree is a change of it: the tool's
- * answer to the interrupt, or the turn's end, within `ms`, with `notice` (`seconds`: the bound) said when neither has come
- */
+/** A Stop confirmed by the interrupt's answer or the turn's end within `ms`, else `notice` (§2.4): one value per tool to make agree */
 export type StopConfirmation = { readonly ms: number; notice(seconds: number): string }
 
 /**

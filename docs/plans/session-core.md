@@ -426,20 +426,21 @@ Claude's differences are named values of the wire, not branches on the tool:
 
 | Policy (`MidTurnWire`) | Codex | Claude | Why it differs |
 |---|---|---|---|
-| `stop: StopConfirmation` (`byAnswer`, `bound`) | none: the turn's end confirms, no bound (§9.2) | the interrupt's answer or the result confirms; 10 s (`STOP_CONFIRM_MS`, one constant with ACP now) and "Claude Code has not confirmed the stop after N s. The turn is still running." | Q2 and the wording are the owner's calls; each is a change of this value |
-| how a turn's end is said | `turnEnded(id, ending)`: the ledger says `turn_complete`, `waiting_input` or `error` | `said(events, completes)`: the normalizer's events go out as they are, among the goal's events and the closed cards, `turn_complete` with its `output`; then `turnEnded(null, null)` closes the turn and `confirmStop` confirms a waiting Stop | moving Claude's endings into the ledger would reorder events |
+| `stop: StopConfirmation` (`ms`, `notice`; its presence means the interrupt's answer confirms too) | none: the turn's end confirms, no bound (§9.2) | the interrupt's answer or the result confirms; 10 s (`STOP_CONFIRM_MS`, one constant with ACP now) and "Claude Code has not confirmed the stop after N s. The turn is still running." | Q2 and the wording are the owner's calls; each is a change of this value |
+| how a turn's end is said | `turnEnded(id, ending)`: the ledger says `turn_complete`, `waiting_input` or `error` | `endSaid(events, completes, took)`, one call per result: the turn closes, the normalizer's events go out as they are (among the goal's events and the closed cards, `turn_complete` with its `output`) with `took` readable as `endingInputs` (`turnInputs`), then a waiting Stop is confirmed; `said(events)` for other messages | moving Claude's endings into the ledger would reorder events |
 | `open`, `hasConversation`, `write`, `refusal`, `close`, `detach` | the ledger's queue (while opening, behind a blocking turn) writes through them | none: the SDK's input stream is written by Claude (quiet inputs, a held `/goal`, the sign-in race go through it), and its conversation exists from the start | |
-| `stopRefused`, `idleStop` | none | the normalizer gets the turn's own ending back; a Stop with no turn still asks the interrupt (it cancels what the SDK holds), and a refusal then is `couldNotStop` | |
+| `stopRefused`, `idleStop`; `tracked` on `interrupt`, `releaseCards`, `idleStop` | none (ignores `tracked`) | the normalizer gets the turn's own ending back; a Stop with no turn still asks the interrupt, and a refusal then is `couldNotStop`; `tracked` (a tracked input waited when the Stop came, read before they fail) is `cancel_queued` | |
 | `inFlight`, `exitWords` | none: the ledger's own state | a tracked input, a card, a message queued or unanswered, background work, a CLI that has said nothing; inputs fail with "…before this agent reported back" | |
 
 Left on Claude's side, as Claude's own rules on the core: quiet inputs and the result that answers only them, the turn the CLI
 runs for a quiet input (`cliTurnRan`), `cancel_queued` and the person's inputs its answer names, a failed turn's parent notes
 (`cancelAsyncMessage`), the goal gate, the sign-in race, an adopted process's lost calls, and the cards (PR 8).
 
-Size: +233 −176 lines outside tests (+57): `claude/` −64, `core/` +121. The owner chose one copy of the turn logic over
+Size: +250 −190 lines outside tests (+60): `claude/` −69, `core/` +129; tests +147 −1. The owner chose one copy of the turn logic over
 fewer lines. What each open decision would remove later: one Stop wording for Claude and ACP leaves `bound.notice` one
-function of the label (about −2 lines); a Stop confirmed only at the turn's end removes `byAnswer` and the answer's
-confirmation (about −6), and with Q2 Codex's no-bound case too, so `StopConfirmation` becomes one constant (about −10 more).
+function of the label (about −2 lines); a Stop confirmed only at the turn's end removes the answer's confirmation (about
+−3); with Q2, Codex gets a `stop` (one line, then confirmed by its `turn/interrupt` answer as Claude is, or by its end once the
+previous decision is made), and `StopConfirmation` becomes one constant (about −8 more).
 None of Claude's existing tests changed, #1831's invariant tables and `interrupt.test.ts` included; the core tests
 (`core/mid-turn-ledger.test.ts`) add a wire that writes its own inputs, with each policy.
 
@@ -577,7 +578,7 @@ estimates of changed lines without fixtures.
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
-| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +57 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
+| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +60 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |

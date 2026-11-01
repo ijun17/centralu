@@ -217,10 +217,7 @@ export class MidTurnLedger {
     if (id) this.receipts.endTurn(id)
   }
 
-  /**
-   * A turn's end the tool says in its own events (Claude's result): the turn closes, `took` (the inputs it names by the host's
-   * names) is what `endingInputs` reads while they go out, and a Stop still waiting is confirmed by it once they are out
-   */
+  /** A turn's end in the tool's own events (Claude's result): the turn closes, they go out with `took` read meanwhile, a Stop is confirmed */
   endSaid(events: readonly NormalizedEvent[], completes: readonly string[] | undefined, took: readonly string[] | null): void {
     this.turnEnded(null, null)
     this.ending = took
@@ -234,9 +231,8 @@ export class MidTurnLedger {
   private ending: readonly string[] | null = null
 
   /**
-   * Events the tool says itself, in order, a turn's end among them (Claude: its normalizer's, where the end sits among the goal's
-   * events and the cards it closes, and `turn_complete` carries the answer's `output`). `completes`: the inputs the end names,
-   * completed after its `turn_complete`. A failure or a limit among them is how the turn ended: a Stop still waiting is let go
+   * Events the tool says itself, in order (Claude's normalizer's: a turn's end among the goal's events and closed cards). `completes`
+   * complete after their `turn_complete`; a failure or a limit among them is how the turn ended, and a waiting Stop is let go
    */
   said(events: readonly NormalizedEvent[], completes?: readonly string[]): void {
     for (const e of events) {
