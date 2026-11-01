@@ -169,7 +169,7 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
     return s
   }
 
-  it('says the turn stopped only after the interrupt answers', async () => {
+  it("says the turn stopped only at its result, not at the interrupt's answer", async () => {
     let confirm: () => void = () => {}
     cli.interrupt = () => new Promise((resolve) => (confirm = () => resolve(undefined)))
     const { handle, events } = await running()
@@ -178,6 +178,9 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
     expect(stateOf(events)).toBe('working')
 
     confirm()
+    await tick()
+    expect(stateOf(events)).toBe('working')
+    cli.push(interrupted)
     await tick()
     expect(stateOf(events)).toBe('waiting_input')
     expect(stoppedStates(events)).toHaveLength(1)
@@ -225,25 +228,26 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
     await handle.dispose()
   })
 
-  it('an interrupt that never answers is said in a notice once its bound passes; the turn stays working, and a late answer still stops it', async () => {
+  it('a turn that does not end is said in a notice once its bound passes, in every tool\'s words; the turn stays working, and its result still stops it', async () => {
     let confirm: () => void = () => {}
     cli.interrupt = () => new Promise((resolve) => (confirm = () => resolve(undefined)))
     const { handle, events, errors } = await running({ stopConfirmMs: 20 })
     handle.interrupt()
 
     await vi.waitFor(() => expect(stopNotices(events)).toHaveLength(1), { timeout: 5_000 * SLOW })
-    expect(stopNotices(events)[0]).toMatch(/^Claude Code has not confirmed the stop after \d+ s\. The turn is still running\.$/)
+    expect(stopNotices(events)).toEqual(['Claude Code has not confirmed the stop; the turn may still be running.'])
     expect(errors()).toEqual([])
     expect(stateOf(events)).toBe('working')
 
     confirm()
+    cli.push(interrupted)
     await tick()
     expect(stateOf(events)).toBe('waiting_input')
     expect(stoppedStates(events)).toHaveLength(1)
     await handle.dispose()
   })
 
-  it('a second Stop joins the first: one bound, and two answers say stopped once', async () => {
+  it('a second Stop joins the first: one bound, and its result says stopped once', async () => {
     const answers: (() => void)[] = []
     cli.interrupt = () => new Promise((resolve) => answers.push(() => resolve(undefined)))
     const { handle, events } = await running({ stopConfirmMs: 10_000 })
@@ -264,13 +268,14 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
       vi.useRealTimers()
     }
     for (const answer of answers) answer()
+    cli.push(interrupted)
     await tick()
     expect(stoppedStates(events)).toHaveLength(1)
     expect(stopNotices(events)).toHaveLength(1)
     await handle.dispose()
   })
 
-  it('a Stop pressed after the bound was said starts it again, and an answer to the first still stops the turn', async () => {
+  it('a Stop pressed after the bound was said starts it again, and the result still stops the turn', async () => {
     const answers: (() => void)[] = []
     cli.interrupt = () => new Promise((resolve) => answers.push(() => resolve(undefined)))
     const { handle, events } = await running({ stopConfirmMs: 10_000 })
@@ -290,6 +295,7 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
       vi.useRealTimers()
     }
     answers[0]!()
+    cli.push(interrupted)
     await tick()
     expect(stoppedStates(events)).toHaveLength(1)
     expect(stateOf(events)).toBe('waiting_input')
@@ -330,6 +336,7 @@ describe('a Stop Claude has not confirmed (interrupt)', () => {
     await tick()
     expect(stopNotices(events)).toEqual([])
     pending[1]!.resolve()
+    cli.push(interrupted)
     await tick()
     expect(stateOf(events)).toBe('waiting_input')
     await handle.dispose()
@@ -355,7 +362,7 @@ describe('every turn ends (#1829)', () => {
     'the process exits mid-turn': [...running, ['the stream ends', () => cli.end(), false]],
     'the process fails mid-turn': [...running, ['the stream throws', () => cli.end(new Error('killed')), false]],
     'the process exits with a card open': [...running, ['a card is raised', card, true], ['the stream ends', () => cli.end(), false]],
-    'a Stop with a card open': [...running, ['a card is raised', card, true], ['Stop', (h) => h.interrupt(), false]],
+    'a Stop with a card open': [...running, ['a card is raised', card, true], ['Stop', (h) => h.interrupt(), true], ['its result', () => cli.push(interrupted), false]],
     'a quiet input the CLI ran a turn for': [
       ['a quiet input is sent', (h) => h.send('<centralu-nudge/>', { quiet: true }), false],
       ['the CLI runs a turn for it', () => cli.push(said(lastInput(), 'carrying on')), true],

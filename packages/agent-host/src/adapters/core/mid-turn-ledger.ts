@@ -1,7 +1,8 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type EventSink, type InputObserver } from '../contract.js'
 import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
-import { stopNotConfirmed, undeliveredError } from '../session-kit.js'
+import { stopNotConfirmed, stopNotEnded, undeliveredError } from '../session-kit.js'
+import { STOP_CONFIRM_MS } from './ledger.js'
 import type { MidTurnInput, MidTurnWire, ToolTurnEnding } from './seam.js'
 
 /**
@@ -196,10 +197,12 @@ export class MidTurnLedger {
 
   /** A turn ended; `ending`: how, said to the host with the inputs bound to it settled (null: the tool says no more of it) */
   turnEnded(id: string | null, ending: ToolTurnEnding | null): void {
+    const was = this.running
     this.running = null
     if (id) keep(this.ended, id)
+    // The running turn's end lets its Stop go, said or not (Codex's turn/failed), not a late one's; Claude's: `endSaid` confirms
+    if (id ? id === was : ending) this.endStopWait()
     if (!ending) return
-    this.endStopWait()
     if (this.blocking) this.unblock()
     const sessionId = this.sessionId
     switch (ending.how) {
@@ -260,41 +263,32 @@ export class MidTurnLedger {
     if (!this.stopped.includes(turnId)) keep(this.stopped, turnId)
     const wait = running ? this.awaitStop() : null
     if (wait) wait.asks++
-    void this.wire.interrupt(turnId, tracked).then(
-      () => {
-        if (wait) this.confirmStop(wait)
-      },
-      (err: Error) => {
-        if (!running) return
-        if (wait) {
-          wait.asks--
-          // Confirmed already, closed, or another Stop's interrupt may still land
-          if (this.stopWait !== wait || this.closed || wait.asks > 0) return
-          this.endStopWait()
-          this.wire.stopRefused?.()
-          if (wait.late) return
-        }
-        // As a notice (#1060): the turn is still running, and an error would end it for the host
-        this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`))
-      },
-    )
+    // Its answer confirms nothing: only the turn's end does (owner decision on #1654)
+    void this.wire.interrupt(turnId, tracked).catch((err: Error) => {
+      if (!wait) return
+      wait.asks--
+      // Confirmed already, closed, or another Stop's interrupt may still land
+      if (this.stopWait !== wait || this.closed || wait.asks > 0) return
+      this.endStopWait()
+      this.wire.stopRefused?.()
+      // As a notice (#1060): the turn is still running, and an error would end it for the host
+      if (!wait.late) this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`))
+    })
   }
 
   /**
-   * Waits for the tool to confirm a Stop under the wire's bound (none: no wait). A second Stop joins the wait (one bound, one
-   * confirmation); one after the bound was said starts it again on the same wait, which an answer to the first still confirms
+   * Waits for the turn's end under one bound for every tool. A second Stop joins the wait (one bound, one confirmation); one
+   * after the bound was said starts it again on the same wait
    */
-  private awaitStop(): StopWait | null {
-    const bound = this.wire.stop
-    if (!bound) return null
+  private awaitStop(): StopWait {
     const current = this.stopWait
     if (current && !current.late) return current
     const wait: StopWait = current ?? { late: false, asks: 0, bound: undefined }
     wait.late = false
     wait.bound = setTimeout(() => {
       wait.late = true
-      if (!this.closed) this.emit(stopNotConfirmed(this.sessionId, bound.notice(Math.round(bound.ms / 1000))))
-    }, bound.ms)
+      if (!this.closed) this.emit(stopNotEnded(this.sessionId, this.wire.label))
+    }, this.wire.stopConfirmMs ?? STOP_CONFIRM_MS)
     wait.bound.unref?.()
     this.stopWait = wait
     return wait
@@ -306,7 +300,7 @@ export class MidTurnLedger {
     this.stopWait = null
   }
 
-  /** The tool confirmed the Stop (the interrupt's answer, or the stopped turn's end the tool said itself): said stopped once */
+  /** The stopped turn's end the tool said itself (`endSaid`) confirms the Stop: said stopped once */
   private confirmStop(wait = this.stopWait): void {
     if (!wait || this.stopWait !== wait) return
     this.endStopWait()
@@ -350,6 +344,7 @@ export class MidTurnLedger {
   exited(expected: boolean, crash: string): void {
     // Read before the receipts fail and the connection's work ends with it
     const held = !expected && !!this.wire.inFlight?.()
+    this.endStopWait()
     this.receipts.failAll(new Error(this.wire.exitWords ?? PROCESS_ENDED))
     this.wire.connectionEnded()
     if (expected) return

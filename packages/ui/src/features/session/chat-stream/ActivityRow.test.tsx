@@ -47,7 +47,7 @@ describe('ActivityRow Stop', () => {
   })
 
   it('is Stop again, with the notice beside it, when the tool says the stop has not taken effect', () => {
-    const text = 'Claude Code has not confirmed the stop after 10 s. The turn is still running.'
+    const text = 'Claude Code has not confirmed the stop; the turn may still be running.'
     const { html, tag, label } = render({ s1: { turn: TURN, failed: text } })
     expect(label).toBe('Stop')
     expect(tag).not.toMatch(/ disabled=""/)

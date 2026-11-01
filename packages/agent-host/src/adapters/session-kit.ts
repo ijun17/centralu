@@ -91,6 +91,9 @@ export function stopNotConfirmed(sessionId: string, text: string): NormalizedEve
   return { type: 'notice', sessionId, level: 'warning', text, from: 'Centralu', label: STOP_NOT_CONFIRMED_LABEL }
 }
 
+/** Every tool's words when a Stop's turn has not ended within the bound (owner decision on #1654) */
+export const stopNotEnded = (sessionId: string, label: string) => stopNotConfirmed(sessionId, `${label} has not confirmed the stop; the turn may still be running.`)
+
 /**
  * The ids of the approval and question cards a handle raises, `<prefix>-<tag>-<n>`. Part of every id is this
  * handle's own tag (#683 review). The counter starts at 0 in each process, so after a swap a window that missed the

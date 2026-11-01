@@ -120,6 +120,7 @@ says it waits "the way Codex waits for its `turn/completed`", which Codex does n
 (Claude and ACP): a Stop the tool accepted and never acted on is the case the timer exists for, and Codex's
 `turn/interrupt` answer is an acceptance, not a confirmation that the turn ended. Codex gaining the timer is a visible
 notice in a case that today shows nothing: a behaviour change, its own pull request, and an open question (§9.2).
+Decided on #1654 after PR 7: one bound and ACP's words for every tool, and a Stop is confirmed only by the turn's end.
 
 ### 2.5 The exit: crash or asleep, and its message
 
@@ -426,7 +427,7 @@ Claude's differences are named values of the wire, not branches on the tool:
 
 | Policy (`MidTurnWire`) | Codex | Claude | Why it differs |
 |---|---|---|---|
-| `stop: StopConfirmation` (`ms`, `notice`; its presence means the interrupt's answer confirms too) | none: the turn's end confirms, no bound (§9.2) | the interrupt's answer or the result confirms; 10 s (`STOP_CONFIRM_MS`, one constant with ACP now) and "Claude Code has not confirmed the stop after N s. The turn is still running." | Q2 and the wording are the owner's calls; each is a change of this value |
+| `stopConfirmMs` (tests only; `STOP_CONFIRM_MS`, 10 s, as ACP) | `turn/completed` confirms | the result confirms | the same rule and words for both since the owner's decision (§9.2): "<tool> has not confirmed the stop; the turn may still be running." |
 | how a turn's end is said | `turnEnded(id, ending)`: the ledger says `turn_complete`, `waiting_input` or `error` | `endSaid(events, completes, took)`, one call per result: the turn closes, the normalizer's events go out as they are (among the goal's events and the closed cards, `turn_complete` with its `output`) with `took` readable as `endingInputs` (`turnInputs`), then a waiting Stop is confirmed; `said(events)` for other messages | moving Claude's endings into the ledger would reorder events |
 | `open`, `hasConversation`, `write`, `refusal`, `close`, `detach` | the ledger's queue (while opening, behind a blocking turn) writes through them | none: the SDK's input stream is written by Claude (quiet inputs, a held `/goal`, the sign-in race go through it), and its conversation exists from the start | |
 | `stopRefused`, `idleStop`; `tracked` on `interrupt`, `releaseCards`, `idleStop` | none (ignores `tracked`) | the normalizer gets the turn's own ending back; a Stop with no turn still asks the interrupt, and a refusal then is `couldNotStop`; `tracked` (a tracked input waited when the Stop came, read before they fail) is `cancel_queued` | |
@@ -437,10 +438,8 @@ runs for a quiet input (`cliTurnRan`), `cancel_queued` and the person's inputs i
 (`cancelAsyncMessage`), the goal gate, the sign-in race, an adopted process's lost calls, and the cards (PR 8).
 
 Size: +252 −190 lines outside tests (+62): `claude/` −70, `core/` +132; tests +147 −1. The owner chose one copy of the turn logic over
-fewer lines. What each open decision would remove later: one Stop wording for Claude and ACP leaves `bound.notice` one
-function of the label (about −2 lines); a Stop confirmed only at the turn's end removes the answer's confirmation (about
-−3); with Q2, Codex gets a `stop` (one line, then confirmed by its `turn/interrupt` answer as Claude is, or by its end once the
-previous decision is made), and `StopConfirmation` becomes one constant (about −8 more).
+fewer lines. The two Stop decisions came after (§9.2): one bound and ACP's words for every tool, and a Stop confirmed
+only by the turn's end, removed `StopConfirmation` and the answer's confirmation in their own pull request.
 None of Claude's existing tests changed, #1831's invariant tables and `interrupt.test.ts` included; the core tests
 (`core/mid-turn-ledger.test.ts`) add a wire that writes its own inputs, with each policy.
 
@@ -600,7 +599,7 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
 | Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `MidTurnLedger.exited` with Claude's `inFlight` since PR 7, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything |
-| Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
+| Codex gets the Stop confirmation timer | §2.4 | done after 7 (§9.2): one bound and words for every tool, confirmed by the turn's end |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
 ## 8. Antigravity on the core (superseded)
@@ -641,6 +640,8 @@ wire, may still need a Stop to deny every open request first (`GateRequests`).
 1. **Claude's idle exit** (§2.5): asleep like Codex and ACP (#1397's reasoning), or does Claude have a reason to call
    it a crash? Decided (2026-10-27): asleep; done in its own pull request before PR 7 (§7.3).
 2. **Codex and the Stop timer** (§2.4): add the 10 s notice where Codex accepted the interrupt and the turn goes on?
+   Decided (#1654, after PR 7): yes, one bound for every tool, said in ACP's words ("<tool> has not confirmed the stop;
+   the turn may still be running."); and a Stop is confirmed only by the turn's end, not by the interrupt's answer.
 3. **`endsWithHost` for Claude and Codex** (§2.6): the stronger guarantee, at the cost of an `sh` wrapper per CLI on
    macOS and Linux and a real-OS test each.
 4. **The context guard** (§2.2): the upper bound for every tool, and "0 means no reading" per tool?

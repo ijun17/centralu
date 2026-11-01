@@ -2008,15 +2008,16 @@ Implementation rules:
   Open cards are a `PendingCards`: every way a card goes (answered, withdrawn by the CLI, the turn stopped, the handle
   closed) goes through `take` or `release`, which removes it before it is closed, and the adapter says
   `approval_resolved` / `question_resolved` there. A turn is said stopped only once the tool confirms the
-  stop: Codex's `turn/completed`, Claude's answer to the SDK's `interrupt()` or the stopped turn's result, whichever
-  comes first. Claude used to say it at once, so a rejected interrupt showed the turn stopped while the CLI kept
-  working. A Stop that has not taken effect (either tool refuses the interrupt, or nothing confirms Claude's within
-  `stopConfirmMs`, 10 s) leaves the turn running, and is said as a notice (`stopNotConfirmed`, label
+  stop by ending the turn: Codex's `turn/completed`, Claude's result (owner decision on #1654: the answer to the
+  interrupt only accepts it). Claude used to say it at once, so a rejected interrupt showed the turn stopped while the
+  CLI kept working. A Stop that has not taken effect (either tool refuses the interrupt, or the turn has not ended
+  within `stopConfirmMs`, 10 s, for every tool: "<tool> has not confirmed the stop; the turn may still be running.")
+  leaves the turn running, and is said as a notice (`stopNotConfirmed`, label
   `STOP_NOT_CONFIRMED_LABEL`), not an error: an error moves the session to `error`, which the manager takes as the
   turn's end (delegation waits settle, queued requests go in), and the turn's own ending (`waiting_input`) is not a
   move `error` allows. The notice also clears the wait's `stoppedByPerson` (`AgentRunWait`), so a child that then
   finishes hands its answer to the one waiting. A second Stop joins the first one's wait and bound; one pressed after
-  the bound was said starts the bound again on the same wait. A confirmation after the bound still ends the turn as
+  the bound was said starts the bound again on the same wait. A turn's end after the bound still ends it as
   stopped. A turn that fails or hits a limit while a Stop waits ends as it did: nothing says it stopped after that.
   Only an idle Claude session's refused interrupt is still `couldNotStop`, after it was said stopped. The window's
   Stop button says "Stopping…" from the click until the turn ends, through an approval in it, and shows the notice's
