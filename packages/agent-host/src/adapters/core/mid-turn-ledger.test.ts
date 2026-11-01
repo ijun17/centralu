@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../contract.js'
 import { MidTurnLedger } from './mid-turn-ledger.js'
@@ -456,5 +456,141 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     wire.opened.reject(new Error('request abandoned: this host let go of codex'))
     await tick()
     expect(said.at(-1)).toBe('a:fail request abandoned: this host let go of codex')
+  })
+})
+
+/** A wire that writes its own inputs (Claude: the SDK's input stream), with the policies Claude gives the ledger (§4.3) */
+function ownInputs(policy: { ms?: number; inFlight?: boolean } = {}) {
+  const said: string[] = []
+  const answers: ReturnType<typeof deferred<unknown>>[] = []
+  const wire: MidTurnWire = {
+    label: 'Tool',
+    interrupt: (_turn, tracked) => {
+      said.push(`interrupt:${tracked}`)
+      const answer = deferred<unknown>()
+      answers.push(answer)
+      return answer.promise
+    },
+    ...(policy.ms ? { stop: { ms: policy.ms, notice: (s: number) => `not confirmed after ${s} s` } } : {}),
+    stopRefused: () => said.push('stopRefused'),
+    idleStop: (tracked) => said.push(`idleStop:${tracked}`),
+    releaseCards: (tracked) => said.push(`releaseCards:${tracked}`),
+    inFlight: () => policy.inFlight ?? false,
+    exitWords: 'gone with the process',
+    connectionEnded: () => said.push('connectionEnded'),
+  }
+  const ledger = new MidTurnLedger('s1', (e) => {
+    said.push(e.type === 'state_change' ? `${e.state}:${e.reason ?? ''}` : e.type === 'notice' ? `notice:${e.text}` : e.type === 'session_live' ? `live:${e.reason}` : e.type)
+  }, wire)
+  const observe = (name: string) => ({ accepted: () => said.push(`${name}:accepted`), complete: () => said.push(`${name}:complete`), fail: (e: Error) => said.push(`${name}:fail ${e.message}`) })
+  return { said, answers, ledger, observe }
+}
+
+const usage: NormalizedEvent = { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } }
+
+describe('a tool that writes its own inputs, on the ledger with its policies', () => {
+  it('is ready at once; an end said in its own events closes the turn, names its inputs meanwhile, and completes them after turn_complete', () => {
+    const { said, ledger, observe } = ownInputs()
+    expect(ledger.closed).toBe(false)
+    const r = ledger.track(observe('a'), '00000000-0000-4000-8000-000000000001')
+    expect(r.id).toBe('00000000-0000-4000-8000-000000000001')
+    ledger.turnStarted('t')
+    ledger.accept(r.id)
+    expect(ledger.turnRunning).toBe(true)
+    const named: (readonly string[] | null)[] = []
+    const events: NormalizedEvent[] = [usage, { type: 'turn_complete', sessionId: 's1' }, { type: 'notice', sessionId: 's1', level: 'info', text: 'after' }]
+    const watched = new MidTurnLedger('s2', () => named.push(watched.endingInputs), { label: 'Tool', interrupt: async () => {}, releaseCards: () => {}, connectionEnded: () => {} })
+    watched.endSaid(events, undefined, ['host-name'])
+    expect(named).toEqual([['host-name'], ['host-name'], ['host-name']])
+    expect(watched.endingInputs).toBeNull()
+    ledger.endSaid(events, [r.id], null)
+    expect(ledger.turnRunning).toBe(false)
+    expect(said).toEqual(['a:accepted', 'usage_update', 'turn_complete', 'a:complete', 'notice:after'])
+  })
+
+  it('a Stop confirmed by the answer is said once for two Stops; the bound is said once with its words, and a late answer still confirms', async () => {
+    vi.useFakeTimers()
+    try {
+      const { said, answers, ledger } = ownInputs({ ms: 10_000 })
+      ledger.turnStarted('t')
+      ledger.stopByPerson()
+      ledger.stopByPerson()
+      vi.advanceTimersByTime(10_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toEqual(['notice:not confirmed after 10 s'])
+      answers[0]!.resolve(undefined)
+      answers[1]!.resolve(undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(said.filter((x) => x.startsWith('waiting_input'))).toEqual(['waiting_input:interrupted'])
+      vi.advanceTimersByTime(20_000)
+      expect(said.filter((x) => x.startsWith('notice'))).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a refused Stop under a bound gives the turn its own ending back and says why, unless another Stop may still land', async () => {
+    const { said, answers, ledger } = ownInputs({ ms: 10_000 })
+    ledger.turnStarted('t')
+    ledger.stopByPerson()
+    ledger.stopByPerson()
+    answers[0]!.reject(new Error('no'))
+    await tick()
+    expect(said).not.toContain('stopRefused')
+    answers[1]!.reject(new Error('still no'))
+    await tick()
+    expect(said.slice(-2)).toEqual(['stopRefused', 'notice:Could not stop: still no. The turn is still running.'])
+  })
+
+  it('without a StopConfirmation (Codex, §9.2) the answer says nothing: only the turn\'s end does', async () => {
+    const { said, answers, ledger } = ownInputs()
+    ledger.turnStarted('t')
+    ledger.stopByPerson()
+    answers[0]!.resolve(undefined)
+    await tick()
+    expect(said).not.toContain('waiting_input:interrupted')
+    ledger.turnEnded('t', { how: 'interrupted' })
+    expect(said.at(-1)).toBe('waiting_input:interrupted')
+  })
+
+  it('the end said by the tool confirms a waiting Stop; a failure among its events lets it go without a word', () => {
+    const a = ownInputs({ ms: 10_000 })
+    a.ledger.turnStarted('t')
+    a.ledger.stopByPerson()
+    a.ledger.endSaid([], undefined, null)
+    expect(a.said.at(-1)).toBe('waiting_input:interrupted')
+    const b = ownInputs({ ms: 10_000 })
+    b.ledger.turnStarted('t')
+    b.ledger.stopByPerson()
+    b.ledger.endSaid([{ type: 'error', sessionId: 's1', error: { code: 'internal', message: 'x', retryable: true } }], undefined, null)
+    expect(b.said).not.toContain('waiting_input:interrupted')
+  })
+
+  it('a Stop tells the wire whether a tracked input waited, read before they fail; with no turn it tells the tool (`idleStop`) before it is said stopped', () => {
+    const running = ownInputs({ ms: 10_000 })
+    void running.ledger.track(running.observe('a')).done.catch(() => {})
+    running.ledger.turnStarted('t')
+    running.ledger.stopByPerson()
+    expect(running.said).toEqual(['a:fail The parent note was stopped before it finished', 'releaseCards:true', 'interrupt:true'])
+    const idle = ownInputs({ ms: 10_000 })
+    idle.ledger.stopByPerson()
+    expect(idle.said).toEqual(['releaseCards:false', 'idleStop:false', 'waiting_input:interrupted'])
+  })
+
+  it('an exit is a crash with the wire\'s own work in flight, read before the receipts fail, and asleep without; inputs fail in its words', () => {
+    const busy = ownInputs({ inFlight: true })
+    void busy.ledger.track(busy.observe('a')).done.catch(() => {})
+    busy.ledger.exited(false, 'it crashed')
+    expect(busy.said).toEqual(['a:fail gone with the process', 'connectionEnded', 'error'])
+    const idle = ownInputs()
+    idle.ledger.exited(false, 'it crashed')
+    expect(idle.said).toEqual(['connectionEnded', 'live:asleep'])
+  })
+
+  it('the close says nothing more and fails what waits in its words', () => {
+    const { said, ledger, observe } = ownInputs()
+    void ledger.track(observe('a')).done.catch(() => {})
+    ledger.close(new Error('closed'))
+    expect(ledger.closed).toBe(true)
+    expect(said).toEqual(['a:fail closed'])
   })
 })

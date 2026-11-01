@@ -217,7 +217,7 @@ image (by reading): its own small fix.
 |---|---|---|
 | `tool-process.ts` | starting a tool's process (local, keeper, adopted, replayed), the tap that records its frames, its stderr tail, its exit, the stop (EOF, the stop bound, the tree), `detach` | `local-process.ts`, the three spawn sites, `frames/recorder.ts`, the three `dispose`s |
 | `ledger.ts` | the session's phase (`opening`, `ready`, `closed`), the turn that runs, the input queue for a tool without mid-turn input or in a blocking turn, the `InputReceipts`, the Stop and its confirmation timer, "interrupted by the tool", undelivered input on exit and dispose, crash vs asleep | the three `session.ts` |
-| `mid-turn-ledger.ts` (PR 6, §4.2) | the same for a tool that takes input mid-turn and names its turns (Codex; Claude in PR 7): inputs bound to the turn the tool says took them, the queue behind a blocking turn | `codex/session.ts`, `codex/turns.ts` |
+| `mid-turn-ledger.ts` (PR 6 and 7, §4.2, §4.3) | the same for a tool that takes input mid-turn and names its turns (Codex, Claude): inputs bound to the turn the tool says took them, the queue behind a blocking turn | `codex/session.ts`, `codex/turns.ts` |
 | `grants.ts` | the decision order of §2.7 (with the tool's `auto` answer) over `AlwaysAllowRules`, `insideFolder`, the preset; the cards (`PendingCards`, `CardIds`) and releasing them on stop, exit and dispose | `claude/session-cards.ts`, `codex/server-requests.ts`, `acp/session.ts` |
 | `events.ts` | the hygiene every tool's events pass: `TouchedFiles`, the image cap, token totals, the context guard (§2.2), compaction marks (dedupe, manual when our compact turn runs), `RetryActivity`, `UnmappedTypes` | the shared helpers plus their per-tool bypasses |
 
@@ -327,7 +327,7 @@ What the ledger owns now, one copy for every tool on it:
   with "`<label>` exited (code N)", and the queued ones with the undelivered count and its `error` event; the close fails
   them with "the session closed". `turnInputs` names the inputs the last turn took by the host's names.
 - **The Stop** (§2.4): `stopAsked` on the turn, the wire's own Stop, the cards released, and the 10 s timer
-  (`STOP_CONFIRM_MS`, now one constant for ACP; Claude's own copy in `claude/index.ts` goes with PR 7) for every tool on
+  (`STOP_CONFIRM_MS`, one constant for ACP and, since PR 7, Claude) for every tool on
   `CoreSession` (its `confirmsStop` setting went in PR 6, §4.2). The notice reads ACP's words ("`<label>` has not confirmed the stop; the turn may still be running.");
   Claude's differ ("…after N s. The turn is still running."), so PR 7 takes ACP's words or keeps its own as a visible
   change of its own, not inside the move.
@@ -404,6 +404,45 @@ blocking turn, binding and late answers, the Stop and a turn named after it, a r
 the exit in each state, and the close's words. The #1733 review's mutants of the ledger and of Codex's calls into it each fail
 one of these or a Codex test. Codex's own tests (36 files, through its client's frames) pass unchanged. Codex
 has no recorded replays yet (PR 2 recorded none), so those tests are the pin.
+
+### 4.3 As built in PR 7
+
+Claude runs on the same `MidTurnLedger` as Codex, not on `CoreSession`: Claude takes input mid-turn, and the CLI starts turns
+of its own (a goal's next lap, the turn it runs for a quiet input, an adopted process's turn, a task notification), so the core
+cannot be the one that begins every turn. The SDK stays the wire: `ClaudeSession` holds the ledger and builds its `MidTurnWire`
+over its own methods. What now runs in one place for Codex and Claude:
+
+- **The turn's open and close**, and so "every opened turn ends" (#1829): `turnStarted` when a message of ours starts one or the
+  CLI starts its own, `turnEnded` at its end; `turnRunning` is what Claude's `turnOpen` was. Claude names no turns and runs one at
+  a time, so its running turn has one fixed name.
+- **The receipts**: `track` (Claude's `sendTracked`, and Codex's through `sendTracked`), `accept`, completion after the end's
+  `turn_complete`, and failing them on a Stop, an exit and the close. Claude's own `InputReceipts` is gone.
+- **The Stop and its confirmation**: the inputs fail, the wire releases, the running turn is asked to stop, a refusal is the
+  notice "Could not stop: …. The turn is still running." (the same words already), and a Stop with no turn running is said at
+  once. Claude's timer (`StopWait`, `awaitStop`, `confirmStop`) moved into the ledger as it was.
+- **The exit** (§2.5, Q1): the ledger decides crash or asleep for both, from its own state and what the wire says is in flight.
+
+Claude's differences are named values of the wire, not branches on the tool:
+
+| Policy (`MidTurnWire`) | Codex | Claude | Why it differs |
+|---|---|---|---|
+| `stop: StopConfirmation` (`ms`, `notice`; its presence means the interrupt's answer confirms too) | none: the turn's end confirms, no bound (§9.2) | the interrupt's answer or the result confirms; 10 s (`STOP_CONFIRM_MS`, one constant with ACP now) and "Claude Code has not confirmed the stop after N s. The turn is still running." | Q2 and the wording are the owner's calls; each is a change of this value |
+| how a turn's end is said | `turnEnded(id, ending)`: the ledger says `turn_complete`, `waiting_input` or `error` | `endSaid(events, completes, took)`, one call per result: the turn closes, the normalizer's events go out as they are (among the goal's events and the closed cards, `turn_complete` with its `output`) with `took` readable as `endingInputs` (`turnInputs`), then a waiting Stop is confirmed; `said(events)` for other messages | moving Claude's endings into the ledger would reorder events |
+| `open`, `hasConversation`, `write`, `refusal`, `close`, `detach` | the ledger's queue (while opening, behind a blocking turn) writes through them | none: the SDK's input stream is written by Claude (quiet inputs, a held `/goal`, the sign-in race go through it), and its conversation exists from the start | |
+| `stopRefused`, `idleStop`; `tracked` on `interrupt`, `releaseCards`, `idleStop` | none (ignores `tracked`) | the normalizer gets the turn's own ending back; a Stop with no turn still asks the interrupt, and a refusal then is `couldNotStop`; `tracked` (a tracked input waited when the Stop came, read before they fail) is `cancel_queued` | |
+| `inFlight`, `exitWords` | none: the ledger's own state | a tracked input, a card, a message queued or unanswered, background work, a CLI that has said nothing; inputs fail with "…before this agent reported back" | |
+
+Left on Claude's side, as Claude's own rules on the core: quiet inputs and the result that answers only them, the turn the CLI
+runs for a quiet input (`cliTurnRan`), `cancel_queued` and the person's inputs its answer names, a failed turn's parent notes
+(`cancelAsyncMessage`), the goal gate, the sign-in race, an adopted process's lost calls, and the cards (PR 8).
+
+Size: +252 −190 lines outside tests (+62): `claude/` −70, `core/` +132; tests +147 −1. The owner chose one copy of the turn logic over
+fewer lines. What each open decision would remove later: one Stop wording for Claude and ACP leaves `bound.notice` one
+function of the label (about −2 lines); a Stop confirmed only at the turn's end removes the answer's confirmation (about
+−3); with Q2, Codex gets a `stop` (one line, then confirmed by its `turn/interrupt` answer as Claude is, or by its end once the
+previous decision is made), and `StopConfirmation` becomes one constant (about −8 more).
+None of Claude's existing tests changed, #1831's invariant tables and `interrupt.test.ts` included; the core tests
+(`core/mid-turn-ledger.test.ts`) add a wire that writes its own inputs, with each policy.
 
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
@@ -539,7 +578,7 @@ estimates of changed lines without fixtures.
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
-| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
+| 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +62 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 
 | 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
@@ -560,7 +599,7 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | ACP caps inline images (`inlineImageEvent`) | §2.9 | now |
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
-| Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `ClaudeSession.exitEvent`, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything |
+| Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `MidTurnLedger.exited` with Claude's `inFlight` since PR 7, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything |
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
