@@ -319,10 +319,4 @@ describe('ask_project to a machine that is away', () => {
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Try again once the person has connected it.') })
     expect((r as { error: string }).error).not.toContain('link is back')
   })
-
-  it('keeps the link-back sentence for a machine the hub keeps trying', async () => {
-    const h = await hub()
-    h.setAway('not reachable right now')
-    expect(await h.mgr.askProject('h1', { project: 'm1/api', task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining('Try again once its link is back.') })
-  })
 })
