@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorMessage } from '@cc/protocol'
 import { execFailure } from './exec-error.js'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runGit, stopGitChildren } from './git-exec.js'
 import { cloneFailure } from './project-clone.js'
 import { settle } from './process-tree.test-helpers.js'
-import { ownProcesses } from '../process.test-helpers.js'
+import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 function git(cwd: string, ...args: string[]): string {
@@ -107,8 +107,7 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
       () => 'committed',
       (e: unknown) => (execFailure(e).timedOut ? 'timed out' : `failed: ${errorMessage(e)}`),
     )
-    await settle(() => existsSync(pidFile), Boolean, 5_000 * SLOW)
-    childPid = Number(readFileSync(pidFile, 'utf8'))
+    childPid = await pidIn(pidFile, 5_000)
     const answer = await outcome
     // Settled at the bound, not when the child would have ended
     expect(Date.now() - started).toBeLessThan(20_000 * SLOW)
