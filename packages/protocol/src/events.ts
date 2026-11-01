@@ -38,12 +38,15 @@ const base = { sessionId: z.string() }
  * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
  * order of the messages. Absent from a host that does not say.
  * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
+ * `since` (#1812): the row the turn began after, when the host kept it (a session a hub gives messages); a hub asks for
+ * this turn's words by it (`host.lastAnswer`), since the next turn may have begun or ended by the time it reads them.
  */
 export const TurnWho = z.object({
   by: z.enum(['person', 'work']),
   wrote: z.literal(true).optional(),
   added: z.literal(true).optional(),
   compaction: z.literal(true).optional(),
+  since: z.number().int().optional(),
 })
 export type TurnWho = z.infer<typeof TurnWho>
 const endsTurn = { turn: TurnWho.optional() }

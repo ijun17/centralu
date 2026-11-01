@@ -1,7 +1,7 @@
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { HUB_SENDER } from './hub-sender.js'
-import { linkedTurnEnd } from './linked-turn-end.js'
+import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { NO_WORDS } from './ask-project.js'
 
@@ -473,7 +473,7 @@ export class LinkedReports {
   private async report(
     sessionId: string,
     orchestratorId: string,
-    ending: { type: string; error?: { message?: string } },
+    ending: { type: string; error?: { message?: string }; turn?: unknown },
     work?: ReportWork,
     known?: { name: string; project: string },
     /** The person's part in the turn reported (#1377) */
@@ -494,7 +494,8 @@ export class LinkedReports {
      */
     // Nor its words once the person has taken it over: what is there now is not the assigned work's
     const tookOver = (!!work && 'tookOver' in work) || theirs
-    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const since = turnSince(ending)
+    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true, ...(since !== undefined ? { since } : {}) }).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
       : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
