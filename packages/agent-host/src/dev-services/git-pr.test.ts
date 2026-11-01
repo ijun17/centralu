@@ -275,6 +275,22 @@ describe('a gh lookup that fails (#841)', () => {
     expect(said).toEqual(['[git] gh could not read the pull request of feat/x: HTTP 401: Bad credentials (https://api.github.com/graphql)'])
   })
 
+  it("reads a character cut between two writes of gh's stderr whole", { timeout: 30_000 * SLOW }, async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const project = ghSaying('')
+    // "€" is three bytes; gh's stderr reaches the host in two pieces, the first ending inside it
+    writeFileSync(
+      join(project, 'pr'),
+      `process.stderr.write(Buffer.from([0x70, 0x72, 0x69, 0x63, 0x65, 0x20, 0xe2, 0x82]))
+setTimeout(() => { process.stderr.write(Buffer.from([0xac, 0x0a])); process.exitCode = 1 }, 300)
+`,
+    )
+    expect(await gitBranchPr(project, 'feat/z')).toBeNull()
+    expect(log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('price'))).toEqual([
+      '[git] gh could not read the pull request of feat/z: price €',
+    ])
+  })
+
   it('says nothing when the branch has no pull request, which is an answer', { timeout: 30_000 * SLOW }, async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const project = ghSaying('no pull requests found for branch "feat/y"\n')
