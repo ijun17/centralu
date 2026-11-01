@@ -256,33 +256,30 @@ export class AppProcess {
    * collected once it has exited, however late, since only then is the window of its leftovers known.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
-    this.stopping ??= this.end(graceMs, opts.awaitKill !== false)
     // A stop already under way, started by someone who did not wait for the tree: this caller still does
-    return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
-  }
-
-  private async end(graceMs: number, awaitKill: boolean): Promise<void> {
-    void this.client.close().catch(() => {})
-    this.closeFd3Server?.()
-    this.child.stdin?.end()
-    this.fd3?.end()
-    if (this.alive && !(await this.waitExit(graceMs))) {
-      this.log.note(`did not exit within ${graceMs}ms of stdin and fd 3 closing — stopping the process tree`)
-      stopTree(killHandle(this.child), KILL_GRACE_MS, () => this.alive)
-      if (awaitKill) await this.waitExit(KILL_GRACE_MS + 1000)
-    } else if (hasProcessGroups()) {
-      void this.collectLeftovers()
-    }
-    this.fd3?.destroy()
-    const exited = this.waitExit().then(() => {})
-    if (hasProcessGroups()) {
-      this.leftovers = exited
-      this.log.close()
-    } else {
-      // The log stays open for the leftovers' note
-      this.leftovers = exited.then(() => this.collectLeftovers())
-      void this.leftovers.finally(() => this.log.close())
-    }
+    if (this.stopping) return opts.awaitTree ? this.stopping.then(() => this.leftovers ?? undefined) : this.stopping
+    this.stopping = (async () => {
+      void this.client.close().catch(() => {})
+      this.closeFd3Server?.()
+      this.child.stdin?.end()
+      this.fd3?.end()
+      if (this.alive && !(await this.waitExit(graceMs))) {
+        this.log.note(`did not exit within ${graceMs}ms of stdin and fd 3 closing — stopping the process tree`)
+        stopTree(killHandle(this.child), KILL_GRACE_MS, () => this.alive)
+        if (opts.awaitKill !== false) await this.waitExit(KILL_GRACE_MS + 1000)
+      } else if (hasProcessGroups()) {
+        void this.collectLeftovers()
+      }
+      this.fd3?.destroy()
+      const exited = this.waitExit().then(() => {})
+      const leftovers = hasProcessGroups() ? exited : exited.then(() => this.collectLeftovers())
+      this.leftovers = leftovers
+      if (opts.awaitTree) await leftovers
+      // The log stays open for the leftovers' note, if they are collected after this returns
+      if (!hasProcessGroups() && !opts.awaitTree) void leftovers.finally(() => this.log.close())
+      else this.log.close()
+    })()
+    return this.stopping
   }
 
   /** The failure text plus the last lines the app left on stderr — read by a person and the building agent */

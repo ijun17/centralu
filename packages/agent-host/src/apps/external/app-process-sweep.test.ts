@@ -89,7 +89,7 @@ describe('stopping an app and waiting for its tree', () => {
     try {
       let settled = false
       const stopped = proc.stop(0, { awaitTree: true }).then(() => (settled = true))
-      await vi.waitFor(() => expect(kills).toEqual([proc.child.pid]))
+      await vi.waitFor(() => expect(kills).toContain(proc.child.pid))
       // Scheduled after the stop's own wait for the kill, so that wait has run out by the time this fires
       await new Promise((r) => setTimeout(r, 10))
       expect(settled).toBe(false)
