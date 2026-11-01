@@ -20,6 +20,9 @@ export const UNKNOWN_TIER = { name: 'deep', line: 'Tier: deep (pnpm pre-pr answe
 // A stack of three builds three heads, then runs the changed tests twice: minutes, not seconds
 const LIMIT_MS = 30 * 60_000
 const BEAT_MS = 60_000
+// The script divides its own time among its phases and answers by then (what it did not reach is said in its answer);
+// the kill at `limitMs` is only for a script that does not. The clean-up of a killed run needs the difference
+const scriptLimit = (limitMs) => Math.max(60, Math.floor(limitMs / 1000) - 120)
 // Each call has a name of its own, for its refs and for the script's run folder: two open_pr calls run
 // pre-pr side by side (outside the write line), and one's clean-up must not take what the other uses
 let calls = 0
@@ -114,7 +117,7 @@ export async function runPrePr({ dir, repo, head, base, main, lowers = [], exemp
   try {
     await git(root, ['fetch', '--no-tags', '--quiet', remote, ...branches.map((b) => `+refs/heads/${b}:${ref(b)}`)], { timeoutMs: 5 * 60_000 })
     if (signal?.aborted) return { ran: false, why: 'the call was cancelled', refsLeft }
-    const args = [path, '--json', '--no-fetch', '--run-id', id, '--remote', remote, '--head', ref(head), '--base', ref(base), '--main', ref(main), ...lowers.flatMap((b) => ['--stack', ref(b)])]
+    const args = [path, '--json', '--no-fetch', '--run-id', id, '--remote', remote, '--limit', String(scriptLimit(limitMs)), '--head', ref(head), '--base', ref(base), '--main', ref(main), ...lowers.flatMap((b) => ['--stack', ref(b)])]
     for (const [check, why] of Object.entries(exempt)) args.push('--exempt', `${check}=${why}`)
     const result = await runScript(args, root, { signal, limitMs, beat })
     if (result.stopped) {

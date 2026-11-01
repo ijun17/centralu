@@ -126,14 +126,14 @@ export function canonical(path) {
 
 const tail = (text, lines = 25) => String(text ?? '').trim().split('\n').slice(-lines).join('\n')
 
-/** Runs a Node entry point of the worktree's own node_modules; answers { ok, out }. */
+/** Runs a Node entry point of the worktree's own node_modules; answers { ok, out, timedOut }. `timeout` is in ms, 0 for none. */
 function nodeBin(worktree, bin, args, env = {}, timeout = 0) {
   const dir = canonical(worktree)
   try {
     const out = execFileSync(process.execPath, [join(dir, 'node_modules', bin), ...args], { cwd: dir, encoding: 'utf8', timeout, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
-    return { ok: true, out }
+    return { ok: true, out, timedOut: false }
   } catch (e) {
-    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message) }
+    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message), timedOut: e.code === 'ETIMEDOUT' }
   }
 }
 
@@ -267,10 +267,10 @@ export const realRunners = {
     }
     mirrorModules(root, dir)
   },
-  tsc(dir) {
+  tsc(dir, { timeoutMs = 0 } = {}) {
     // The heap `pnpm typecheck` gives tsc (package.json): Node's default is a quarter of the machine's memory, under what
     // tsc needs on a 7 GB macOS runner (0.1.0-beta.43's rehearsal)
-    return nodeBin(dir, 'typescript/bin/tsc', ['--noEmit', '-p', '.'], { NODE_OPTIONS: `${ENV.NODE_OPTIONS ?? ''} --max-old-space-size=4096`.trim() })
+    return nodeBin(dir, 'typescript/bin/tsc', ['--noEmit', '-p', '.'], { NODE_OPTIONS: `${ENV.NODE_OPTIONS ?? ''} --max-old-space-size=4096`.trim() }, timeoutMs)
   },
   depcruise(dir) {
     const r = nodeBin(dir, 'dependency-cruiser/bin/dependency-cruise.mjs', ['packages', 'apps', '--config', 'tooling/dependency-cruiser.cjs', '--output-type', 'json'])
@@ -432,6 +432,10 @@ export function failuresOf(report, root) {
 /** The most one pull request's guards may take, and the default for the whole check. */
 export const GUARDS_PER_PR_MS = 5 * 60_000
 export const GUARDS_LIMIT_MS = 10 * 60_000
+/** The whole run's time: every phase draws from what is left of it. The board stops the script a little after (pre-pr.mjs there). */
+export const TOTAL_LIMIT_MS = 25 * 60_000
+/** The least time a phase needs to be worth starting; with less it is reported as not run, not cut off half way. */
+export const PHASE_MIN_MS = 60_000
 
 /**
  * Runs `guards` (files of this branch) against each of `prs` (open, not the stack's own) with this branch
@@ -628,7 +632,7 @@ export function sweepStale(root, { isAlive = alive } = {}) {
  * the run; a warning does not. `exempt` maps a check of {@link CHECKS} to the reason it is not run.
  * `runners` replaces the tools (tests); `log` hears progress; `stopped()` says the run was interrupted.
  */
-export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false, guardsLimitMs = GUARDS_LIMIT_MS, now = Date.now } = {}) {
+export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false, guardsLimitMs = GUARDS_LIMIT_MS, limitMs = TOTAL_LIMIT_MS, now = Date.now } = {}) {
   const root = resolve(git(cwd, ['rev-parse', '--show-toplevel']).trim())
   for (const [check, why] of Object.entries(exempt)) {
     if (!CHECKS.includes(check)) throw new Error(`No check is called ${check}; the checks are ${CHECKS.join(', ')}.`)
@@ -655,6 +659,20 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   const notes = []
   const exempted = Object.entries(exempt).map(([check, reason]) => ({ check, reason: String(reason).trim() }))
   const short = (s) => s.slice(0, 10)
+  const deadline = now() + limitMs
+  const left = () => deadline - now()
+  /**
+   * Says a check did not run (it must never read as passed). tsc and the revert check are findings, so open_pr refuses
+   * unless they are exempted with a reason, as for a failure; the guards are only ever a warning.
+   */
+  const notRun = (check, what, why) =>
+    (check === 'guards' ? warnings : findings).push({ check, message: `${what}: not run: ${why}.${check === 'guards' ? '' : ` Run it again, or exempt ${check} with the reason it cannot run.`}` })
+  /** True (and says so) when `what` cannot start with the time that is left. */
+  const outOfTime = (check, what) => {
+    if (left() >= PHASE_MIN_MS) return false
+    notRun(check, what, `out of time (${Math.max(0, Math.round(left() / 1000))} s of the ${Math.round(limitMs / 1000)} s left)`)
+    return true
+  }
   let tier = null
   const answer = (heads) => ({ ok: findings.length === 0, findings, warnings, exempted, notes, heads: heads.map((h) => ({ sha: h.sha, names: h.names })), head: at.head, tier })
 
@@ -733,10 +751,11 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       const label = `${h.names.join(', ')} (${short(h.sha)})`
       const wt = worktree(h.sha)
       if (h.sha === at.head) top = wt
-      if (skip('tsc')) continue
+      if (skip('tsc') || outOfTime('tsc', `tsc at ${label}`)) continue
       log(`tsc at ${label}`)
-      const r = runners.tsc(wt)
-      if (!r.ok) findings.push({ check: 'tsc', message: `tsc fails at ${label}; each pull request of a stack lands on its own and must build:\n${tail(r.out)}` })
+      const r = runners.tsc(wt, { timeoutMs: left() })
+      if (r.timedOut) notRun('tsc', `tsc at ${label}`, 'out of time (stopped at the limit)')
+      else if (!r.ok) findings.push({ check: 'tsc', message: `tsc fails at ${label}; each pull request of a stack lands on its own and must build:\n${tail(r.out)}` })
     }
 
     check()
@@ -775,7 +794,7 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       // nothing: the exemption and its reason are in the answer
     } else if (!tests.length) {
       notes.push(`No new or changed vitest file against ${base}.`)
-    } else {
+    } else if (!outOfTime('revert', 'The changed tests')) {
       check()
       const sources = changed.filter((c) => !isTestFile(c.path))
       log(`Running ${tests.length} test file(s) with ${sources.length} other change(s) reverted to ${base}`)
@@ -789,31 +808,39 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         runners.prepare(top, root)
       }
       let failed = 0
+      // Answers the tests, or null when vitest gave no report (out of time included)
       const run = (files) => {
         check()
-        const report = runners.vitest(top, files)
-        if (!report) notes.push(`vitest gave no report for ${files.join(', ')}.`)
+        const report = runners.vitest(top, files, { timeoutMs: left() })
+        if (!report) return null
         // Failures, not "not passed": a skipped or todo test is neither, and a file that did not load fails with no test of its own
         failed = failuresOf(report, top).length
         return vitestTests(report, top)
       }
       const reverted = run(tests.map((t) => t.path))
       const failing = failed
-      const existed = tests.filter((t) => t.status !== 'A').map((t) => t.path)
+      // The second pass only tells which passing tests the base's version of a file already had: a file that is
+      // new (added) has none to ask, and one with no passing test in the first pass has nothing to compare
+      const passing = new Set((reverted ?? []).filter((t) => t.status === 'passed').map((t) => t.file))
+      const existed = tests.filter((t) => t.status !== 'A' && passing.has(t.path)).map((t) => t.path)
       for (const p of existed) git(top, ['checkout', fork, '--', p])
-      const before = existed.length ? run(existed) : []
-      const loose = passingNewTests({ reverted, base: before })
+      let before = []
+      if (reverted && existed.length) before = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed)
+      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, 'vitest gave no report (it ran out of time, or did not start)')
+      else if (!before) notRun('revert', `The base's version of ${existed.join(', ')}`, 'no report, so no test was judged')
+      // Without the base's answer every passing test would look new: say nothing of them
+      const loose = reverted && before ? passingNewTests({ reverted, base: before }) : []
       for (const t of loose) {
         findings.push({ check: 'revert', message: `${t.file}: "${t.name}" passes with this pull request's other changes reverted to ${base}, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.` })
       }
-      if (!loose.length) notes.push(`${failing} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
+      if (reverted && before && !loose.length) notes.push(`${failing} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
     }
 
     // guards: only a warning. The guards this branch adds or changes, against the open pull requests with it merged in
     if (!skip('guards')) {
       check()
       const guards = guardFiles(root, git(root, ['merge-base', at.main, at.head]).trim(), at.head)
-      if (guards.length) {
+      if (guards.length && !outOfTime('guards', guards.join(', '))) {
         let prs
         try {
           prs = otherPrs(openPrs(), commits, names).filter((p) => !p.isDraft)
@@ -821,8 +848,9 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
           warnings.push({ check: 'guards', message: `${guards.join(', ')} could not be run against the open pull requests: they could not be read (${e.message}).` })
         }
         if (prs) {
-          log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsLimitMs / 1000)} s`)
-          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsLimitMs, now, log, check })
+          const guardsMs = Math.min(guardsLimitMs, left())
+          log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsMs / 1000)} s`)
+          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsMs, now, log, check })
           warnings.push(...guardWarnings(res, guards))
           notes.push(`${guards.join(', ')} run against ${prs.length} open pull request(s): ${res.failing.length} would fail, ${res.skipped.length} skipped, ${res.unchecked.length} not reached.`)
         }
@@ -844,12 +872,13 @@ export function parseArgs(argv) {
     else if (['--head', '--base', '--main', '--remote'].includes(a) && value !== undefined) o[a.slice(2)] = argv[++i]
     else if (a === '--run-id' && value !== undefined) o.runId = argv[++i]
     else if (a === '--cleanup' && value !== undefined) o.cleanup = argv[++i]
+    else if (a === '--limit' && /^\d+$/.test(value ?? '')) o.limitMs = Number(argv[++i]) * 1000
     else if (a === '--guards-limit' && /^\d+$/.test(value ?? '')) o.guardsLimitMs = Number(argv[++i]) * 1000
     else if (a === '--stack' && value !== undefined) o.stack.push(argv[++i])
     else if (a === '--exempt' && value !== undefined && value.includes('=')) {
       const [check, ...why] = argv[++i].split('=')
       o.exempt[check] = why.join('=')
-    } else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--guards-limit <seconds>] | --cleanup <run-id>`)
+    } else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--limit <seconds>] [--guards-limit <seconds>] | --cleanup <run-id>`)
   }
   if (o.runId !== undefined && !/^[\w.-]+$/.test(o.runId)) throw new Error('--run-id takes letters, digits, ".", "_" and "-" only.')
   if (o.cleanup !== undefined && !/^[\w.-]+$/.test(o.cleanup)) throw new Error('--cleanup takes a run id: letters, digits, ".", "_" and "-" only.')
