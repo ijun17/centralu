@@ -24,6 +24,7 @@ describe('readStored / writeStored', () => {
   })
 
   it('reads and writes nothing, without throwing, when storage is absent or denied', () => {
+    vi.stubGlobal('localStorage', undefined)
     expect(() => writeStored('k', 1)).not.toThrow()
     expect(readStored('k')).toBeUndefined()
     vi.stubGlobal('localStorage', {
