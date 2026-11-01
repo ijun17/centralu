@@ -1,5 +1,6 @@
 import { errnoCode } from '../os/errors.js'
 import type { Os } from '../os/port.js'
+import { writeFileWhole } from '../os/write-file-whole.js'
 import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedRecord } from './serve-credentials.js'
 
 /**
@@ -246,18 +247,7 @@ export class UsedCredentialsFile {
     const records = this.used.records()
     const text = records.map(encodeUsedRecord).join('')
     try {
-      const tmp = `${this.path}.${process.pid}.tmp`
-      try {
-        this.os.files.writeFileSync(tmp, text, { mode: 0o600 })
-        this.os.files.renameSync(tmp, this.path)
-      } catch (e) {
-        try {
-          this.os.files.rmSync(tmp, { force: true })
-        } catch {
-          // Held open by a scanner: the write's own error is the one to say
-        }
-        throw e
-      }
+      writeFileWhole(this.os.files, this.path, text, { mode: 0o600 })
     } catch (e) {
       this.log(`[agent-host] the file of used credentials could not be shortened (${codeOf(e)})`)
       return
