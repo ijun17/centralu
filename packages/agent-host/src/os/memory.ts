@@ -1526,7 +1526,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return out
   }
 
-  async function stop(child: OsChild, graceMs: number): Promise<OsExit> {
+  async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}): Promise<OsExit> {
     const pid = child.pid
     const root = pid === undefined ? undefined : procs.get(pid)
     if (!root) {
@@ -1548,7 +1548,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       }, graceMs)
     }
     const exit = await child.exited
-    if (!windows && root.row.pgid === root.row.pid) {
+    if (!windows && root.row.pgid === root.row.pid && o.sweep !== false) {
       // Its group is swept once it has gone: TERM, then KILL after the grace
       const left = [...procs.values()].filter((p) => p.row.alive && p.row.pgid === root.row.pid)
       for (const p of left) deliver(p, 'SIGTERM')

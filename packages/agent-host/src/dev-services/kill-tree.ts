@@ -116,10 +116,27 @@ export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self
   return groupsOf(descendants(rows, survivors), pgidOf, self)
 }
 
+/** The `ps` listing every snapshot reads: pid, parent and group of every process */
+const PS_ARGS = ['-A', '-o', 'pid=,ppid=,pgid='] as const
+
+/** Fires `signal` at each group, carrying on past one that is already gone; whether any was reached */
+function fireGroups(groups: readonly number[], signal: 'SIGTERM' | 'SIGKILL'): boolean {
+  let hit = false
+  for (const g of groups) {
+    try {
+      process.kill(-g, signal)
+      hit = true
+    } catch {
+      // that group is already gone — keep firing at the rest
+    }
+  }
+  return hit
+}
+
 /** One ps snapshot. Returns an empty array on failure — which falls back to the old behavior of only firing at the root's group */
 function snapshot(): ProcRow[] {
   try {
-    return parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000, windowsHide: true }))
+    return parsePs(execFileSync('ps', PS_ARGS, { encoding: 'utf8', timeout: 2000, windowsHide: true }))
   } catch {
     return []
   }
@@ -215,15 +232,7 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = 
   }
 
   const rows = snapshot()
-  let hit = false
-  for (const g of killTargets(rows, pid, process.pid)) {
-    try {
-      process.kill(-g, signal)
-      hit = true
-    } catch {
-      // that group is already gone — keep firing at the rest
-    }
-  }
+  const hit = fireGroups(killTargets(rows, pid, process.pid), signal)
   if (!hit) {
     try {
       handle.kill(signal) // every group is gone, or there is no permission — one last confirming shot
@@ -254,7 +263,7 @@ export async function noteGroups(root: number, known: ReadonlySet<number>, platf
   if (platform === 'win32') return new Set()
   let rows: ProcRow[] = []
   try {
-    rows = parsePs((await runFile('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000, windowsHide: true })).stdout)
+    rows = parsePs((await runFile('ps', PS_ARGS, { encoding: 'utf8', timeout: 2000, windowsHide: true })).stdout)
   } catch {
     // Not read: what is known stays
   }
@@ -316,13 +325,7 @@ export function stopGroup(pgid: number, graceMs: number): void {
   const t = setTimeout(() => {
     const now = snapshot()
     const targets = now.length > 0 ? survivorTargets(now, members, process.pid) : [pgid]
-    for (const g of targets) {
-      try {
-        process.kill(-g, 'SIGKILL')
-      } catch {
-        // that group has already emptied out — keep firing at the rest
-      }
-    }
+    fireGroups(targets, 'SIGKILL')
   }, graceMs)
   t.unref?.()
 }
@@ -439,15 +442,7 @@ function finish(handle: KillablePty, first: ProcRow[], rootOurs: boolean): void 
   }
 
   const known = rootOurs ? first : first.filter((r) => r.pid !== handle.pid)
-  let hit = false
-  for (const g of survivorTargets(rows, known, process.pid)) {
-    try {
-      process.kill(-g, 'SIGKILL')
-      hit = true
-    } catch {
-      // that group has already emptied out — keep firing at the rest
-    }
-  }
+  const hit = fireGroups(survivorTargets(rows, known, process.pid), 'SIGKILL')
   /*
    * Not one group was hit, but root is still in the table — this is a spot where root sits in
    * our own group and firing at the group is not an option. So a confirming shot fires at the

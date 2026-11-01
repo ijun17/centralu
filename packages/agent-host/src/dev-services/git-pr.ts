@@ -1,9 +1,7 @@
 import { isObj } from '../json-value.js'
 import { execFailure } from './exec-error.js'
-import { killTree } from './kill-tree.js'
-import { killHandle, spawnGrouped } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
-import { raceTimeout } from '../timing.js'
+import { realOs } from '../os/real.js'
 
 /** A branch's pull request status, asked of gh: what the merge checks know beside `gitBranchMerged` (#76). */
 
@@ -61,69 +59,33 @@ export async function gitBranchPr(
   timeoutMs = OK.timeout,
 ): Promise<BranchPr | 'unavailable' | null> {
   /*
-   * Started as the root of a tree this host can end (`spawnGrouped`), as git is: off Windows in a process group of its
-   * own, so the tree kill below reaches what gh started (it runs git to read the remotes); in the host's group it
-   * spared them (#982 review). No `timeout` of execFile's own either: it ended gh alone. Running past `timeoutMs`
-   * takes the abort's path.
-   */
-  const { child } = spawnGrouped(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], {
-    cwd: projectCwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  const stdoutPipe = child.stdout
-  const stderrPipe = child.stderr
-  if (!stdoutPipe || !stderrPipe) {
-    killTree(killHandle(child), 'SIGKILL')
-    throw new Error('gh started without its output pipes')
-  }
-  const out: Buffer[] = []
-  let outBytes = 0
-  stdoutPipe.on('data', (chunk: Buffer) => {
-    outBytes += chunk.length
-    if (outBytes <= OK.maxBuffer) out.push(chunk)
-  })
-  let err = ''
-  stderrPipe.on('data', (chunk: Buffer) => {
-    err = (err + chunk.toString('utf8')).slice(-GH_STDERR_KEEP)
-  })
-  const run = new Promise<string>((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code) => (code === 0 ? resolve(Buffer.concat(out).toString('utf8')) : reject(Object.assign(new Error(`gh exited with ${code}`), { code, stderr: err }))))
-  })
-  const closed = new Promise<void>((done) => child.once('close', () => done()))
-  const exited = new Promise<void>((done) => child.once('exit', () => done()))
-  /*
    * **An abort, or running past `timeoutMs`, ends gh with the processes it started, and returns once gh is gone** (the
-   * host stopping, #368; a gh that does not answer, #982).
-   * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY).
-   * `killTree` ends the tree (gh's group; `taskkill /T /F` on Windows). The wait is for gh's `exit`, then for `close`
-   * (every process holding gh's output has ended) for at most a second: on macOS and Linux the tree kill does not
-   * reach a child that left gh's process group, and that child can hold the output open for as long as it runs,
-   * which must not hold the host's shutdown (nor does it hold the folder there: those systems remove a folder a
-   * process works in).
+   * host stopping, #368; a gh that does not answer, #982). `os.processes.run` starts gh as the root of a tree this host
+   * can end, as git is: off Windows in a process group of its own, so the tree kill reaches what gh started (it runs git
+   * to read the remotes); in the host's group it spared them (#982 review). It ends the tree at once (no grace: gh holds
+   * no lock files), and returns when gh has exited and its output has closed, or a second after the exit.
+   *
+   * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY). On
+   * macOS and Linux the tree kill does not reach a child that left gh's process group, and that child can hold the
+   * output open for as long as it runs, which must not hold the host's shutdown (nor does it hold the folder there:
+   * those systems remove a folder a process works in).
    */
-  const stop = () => {
-    killTree(killHandle(child), 'SIGKILL')
-    // gh itself as well, should the tree kill have found no group to fire at
-    child.kill('SIGKILL')
-  }
-  // Set by the executor below, which runs at once
-  let onAbort: () => void = () => {}
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => {
-      stop()
-      void exited
-        .then(() => raceTimeout(closed, 1000, undefined))
-        .then(() => reject(Object.assign(new Error('gh was stopped'), { code: 'ABORT_ERR' })))
-    }
-  })
-  aborted.catch(() => {})
-  if (signal?.aborted) onAbort()
-  else signal?.addEventListener('abort', onAbort, { once: true })
-  const timer = setTimeout(onAbort, timeoutMs)
   try {
-    const stdout = await Promise.race([run, aborted])
-    const j: unknown = JSON.parse(stdout)
+    const run = await realOs().processes.run(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], {
+      cwd: projectCwd,
+      timeoutMs,
+      maxBuffer: OK.maxBuffer,
+      signal,
+      stopGraceMs: 0,
+      // Characters, not bytes, are kept: a character is at most four bytes
+      stderrKeep: { bytes: GH_STDERR_KEEP * 4, from: 'tail' },
+    })
+    if (run.ended) return null
+    if (run.code !== 0) {
+      noteGhFailure(branch, { stderr: run.stderr.toString('utf8').slice(-GH_STDERR_KEEP) })
+      return null
+    }
+    const j: unknown = JSON.parse(run.stdout.toString('utf8'))
     if (!isObj(j)) return null
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {
@@ -138,8 +100,5 @@ export async function gitBranchPr(
     if (failure.code === 'ENOENT') return 'unavailable'
     noteGhFailure(branch, failure)
     return null
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
   }
 }

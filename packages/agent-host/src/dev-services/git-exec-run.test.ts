@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runGit, stopGitChildren } from './git-exec.js'
+import { runGit, streamGit, stopGitChildren } from './git-exec.js'
 import { cloneFailure } from './project-clone.js'
 import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
@@ -113,6 +113,71 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
     expect(Date.now() - started).toBeLessThan(20_000 * SLOW)
     expect(await settle(() => alive(childPid!), (up) => !up, 5_000 * SLOW)).toBe(false)
     expect(answer).toBe('timed out')
+  })
+})
+
+/*
+ * #1842: the bound is the answer, whatever git printed. `runGit`'s callers read `stderr` before the message, and git ended
+ * by the bound reports on its own (on Windows the tree's child goes first, and git prints "fatal: Could not read from
+ * remote repository" and exits 128). Here the program git runs says it before the bound fires, and again when it is
+ * signalled, and exits non-zero on the signal where the OS lets it: on every OS the failure is the bound's.
+ */
+describe('a git that runs past its time reports the bound, not its own words (#1842)', () => {
+  let root: string
+  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
+
+  /** A repository whose hook (or fsmonitor) program prints to stderr, says so in a file, and then waits */
+  function talkative(): { repo: string; said: string } {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-said-')))
+    const repo = join(root, 'repo')
+    mkdirSync(repo)
+    git(repo, 'init', '-q')
+    git(repo, 'config', 'user.email', 'test@test')
+    git(repo, 'config', 'user.name', 'test')
+    git(repo, 'config', 'commit.gpgsign', 'false')
+    const said = join(root, 'said')
+    const program = join(root, 'talk.cjs')
+    writeFileSync(
+      program,
+      `const fs = require('node:fs')
+console.error('fatal: it said this itself')
+fs.writeFileSync(${JSON.stringify(said)}, 'x')
+const bye = () => { console.error('fatal: and this when it was signalled'); process.exit(128) }
+process.on('SIGTERM', bye)
+process.on('SIGINT', bye)
+setTimeout(() => {}, 60_000)`,
+    )
+    const script = `#!/bin/sh
+${shPath(process.execPath)} ${shPath(program)}
+`
+    const hook = join(repo, '.git', 'hooks', 'pre-commit')
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true })
+    writeFileSync(hook, script)
+    chmodSync(hook, 0o755)
+    return { repo, said }
+  }
+
+  it('runGit: the failure says the bound, with no output of its own', { timeout: 30_000 * SLOW }, async () => {
+    const { repo, said } = talkative()
+    const failed = await runGit(repo, ['commit', '--allow-empty', '-m', 'x'], { allowRepoPrograms: true, timeout: 5_000 * SLOW }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    // The program spoke before the bound fired: what the test is about happened
+    expect(existsSync(said)).toBe(true)
+    expect(failed).toMatchObject({ message: `git did not answer within ${5_000 * SLOW} ms`, timedOut: true, stderr: '', stdout: '' })
+  })
+
+  it('streamGit: the failure says the bound, with no output of its own', { timeout: 30_000 * SLOW }, async () => {
+    const { repo, said } = talkative()
+    // Run by a status in a repository whose fsmonitor is the program; the hook above is not needed
+    git(repo, 'config', 'core.fsmonitor', `${shPath(process.execPath)} ${shPath(join(root, 'talk.cjs'))}`)
+    const failed = await streamGit(repo, ['status', '-z'], () => false, { allowRepoPrograms: true, timeout: 5_000 * SLOW }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(existsSync(said)).toBe(true)
+    expect(failed).toMatchObject({ timedOut: true, stderr: '' })
   })
 })
 
