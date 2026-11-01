@@ -472,9 +472,12 @@ The tools differ today, by reading, and each keeps its difference (none is a beh
 | a disk check that throws | would have failed the request; now asks (`insideFolder` catches its own disk errors; only `homedir()` could throw) | asks | would have failed the call; now asks (the same) |
 | an empty rule key | matched a saved empty rule; now never (as Codex and Claude): unreachable, since `rulesFor` drops an empty matcher and `answered` keeps none | never matches | never matches |
 
-ACP (PR 8a) and Codex (PR 8b) are on it; Claude follows. Codex's one difference in timing: under `edits`, a patch the
+ACP (PR 8a), Codex (PR 8b) and Claude (PR 8c) are on it. Codex's one difference in timing: under `edits`, a patch the
 grant cannot allow (a delete, a move, no change) is a card at once, where it used to wait one disk-check tick first; the
-same card, and Codex still ends it with its request.
+same card, and Codex still ends it with its request. Claude's question (`AskUserQuestion`) is answered before the order,
+as ACP's is: no step answered it before (not Centralu's tool, a read, an app tool or an edit, and `auto` let it through).
+Claude's saved-rule key is read from the card's path without the disk (`newFile` changes what the card says, not the key),
+and a card that needs no wait is still raised before the callback yields (its tests pin that).
 
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
@@ -612,7 +615,7 @@ estimates of changed lines without fixtures.
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (§2.4). Done: `core/mid-turn-ledger.ts` (§4.2), and `confirmsStop` removed with PR 5's mid-turn path | L, ~450 | Codex's replays (PR 2: none recorded yet), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
 | 7 | **The ledger, Claude**: Claude's receipts, Stop timer and crash onto the ledger; the SDK stays its wire. Done: on `MidTurnLedger` with named policies (§4.3), +62 lines | L, ~500 | Claude's replays, `session` tests unchanged | 5, #1626 |
 
-| 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers). ACP and Codex done (§4.4) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
+| 8 | **The decision order**: `core/grants.ts`; ACP, then Codex, then Claude supply `GrantQuery` (three small pull requests, or one per tool if review prefers). Done (§4.4) | M each, ~200 | the approval tests of each tool unchanged; core tests for the order | 5 |
 | 9 | **Event hygiene**: `core/events.ts` calling the shared helpers for each tool; the two ACP `pathsOf` copies become one | S, ~150 | replays unchanged (the bypasses of §2 stay bypasses: see 7.3) | 5 |
 
 Row 7, measured against main at `4489459b8` by reading (code lines without blanks and comments): Claude's own copy is about 150 lines in `claude/session.ts` (the Stop and its timer 78, the exit 20, turn and receipt handling about 30, `sendTracked` 10, fields and `deliver`), but `MidTurnLedger` shares about 10 of them as they are (receipts failed on a Stop, the close and an exit; a Stop with no turn said at once; the refusal's words). The rest differs in behaviour pinned by tests: the Stop is confirmed by the interrupt's answer or the result, joins a Stop already waiting and starts its bound again once said (`interrupt.test.ts`); a turn's ending comes from the normalizer, among the goal's events and deferred card closures, with `turn_complete`'s `output`; receipts complete from the result's `user_message_uuids`, not from a turn id (Claude names none); `cancelQueued` empties the SDK's queue and counts what it held; a refused Stop with no turn is an error. Moved as it is, Claude's copy becomes Claude-only options of the ledger plus a wire of about 15 lines: about +55 lines, and never less than about +5. What would make it smaller, each a behaviour change of its own: one Stop wording and timer for Claude and ACP, a Stop confirmed only at the turn's end, and the ledger saying a turn's ending after the tool's own events. The idle exit (Q1) was the fourth; it is done. The owner chose to make the move all the same (2026-11-01), for one copy of the turn logic, within about +60 lines.
