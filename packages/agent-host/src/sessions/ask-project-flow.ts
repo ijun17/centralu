@@ -250,9 +250,6 @@ export class AskProjectFlow {
     const candidates = [...this.host.meta.values()].filter((s) =>
       s.projectId === target.id && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s),
     )
-    const list = () => candidates.map((s) => JSON.stringify({
-      id: s.id, name: s.name, state: s.state, lastActive: lastActiveOf(this.host.store.messages, s.id) ?? null,
-    })).join('\n')
     const wantedSession = opts.session?.trim()
     // A bounded call can keep waiting even when the person has since opened another session.
     const outstanding = [...this.host.children.delegations.entries()].filter(([, d]) =>
@@ -268,15 +265,9 @@ export class AskProjectFlow {
       const [key, pending] = outstanding[0]!
       return this.awaitDelegation(key, pending, signal)
     }
-    const named = wantedSession
-      ? candidates.filter((s) => s.name.toLowerCase() === wantedSession.toLowerCase())
-      : candidates
-    const chosen = candidates.find((s) => s.id === wantedSession) ?? (named.length === 1 ? named[0] : undefined)
-    if (!chosen) {
-      return { ok: false, error: candidates.length
-        ? `${wantedSession ? `No unique ordinary session named "${wantedSession}" in ${target.name}. ` : ''}Name a session with the session argument. Sessions (name, state, last active):\n${list()}`
-        : `${target.name} has no ordinary session. The person has to open one there; this call cannot create one.` }
-    }
+    const picked = pickAskedSession(candidates, wantedSession, target.name, (s) => lastActiveOf(this.host.store.messages, s.id))
+    if ('error' in picked) return { ok: false, error: picked.error }
+    const chosen = picked.chosen
     const key = `${callerId}>${target.id}>${chosen.id}`
     const pending = this.host.children.delegations.get(key)
     if (pending && !opts.task) return this.awaitDelegation(key, pending, signal)

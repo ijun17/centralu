@@ -356,12 +356,20 @@ export function linkedSessions(
       if (!m) return refusal
       const projectId = m.q.strip(project.id, 'The project')
       return attempt(m, async () => {
-        const sessions: { id: string; name: string; state: string }[] = []
+        const sessions: { id: string; name: string; state: string; lastActive?: string }[] = []
         for (const raw of await listOf(m, 'sessions.list')) {
           // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's orchestrator or a lead
           if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || raw.kind !== 'worker' || raw.appId) continue
           if (typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
           sessions.push({ id: m.q.id(raw.id), name: oneLine(raw.name), state: oneLine(raw.state, 40) })
+        }
+        // When each last moved, for the refusal that lists them: only the machine's `host.sessions` has it. Best effort, an older build or a slow answer lists none
+        if (sessions.length) {
+          const moved = new Map((await boundedAsk(m, 'host.sessions', {}).then((a) => rows(m, a), () => [])).map((r) => [r.sessionId, r.lastActive]))
+          for (const s of sessions) {
+            const at = moved.get(s.id)
+            if (at) s.lastActive = at
+          }
         }
         return { sessions }
       })

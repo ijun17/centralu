@@ -243,7 +243,7 @@ export type LinkedSessions = {
    */
   projects(need?: ProjectNeed): Promise<ProjectLookup>
   /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
-  projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
+  projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string; lastActive?: string }[] }>>
   /**
    * A new session in a machine's project, under `preset` (`normal` when none is given; the caller caps it, #838), named
    * if a name is given. For start_agent's child there (#1038): its model and effort, a new worktree on `worktreeBranch`,
