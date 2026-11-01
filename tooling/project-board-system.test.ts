@@ -212,6 +212,27 @@ describe("the board app's runProgram", { timeout: 60_000 * SLOW }, () => {
     expect((await sys.runProgram(NODE, ['-e', 'process.stdout.write("ok")'], { timeoutMs: 60_000 * SLOW })).stdout).toBe('ok')
   })
 
+  it('lets go of the pipes at a time-out, so a process the child left running does not hold the call (#1842)', async () => {
+    const sys = await system()
+    // The child starts a detached grandchild that keeps its pipes for 60 s, and hangs: git's helpers and a cmd.exe shim's pnpm do this
+    const parent = `
+      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit', detached: true })
+      g.unref()
+      process.stdout.write(String(g.pid))
+      setInterval(() => {}, 1000)`
+    const started = Date.now()
+    const failed = await failureOf(sys.runProgram(NODE, ['-e', parent], { timeoutMs: 2000 * SLOW }))
+    expect(failed.timedOut).toBe(true)
+    expect(Date.now() - started).toBeLessThan(30_000)
+    // A grandchild's id is only in stdout when the pipe was still open when it was written
+    if (failed.stdout) process.kill(Number(failed.stdout))
+  })
+
+  it('takes a time-out of 0 as no limit, as node does', async () => {
+    const sys = await system()
+    expect((await sys.runProgram(NODE, ['-e', 'setTimeout(() => process.stdout.write("late"), 1500)'], { timeoutMs: 0 })).stdout).toBe('late')
+  })
+
   it('ends the whole process tree on a time-out, or an abort, with `tree`: the child and what it started', async () => {
     const sys = await system()
     // The child starts a grandchild that holds its pipes and prints its id; without the tree's end the call would wait for it
@@ -241,16 +262,16 @@ describe("the board app's runProgram", { timeout: 60_000 * SLOW }, () => {
 
   it('does not wait for ever for the pipes of a process the child left running, with `tree`', async () => {
     const sys = await system()
-    // The child ends at once; a grandchild it leaves holds the pipes for 20 s
+    // The child ends at once; a grandchild it leaves holds the pipes for 60 s
     const parent = `
-      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'inherit', detached: true })
+      const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit', detached: true })
       g.unref()
       process.stdout.write('done ' + g.pid)`
     const started = Date.now()
     const { stdout } = await sys.runProgram(NODE, ['-e', parent], { tree: true })
     expect(stdout).toMatch(/^done \d+$/)
-    expect(Date.now() - started).toBeLessThan(15_000 * SLOW)
-    // It was left running by design: end it now rather than wait out its 20 s
+    expect(Date.now() - started).toBeLessThan(30_000)
+    // It was left running by design: end it now rather than wait out its 60 s
     process.kill(Number(stdout.slice(5)))
   })
 

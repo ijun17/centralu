@@ -33,7 +33,7 @@ const gh = async (args, { timeoutMs }) => {
     const { stdout } = await runProgram('gh', args, {
       env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
       maxBuffer: 16 * 1024 * 1024,
-      timeoutMs,
+      timeoutMs: Math.max(1, Math.ceil(timeoutMs)), // 0 would mean no limit
       killSignal: 'SIGKILL',
     })
     return stdout

@@ -86,11 +86,15 @@ export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024
     const stop = (why) => {
       if (stoppedBy) return
       stoppedBy = why
+      // As node's own time-out does: let go of the pipes first, so a process the child started and left holding them cannot keep the call waiting
+      child.stdout?.destroy()
+      child.stderr?.destroy()
       if (tree) void stopTree(child)
       else child.kill(options.killSignal)
     }
     const onAbort = () => stop('aborted')
-    if (timeoutMs !== undefined) timer = setTimeout(() => stop('timedOut'), Math.max(1, Math.min(2_147_483_647, Math.ceil(timeoutMs))))
+    // 0 is no limit, as in node; a longer one than a timer takes would fire at once
+    if (timeoutMs) timer = setTimeout(() => stop('timedOut'), Math.min(2_147_483_647, timeoutMs))
     if (signal?.aborted) onAbort()
     else signal?.addEventListener('abort', onAbort, { once: true })
     if (tree)
