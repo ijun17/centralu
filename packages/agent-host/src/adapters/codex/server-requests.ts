@@ -8,8 +8,8 @@ import { approvalDetailFrom, toCodexDecision } from './approvals.js'
 import { paramsOf } from './params.js'
 import { changeKindOf, fileChangesOf } from './items.js'
 import { CardIds, PendingCards } from '../session-kit.js'
-import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
-import { insideFolder } from '../edit-grant.js'
+import { alwaysAllowKey } from '../always-allow.js'
+import { Grants, type GrantAnswer } from '../core/grants.js'
 import type { FileChange } from '../file-changes.js'
 import { turnIdOf } from './turn-reads.js'
 import { asObj, str } from '../../json-value.js'
@@ -43,10 +43,11 @@ export class CodexRequests {
    * meanwhile (`noteRequestEnded`) is dropped from here, and its check then neither answers nor raises a card for a
    * request that is gone.
    */
-  private readonly grants = new Map<string, OpenRequest>()
+  private readonly checks = new Map<string, OpenRequest>()
   /** The ids of the cards this handle raises (see `CardIds`) */
   private readonly ids = new CardIds()
-  private alwaysAllow = new AlwaysAllowRules()
+  /** The decision order (`core/grants.ts`): no `auto` step, as Codex's `approvalPolicy: never` sends no request under `auto` */
+  private readonly grants = new Grants(null)
   /**
    * The changes of each file-change item still open, by item id (#169). The approval request for that item
    * names it and carries nothing else (measured — see approvalDetailFrom), so the card's path and diff come
@@ -69,14 +70,14 @@ export class CodexRequests {
     if (n.method === 'serverRequest/resolved') {
       if (typeof p.requestId !== 'string' && typeof p.requestId !== 'number') return
       const serverId = String(p.requestId)
-      this.grants.delete(serverId)
+      this.checks.delete(serverId)
       this.closeApprovals((a) => String(a.serverId) === serverId)
       return
     }
     if (n.method !== 'turn/completed' && n.method !== 'turn/failed') return
     const turn = turnIdOf(n.params)
     if (typeof p.threadId !== 'string' || !turn) return
-    for (const [id, g] of this.grants) if (g.threadId === p.threadId && g.turnId === turn) this.grants.delete(id)
+    for (const [id, g] of this.checks) if (g.threadId === p.threadId && g.turnId === turn) this.checks.delete(id)
     this.closeApprovals((a) => a.threadId === p.threadId && a.turnId === turn)
   }
 
@@ -188,44 +189,33 @@ export class CodexRequests {
     const itemId = str(paramsOf(r, 'item/fileChange/requestApproval').itemId)
     const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId)?.changes)
 
-    // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
-    // A request that names no file has no key: a rule saved for "(no path)" would let every such request through
-    const key = alwaysAllowKey(detail)
-    if (key && this.alwaysAllow.allows(key)) {
-      this.host.respond(r.id, { decision: 'accept' })
-      return
-    }
-
     /*
-     * `edits` (#1525): a patch that only adds or updates files inside the session's folder is accepted without a card.
+     * The decision order (`core/grants.ts`): a saved "always allow" rule (the same rule as C-2), then `edits` (#1525). A
+     * request that names no file has no key: a rule saved for "(no path)" would let every such request through.
+     *
+     * `edits`: a patch that only adds or updates files inside the session's folder is accepted without a card.
      * Codex has no approval mode that accepts patches and asks for commands (`on-request` runs sandboxed commands
      * unasked), so the one grant is answered here. A request that names extra access (`grantRoot`, a `reason`), a
      * delete, a move, a path outside the folder or under a protected name, or one that cannot be checked, is a card.
      */
     const folder = this.host.editsFolder()
     const changes = r.method === 'applyPatchApproval' ? changesOfLegacy(params) : this.fileChanges.get(itemId)?.changes
-    if (folder && changes && (r.method === 'item/fileChange/requestApproval' || r.method === 'applyPatchApproval') && !params.grantRoot && !params.reason) {
-      const key = String(r.id)
-      this.grants.set(key, requestOrigin(r))
-      void this.mayGrantEdit(folder, changes).then((ok) => {
-        // Codex ended the request while it was checked: nothing to answer, no card to raise
-        if (!this.grants.delete(key)) return
-        if (ok) this.host.respond(r.id, { decision: 'accept' })
-        else this.raiseCard(r, detail)
-      })
-      return
-    }
-    this.raiseCard(r, detail)
+    const patch = (r.method === 'item/fileChange/requestApproval' || r.method === 'applyPatchApproval') && !params.grantRoot && !params.reason
+    // A delete or a move is not an edit
+    const edits = folder && changes && patch && changes.length > 0 && changes.every((c) => c.change === 'add' || c.change === 'update')
+    const answer = this.grants.decide({ auto: false, alwaysAllowKey: alwaysAllowKey(detail), edit: edits ? { folder, paths: changes.map((c) => c.path) } : null })
+    if (!(answer instanceof Promise)) return this.answer(r, detail, answer)
+    const key = String(r.id)
+    this.checks.set(key, requestOrigin(r))
+    void answer.then((a) => {
+      // Codex ended the request while it was checked: nothing to answer, no card to raise
+      if (this.checks.delete(key)) this.answer(r, detail, a)
+    })
   }
 
-  /** Whether every change adds or updates a file inside `folder` (a delete or a move is not an edit; a check that fails asks) */
-  private async mayGrantEdit(folder: string, changes: readonly FileChange[]): Promise<boolean> {
-    if (changes.length === 0 || changes.some((c) => c.change !== 'add' && c.change !== 'update')) return false
-    try {
-      return await insideFolder(folder, changes.map((c) => c.path))
-    } catch {
-      return false
-    }
+  private answer(r: ServerRequest, detail: ApprovalDetail, answer: GrantAnswer): void {
+    if (answer.grant === 'allow') this.host.respond(r.id, { decision: 'accept' })
+    else this.raiseCard(r, detail)
   }
 
   private raiseCard(r: ServerRequest, detail: ApprovalDetail): void {
@@ -235,7 +225,7 @@ export class CodexRequests {
   }
 
   applyRules(matchers: readonly string[]): void {
-    this.alwaysAllow.addAll(matchers)
+    this.grants.applyRules(matchers)
   }
 
   respondApproval(
@@ -264,7 +254,7 @@ export class CodexRequests {
       this.host.emit({ type: 'approval_resolved', sessionId: this.host.sessionId, requestId, decision })
       return true
     }
-    if (decision === 'always' && matcher) this.alwaysAllow.add(matcher)
+    this.grants.answered(decision, matcher)
     this.host.respond(serverId, { decision: toCodexDecision(decision) })
     this.host.emit({ type: 'approval_resolved', sessionId: this.host.sessionId, requestId, decision })
     return true
