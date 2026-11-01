@@ -240,7 +240,7 @@ export class LinkedMachine extends LinkedMachineConnection {
       const r = await this.readActivity()
       if (r.activity) return r.activity
       if (r.cannot || i >= ACTIVITY_UNREAD_RETRIES) throw linkError(this.blindSentence())
-      await sleep(poll, new AbortController().signal, { unref: true })
+      await sleep(poll, undefined, { unref: true })
     }
   }
 
