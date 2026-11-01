@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Wait outside an MCP call: agents can start this in the background and keep working.
 import { readFile } from 'node:fs/promises'
-import { execFile } from '../system.mjs'
+import { runProgram } from '../system.mjs'
 import { DEFAULT_TIMEOUT_MS, waitForChecks } from '../wait-checks.mjs'
 import { parseItemRef } from '../github.mjs'
 
@@ -28,17 +28,19 @@ if (!validTimeout || (!ref && !pr)) {
   console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs <pr|owner/repo#pr|PR URL> | --ref <branch|sha> [--timeout-minutes <minutes>]')
   process.exit(2)
 }
-const gh = (args, { timeoutMs }) =>
-  new Promise((resolve, reject) =>
-    execFile('gh', args, {
+const gh = async (args, { timeoutMs }) => {
+  try {
+    const { stdout } = await runProgram('gh', args, {
       env: { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_PAGER: '' },
       maxBuffer: 16 * 1024 * 1024,
-      timeout: Math.max(1, Math.min(2_147_483_647, Math.ceil(timeoutMs))),
+      timeoutMs,
       killSignal: 'SIGKILL',
-    }, (error, stdout, stderr) =>
-      error ? reject(new Error(String(stderr || error.message).trim())) : resolve(stdout),
-    ),
-  )
+    })
+    return stdout
+  } catch (error) {
+    throw new Error(String(error.stderr || error.message).trim())
+  }
+}
 const result = await waitForChecks({
   repo: pr?.repo ?? config.repository,
   ref,

@@ -6,7 +6,7 @@
 // answer. Whatever keeps it from answering (no such script yet, an older one without `--screen`, the files not known,
 // a crash) is read as "it does": a batch that cannot be judged runs the heavy jobs, as a change that cannot be judged
 // is deep (queue-integrate.mjs).
-import { execFile } from './system.mjs'
+import { runProgram } from './system.mjs'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -42,15 +42,16 @@ function runJudge(source, files) {
       const dir = await realpath(made)
       const file = join(dir, 'ci-changes.mjs')
       await writeFile(file, source)
-      const out = await new Promise((resolve, reject) => {
-        const child = execFile(node, [file, '--screen'], { cwd: dir, timeout: JUDGE_MS, maxBuffer: 1024 * 1024, windowsHide: true, env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } }, (error, stdout, stderr) => {
-          if (!error) return resolve({ stdout, stderr })
-          const how = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'more output than it may print' : error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
-          const line = errorLine(stderr)
-          reject(new Error(`the judge ended with ${how}: ${line || error.message}`))
-        })
-        child.stdin.on('error', () => {})
-        child.stdin.end(JSON.stringify(files))
+      const out = await runProgram(node, [file, '--screen'], {
+        cwd: dir,
+        timeoutMs: JUDGE_MS,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+        env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) },
+        input: JSON.stringify(files),
+      }).catch((error) => {
+        const how = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'more output than it may print' : error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
+        throw new Error(`the judge ended with ${how}: ${errorLine(error.stderr) || error.message}`)
       })
       const text = String(out.stdout).trim()
       const said = errorLine(out.stderr)

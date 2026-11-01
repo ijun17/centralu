@@ -1,14 +1,14 @@
 // The board's one door to the operating system for starting programs (#1599, docs/plans/os-layer.md §2.4): `gh` for
 // GitHub, `git` for the checkout, Node for the judges and pre-pr, and project.json's conflict commands. Every module
-// of this app starts a program through `execFile` or `spawn` here, never through node:child_process itself.
+// of this app starts a program through `runProgram` here, never through node:child_process itself.
 //
 // Tests only: `PROJECT_BOARD_FAKE_PROGRAMS` names a module whose exports, each named for a program (`gh`), answer it
 // in this process instead of starting it: `(args, { input, cwd, env }) => { code, stdout, stderr }`. A fake `gh` on
 // PATH costs a process start per call (on Windows a launcher and Node, about 60 ms), and a merge queue test makes
 // dozens; in this process a call costs well under a millisecond. Whatever the module does not name is started as
 // always. The real start (quoting, PATH lookup, a launcher, stdin) keeps tests of its own that start real programs.
-import { execFile as startProgram, spawn as spawnProgram } from 'node:child_process'
-import { basename } from 'node:path'
+import { execFile as startProgram } from 'node:child_process'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const fakes = process.env.PROJECT_BOARD_FAKE_PROGRAMS ? await import(pathToFileURL(process.env.PROJECT_BOARD_FAKE_PROGRAMS).href) : {}
@@ -44,5 +44,66 @@ export function execFile(file, args, options, callback) {
   return { stdin, pid: undefined, kill: () => false }
 }
 
-/** node:child_process's `spawn`, through this door; never faked (pre-pr's long run, read as it goes) */
-export const spawn = (...args) => spawnProgram(...args)
+/** Stops a process and everything it started (tsc, vitest and pnpm run under a script); resolves when it has exited. */
+export function stopTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+  return new Promise((resolve) => {
+    child.once('exit', () => resolve())
+    if (process.platform === 'win32') startProgram(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], () => {})
+    else {
+      try {
+        // Started detached (`tree`), so it leads a process group of its own
+        process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        child.kill('SIGKILL')
+      }
+    }
+  })
+}
+
+/**
+ * Runs `file` without a shell: `{ stdout, stderr }`, or a rejection with node's error plus `stdout` and `stderr` as
+ * strings, so each caller keeps its own message for `code` and `killed`. Other options go to `execFile`.
+ * - `timeoutMs` (or `signal`, then `aborted`) ends the run, which is then `timedOut` and `killed` whatever the child wrote or
+ *   exited with: a forced end exits with a code, and a caller reading that or stderr would miss the time-out (#1842).
+ * - `tree` ends the child and all it started, not the child alone (its grandchildren would hold the pipes and the call
+ *   would wait), and stops waiting 5 s after a child's exit for the pipes of a process it left running.
+ * - `input` goes to stdin; a child that stops reading it is not a crash here.
+ */
+export function runProgram(file, args, { timeoutMs, input, maxBuffer = 64 * 1024 * 1024, tree = false, signal, ...options } = {}) {
+  return new Promise((resolve, reject) => {
+    let stoppedBy = null
+    let timer
+    let lingering
+    const child = execFile(file, args, { maxBuffer, ...options, ...(tree && process.platform !== 'win32' ? { detached: true } : {}) }, (error, stdout, stderr) => {
+      clearTimeout(timer)
+      clearTimeout(lingering)
+      signal?.removeEventListener('abort', onAbort)
+      if (!error) return resolve({ stdout, stderr })
+      if (stoppedBy) Object.assign(error, { [stoppedBy]: true, killed: true })
+      reject(Object.assign(error, { stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }))
+    })
+    const stop = (why) => {
+      if (stoppedBy) return
+      stoppedBy = why
+      if (tree) void stopTree(child)
+      else child.kill(options.killSignal)
+    }
+    const onAbort = () => stop('aborted')
+    if (timeoutMs !== undefined) timer = setTimeout(() => stop('timedOut'), Math.max(1, Math.min(2_147_483_647, Math.ceil(timeoutMs))))
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
+    if (tree)
+      child.once('exit', () => {
+        lingering = setTimeout(() => {
+          child.stdout?.destroy()
+          child.stderr?.destroy()
+        }, 5_000)
+        lingering.unref()
+      })
+    if (input !== undefined) {
+      child.stdin.on('error', () => {})
+      child.stdin.end(input)
+    }
+  })
+}

@@ -1050,8 +1050,8 @@ push run of CI is fully green, the full tier included (or `commit`).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
-- `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `execFile`.
-- `system.mjs` — the app's one door for starting programs (`execFile`, `spawn`: gh, git, Node, the conflict commands).
+- `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `runProgram`.
+- `system.mjs` — the app's one door for starting programs (`runProgram`, `stopTree`: gh, git, Node, the conflict commands, pre-pr's script).
   No other module imports `node:child_process` (#1599, docs/plans/os-layer.md §2.4): lint refuses it (`local/os-imports`,
   `REPO_APP_DOORS` in tooling/os-layer.js). Tests only: `PROJECT_BOARD_FAKE_PROGRAMS` names a module whose exports,
   named for programs, answer them in this process (`tooling/fake-gh.test-helpers.ts` `inProcess`, run by
