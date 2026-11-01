@@ -38,7 +38,7 @@ export function findMachine<M extends { id: string }>(machines: Iterable<M>, id:
 }
 
 /** The machine of `machines` a qualified id names, with the id inside it; null for an id with no such machine (the hub's own) */
-export function machineOf<M extends { id: string }>(machines: Iterable<M>, value: string): { machine: M; id: string } | null {
+export function qualifiedMachine<M extends { id: string }>(machines: Iterable<M>, value: string): { machine: M; id: string } | null {
   const split = splitQualified(value)
   const machine = split ? findMachine(machines, split.machine) : null
   return split && machine ? { machine, id: split.id } : null
