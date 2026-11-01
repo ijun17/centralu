@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntry, letterOf, navButtonOf, navKeyOf } from './keys.js'
+import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntry, letterOf, pressesItself, navButtonOf, navKeyOf } from './keys.js'
 
 /** Only the two fields this function looks at, from a real KeyboardEvent */
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
@@ -72,6 +72,17 @@ describe('isTextEntry — arrow keys and Enter inside a text field belong to tha
     expect(isTextEntry(el('INPUT', { type: 'checkbox' }))).toBe(false)
     expect(isTextEntry(el('FORM'))).toBe(false)
     expect(isTextEntry(null)).toBe(false)
+  })
+})
+
+describe('pressesItself — a button or a link takes its own Enter', () => {
+  const el = (closest: string | null) => ({ closest: (sel: string) => (closest && sel.includes(closest) ? {} : null) }) as unknown as EventTarget
+
+  it('reads a button, a link and what is inside a button as a control', () => {
+    expect(pressesItself(el('button'))).toBe(true)
+    expect(pressesItself(el('a[href]'))).toBe(true)
+    expect(pressesItself(el(null))).toBe(false)
+    expect(pressesItself(null)).toBe(false)
   })
 })
 

@@ -16,7 +16,7 @@ import { TextInput } from '../../components/TextField.jsx'
 import { Kbd } from '../../components/primitives.jsx'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
-import { isPlainEnter, isPlainEscape, isTextEntry } from '../../app/keys.js'
+import { isPlainEnter, isPlainEscape, isTextEntry, pressesItself } from '../../app/keys.js'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { CommandLogView } from '../../components/CommandLogView.jsx'
 import { usePresence } from '../../components/presence.js'
@@ -141,7 +141,7 @@ export function CommandRunnerOverlay({
         return
       }
       // A focused button presses itself on Enter and Space
-      if (e.target instanceof HTMLElement && e.target.closest('button')) return
+      if (pressesItself(e.target)) return
       const c = commands[cursor]
       if (!c) return
       if (isPlainEnter(e)) {

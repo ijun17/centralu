@@ -54,6 +54,24 @@ test('while the delete-confirmation dialog is open, y/n/a do not reach the appro
   await expect.poll(() => answers(page)).toEqual([{ sessionId, requestId: 'r-hidden', decision: 'allow' }])
 })
 
+test('y/n/a pressed in a focused <select> do not answer the approval card (#1143)', async ({ page }) => {
+  const sessionId = await sessionWithApproval(page)
+  // A select takes the letters for its own type-ahead, like a text field does
+  await page.evaluate(() => {
+    const s = document.createElement('select')
+    s.id = 'probe-select'
+    s.innerHTML = '<option>yes</option><option>no</option>'
+    document.body.appendChild(s)
+    s.focus()
+  })
+  for (const k of ['y', 'n', 'a']) await page.keyboard.press(k)
+  await expect(page.getByTestId('approval-card')).toBeVisible()
+  expect(await answers(page)).toEqual([])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('y')
+  await expect.poll(() => answers(page)).toEqual([{ sessionId, requestId: 'r-hidden', decision: 'allow' }])
+})
+
 async function freshSession(page: Page): Promise<string> {
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
