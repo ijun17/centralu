@@ -4,7 +4,7 @@ import { proofNonce, provesCredential, provesToken } from '../transport/host-pro
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
 import { asObj, str, tryParseJson } from '../json-value.js'
-import { PendingRequests } from '../transport/json-lines.js'
+import { PendingRequests } from '@cc/common'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).

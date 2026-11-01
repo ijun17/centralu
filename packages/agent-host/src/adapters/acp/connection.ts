@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { errorMessage } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
 import { logToolStderr, stopToolProcess } from '../core/tool-process.js'
-import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
+import { PendingRequests } from '@cc/common'
+import { lineSplitter } from '../../transport/json-lines.js'
 
 /**
  * JSON-RPC 2.0 over newline-delimited stdio, as the Agent Client Protocol speaks it (docs/plans/acp-adapter.md §11).

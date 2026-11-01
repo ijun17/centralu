@@ -30,13 +30,14 @@ Inside Codex's macOS sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` wi
 `E2E_BROWSER=chromium` only; CI runs WebKit. Unset `STYLE_SNAPSHOT_BROWSER=webkit` too.
 The runners refuse WebKit there before launch, since it crashes and raises an OS dialog.
 
-A change to `packages/agent-host` or `packages/protocol` only reaches a running app after a
+A change to `packages/agent-host`, `packages/protocol` or `packages/common` only reaches a running app after a
 restart; `packages/ui` and `packages/platform` reload live under `pnpm app:dev`. Do not run
 `tauri build` / `pnpm app` unless asked: it rewrites the bundle a running app may be using.
 
 ## Map
 
 - `packages/protocol`: types and messages shared by UI and host. Additions only.
+- `packages/common`: pure helpers both the host and the screen run (listener set, pending requests). No IO, no React, no other package.
 - `packages/core`: pure domain logic. No IO, no React.
 - `packages/platform`: ports (interfaces) and their web, Tauri and mock implementations.
 - `packages/ui`: React. Talks to the outside only through ports.

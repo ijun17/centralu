@@ -28,8 +28,8 @@
     "guard": {
       "maxMainRuns": 3,
       "jobPaths": {
-        "keeper e2e": ["apps/desktop/", "packages/agent-host/", "packages/protocol/", "packages/core/", "scripts/", "package.json", "pnpm-lock.yaml"],
-        "host tests, remote Node": ["packages/agent-host/", "packages/protocol/", "packages/core/", "packaging/remote-runtime.json", "package.json", "pnpm-lock.yaml"]
+        "keeper e2e": ["apps/desktop/", "packages/agent-host/", "packages/protocol/", "packages/common/", "packages/core/", "scripts/", "package.json", "pnpm-lock.yaml"],
+        "host tests, remote Node": ["packages/agent-host/", "packages/protocol/", "packages/common/", "packages/core/", "packaging/remote-runtime.json", "package.json", "pnpm-lock.yaml"]
       }
     },
     "conflicts": {

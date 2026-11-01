@@ -58,6 +58,11 @@ centralu/
 │  │     ├─ theme.ts  machines.ts  handoff.ts  paths.ts  semver.ts  always-allow.ts  app-*.ts …
 │  │     └─ schema/schema.sql   # the store's DDL, in one place (agent-host.md §5)
 │  │
+│  ├─ common/                   # pure helpers both the host and the screen run: no IO, no React, no domain, no dependency
+│  │  └─ src/                   #   (@cc/common; docs/architecture.md §2)
+│  │     ├─ listeners.ts        # createListeners: a set of subscribers, each isolated from the others' failures
+│  │     └─ pending-requests.ts # PendingRequests: requests sent and not yet answered, each with its own timeout
+│  │
 │  ├─ core/                     # pure domain. No IO, no React
 │  │  └─ src/
 │  │     ├─ session/            # session reducer (the transition rules are protocol's session-state.ts)

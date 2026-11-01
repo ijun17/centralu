@@ -28,24 +28,34 @@ Large changes were **expected** in this project from the start. The architecture
 │  pure domain │   ports/ ← what ui sees                 │
 │  (no IO)     │   web/ tauri/ mock/ ← only apps know    │
 ├──────────────┴─────────────────────────────────────────┤
+│  common     pure helpers both sides run (no domain)    │
 │  protocol   message and event schemas (zod)            │
 │             — everyone's shared language               │
 └────────────────────────────────────────────────────────┘
-   agent-host (separate Node process) ──→ shares protocol only
+   agent-host (separate Node process) ──→ shares protocol and common only
 ```
 
 **Dependency rules (a violation is a lint error, not a review comment):**
 
 | Package | May depend on | Absolutely forbidden |
 |---|---|---|
-| `ui` | core, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, using fetch/WebSocket directly |
-| `core` | protocol | React, DOM, all IO (pure TS only) |
+| `ui` | core, common, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, using fetch/WebSocket directly |
+| `core` | common, protocol | React, DOM, all IO (pure TS only) |
+| `common` | nothing (a leaf) | every other package, React, DOM, all IO |
 | `platform/ports` | protocol | implementation code |
-| `platform/web` `platform/tauri` | ports, protocol | ui, core |
-| `agent-host` | protocol, external SDKs | ui, core, platform |
+| `platform/web` `platform/tauri` | ports, common, protocol | ui, core |
+| `agent-host` | common, protocol, external SDKs | ui, core, platform |
 | `apps/*` | everything (it does the assembly) | — |
 
 The heart of it: **the only place that knows an implementation is the apps entry point.** Everything else knows only interfaces and schemas.
+
+**A pure helper both sides of the process run lives in `packages/common`** (`@cc/common`, #1143): no IO, no React, no
+domain, and no dependency on another package, so the host, core, the screen and the platform can all take it without a
+cycle. It holds what is written once so that a fix reaches every caller: `createListeners` (a set of subscribers, each
+isolated from the others' failures) and `PendingRequests` (requests sent and not yet answered, each with its own timeout).
+`common-is-leaf` in dependency-cruiser fails an import of another package; `core`'s purity lint applies to it too.
+A helper with a domain meaning (a session, a path as the wire spells it) is not common's: the next paragraph says where it goes.
+Protocol does not take it: it has zero dependencies but zod (`protocol-is-leaf`).
 
 **A pure rule both sides of the process run lives in protocol**, not in core: the host may not import core. How a
 path is spelled on the wire (`protocol/paths.ts`) and the session state machine (`protocol/session-state.ts`: the

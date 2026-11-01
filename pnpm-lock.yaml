@@ -159,6 +159,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.263
         version: 0.3.263(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(zod@4.4.3)
+      '@cc/common':
+        specifier: workspace:*
+        version: link:../common
       '@cc/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -193,6 +196,8 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+
+  packages/common: {}
 
   packages/core:
     dependencies:
@@ -230,6 +235,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@cc/common':
+        specifier: workspace:*
+        version: link:../common
       '@cc/core':
         specifier: workspace:*
         version: link:../core

@@ -16,6 +16,7 @@ export function aliases(extra: Record<string, string> = {}): Record<string, stri
     ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, r(v)])),
     '@cc/protocol/client': r('packages/protocol/src/client.ts'),
     '@cc/protocol': r('packages/protocol/src/index.ts'),
+    '@cc/common': r('packages/common/src/index.ts'),
     '@cc/core': r('packages/core/src/index.ts'),
     '@cc/platform/ports': r('packages/platform/src/ports/index.ts'),
     '@cc/platform/web': r('packages/platform/src/web/index.ts'),

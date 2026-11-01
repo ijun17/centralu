@@ -128,6 +128,13 @@ module.exports = {
       to: { path: '\.test-helpers\.tsx?$' },
     },
     {
+      name: 'common-is-leaf',
+      comment: 'common holds the pure helpers both sides of the process run: it depends on no other package, so the host, the screen and core can all take it without a cycle.',
+      severity: 'error',
+      from: { path: '^packages/common/src' },
+      to: { path: '^packages/(?!common)' },
+    },
+    {
       name: 'protocol-is-leaf',
       comment: 'protocol has zero dependencies (except zod).',
       severity: 'error',

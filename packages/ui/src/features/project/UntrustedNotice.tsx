@@ -1,4 +1,4 @@
-import { createListeners } from '@cc/core'
+import { createListeners } from '@cc/common'
 import { useState, useSyncExternalStore } from 'react'
 import { Button } from '../../components/Button.jsx'
 import { CloseIcon } from '../../components/icons.jsx'

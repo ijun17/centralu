@@ -87,3 +87,12 @@ describe('agent-host layer boundary', () => {
     expect(ruleIds(msgs)).toContain('no-restricted-imports')
   })
 })
+
+describe('common layer boundary', () => {
+  it('rejects importing node IO and react, like core', async () => {
+    const io = await lint('packages/common/src/x.ts', `import { readFileSync } from 'node:fs'\nexport const a = readFileSync`)
+    expect(ruleIds(io)).toContain('no-restricted-imports')
+    const react = await lint('packages/common/src/x.ts', `import { useState } from 'react'\nexport const a = useState`)
+    expect(ruleIds(react)).toContain('no-restricted-imports')
+  })
+})

@@ -167,7 +167,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const full = mac.slice(mac.indexOf('id: full'))
     expect(quick).toContain("if: needs.changes.outputs.host_tests == 'off'")
     expect(full).toContain("if: needs.changes.outputs.host_tests == 'true'")
-    expect(full).toContain('packages/agent-host packages/protocol tooling/\n')
+    expect(full).toContain('packages/agent-host packages/protocol packages/common tooling/\n')
     // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
     expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
@@ -643,6 +643,7 @@ describe('which changes reach the screen, for the merge queue (.github/scripts/c
       'apps/web/src/main.tsx',
       'packages/agent-host/src/sessions/x.ts',
       'packages/protocol/src/messages.ts',
+      'packages/common/src/listeners.ts',
       'e2e/some.spec.ts',
       'e2e/fixtures/linked-hosts-ui-scenarios.ts',
       'e2e/ux/baseline.json',
@@ -669,6 +670,7 @@ describe('which changes reach the screen, for the merge queue (.github/scripts/c
       'packages/ui/src/App.test.tsx',
       'packages/agent-host/src/sessions/x.test.ts',
       'packages/protocol/src/messages.test.ts',
+      'packages/common/src/listeners.test.ts',
       'packages/agent-host/src/fake-exe.test-helpers.ts',
       'tooling/project-board-queue.test.ts',
       'tooling/fixtures/node-floor.json',

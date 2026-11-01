@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { createConnection, type Socket } from 'node:net'
-import { lineSplitter, PendingRequests } from '../transport/json-lines.js'
+import { PendingRequests } from '@cc/common'
+import { lineSplitter } from '../transport/json-lines.js'
 
 /**
  * The host's side of the keeper's child service (#280, option C step 2).

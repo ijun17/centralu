@@ -120,6 +120,7 @@ export default tseslint.config(
       'boundaries/include': ['packages/**/*', 'apps/**/*'],
       'boundaries/elements': [
         { type: 'protocol', pattern: 'packages/protocol/src/**/*' },
+        { type: 'common', pattern: 'packages/common/src/**/*' },
         { type: 'core', pattern: 'packages/core/src/**/*' },
         { type: 'ports', pattern: 'packages/platform/src/ports/**/*' },
         { type: 'platform-impl', pattern: 'packages/platform/src/(web|tauri|mock)/**/*' },
@@ -135,20 +136,21 @@ export default tseslint.config(
           default: 'disallow',
           rules: [
             { from: 'protocol', allow: ['protocol'] },
-            { from: 'core', allow: ['core', 'protocol'] },
+            { from: 'common', allow: ['common'] },
+            { from: 'core', allow: ['core', 'common', 'protocol'] },
             { from: 'ports', allow: ['ports', 'protocol'] },
-            { from: 'platform-impl', allow: ['platform-impl', 'ports', 'protocol'] },
-            { from: 'ui', allow: ['ui', 'core', 'ports', 'protocol'] },
-            { from: 'agent-host', allow: ['agent-host', 'protocol'] },
-            { from: 'app', allow: ['app', 'ui', 'core', 'ports', 'platform-impl', 'protocol'] },
+            { from: 'platform-impl', allow: ['platform-impl', 'ports', 'common', 'protocol'] },
+            { from: 'ui', allow: ['ui', 'core', 'common', 'ports', 'protocol'] },
+            { from: 'agent-host', allow: ['agent-host', 'common', 'protocol'] },
+            { from: 'app', allow: ['app', 'ui', 'core', 'common', 'ports', 'platform-impl', 'protocol'] },
           ],
         },
       ],
     },
   },
-  // core: a pure domain — no IO, no React.
+  // core: a pure domain — no IO, no React. common is pure too: the helpers both sides of the process run.
   {
-    files: ['packages/core/**/*.ts'],
+    files: ['packages/core/**/*.ts', 'packages/common/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

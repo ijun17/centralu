@@ -25,10 +25,10 @@
 //   bundle      the product's sources (anything but documents and tests): the four bundles
 //   host        the product's sources outside the window (packages/ui, core, platform, apps/web), and
 //               the few test inputs the keeper's Rust tests read (HOST_TEST_INPUTS): the keeper end to
-//               end, macOS and Linux, and the content verifier. The host shares only protocol with the
+//               end, macOS and Linux, and the content verifier. The host shares only protocol and common with the
 //               window (docs/architecture.md §2), and none of them read any other test
 //   host_tests  anything but documents outside the window and e2e/: the host's tests on the Node
-//               remotes run (packages/agent-host, packages/protocol, tooling/launcher-)
+//               remotes run (packages/agent-host, packages/protocol, packages/common, tooling/launcher-)
 //   code        anything but documents: the UI scenarios in Chromium and the UX tasks
 //
 // Each is `true` or `false` on a full run (`false` runs the job's stand-in, which reports its checks
@@ -71,8 +71,8 @@ const TESTS = [/\.test\.(ts|tsx|mts|mjs)$/, /\.test-helpers\.(ts|mts)$/, /^e2e\/
 const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/]
 /** The window: what the host, the keeper and the content verifier never load */
 const WINDOW = [/^packages\/(ui|core|platform)\//, /^apps\/web\//]
-/** The product the UI scenarios start and speak to besides the window: the host and the protocol between them */
-const HOST_PRODUCT = [/^packages\/(agent-host|protocol)\//]
+/** The product the UI scenarios start and speak to besides the window: the host and the protocol between them, and the helpers both run (packages/common) */
+const HOST_PRODUCT = [/^packages\/(agent-host|protocol|common)\//]
 /**
  * What the UI scenarios render or read from outside the window and the host (2026-10-26, #1538, found by walking what
  * `e2e/` and `apps/web` import or name; tooling/build-workflow.test.ts walks it again, so a new such file that is not

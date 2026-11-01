@@ -626,7 +626,7 @@ jobs:
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
           # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
           CC_BUNDLE_COMPARED_BY: verify
-        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol tooling/
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol packages/common tooling/
 
       # The time each file took, for choosing what the quick tier runs; also when a test failed
       - name: Say which test files took longest
@@ -1052,7 +1052,7 @@ jobs:
   # only works on 22 would pass every other check and break every remote. Added beside the jobs above,
   # not in place of them: the app's own host still runs on whatever Node the person has, 22 or later.
   #
-  # The host, its protocol and the npm launcher, which is what a remote runs. Linux and Windows,
+  # The host, its protocol and shared helpers, and the npm launcher, which is what a remote runs. Linux and Windows,
   # the two systems the installer serves. The version comes from the pin itself, so moving the pin
   # (scripts/node-pin.mjs --set) moves this job with it; tooling/node-pin.test.ts holds the two together.
   host-tests-remote-node:
@@ -1094,7 +1094,7 @@ jobs:
           # Never the real data folder, on any OS (AGENTS.md)
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
         # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto
-        run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher- tooling/key-pairing-vector
+        run: pnpm exec vitest run packages/agent-host packages/protocol packages/common tooling/launcher- tooling/key-pairing-vector
 
   host-tests-remote-node-skipped:
     name: host tests, remote Node (${{ matrix.runner }})
