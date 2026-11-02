@@ -1321,6 +1321,8 @@
   /* The letter sits high in the readout font's line box (measured at 4x: its middle up to 0.75px above the chip's);
      1px on top brings every look within a quarter pixel of the middle */
   padding-top: 1px;
+  /* A look changing (a session starts to wait, an approval is answered) fades in the short time every state change takes */
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 /* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
    the 1px goes under it (measured at 4x) */
@@ -1335,6 +1337,12 @@
 .cc-mark[data-look='waiting'] > .cc-chip {
   border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
+}
+/* A session waiting on an approval: the chip is close to white, so it stands out without a line under the row (#1740).
+   The same in every theme: near-white with dark ink reads as the brightest thing in the list in dark and light alike */
+.cc-mark[data-look='waiting'][data-state='waiting_approval'] > .cc-chip {
+  background-color: #f4f4f4;
+  color: #111111;
 }
 .cc-mark[data-look='stopped'] > .cc-chip {
   border: 2px dashed var(--color-ink-signal);

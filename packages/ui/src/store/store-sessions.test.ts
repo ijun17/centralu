@@ -772,3 +772,22 @@ describe('focusing the orchestrator', () => {
     expect(s.introSeen).toBe(true)
   })
 })
+
+/*
+ * #1653: the orchestrator's session is deleted. The screen goes back to its start state instead of drawing a pane for a
+ * session the store no longer holds, and the next first question starts a new one.
+ */
+describe('the orchestrator session being deleted', () => {
+  it('forgets which session is the orchestrator, so its screen shows the start state again', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('orc-1653', sessionInfo('orc-1653', { projectId: null, kind: 'orchestrator' }))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('orc-1653')
+    expect(useStore.getState().orchestratorId).toBe('orc-1653')
+
+    mock.sessions.delete('orc-1653')
+    mock.emit({ type: 'session_deleted', sessionId: 'orc-1653' })
+
+    expect(useStore.getState().orchestratorId).toBeNull()
+  })
+})

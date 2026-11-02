@@ -13,7 +13,7 @@ import { NO_PATH, alwaysAllowKey, matchesAllowRule, oneLineText, type ApprovalDe
  * edit, several files, a command that was too long) back as "needs checking". When the strip itself was
  * removed (the user's request, 2026-09-10 — every time it appeared or disappeared, the whole screen was
  * pushed around), the question that rule answered went with it. An approval is now answered **on that
- * session's card**, or, where the card's question is a plain yes or no, on the waiting list's or the sidebar's row
+ * session's card**, or, where the card's question is a plain yes or no, on the waiting list's row
  * that shows it (#543, `answersInPlace` below).
  */
 
@@ -169,8 +169,8 @@ export function approvalNotes(d: ApprovalDetail): string[] {
 }
 
 /**
- * Whether a waiting approval can be answered from a list row (#543): the waiting list's row and the sidebar's row
- * offer Allow and Deny without opening the session, and only for a card whose question is a plain yes or no that one
+ * Whether a waiting approval can be answered from a list row (#543): the waiting list's row
+ * offers Allow and Deny without opening the session, and only for a card whose question is a plain yes or no that one
  * line states whole.
  *
  * - A **command** on one line, and a **single-file edit or new file** that names its file: the line is the command or

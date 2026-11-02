@@ -145,7 +145,7 @@ export function Inbox() {
         aria-label="Waiting"
         // Leaving, it takes no keys and no focus (focusReturn.ts)
         inert={leaving}
-        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
+        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 flex max-h-[calc(100vh/var(--text-zoom)-3.5rem)] w-[560px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
         data-testid="inbox"
       >
         {/*
@@ -181,7 +181,7 @@ export function Inbox() {
           </p>
           )
         ) : (
-          <ul className="flex max-h-[calc(56vh/var(--text-zoom))] flex-col gap-0.5 overflow-y-auto p-1">
+          <ul className="flex max-h-[calc(56vh/var(--text-zoom))] min-h-0 flex-col gap-0.5 overflow-y-auto p-1">
             {items.map((it, i) => (
               <li
                 key={it.id}
@@ -253,7 +253,6 @@ export function Inbox() {
                 {it.state === 'waiting_approval' && !it.proposal && (
                   <RowApproval
                     sessionId={it.id}
-                    place="inbox"
                     keys={i === cursor}
                     settled={settled}
                     onOpen={() => {
