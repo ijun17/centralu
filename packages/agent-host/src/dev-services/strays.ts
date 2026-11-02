@@ -159,50 +159,62 @@ export function pickStrays(
   return out.sort((a, b) => a.pid - b.pid)
 }
 
-async function psRows(): Promise<PsRow[]> {
+/**
+ * How long `ps` or `lsof` may take. On a saturated machine either can take far longer than a quiet one's tens of ms (the
+ * Windows process listing needed 60 s for the same reason, #1779); a listing that does not finish is not "no leftovers"
+ */
+const LIST_TIMEOUT_MS = 60_000
+
+type Run = (file: string, args: string[], opts: { maxBuffer: number; timeout: number; windowsHide: boolean }) => Promise<{ stdout: string }>
+
+/** A listing that could not be read is said on stderr: it must not pass for an empty one */
+function unread(what: string, e: unknown): void {
+  console.error(`[strays] ${what} could not be read (${isObj(e) && typeof e.message === 'string' ? e.message.split('\n')[0] : String(e)}); leftovers may be missing from the list`)
+}
+
+async function psRows(run: Run): Promise<PsRow[]> {
   try {
     // Only our own account's processes are looked at — we could never kill another account's process anyway, and it is not ours to ask about
-    const { stdout } = await exec('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], {
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 5000,
-      windowsHide: true,
-    })
+    const { stdout } = await run('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], { maxBuffer: 8 * 1024 * 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true })
     return parsePsRows(stdout)
-  } catch {
+  } catch (e) {
+    unread('the process list', e)
     return []
   }
 }
 
-async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
+async function cwdsOf(run: Run, pids: readonly number[]): Promise<Map<number, string>> {
   if (pids.length === 0) return new Map()
   try {
-    const { stdout } = await exec('lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'], {
-      maxBuffer: 8 * 1024 * 1024,
-      timeout: 5000,
-      windowsHide: true,
-    })
+    const { stdout } = await run('lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'], { maxBuffer: 8 * 1024 * 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true })
     return parseLsofCwd(stdout)
   } catch (e) {
     // lsof exits 1 when some process cannot be read, but it still **prints what it did read** — that is not discarded
     const partial = isObj(e) && typeof e.stdout === 'string' ? e.stdout : undefined
+    // An exit code is lsof's own answer; a kill by the timeout, or no lsof to run, is not an answer
+    if (isObj(e) && (e.killed === true || typeof e.code === 'string')) unread('the working folders', e)
     return partial ? parseLsofCwd(partial) : new Map()
   }
 }
 
 /**
- * The leftover processes currently alive. This scans in two steps: ps narrows down the candidates
- * (only those with no terminal), then lsof is run on just those pids — a full lsof takes hundreds
- * of ms, but limited to candidates it takes tens.
+ * The processes running now and the folder of each that has no terminal: ps narrows down the candidates, then lsof is
+ * run on just those pids — a full lsof takes hundreds of ms, but limited to candidates it takes tens.
  */
+export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; cwdOf: Map<number, string> }> {
+  const rows = await psRows(run)
+  const cwdOf = await cwdsOf(run, rows.filter((r) => r.pid > 1 && noTty(r.tty)).map((r) => r.pid))
+  return { rows, cwdOf }
+}
+
+/** The leftover processes currently alive (`scanProcesses`, then the four rules) */
 export async function findStrays(
   roots: readonly string[],
   selfPid = process.pid,
   held: readonly number[] = [],
 ): Promise<StrayProcess[]> {
   if (!hasPs() || roots.length === 0) return []
-  const rows = await psRows()
-  const candidates = rows.filter((r) => r.pid > 1 && noTty(r.tty)).map((r) => r.pid)
-  const cwdOf = await cwdsOf(candidates)
+  const { rows, cwdOf } = await scanProcesses()
   return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held)
 }
 
