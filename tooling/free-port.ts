@@ -9,8 +9,9 @@ import { createServer } from 'node:net'
 const [LOW, HIGH] = [12000, 16999]
 const given = new Set<number>()
 
-/** A port nobody listens on right now, for a child process to listen on (a product that cannot be told port 0). */
-/** `start`: where in the range to begin looking, a random place unless a test says where. */
+/**
+ * A port nobody listens on right now, for a child process to listen on (a product that cannot be told port 0).
+ * `start`: where in the range to begin looking, a random place unless a test says where. */
 export async function freePort(start = randomInt(HIGH - LOW + 1)): Promise<number> {
   const size = HIGH - LOW + 1
   for (let i = 0; i < size; i++) {
