@@ -49,6 +49,7 @@ import {
   stateAfterUnblocked,
   type SenderClass,
   type Standing,
+  ADOPTED_TASK,
 } from './rules.js'
 
 /*
@@ -218,7 +219,6 @@ const sessionIdOf = (address: string): string => {
 const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
 
 /** The task of a thread adopted from a report mark: the words the owner gave were not kept, and the session's conversation has them */
-const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
 
 /**
  * How a turn of delegated work ended, told by Centralu to the thread's owner (§6, §8.1). The words of `body` are Centralu's own with the

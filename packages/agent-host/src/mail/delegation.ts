@@ -1,76 +1,55 @@
-import { CENTRALU, PERSON, parseAddress } from './address.js'
-import type { MailRecords, ThreadOrigin, ThreadRow } from '../dev-services/store/mail.js'
+import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
+import type { ThreadOrigin } from '../dev-services/store/mail.js'
+import { PERSON } from './address.js'
+import type { DelegationOrigin, MessageService, TurnReport } from './messages.js'
 import { refusalReason } from './rules.js'
-import type { ClosingHooks, MailService } from './service.js'
 import type { MailTurns, TurnStart } from './turns.js'
 
 /**
- * What the mailbox does when a session gives another one work through a tool whose delivery the host already makes
- * (`ChildOwnership.delegated`, docs/plans/mailbox.md §8.1): it writes the task down as a thread the caller owns, beside the old
- * path, which stays the way the task reaches the child. Both are sessions of this host: a child on a linked machine keeps the
- * old path until slice 4 and never reaches here.
+ * What the mailbox does when a session gives another one work through a tool whose delivery the host already makes (`ChildOwnership.delegated`,
+ * docs/plans/mailbox.md §9.1): it writes a task from the caller to the child, delivered (the old path delivered the words), and the turn the task
+ * started is that task's. Each delegation is its own task. Both are sessions of this host: a child on a linked machine keeps the old path (§14).
  */
-export function delegationRecorder(
-  mail: MailService,
-  sessionOf: (id: string) => { projectId?: string | null; /** The agent depth it was started at (#867) */ depth?: number } | undefined,
-  /** The turns the child runs: the one the task started (it began before the thread existed) belongs to the thread from here */
-  turns?: MailTurns,
-): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => void {
+export function delegationRecorder(mail: MessageService, turns?: MailTurns): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => void {
   return (callerId, childId, origin, task) => {
-    // Handed on in the middle of the work of a thread of its own: this thread is that one's child (§6)
-    const parentId = turns?.current(callerId)?.threadId ?? null
-    const { thread } = mail.recordDelegation(mail.sessionAddress(callerId), {
-      assignee: mail.sessionAddress(childId),
-      task,
-      origin,
-      projectId: sessionOf(childId)?.projectId || null,
-      parentId,
-      depth: sessionOf(childId)?.depth ?? 0,
-    })
-    turns?.attach(childId, thread.id, callerId)
+    const written = mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: true })
+    turns?.attach(childId, written.id, callerId)
   }
+}
+
+/** The old path's word for where work came from, as a task's origin (§5.2) */
+function delegationOrigin(origin: ThreadOrigin): DelegationOrigin {
+  return origin === 'start_agent' || origin === 'agent_session' || origin === 'send_to_session' || origin === 'create_session' || origin === 'ask_project' ? origin : 'send_to_session'
 }
 
 /**
- * A session a script or the RPC started with a first message (`create_session` by a connection with the limited credential, §8.1): the work is the
- * person's, whose Inbox the report lands in. Written before the first message goes in, so the turn it starts is reported
+ * A session a script or the RPC started with a first message (§9.6): the work is the person's, a task from the person whose report lands in their
+ * Inbox. Written before the first message goes in, so the turn it starts is reported
  */
-export function personWorkRecorder(
-  mail: MailService,
-  sessionOf: (id: string) => { projectId?: string | null; depth?: number } | undefined,
-): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
+export function personWorkRecorder(mail: MessageService): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
   return (sessionId, text, fromScript) => {
-    mail.recordDelegation(PERSON, {
-      ...(fromScript ? { fromScript } : {}),
-      assignee: mail.sessionAddress(sessionId),
-      task: text,
-      origin: 'create_session',
-      projectId: sessionOf(sessionId)?.projectId || null,
-      depth: sessionOf(sessionId)?.depth ?? 0,
-    })
+    mail.task(PERSON, mail.sessionAddress(sessionId), { text, origin: fromScript ? 'script' : 'create_session', delivered: true })
   }
 }
 
-/** The end of a turn of work the person owns is a report in their thread (Centralu's words, the session's own beside them), and the thread goes where the draft says */
-export function personReportRecorder(mail: MailService, records: MailRecords): (sessionId: string, draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'then'>) => boolean {
+/** Whether the person has work with the session whose turn is reported to them: an unsettled task from the person */
+export function personOwes(mail: MessageService, records: MailboxRecords): (sessionId: string) => boolean {
+  return (sessionId) => records.newestTask(PERSON, mail.sessionAddress(sessionId)) !== undefined
+}
+
+/** The end of a turn of work the person owns: Centralu's report on the person's task (§9.6); false when there is no such task or it was refused */
+export function personReportRecorder(
+  mail: MessageService,
+  records: MailboxRecords,
+  /** The work the session handed on in the person's work that is still owed (§9.4): a turn that ends while it is, is `waiting` */
+  waitingOn: (sessionId: string) => number = () => 0,
+): (sessionId: string, draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'then'>) => boolean {
   return (sessionId, draft) => {
-    const assignee = mail.sessionAddress(sessionId)
-    const thread = records.latestBetween(PERSON, assignee)
-    if (!thread || thread.state !== 'running') return false
-    // The same pause on the same background work is said once: a second turn that leaves as many tasks running tells the person nothing new
-    const last = draft.then === 'running' && draft.paused ? records.lastReportBy(thread.id, CENTRALU) : undefined
-    if (last && last.facts.outcome === 'paused' && last.facts.paused === draft.paused) return true
+    const task = records.newestTask(PERSON, mail.sessionAddress(sessionId))
+    if (!task) return false
+    const owed = draft.then === 'review' && draft.outcome === 'finished' ? waitingOn(sessionId) : 0
     try {
-      mail.reportTurn(thread.id, {
-        to: PERSON,
-        about: assignee,
-        outcome: draft.outcome,
-        body: draft.body,
-        ...(draft.answer ? { answer: draft.answer } : {}),
-        ...(draft.error ? { error: draft.error } : {}),
-        ...(draft.paused ? { paused: draft.paused } : {}),
-        then: draft.then,
-      })
+      mail.report(task.id, turnReport(owed > 0 ? { ...draft, outcome: 'paused', then: 'running' } : draft, owed))
       return true
     } catch (e) {
       if (refusalReason(e) !== undefined) return false
@@ -79,114 +58,91 @@ export function personReportRecorder(mail: MailService, records: MailRecords): (
   }
 }
 
-/**
- * What the host does when a thread whose work was going is closed by the person or its owner (3.10, MB): `turnRunning` is whether `mail_turns` says
- * a turn going in the assignee belongs to this thread, and `closed` stops that turn and tells the helper (`SessionManager.workClosed`)
- */
-export function closingRecorder(
-  turns: MailTurns,
-  host: {
-    inTurn(sessionId: string): boolean
-    /** The session's turn has ended but its own background work runs, and a report waits on it (`pausedReports`) */
-    paused(sessionId: string, ownerId: string): boolean
-    workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string; since?: number }): void
-  },
-): ClosingHooks {
-  const sessionOf = (address: string): string | undefined => {
-    const party = parseAddress(address)
-    return party?.kind === 'session' ? party.sessionId : undefined
-  }
-  return {
-    turnRunning: (thread) => {
-      const helper = sessionOf(thread.assignee ?? '')
-      if (helper === undefined) return false
-      if (host.inTurn(helper)) return turns.current(helper)?.threadId === thread.id
-      // Paused over its own background work for this thread's owner: that work is what is going
-      const owner = sessionOf(thread.owner)
-      return owner !== undefined && host.paused(helper, owner)
-    },
-    closed: (c) => {
-      // When the turn that is stopped began: only the background work it started is stopped with it
-      const since = turns.startedAt(c.helperId)
-      host.workClosed({ threadOwner: sessionOf(c.thread.owner) ?? '', helperId: c.helperId, stopped: c.stopped, text: c.text, ...(since !== undefined ? { since } : {}) })
-    },
-  }
-}
-
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }
 
-/** The most of the answer a call returned that the thread keeps: the child's own words, as its message, read with the tool */
+/** The most of the answer a call returned that the report keeps */
 const ANSWER_KEPT = 600
 
 /**
- * What the mailbox does when a call returns the answer of work a session gave another (§8.1): the call is the report. The reports of the
- * thread that still wait for the caller are read and handled, and a thread that is still `running` is reported on in it (told, with what
- * the call returned) and goes to `review`: the owner decides. Nothing wakes the owner for news a call already gave. A call that only
- * read where the work stands, or an answer of a turn that left background work running, reports nothing new
+ * What the mailbox does when a call returns the answer of work a session gave another, or reads where it stands (§9.6): the reports on the caller's
+ * tasks to the child are read. A call that returned how the turn ended is the report: it is written on the task as told (delivered and read), which
+ * settles it, so nothing wakes the caller for news the call already gave
  */
-export function answerRecorder(mail: MailService, records: MailRecords): (callerId: string, childId: string, how?: AnswerGiven) => void {
+export function answerRecorder(
+  mail: MessageService,
+  records: MailboxRecords,
+  turns?: Pick<MailTurns, 'startedAtOf'>,
+  /** The work the child handed on in this work that is still owed (§9.4): an answer given while it is, is `waiting`, and the task stays open */
+  waitingOn: (ownerId: string, childId: string) => number = () => 0,
+): (callerId: string, childId: string, how?: AnswerGiven) => void {
   return (callerId, childId, how) => {
     const owner = mail.sessionAddress(callerId)
     const child = mail.sessionAddress(childId)
-    mail.reportsAnswered(owner, child)
-    const thread = records.latestBetween(owner, child)
-    if (!how || !thread || thread.state !== 'running') return
+    const now = Date.now()
+    const reports = records.unreadFor(owner).filter((p) => p.message.kind === 'report' && reportOnTaskTo(records, p.message, owner, child)).map((p) => p.message.id)
+    records.markDelivered(owner, reports, now, null)
+    records.markRead(owner, reports, now)
+    const task = records.newestTask(owner, child)
+    if (!how || !task) return
     const read = `read_session(sessionId="${childId}")`
-    // Centralu's words are its own: how it ended, the id, the kind of error. The session's last response is its own message, behind them
-    mail.reportTurn(thread.id, {
-      to: owner,
-      about: child,
-      outcome: how.ok ? 'finished' : 'failed',
+    const waiting = how.ok ? waitingOn(callerId, childId) : 0
+    const startedAt = turns?.startedAtOf(childId)
+    const written = mail.report(task.id, {
+      ...(startedAt !== undefined ? { startedAt } : {}),
+      ...(waiting > 0 ? { outcome: 'waiting' as const, waitingOn: waiting } : { outcome: how.ok ? ('finished' as const) : ('failed' as const) }),
       body: how.ok
-        ? `[Centralu] The assigned work finished.\nid: ${childId}\n\nIts last response is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        ? `[Centralu] The assigned work finished.\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`
         : `[Centralu] The assigned work did not finish.\nid: ${childId}\n\nIts tool's error, by kind: ${how.error}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
       ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
-      then: 'review',
-      told: true,
     })
+    if ('message' in written) {
+      records.markDelivered(owner, [written.message.id], now, null)
+      records.markRead(owner, [written.message.id], now)
+    }
   }
 }
 
-/** What the mailbox does when a session deletes the session that did work it gave (§3.3): a thread whose work was reported is closed */
-export function finishRecorder(mail: MailService): (callerId: string, childId: string) => void {
-  return (callerId, childId) => mail.ownerFinished(mail.sessionAddress(callerId), mail.sessionAddress(childId))
+/** Whether `report` is Centralu's report on a task `owner` gave `child` */
+function reportOnTaskTo(records: MailboxRecords, report: MailRow, owner: string, child: string): boolean {
+  const task = report.replyTo === null ? undefined : records.message(report.replyTo)
+  return task?.kind === 'task' && task.sender === owner && records.recipient(task.id, child) !== undefined
 }
 
 /**
- * What the mailbox does when a turn starts that it did not start (§6): it records whose the turn is and which thread it belongs to,
- * so the turn's end can be told as that thread's. The person's own turn belongs to none, except when they chose to add their message
- * to the task. A caller's message starts a turn of the thread that caller owns with the session; so does the CLI running on after the
- * background work of the turn that paused (the caller is the one a report is still owed to)
+ * What the mailbox does when a turn starts that it did not start: whose the turn is and which task it is the work of, so its end can be reported as
+ * that task's. The person's own turn belongs to none, except when they chose to add their message to the task. A caller's message starts a turn of
+ * the task that caller gave; so does the CLI running on after the background work of the turn that paused (a report is still owed to the caller)
  */
-export function turnRecorder(mail: MailService, records: MailRecords, turns: MailTurns): (sessionId: string, turn: TurnStart) => void {
+export function turnRecorder(mail: MessageService, records: MailboxRecords, turns: MailTurns): (sessionId: string, turn: TurnStart) => void {
   return (sessionId, turn) => {
-    const thread = turn.ownerId && (turn.by === 'work' || turn.added) ? records.latestBetween(mail.sessionAddress(turn.ownerId), mail.sessionAddress(sessionId)) : undefined
-    const threadId = thread && thread.state !== 'done' ? thread.id : null
-    const personWork = (): string | null => {
-      const mine = turn.ownerId ? undefined : records.latestBetween(PERSON, mail.sessionAddress(sessionId))
-      return mine?.state === 'running' ? mine.id : null
-    }
+    const child = mail.sessionAddress(sessionId)
+    const taskId = turn.ownerId && (turn.by === 'work' || turn.added) ? (records.newestTask(mail.sessionAddress(turn.ownerId), child)?.id ?? null) : null
+    const personWork = (): string | null => (turn.ownerId ? null : (records.newestTask(PERSON, child)?.id ?? null))
     if (turn.by === 'person') turns.beginOther(sessionId, 'person', null)
-    else if (turn.added) turns.beginOther(sessionId, 'person', threadId, turn.ownerId)
-    // A report or notice about another session starts a turn of its own kind, not of a caller's send (§6 keeps `caller` for that)
+    else if (turn.added) turns.beginOther(sessionId, 'person', taskId, turn.ownerId)
+    // A report or notice about another session starts a turn of its own kind, not of a caller's send
     else if (turn.source === 'report') turns.beginOther(sessionId, 'report', null)
     else if (turn.source === 'app') turns.beginOther(sessionId, 'app', null)
-    // The turn the person's own work starts (§8.1) is that thread's: work handed on in it is a child thread of it, and its end waits for that work (§6)
-    else turns.beginOther(sessionId, turn.cli ? 'cli' : 'caller', threadId ?? personWork(), turn.ownerId)
+    // The turn the person's own work starts is that task's: work handed on in it is caused by it, and its end waits for that work (§9.4)
+    else {
+      // The person's work has no caller's message behind its first turn (a script's or the RPC's first message reads as the CLI's own): it is the
+      // person's task's turn all the same, started by the task, so what it hands on is caused by it (§9.4)
+      const person = taskId === null ? personWork() : null
+      turns.beginOther(sessionId, turn.cli && person === null ? 'cli' : 'caller', taskId ?? person, turn.ownerId)
+    }
   }
 }
 
 /**
- * A turn's end as the mailbox is told it (docs/plans/mailbox.md §6, §8.1): Centralu's own words for the thread's owner, with the facts
- * a wake carries
+ * A turn's end as the mailbox is told it (docs/plans/mailbox.md §9.3): Centralu's own words for the task's sender, with the facts a wake carries
  */
 export type ReportDraft = {
-  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over, resumed */
   outcome: string
   /** The report in Centralu's words alone: how it ended, the id, the kind of error, how to go on, and where the session's words are read (#1186) */
   body: string
-  /** The session's last response, its own words: they are put in the thread as its message, in front of the report, never in Centralu's */
+  /** The session's last response, its own words: kept on the report as its `answer`, never in Centralu's */
   answer?: string
   /** The kind of error the turn ended in */
   error?: string
@@ -194,12 +150,9 @@ export type ReportDraft = {
   paused?: number
   /** The person wrote into the turn, or added to the task */
   personNote?: boolean
-  /** What the thread becomes (`TurnReport.then`) */
+  /** What the work is now: reported (`review`), still going (`running`: paused over its own work or work it handed on, or an update's cut that goes on), or taken over (`dropped`) */
   then: 'review' | 'running' | 'dropped'
-  /**
-   * The session is being archived, and archiving stopped the turn this reports: that end is not the work's (#1445 review), and the
-   * thread is left to `partyGone`, which says the session is gone and puts the work back on the board
-   */
+  /** The session is being archived, and archiving stopped the turn this reports: that end is not the work's, and the task is left to `partyGone` */
   archiving?: boolean
   /** The owner is in a turn now: a relayed notice joins it and starts none */
   ownerInTurn?: boolean
@@ -208,98 +161,109 @@ export type ReportDraft = {
 }
 
 /**
- * `wake`: the owner reads mail, so the mailbox tells it: at rest it is woken, in a turn the mail waits for the turn's end (3.9; hooks in
- * slice 6 will bring it into the turn), a process kept from an earlier host included. `old`: its seat cannot read mail (a coordinator, a builder,
- * an app's agent), so the old way tells, and holds the notice if it cannot be delivered
+ * `wake`: the owner reads mail, so the mailbox tells it: at rest it is woken, in a turn the mail waits for the turn's end. `old`: its seat cannot read
+ * mail (a coordinator, a builder, an app's agent), so the old way tells, and holds the notice if it cannot be delivered
  */
 export type ReportDelivery = 'wake' | 'old'
 
 /**
- * What the mailbox did with a draft: `mailed`, the report is in the thread and the mailbox tells the owner; `closed`, the session itself
- * closed the thread by mail and said how it ended, so the owner has been told; `none`, there is no thread for this work, and the old way
- * tells; an object, the report is in the thread and the old way tells too: when that message is delivered `settle` marks the report
- * delivered, so the mailbox does not wake the owner for it. `keep`: hold the notice if it cannot be delivered (an owner that cannot read mail;
- * an owner that can is woken by the mailbox instead)
+ * What the mailbox did with a draft (§9.3): `mailed`, the report is written and the mailbox tells the owner; `closed`, the owner has been told
+ * already or needs not be; `none`, there is no task for this work, and the old way tells; an object, the report is written and the old way tells too:
+ * when that message is delivered `settle` marks the report delivered, so the mailbox does not wake the owner for it. `keep`: hold the notice if it
+ * cannot be delivered
  */
 export type ReportedAs = 'mailed' | 'closed' | 'none' | { settle: () => void; keep: boolean }
 
+/** The old path's outcome word as a report's (§5.4), and the word itself as the reason when the two differ */
+function outcomeOf(draft: Pick<ReportDraft, 'outcome' | 'then'>): { outcome: TurnReport['outcome']; reason?: string } {
+  if (draft.then === 'dropped') return { outcome: 'stopped', reason: 'taken_over' }
+  const word = draft.outcome
+  const outcome: TurnReport['outcome'] =
+    word === 'finished' || word === 'settled' ? 'finished' : word === 'failed' || word === 'limit_reached' ? 'failed' : 'stopped'
+  return { outcome, ...(word !== outcome ? { reason: word } : {}) }
+}
 
-/**
- * The thread a session opened to ask the orchestrator (§9.7): a `mail` thread, which `latestBetween` does not take for a delegation's. The one
- * whose work is going if there is one (the session may have written in an answered request and opened another), else the latest
- */
-function askedOf(mail: MailService, records: MailRecords, owner: string, assignee: string): ThreadRow | undefined {
-  const asks = records.threadsOfParty(owner, 'owner').filter((t) => t.assignee === assignee && t.origin === 'mail' && mail.isAsk(t))
-  return asks.findLast((t) => t.state === 'running') ?? asks.at(-1)
+/** A draft as the report the message service writes; `waitingOn` is the work it handed on still owed (§9.4) */
+function turnReport(draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'personNote' | 'then'>, waitingOn: number): TurnReport {
+  const base = { body: draft.body, ...(draft.answer ? { answer: draft.answer } : {}), ...(draft.error ? { error: draft.error } : {}), ...(draft.personNote ? { personNote: true } : {}) }
+  if (draft.then === 'running' && draft.paused) return { ...base, outcome: 'paused', paused: draft.paused }
+  if (draft.then === 'running') return { ...base, outcome: 'waiting', waitingOn: Math.max(1, waitingOn) }
+  return { ...base, ...outcomeOf(draft) }
 }
 
 /**
- * The end of the orchestrator's turn on a session's request, in Centralu's words (§9.7). The asking session gets back what the orchestrator
- * posted in the thread and nothing else of the turn: not its last response, which may be addressed to the person, nor anything the person
- * wrote into the turn, and no pointer to read the orchestrator's conversation, which an ordinary session is refused
+ * The end of the orchestrator's turn on a session's request, in Centralu's words (S12). The asking session gets back what the orchestrator sent it
+ * and nothing else of the turn: not its last response, which may be addressed to the person, nor anything the person wrote into the turn
  */
 function askedReportBody(draft: Pick<ReportDraft, 'outcome'>): string {
   return draft.outcome === 'finished'
-    ? '[Centralu] The orchestrator ended its turn on your request. What it posted in this thread is its answer; if it posted nothing, it had none to give. Its other words in that turn are not passed on.'
-    : `[Centralu] The orchestrator's turn on your request did not finish (${draft.outcome}). What it posted in this thread, if anything, is above. Ask again, or ask the person.`
+    ? '[Centralu] The orchestrator ended its turn on your request. What it sent you in reply is its answer; if it sent nothing, it had none to give. Its other words in that turn are not passed on.'
+    : `[Centralu] The orchestrator's turn on your request did not finish (${draft.outcome}). What it sent you in reply, if anything, has reached you. Ask again, or ask the person.`
 }
 
 /**
- * What the mailbox does with the end of a turn of delegated work (§6, §8.1): the report goes in the thread the owner has with the session,
- * and the owner is told as mail when it can read it. A thread the session itself closed by mail, saying how it ended, takes no second
- * report (the owner has been told); a thread that is done any other way, or none at all, leaves the old way of telling.
- *
- * `turnThread` is the thread of the turn that ended (`MailTurns.threadOf`): a session's request is reported in the thread its turn was,
- * not in one chosen among the pair's threads
+ * Which message a turn's end reports (§9.2): the turn's work message when it is the owner's task to the child or the owner's request to the
+ * orchestrator; else the newest unsettled task from the owner to the child. None: the old path tells
+ */
+function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'messageOf'>, owner: string, child: string, childId: string): { work: MailRow; request: boolean } | undefined {
+  const turnWork = turns.messageOf(childId)
+  const work = turnWork === null ? undefined : records.message(turnWork)
+  if (work && work.sender === owner && records.recipient(work.id, child)) {
+    if (work.kind === 'task') return { work, request: false }
+    if (work.kind === 'message') return { work, request: true }
+  }
+  const task = records.newestTask(owner, child)
+  return task && { work: task, request: false }
+}
+
+/**
+ * What the mailbox does with the end of a turn of delegated work (§9.3): Centralu's report on the task the turn was the work of, for its sender, who
+ * is told as mail when it can read it, and the `ReportedAs` the old path acts on. The old path decides that a report is due (D18); this writes it.
+ * The end of the orchestrator's turn on a request is reported to its asker the same way (S12), and settles that turn's requests (§7.6)
  */
 export function reportRecorder(
-  mail: MailService,
-  records: MailRecords,
-  turnThread: (sessionId: string) => string | null = () => null,
+  mail: MessageService,
+  records: MailboxRecords,
+  turns: Pick<MailTurns, 'messageOf' | 'seqOf' | 'startedAtOf'>,
+  /** The work the child handed on in this work that is still owed (§9.4): a turn that ends while it is, is `waiting` */
+  waitingOn: (ownerId: string, childId: string) => number = () => 0,
 ): (ownerId: string, childId: string, draft: ReportDraft) => ReportedAs {
   return (ownerId, childId, draft) => {
     const owner = mail.sessionAddress(ownerId)
     const child = mail.sessionAddress(childId)
-    const turn = turnThread(childId)
-    const turnAsk = turn === null ? undefined : records.thread(turn)
-    const ownTurn = turnAsk && turnAsk.owner === owner && turnAsk.assignee === child && mail.isAsk(turnAsk) ? turnAsk : undefined
-    const thread = ownTurn ?? records.latestBetween(owner, child) ?? askedOf(mail, records, owner, child)
-    if (!thread) return 'none'
-    const asked = mail.isAsk(thread)
-    if (thread.state === 'done') {
-      // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work
-      const theirs = records.lastWordBy(thread.id, child)
-      const ours = records.lastBy(thread.id, owner)
-      // The person closed it and the owner was told (3.10): the end of the turn that was still going is not a second word
-      const closed = records.lastReportBy(thread.id, CENTRALU)
-      if (closed?.facts.closedBy === 'person' && closed.seq > (ours?.seq ?? 0)) return 'closed'
-      return theirs?.kind === 'report' && theirs.seq > (ours?.seq ?? 0) ? 'closed' : 'none'
-    }
+    const found = reportedWork(records, turns, owner, child, childId)
+    if (!found) return 'none'
+    // Archiving stopped the turn: the task is `partyGone`'s, which settles it and tells its sender
     if (draft.archiving) return 'closed'
-    let posted
+    // An update cut the turn and it goes on (#1618): not the work's end, and the old way says so
+    if (draft.outcome === 'resumed') return 'none'
+    const { work, request } = found
+    let written
     try {
-      posted = mail.reportTurn(thread.id, {
-        to: owner,
-        about: child,
-        outcome: draft.outcome,
-        body: asked ? askedReportBody(draft) : draft.body,
-        ...(draft.answer && !asked ? { answer: draft.answer } : {}),
-        ...(draft.error ? { error: draft.error } : {}),
-        ...(draft.paused ? { paused: draft.paused } : {}),
-        ...(draft.personNote ? { personNote: true } : {}),
-        then: draft.then,
-      })
+      // A request's report carries none of the orchestrator's other words (S12)
+      const { answer: _answer, ...unanswered } = draft
+      const startedAt = turns.startedAtOf(childId)
+      const report = request ? { ...turnReport(unanswered, 0), body: askedReportBody(draft) } : turnReport(draft, waitingOn(ownerId, childId))
+      written = mail.report(work.id, startedAt === undefined ? report : { ...report, startedAt })
     } catch (e) {
       if (refusalReason(e) !== undefined) return 'none'
       throw e
     }
-    // The same pause again (work handed on still going): nothing new to tell
-    if (posted.duplicate) return 'closed'
-    // A pause that does not wake starts no turn (§6, MB): recorded, and read at the owner's next turn. The old way of telling would start one
-    // for an owner at rest, so only an owner in a turn is told
-    if (posted.message.wake === 'no' && draft.delivery !== 'wake' && !draft.ownerInTurn) return 'closed'
+    // The request turn's end settles every request of that asker it carried (§7.6)
+    const seq = turns.seqOf(childId)
+    if (request && seq !== undefined && draft.then !== 'running') mail.requestTurnEnded(child, owner, seq)
+    if ('settledAlready' in written || written.duplicate) return 'closed'
     if (draft.delivery === 'wake') return 'mailed'
-    const messageId = posted.message.id
-    return { keep: true, settle: () => mail.reportTold(thread.id, owner, messageId) }
+    // A later pause does not wake (it is read at the owner's next turn): the old way would start a turn of an owner at rest, so only an owner in a turn is told
+    if (!written.first && !draft.ownerInTurn) return 'closed'
+    const reportId = written.message.id
+    return {
+      keep: true,
+      settle: () => {
+        const now = Date.now()
+        records.markDelivered(owner, [reportId], now, null)
+        records.markRead(owner, [reportId], now)
+      },
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { errorMessage, MACHINE_CHANGE, turnsRunning, type HostActivity, type MachineInfo, type MachineProbe, type RemoteShell, type SshHostList } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
 import { raceTimeout } from '../timing.js'
+import { mailSwitchRollbackText, rollbackCrossesMailSwitch } from '../links/mail-switch.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted, trustedJsonText } from './tool-answers.js'
@@ -272,6 +273,8 @@ export class MachineFlow {
           const why = ops.installRefusal(m.id, 'rollback') ?? busyWith(m)
           if (why) return { ok: false, error: why }
           const was = m.install?.current?.version ?? m.versions?.remote.version
+          // Across the mail switch it would strand that machine's mail (docs/plans/mailbox.md D28): refused before any card
+          if (was && rollbackCrossesMailSwitch(was, previous.version)) return { ok: false, error: mailSwitchRollbackText(nm, shownVersion(previous.version), shownVersion(was)) }
           const refused = await this.ask(
             sessionId,
             `Roll ${nm} (${m.sshTarget}, ${osOf(m)}) back to Centralu ${shownVersion(previous.version)}${was ? `, from ${shownVersion(was)}` : ''}? It stops the Centralu there (its agents end and resume on ` +

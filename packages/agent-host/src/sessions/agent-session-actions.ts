@@ -77,7 +77,13 @@ export class AgentSessionActions {
     // A child start_agent started on a linked machine (#1038): followed through the link. Its id is a linked machine's,
     // `<machine>.<id>`, which no session of this host has
     const remote = opts.sessionId.includes('.') ? this.flow.remote.of(opts.sessionId) : undefined
-    if (remote) return this.flow.remote.agentSession(callerId, remote, opts, signal)
+    if (remote) {
+      // §7.4: more work for a child on a linked machine is asked before it goes over the link
+      const machine = opts.action === 'send' ? this.host.linkedReader?.machineOf(opts.sessionId) : undefined
+      const refused = opts.action === 'send' ? this.host.refusesDelegation(callerId, { sessionId: opts.sessionId, linked: true }, { tool: 'agent_session', target: `a session on ${machine ?? 'a linked machine'}`, text: opts.text ?? '' }) : null
+      if (refused) return { ok: false, error: refused }
+      return this.flow.remote.agentSession(callerId, remote, opts, signal)
+    }
     // Work a handoff gave away (#693): the original that stayed is told where it went
     const gone = this.flow.handedOverAnswer(callerId, opts.sessionId)
     if (gone) return gone
@@ -203,6 +209,9 @@ export class AgentSessionActions {
               error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
             }
           }
+          // §7.4: before anything is sent, queued or forked
+          const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'agent_session', target: child.name || child.id, text: opts.text ?? '' })
+          if (refused) return { ok: false, error: refused }
           const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
           /*
            * Busy with a turn that is not the caller's (#677): the caller chooses what happens, a note into that turn,

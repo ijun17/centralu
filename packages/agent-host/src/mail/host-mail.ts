@@ -1,0 +1,251 @@
+import { errorMessage, oneLineText, type SessionInfo } from '@cc/protocol'
+import type { Store } from '../dev-services/store.js'
+import type { MailHooks, SessionManager } from '../sessions/manager.js'
+import { PERSON, parseAddress, sessionAddress } from './address.js'
+import { takeOverFromEarlierBuild } from './adoption.js'
+import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
+import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './delegation.js'
+import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
+import { mailCalls } from './frame.js'
+import { MessageService } from './messages.js'
+import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
+import { REFUSAL_TEXT } from './rules.js'
+import { MailTool } from './tool.js'
+import { MailTurns } from './turns.js'
+
+/**
+ * What the mail of this host reads of its sessions (docs/plans/mailbox.md §16 M3a): the manager answers it in `main.ts`, and tests answer it from
+ * a real manager too, so the host and its tests wire mail one way
+ */
+export type HostMailSessions = {
+  sessionInfo(id: string): SessionInfo | undefined
+  listSessions(): SessionInfo[]
+  /** Whether the session's seat has the `mail` tool (`reader` or `orchestrator`) */
+  canReadMail(id: string): boolean
+  orchestratorId(): string | undefined
+  /** Why sessions may not ask the orchestrator now, or null when they may (§7.6) */
+  orchestratorAsks(): string | null
+  /** Whether the session reaches `mail` as a command behind `centralu_run` (the orchestrator) */
+  mailCommand(id: string): boolean
+  /** Whether the session's turn goes on from the host before (kept, or continued after an update): its mail turn row is read back */
+  keptInTurn(id: string): boolean
+  /** §9.5: the old report paths still owe the owner a report of the child */
+  oldOwes(ownerId: string, childId: string): boolean
+  mailSessions(): MailSessions
+}
+
+/** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
+export function mailSessionsOf(
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions'>,
+  orchestratorHasMailCommand: () => boolean,
+): HostMailSessions {
+  const seats = mgr.mailSeats(orchestratorHasMailCommand)
+  return {
+    sessionInfo: (id) => mgr.sessionInfo(id),
+    listSessions: () => mgr.listSessions(),
+    canReadMail: (id) => seats.mailTool(id),
+    orchestratorId: () => mgr.orchestratorId(),
+    orchestratorAsks: () => mgr.orchestratorAsks(),
+    mailCommand: (id) => seats.mailCommand(id),
+    keptInTurn: (id) => mgr.keptInTurn(id),
+    oldOwes: (ownerId, childId) => mgr.oldOwes(ownerId, childId),
+    mailSessions: () => mgr.mailSessions(),
+  }
+}
+
+export type HostMail = {
+  service: MessageService
+  reach: MailReach
+  turns: MailTurns
+  delivery: MailDelivery
+  tool: MailTool
+  /** What the manager hears through `useMail` */
+  hooks: MailHooks
+  /**
+   * The step after the host's ready line (§6.3, §9.5), before delivery starts: the thread mail an older build left pending moves, then the report
+   * marks and tasks are brought in step, then delivery starts. By then the host this one replaced is gone, so only one host delivers
+   */
+  afterReady(): void
+}
+
+/**
+ * The mail of this host on the message tables (M3a): the message service over `store.mailbox` with the one reach module, the turns and guards, the
+ * delivery, the version-1 tool mapped onto the service, and the recorders the old report paths call. Nothing here starts until `afterReady`
+ */
+export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostId: string; delivery?: MailDeliveryOptions; now?: () => number } ): HostMail {
+  const { hostId } = opts
+  const addressOf = (id: string) => sessionAddress(hostId, id)
+  const projects = () => store.projects.listProjects()
+  const reach = mailReach({
+    hostId,
+    session: (id) => {
+      const s = sessions.sessionInfo(id)
+      return s && { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
+    },
+    orchestratorId: () => sessions.orchestratorId() ?? null,
+    orchestratorAsks: () => sessions.orchestratorAsks() === null,
+    // Nothing records an app's caller before the apps' mail API (§13)
+    appCalledBy: () => false,
+    project: (projectId) => {
+      const p = projects().find((x) => x.id === projectId)
+      return p && { trusted: p.trusted === true, name: p.name }
+    },
+    askGroupMembers: (address) => askGroupMembers(sessions, hostId, address),
+  })
+  // Filled once `turns` exists: the service reads a session's turn through it (§8.2 step 6)
+  const box: { turns?: MailTurns } = {}
+  const service = new MessageService(store.mailbox, reach, {
+    hostId,
+    ...(opts.now ? { now: opts.now } : {}),
+    turn: (address) => {
+      const party = parseAddress(address)
+      return (party?.kind === 'session' && box.turns?.current(party.sessionId)) || null
+    },
+    calls: (address) => {
+      const party = parseAddress(address)
+      return mailCalls(1, party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
+    },
+  })
+  box.turns = new MailTurns(store.mailbox, {
+    ...(opts.now ? { now: opts.now } : {}),
+    keepOpen: (id) => sessions.keptInTurn(id),
+    // A turn read back after a restart: the orchestrator's work message is a session's request, whose sender asks (§7.6)
+    askerOf: (sessionId, messageId) => {
+      const m = store.mailbox.message(messageId)
+      return m && reach.isOrchestrator(addressOf(sessionId)) && parseAddress(m.sender)?.kind === 'session' ? m.sender : undefined
+    },
+  })
+  const mailTurns = box.turns
+  const delivery = new MailDelivery(service, store.mailbox, sessions.mailSessions(), {
+    turns: mailTurns,
+    ...(opts.now ? { now: opts.now } : {}),
+    // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions. A setting the previous build never reads
+    heartbeat: {
+      read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
+      write: (ms) => store.settings.setAppSetting('mail.heartbeat', String(ms)),
+    },
+    ...opts.delivery,
+  })
+  const askedByHost: AskedByHost = {
+    session: (id) => {
+      const s = sessions.sessionInfo(id)
+      return s && { name: s.name, projectId: s.projectId ?? null }
+    },
+    project: (id) => projects().find((p) => p.id === id),
+    untrusted: (projectId) => reach.untrusted(projectId),
+  }
+  const tool = new MailTool(service, store.mailbox, reach, {
+    caller: (id) => {
+      const s = sessions.sessionInfo(id)
+      return s && { address: addressOf(id), askedBy: s.askedBy ?? null }
+    },
+    orchestratorId: () => sessions.orchestratorId() ?? null,
+    mailArgs: () => 1,
+    form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
+    askerOf: (id) => askerFacts(askedByHost, id),
+    legacyChain: (threadId) => store.legacyChain(threadId, undefined, 9),
+  })
+  const owedOld = (sender: string, recipient: string): boolean => {
+    const owner = parseAddress(sender)
+    const child = parseAddress(recipient)
+    return owner?.kind === 'session' && child?.kind === 'session' && sessions.oldOwes(owner.sessionId, child.sessionId)
+  }
+  const waitingOn = (ownerId: string, childId: string): number => service.waitingOn(addressOf(ownerId), addressOf(childId), mailTurns.messageOf(childId), owedOld)
+
+  const hooks: MailHooks = {
+    askedBy: (id) => askedBy(askedByHost, mailTurns, id),
+    sessionGone: (id) => service.partyGone(addressOf(id)),
+    handOver: (from, to, which) => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { recipients: which.senders.map(addressOf) }),
+    handOverPreview: (from, to) => service.handOverPreview(addressOf(from), addressOf(to)),
+    openWork: (id) => openWork(service, store, addressOf(id)),
+    sessionChanged: (id) => delivery.poke(id),
+    sessionEvent: (e, ended) => mailTurns.observe(e, ended),
+    tool: (id, args) => tool.run(id, args),
+    // Work a session gave another is a task, beside the old path that delivered it (§9.1)
+    delegated: delegationRecorder(service, mailTurns),
+    waitingOn,
+    answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
+    // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
+    personWork: { started: personWorkRecorder(service), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.messageOf(id), owedOld)) },
+    // A turn's end is a report on the task, and the owner is told as mail when it can read it (§9.3)
+    report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
+    turnStarted: turnRecorder(service, store.mailbox, mailTurns),
+    refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
+    roleMoved: (from, to) => {
+      if (service.roleMoved(addressOf(from), addressOf(to)) > 0) delivery.poke(to)
+    },
+  }
+
+  return {
+    service,
+    reach,
+    turns: mailTurns,
+    delivery,
+    tool,
+    hooks,
+    afterReady: () => {
+      try {
+        const moved = store.movePendingThreadMail(Date.now())
+        if (moved.messages > 0) console.error(`[mail] moved ${moved.messages} pending message(s) an older build left in its threads`)
+      } catch (e) {
+        // The move is one transaction: nothing moved, and the next ready tries again
+        console.error(`[mail] moving the thread mail an older build left pending failed: ${errorMessage(e)}`)
+      }
+      try {
+        takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id), oldOwes: (o, c) => sessions.oldOwes(o, c) })
+      } catch (e) {
+        console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
+      }
+      delivery.start()
+    },
+  }
+}
+
+/** The session addresses whose requests to the orchestrator are counted together (§7.5): one project and one root of who started whom */
+function askGroupMembers(sessions: HostMailSessions, hostId: string, address: string): string[] {
+  const party = parseAddress(address)
+  const all = sessions.listSessions()
+  const root = (id: string): string => {
+    let at = id
+    for (let i = 0; i < 16; i++) {
+      const up = all.find((s) => s.id === at)?.askedBy
+      const upper = up ? all.find((s) => s.id === up) : undefined
+      // The walk stops before the orchestrator: it starts sessions in every project, so they are not one group (only their project is)
+      if (!upper || upper.kind === 'orchestrator') break
+      at = upper.id
+    }
+    return at
+  }
+  const me = party?.kind === 'session' ? all.find((s) => s.id === party.sessionId) : undefined
+  if (!me) return [address]
+  const key = `${me.projectId ?? ''}|${root(me.id)}`
+  return all.filter((s) => `${s.projectId ?? ''}|${root(s.id)}` === key).map((s) => sessionAddress(hostId, s.id))
+}
+
+/** What the archive card says a session holds (#1512): first lines of what waits for its answer, and of the tasks it owes a report of */
+function openWork(service: MessageService, store: Store, address: string): { unanswered: string[]; owed: string[] } {
+  const first = (body: string) => oneLineText(body.split(/\r\n|[\n\r]/)[0] ?? '', 160)
+  const unanswered: string[] = []
+  const owed: string[] = []
+  for (const row of service.watchedTo(address)) {
+    const m = store.mailbox.message(row.messageId)
+    if (!m) continue
+    if (m.kind === 'task') owed.push(first(m.body))
+    else if (m.needsReply && row.answerId === null) unanswered.push(first(m.body))
+  }
+  return { unanswered, owed }
+}
+
+/** §7.4: a delegation out of the caller's untrusted project is refused (S15), and the record S16 is built from is written */
+function refusesDelegation(
+  service: MessageService,
+  reach: MailReach,
+  callerId: string,
+  target: DelegationTarget,
+  call: { tool: string; target: string; text: string },
+): string | null {
+  const projectId = reach.refusesDelegation(callerId, target)
+  if (projectId === null) return null
+  service.refused(callerId, { tool: call.tool, target: call.target, firstLine: call.text.split(/\r\n|[\n\r]/)[0] ?? '', projectId })
+  return `Refused (untrusted_project): ${REFUSAL_TEXT.untrusted_project(reach.projectLabel(projectId), call.target)}`
+}

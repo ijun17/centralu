@@ -200,7 +200,7 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const mail = new MailPerson(
     new MailService(store.mail, { hostId: () => 'hub-contract' }),
     store.mail,
-    { resumeSession: () => {}, resumeThread: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 },
+    { resumeSession: () => {}, resumeRoot: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 },
     { session: () => undefined },
   )
   const server = new HostServer({

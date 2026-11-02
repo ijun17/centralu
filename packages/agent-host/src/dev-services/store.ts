@@ -11,6 +11,7 @@ import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords } from './store/linked-machines.js'
 import { MailRecords } from './store/mail.js'
 import { MailboxRecords } from './store/mailbox.js'
+import { legacyChain, movePendingThreadMail } from './store/mailbox-adopt.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords } from './store/messages.js'
 import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
@@ -177,6 +178,19 @@ export class Store extends MigrationRunner {
     } finally {
       this.db.pragma(`busy_timeout = ${wait}`)
     }
+  }
+
+  /**
+   * The thread mail an older build left pending, moved into the message tables and marked handled in the old ones, in one transaction
+   * (docs/plans/mailbox.md §6.3): run after every `ready` from M3a to M7, before delivery starts. A second run finds nothing
+   */
+  movePendingThreadMail(now: number): { messages: number; recipients: number } {
+    return movePendingThreadMail(this.db, now)
+  }
+
+  /** An old thread's messages, read-only (§6.3): the earlier history of a moved message (`legacy_thread`) */
+  legacyChain(threadId: string, before: number | undefined, limit: number): ReturnType<typeof legacyChain> {
+    return legacyChain(this.db, threadId, before, limit)
   }
 
   /** The migration list. `store/migrations/index.ts` holds it, and the rule a new step follows */

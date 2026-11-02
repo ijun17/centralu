@@ -407,16 +407,18 @@ classDiagram
 - `mail_messages`: 글, Centralu의 `facts`, 같은 변화가 두 번 올라가지 않게 하는 키.
 - `mail_receipts`: 각 수신자가 각 메시지를 어디까지 받았는가.
 - `mail_turns`: 세션의 각 턴이 속한 스레드. v65부터 턴의 일 메시지(`message_id`), 턴을 시작한 메시지(`starter_id`, 그 턴이
-  보내는 메일의 원인), 턴이 끝난 방식(`ended_how`)도 있다. 아직 아무도 쓰지 않는다.
+  보내는 메일의 원인), 턴이 끝난 방식(`ended_how`, M5부터 쓴다)도 있다. M3a부터 호스트는 `message_id`와 `starter_id`를 쓰고
+  `thread_id`는 비워 둔다. 재시작이나 업데이트 뒤 이어지는 턴은 자기 행을 그대로 쓴다.
 - `mail`: 스레드 없는 메일(v65, [plans/mailbox.md](plans/mailbox.md) §6.1, #1684): 메시지 하나, 보낸 쪽, 종류(`message`, `task`,
   `report`, `notice`), 답이 필요한가, 답하는 메시지와 그 사슬의 첫 메시지, 보낸 쪽의 턴을 시작한 메시지와 몇 번 건너왔는가,
-  Centralu의 `facts`. `legacy_thread`는 옮겨 온 스레드. 아직 아무도 읽지 않는다. 호스트는 다음 단계에서 이리로 옮긴다.
+  Centralu의 `facts`. `legacy_thread`는 옮겨 온 스레드. M3a부터 호스트의 메일이다. 준비가 끝날 때마다 옛 빌드가 스레드에 남긴
+  대기 중인 메일을 한 번만 이리로 옮긴다(§6.3).
 - `mail_recipients`: `mail`의 메시지 하나에 대한 수신자 하나의 행: 수신 기록이 가진 전달 필드, 전달이 시작한 턴, 끝났는가와
   어떻게 끝났는가(`answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy`), 알림, 놓아 준 때와 보낸 쪽에 알린 때.
 
 호스트 교체 동안 같은 스토어를 맡은 옛 빌드는 이 테이블을 이름으로 부르지 않는다(v61과 v65는 더하기만 한다). 보관함에서 지워진
 세션은 자기 수신 기록, 스레드 안의 자리, 턴 기록을 함께 가져간다. 보존(끝난 스레드는 30일과 180일 뒤, 읽은 알림은 14일 뒤)은
-`MailService.sweep`이고, 호스트가 준비된 뒤 한 번 돌린다([plans/mailbox.md](plans/mailbox.md) §4.4).
+`MessageService.sweep`이고, 호스트가 전달의 60초 순회와 함께 돌린다([plans/mailbox.md](plans/mailbox.md) §6.4).
 
 ## 3. 세션 상태
 

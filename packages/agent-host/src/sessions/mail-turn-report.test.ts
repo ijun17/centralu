@@ -1,59 +1,39 @@
 /**
- * A turn the mailbox starts is the work of the thread it carries (docs/plans/mailbox.md §6, slice 3), over the real manager: its end is reported
- * to the thread's owner like the end of any turn of work, so the thread leaves `running` and a parent above it is not held for good.
- * Found live (MR2 on #1473): the owner sent new work into a thread in `review` by mail, the helper did it, and nobody heard.
+ * A turn the mailbox starts is the work of the task it carries (docs/plans/mailbox.md §8.2, §9.2), over the real manager: its end is reported to
+ * the task's sender like the end of any turn of work, so the task is settled and a parent above it is not held for good. Mail that is no task
+ * starts no work. Found live (MR2 on #1473): the owner sent new work by mail after the first was reported, the helper did it, and nobody heard.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PERSON } from '../mail/address.js'
-import { answerRecorder, closingRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
-import { MailDelivery } from '../mail/delivery.js'
-import { MailService } from '../mail/service.js'
-import { MailTurns } from '../mail/turns.js'
-import type { ThreadRow } from '../dev-services/store/mail.js'
+import type { MailRow } from '../dev-services/store/mailbox.js'
+import type { HostMail } from '../mail/host-mail.js'
 import { ChildReports } from './child-reports.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
-let mail: MailService
-let delivery: MailDelivery
+let m: HostMail
+let read: ReturnType<typeof mailReader>
 let clock = { t: 1_800_000_000_000 }
 
 beforeEach(async () => {
   w = await crossWorld()
   clock = { t: Date.now() }
-  mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => clock.t })
-  const turns = new MailTurns(w.store.mail, { now: () => clock.t })
-  delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {}, turns })
-  w.mgr.useMail({
-    sessionGone: (id) => void mail.sessionGone(id),
-    sessionChanged: (id) => delivery.poke(id),
-    sessionEvent: (e, ended) => turns.observe(e, ended),
-    delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
-    answered: answerRecorder(mail, w.store.mail),
-    report: reportRecorder(mail, w.store.mail),
-    waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
-    finishedWith: finishRecorder(mail),
-    turnStarted: turnRecorder(mail, w.store.mail, turns),
-  })
-  mail.useClosing(
-    closingRecorder(turns, {
-      inTurn: (id) => w.mgr.sessionInfo(id)?.state === 'working',
-      paused: (id, ownerId) => w.mgr.pausedFor(id, ownerId),
-      workClosed: (c) => void w.mgr.workClosed(c),
-    }),
-  )
-  delivery.start()
+  m = wireHostMail(w.mgr, w.store, { now: () => clock.t })
+  read = mailReader(w.store)
+  m.delivery.start()
 })
 afterEach(async () => {
-  delivery.stop()
+  m.delivery.stop()
   vi.restoreAllMocks()
   await w.dispose()
 })
 
 const handleOf = (id: string): CrossHandle => w.adapters.get('claude')!.handles.get(id)!
-const addr = (id: string) => mail.sessionAddress(id)
-const threadBetween = (owner: string, assignee: string): ThreadRow => w.store.mail.latestBetween(addr(owner), addr(assignee))!
-const outcomes = (t: ThreadRow) => w.store.mail.messagesAfter(t.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu').map((m) => m.facts.outcome)
+/** The first task `owner` gave `child` */
+const taskOf = (owner: string, child: string): MailRow => read.tasks(addr(owner), child)[0]!
+const outcomes = (taskId: string) => read.reportsOn(taskId).map((r) => r.facts.outcome)
+/** New work sent by mail: a task from `owner` to `helper` the mailbox delivers (§9.7 stores an owner's answer to a clarification so) */
+const mailTask = (owner: string, helper: string, text: string): MailRow => m.service.task(addr(owner), addr(helper), { text, origin: 'mail', delivered: false })
 const settle = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve()
   await new Promise<void>((r) => setImmediate(r))
@@ -61,7 +41,7 @@ const settle = async () => {
 /** Moves the clock past the debounce and looks at the mailbox, as its timer would */
 const due = async (sessionId: string) => {
   clock.t += 40_000
-  await delivery.process(addr(sessionId))
+  await m.delivery.process(addr(sessionId))
   await settle()
 }
 const turnEnds = async (id: string, text: string) => {
@@ -75,98 +55,84 @@ async function startAgent(parent: string, task: string) {
 }
 async function reported(owner: string, helper: string, text: string) {
   await turnEnds(helper, text)
-  await w.until(() => outcomes(threadBetween(owner, helper)).length >= 1)
+  await w.until(() => outcomes(taskOf(owner, helper).id).length >= 1)
 }
 
-describe('new work sent by mail into a thread in review', () => {
-  it('mail into a thread that is running again is that thread’s work too, and its end is reported', async () => {
+describe('new work sent by mail after the first was reported', () => {
+  it('the turn it starts is that task’s, and its end is reported to the owner, once', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const owner = await w.callerSession()
     const helper = await startAgent(owner, 'write the files')
     await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
-    mail.update(thread.id, addr(owner), { state: 'running' })
+    const first = taskOf(owner, helper)
+    expect(read.taskRow(first.id, helper)).toMatchObject({ settled: 'reported' })
+
     handleOf(helper).acceptsAtOnce = true
-    mail.post(thread.id, addr(owner), { kind: 'note', body: 'and the docs' })
+    const more = mailTask(owner, helper, 'Now write TWO files')
     await due(helper)
-    await turnEnds(helper, 'docs written')
-    await w.until(() => outcomes(thread).length === 2)
-    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
+    expect(handleOf(helper).sent).toHaveLength(2)
+    expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: more.id })
+    expect(w.mgr.reportOwed(helper)?.callerId).toBe(owner)
+
+    await turnEnds(helper, 'two files written')
+    await w.until(() => outcomes(more.id).length === 1)
+    expect(outcomes(more.id)).toEqual(['finished'])
+    expect(read.reportsOn(more.id)[0]).toMatchObject({ replyTo: more.id, facts: expect.objectContaining({ answer: 'two files written' }) })
+    expect(read.taskRow(more.id, helper)).toMatchObject({ settled: 'reported' })
+    // Once: a turn the helper runs afterwards on its own is not the work's
+    await turnEnds(helper, 'tidied up')
+    expect(outcomes(more.id)).toHaveLength(1)
+    expect(outcomes(first.id)).toEqual(['finished'])
   })
 
-  it('a member’s note into a reported thread starts no work of the thread: no report is owed for the turn it starts', async () => {
+  it('a plain message to a helper whose work was reported starts no work: no report is owed for the turn it starts', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const owner = await w.callerSession()
     const helper = await startAgent(owner, 'write the files')
     await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
     const bystander = await startAgent(owner, 'something else')
-    mail.addMember(thread.id, addr(owner), addr(bystander))
     handleOf(helper).acceptsAtOnce = true
-    mail.post(thread.id, addr(bystander), { kind: 'note', body: 'just an aside' })
+    m.service.send(addr(bystander), { to: [addr(helper)], text: 'just an aside' })
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
     expect(w.mgr.reportOwed(helper)).toBeNull()
-    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
+    expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: null })
+    expect(outcomes(taskOf(owner, helper).id)).toEqual(['finished'])
   })
 
-  it('the end of the turn it starts is reported to the owner: the thread leaves running, once', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'write the files')
-    await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
-    expect(thread.state).toBe('review')
-
-    handleOf(helper).acceptsAtOnce = true
-    mail.post(thread.id, addr(owner), { kind: 'note', body: 'Now write TWO files' })
-    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
-    await due(helper)
-    expect(handleOf(helper).sent).toHaveLength(2)
-    expect(w.store.mail.thread(thread.id)?.state).toBe('running')
-
-    await turnEnds(helper, 'two files written')
-    await w.until(() => outcomes(thread).length === 2)
-    expect(outcomes(thread)).toEqual(['finished', 'finished'])
-    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
-    // Once: a turn the helper runs afterwards on its own is not the work's
-    await turnEnds(helper, 'tidied up')
-    expect(outcomes(thread)).toHaveLength(2)
-  })
-
-  it('a parent held by a child that was sent more goes on when that child’s turn is reported: it is told at the real end', async () => {
+  it('a parent whose child sent more by mail is told waiting while that task is owed, and finished at the real end', async () => {
     w.mgr.setUiPreferences({ agentDepth: 3 })
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const a = await w.callerSession()
     const b = await startAgent(a, 'build X')
     const c = await startAgent(b, 'do Y')
-    // C answered Y (review); B's own turn is still going
+    // C answered Y; B's own turn is still going
     await reported(b, c, 'Y done')
-    const y = threadBetween(b, c)
-    expect(y.state).toBe('review')
-    const x = threadBetween(a, b)
+    const x = taskOf(a, b)
+    expect(read.taskRow(taskOf(b, c).id, c)).toMatchObject({ settled: 'reported' })
 
-    // B sends C more by mail and ends its turn: X is held by Y, which is about to run
+    // B sends C more by mail in its turn for X, and ends its turn: X waits on Z, which is about to run
     handleOf(c).acceptsAtOnce = true
-    mail.post(y.id, addr(b), { kind: 'note', body: 'also do Z' })
+    const z = mailTask(b, c, 'also do Z')
+    expect(z.causeId).toBe(x.id)
     await turnEnds(b, 'asked C for more')
-    await w.until(() => outcomes(x).includes('paused'))
-    expect(outcomes(x)).toEqual(['paused'])
-    expect(w.store.mail.thread(x.id)?.state).toBe('running')
+    await w.until(() => outcomes(x.id).length >= 1)
+    expect(outcomes(x.id)).toEqual(['waiting'])
+    expect(read.taskRow(x.id, b)).toMatchObject({ settled: null })
 
     // C does it: its turn is reported to B, which wakes B's turn for the work, and B's end is reported to A
     await due(c)
     await turnEnds(c, 'Z done')
-    await w.until(() => outcomes(y).length === 2)
-    expect(w.store.mail.thread(y.id)?.state).toBe('review')
+    await w.until(() => outcomes(z.id).length === 1)
+    expect(read.taskRow(z.id, c)).toMatchObject({ settled: 'reported' })
     expect(w.mgr.reportOwed(c)).toBeNull()
-    expect(w.store.mail.thread(x.id)?.state).toBe('running')
-    await due(b)
+    expect(read.taskRow(x.id, b)).toMatchObject({ settled: null })
     handleOf(b).acceptsAtOnce = true
+    await due(b)
     await w.until(() => (handleOf(b).sent.length ?? 0) >= 2)
     await turnEnds(b, 'X done')
-    await w.until(() => outcomes(x).includes('finished'))
-    expect(w.store.mail.thread(x.id)?.state).toBe('review')
+    await w.until(() => outcomes(x.id).includes('finished'))
+    expect(read.taskRow(x.id, b)).toMatchObject({ settled: 'reported' })
   })
 
   it('mail that is not taken leaves no report owed', async () => {
@@ -174,15 +140,16 @@ describe('new work sent by mail into a thread in review', () => {
     const owner = await w.callerSession()
     const helper = await startAgent(owner, 'write the files')
     await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
     handleOf(helper).sendTracked = (): Promise<void> => Promise.reject(new Error('the tool failed'))
-    mail.post(thread.id, addr(owner), { kind: 'note', body: 'Now write TWO files' })
+    const more = mailTask(owner, helper, 'Now write TWO files')
     await due(helper)
     expect(w.mgr.reportOwed(helper)).toBeNull()
-    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
+    expect(outcomes(more.id)).toEqual([])
+    expect(read.taskRow(more.id, helper)).toMatchObject({ settled: null })
   })
 
-  it('a helper that already owes owner A a report is sent work by owner B: B’s turn is reported to B, and A’s paused report is left as it was (#1474)', async () => {
+  /** A helper paused over its own background work for A; B gave it work earlier, which was reported */
+  async function pausedForA() {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
     const a = await w.callerSession()
@@ -190,241 +157,61 @@ describe('new work sent by mail into a thread in review', () => {
     const helper = await startAgent(a, 'start the server')
     handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
     await turnEnds(helper, 'server started')
-    const threadA = threadBetween(a, helper)
-    await w.until(() => outcomes(threadA).includes('paused'))
+    const forA = taskOf(a, helper)
+    await w.until(() => outcomes(forA.id).includes('paused'))
     expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    const earlier = m.service.task(addr(b), addr(helper), { text: 'write the docs', origin: 'send_to_session', delivered: true })
+    m.service.report(earlier.id, { outcome: 'finished', body: '[Centralu] The assigned work finished.' })
+    return { a, b, helper, forA }
+  }
 
-    // B gave the helper work earlier (it was reported), and sends it more by mail: the helper takes the turn while its task for A still runs
-    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
-    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
-    expect(w.store.mail.thread(threadB.id)?.state).toBe('review')
+  it('a helper that already owes owner A a report is sent work by owner B: B’s turn is reported to B, and A’s paused report is left as it was (#1474)', async () => {
+    const { a, b, helper, forA } = await pausedForA()
+    // B sends the helper more by mail: the helper takes the turn while its task for A still runs
     handleOf(helper).acceptsAtOnce = true
-    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    const forB = mailTask(b, helper, 'and the changelog')
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
-    expect(w.store.mail.thread(threadB.id)?.state).toBe('running')
+    expect(m.turns.current(helper)).toMatchObject({ messageId: forB.id })
     await turnEnds(helper, 'docs written')
-    await w.until(() => outcomes(threadB).length === 2)
+    await w.until(() => outcomes(forB.id).length === 1)
 
     // B hears of its own turn; A is not told this turn ended, and still waits for its task
-    expect(outcomes(threadB)).toEqual(['finished', 'finished'])
-    expect(w.store.mail.thread(threadB.id)?.state).toBe('review')
-    expect(outcomes(threadA)).toEqual(['paused'])
+    expect(outcomes(forB.id)).toEqual(['finished'])
+    expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'reported' })
+    expect(outcomes(forA.id)).toEqual(['paused'])
+    expect(read.taskRow(forA.id, helper)).toMatchObject({ settled: null })
     expect(w.mgr.pausedFor(helper, a)).toBe(true)
     expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
   })
 
   it('A’s paused work ending during B’s turn is settled when that turn ends: nothing else would start its timer (#1474)', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
-    const a = await w.callerSession()
-    const b = await w.callerSession()
-    const helper = await startAgent(a, 'start the server')
-    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
-    await turnEnds(helper, 'server started')
-    await w.until(() => outcomes(threadBetween(a, helper)).includes('paused'))
-    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
-    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    const { b, helper } = await pausedForA()
     handleOf(helper).acceptsAtOnce = true
-    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    const forB = mailTask(b, helper, 'and the changelog')
     await due(helper)
     expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
     // The server ends in the middle of B's turn
     handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [] })
-    const settle = vi.spyOn(ChildReports.prototype, 'settlePausedReport')
+    const settled = vi.spyOn(ChildReports.prototype, 'settlePausedReport')
     await turnEnds(helper, 'docs written')
-    await w.until(() => outcomes(threadB).length === 2)
-    expect(settle).toHaveBeenCalledWith(helper)
+    await w.until(() => outcomes(forB.id).length === 1)
+    expect(settled).toHaveBeenCalledWith(helper)
   })
 
-  it.each(['person', 'B itself'])('B’s thread closed by %s while that turn runs: the stopped turn is not A’s to hear of, nor B’s (#1474)', async (who) => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
-    const a = await w.callerSession()
-    const b = await w.callerSession()
-    const helper = await startAgent(a, 'start the server')
-    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
-    await turnEnds(helper, 'server started')
-    const threadA = threadBetween(a, helper)
-    await w.until(() => outcomes(threadA).includes('paused'))
-    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
-    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+  it('B withdrawing its task while that turn runs: the turn’s end is not A’s to hear of, nor B’s (#1474)', async () => {
+    const { a, b, helper, forA } = await pausedForA()
     handleOf(helper).acceptsAtOnce = true
-    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    const forB = mailTask(b, helper, 'and the changelog')
     await due(helper)
     expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
-    if (who === 'person') mail.update(threadB.id, PERSON, { state: 'done', outcome: 'dropped' })
-    else mail.update(threadB.id, addr(b), { state: 'done', outcome: 'finished' })
-    await w.until(() => handleOf(helper).interrupted === 1)
+    expect(m.service.done(addr(b), forB.id)).toMatchObject({ how: 'withdrawn' })
     await turnEnds(helper, 'stopped')
     await new Promise((r) => setTimeout(r, 30))
-    expect(outcomes(threadA)).toEqual(['paused'])
+    expect(outcomes(forA.id)).toEqual(['paused'])
     expect(w.mgr.pausedFor(helper, a)).toBe(true)
-    expect(outcomes(threadB)).toEqual(who === 'person' ? ['finished', 'dropped'] : ['finished'])
+    expect(outcomes(forB.id)).toEqual([])
+    expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'withdrawn' })
     expect(handleOf(b).sent.filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
-  })
-})
-
-describe('a thread closed while its work is going (3.10, MB)', () => {
-  const closeAs = (who: string, id: string, outcome: 'dropped' | 'finished' = 'dropped') => mail.update(id, who, { state: 'done', outcome })
-  async function working() {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'write the files')
-    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
-    return { owner, helper, thread: threadBetween(owner, helper) }
-  }
-  const settleAfter = () => new Promise((r) => setTimeout(r, 30))
-
-  it('the person dropping it mid-turn stops the helper’s turn, tells it once without a wake, and tells the owner once that it was stopped', async () => {
-    const { owner, helper, thread } = await working()
-    closeAs(PERSON, thread.id)
-    await w.until(() => handleOf(helper).quiet.length === 1)
-    expect(handleOf(helper).interrupted).toBe(1)
-    expect(handleOf(helper).quiet[0]).toContain(`The person dropped thread ${thread.id}; its work was stopped. Do not continue it.`)
-    expect(handleOf(helper).quiet[0]).toContain('[Centralu]')
-    // The thread has it as an event
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'event').at(-1)?.facts).toMatchObject({ change: 'helper_told', stopped: true })
-    // The owner's report is the one notice that the person closed it, saying the turn was stopped
-    const reports = w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
-    expect(reports).toHaveLength(1)
-    expect(reports[0]).toMatchObject({ facts: { outcome: 'dropped', closedBy: 'person', stopped: true } })
-    // The stopped turn ends, and nothing is reported a second time: no mark, no relayed message
-    expect(w.mgr.reportOwed(helper)).toBeNull()
-    await turnEnds(helper, 'stopped')
-    await settleAfter()
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')).toHaveLength(1)
-    expect((handleOf(owner).sent).filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
-  })
-
-  it('the owner closing it by mail stops the turn and tells the helper, naming the owner; the owner is not told of its own close', async () => {
-    const { owner, helper, thread } = await working()
-    closeAs(addr(owner), thread.id, 'finished')
-    await w.until(() => handleOf(helper).quiet.length === 1)
-    expect(handleOf(helper).interrupted).toBe(1)
-    expect(handleOf(helper).quiet[0]).toContain(`The owner (${owner}) marked done thread ${thread.id}; its work was stopped.`)
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')).toEqual([])
-  })
-
-  it('a helper in a turn that is not the thread’s is not interrupted: it gets only the note', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'write the files')
-    await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
-    // The owner asked for more (the thread runs again), and then the person typed into the helper: that turn is theirs
-    mail.update(thread.id, addr(owner), { state: 'running' })
-    await w.mgr.send(helper, 'wait, one question for you')
-    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
-    closeAs(PERSON, thread.id)
-    await w.until(() => handleOf(helper).quiet.length === 1)
-    expect(handleOf(helper).interrupted).toBe(0)
-    expect(handleOf(helper).quiet[0]).toContain(`The person dropped thread ${thread.id}. Do not continue it.`)
-    expect(handleOf(helper).quiet[0]).not.toContain('was stopped')
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'event').at(-1)?.facts).toMatchObject({ change: 'helper_told', stopped: false })
-    const closed = w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.facts.closedBy === 'person')
-    expect(closed[0]!.facts.stopped).toBeUndefined()
-  })
-
-  it('stops the background work the stopped turn started, and leaves a dev server the person started and work of another turn running (#1474)', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'write the files')
-    const thread = threadBetween(owner, helper)
-    const h = handleOf(helper)
-    // Started before this turn's calls: the person's dev server, and an earlier turn's watcher
-    h.event({ type: 'tool_call', sessionId: helper, callId: 'c-this', summary: { tool: 'Bash', title: 'pnpm test --watch', paths: [] } })
-    h.event({
-      type: 'background_tasks',
-      sessionId: helper,
-      live: [
-        { id: 't-this', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c-this' },
-        { id: 't-server', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
-        { id: 't-old', kind: 'shell', description: 'tail -f log', status: 'running', stoppable: true, parentCallId: 'c-before' },
-      ],
-    })
-    // The earlier call is in the conversation too, from before the turn began
-    w.store.messages.appendMessages([{ sessionId: helper, seq: w.store.messages.nextSeq(helper), role: 'system', kind: 'tool_call', payload: { callId: 'c-before', summary: { tool: 'Bash', title: 'tail -f log', paths: [] } }, ts: Date.now() - 600_000 }])
-    closeAs(PERSON, thread.id)
-    await w.until(() => h.quiet.length === 1)
-    expect(h.interrupted).toBe(1)
-    expect(h.stoppedTasks).toEqual(['t-this'])
-  })
-
-  it('a tool that has no quiet input (Codex) is not sent the note, which would start a turn nobody reports: its turn is stopped and the thread has the event', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const owner = await w.callerSession()
-    const started = await w.mgr.startAgent(owner, { task: 'write the files', wait: false, tool: 'codex' })
-    const helper = started.ok ? started.sessionId : ''
-    expect(w.mgr.sessionInfo(helper)).toMatchObject({ tool: 'codex', state: 'working' })
-    const thread = threadBetween(owner, helper)
-    const codex = w.adapters.get('codex')!.handles.get(helper)!
-    closeAs(PERSON, thread.id)
-    await w.until(() => codex.interrupted === 1)
-    await settleAfter()
-    expect(codex.sent).toHaveLength(1)
-    expect(codex.quiet).toEqual([])
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'event').at(-1)?.facts).toMatchObject({ change: 'helper_told', stopped: true })
-  })
-
-  it('a helper paused over its own background work for the owner is stopped too: the work is what is going', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'start the server')
-    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
-    await turnEnds(helper, 'server started')
-    const thread = threadBetween(owner, helper)
-    await w.until(() => outcomes(thread).includes('paused'))
-    expect(w.mgr.sessionInfo(helper)?.state).not.toBe('working')
-    expect(w.mgr.pausedFor(helper, owner)).toBe(true)
-    expect(mail.turnRunning(w.store.mail.thread(thread.id)!)).toBe(true)
-    closeAs(PERSON, thread.id)
-    await w.until(() => handleOf(helper).quiet.length === 1)
-    expect(w.mgr.reportOwed(helper)).toBeNull()
-    expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.facts.closedBy === 'person')[0]!.facts.stopped).toBe(true)
-  })
-
-  it('a helper paused for the owner that is sent more and starts new work: the stop takes the paused work and the work the new turn started (#1474)', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'start the server')
-    const h = handleOf(helper)
-    h.event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
-    await turnEnds(helper, 'server started')
-    const thread = threadBetween(owner, helper)
-    await w.until(() => outcomes(thread).includes('paused'))
-    h.acceptsAtOnce = true
-    mail.post(thread.id, addr(owner), { kind: 'note', body: 'and run the tests too' })
-    await due(helper)
-    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
-    // The call is in the conversation after the turn began (the test's clock is ahead of the real one)
-    w.store.messages.appendMessages([{ sessionId: helper, seq: w.store.messages.nextSeq(helper), role: 'system', kind: 'tool_call', payload: { callId: 'c2', summary: { tool: 'Bash', title: 'pnpm test --watch', paths: [] } }, ts: clock.t + 1_000 }])
-    h.event({
-      type: 'background_tasks',
-      sessionId: helper,
-      live: [
-        { id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
-        { id: 't2', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c2' },
-      ],
-    })
-    closeAs(PERSON, thread.id)
-    await w.until(() => h.quiet.length === 1)
-    expect(h.interrupted).toBe(1)
-    expect([...h.stoppedTasks].sort()).toEqual(['t1', 't2'])
-  })
-
-  it('a thread whose work was reported and is marked done tells the helper nothing', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const owner = await w.callerSession()
-    const helper = await startAgent(owner, 'write the files')
-    await reported(owner, helper, 'one file written')
-    const thread = threadBetween(owner, helper)
-    closeAs(PERSON, thread.id, 'finished')
-    await settleAfter()
-    expect(handleOf(helper).quiet).toEqual([])
-    expect(handleOf(helper).interrupted).toBe(0)
   })
 })

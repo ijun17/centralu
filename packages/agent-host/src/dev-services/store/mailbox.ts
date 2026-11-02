@@ -340,6 +340,15 @@ export class MailboxRecords {
     return this.messages(`m.reply_to = ? AND m.kind = 'report' AND m.sender = 'centralu' ORDER BY m.created_at, m.id`, taskId)
   }
 
+  /** The newest message moved from the v61 thread `threadId` (§6.3) that `recipient` was sent: what the old tool's `thread` names (§11.3) */
+  newestLegacyTo(threadId: string, recipient: string): MailRow | undefined {
+    return this.messages(
+      `m.legacy_thread = ? AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
+      threadId,
+      recipient,
+    )[0]
+  }
+
   /** The newest task from `sender` whose row to `recipient` is not settled */
   newestTask(sender: string, recipient: string): MailRow | undefined {
     return this.messages(
@@ -542,6 +551,43 @@ export class MailboxRecords {
   /** A held answer was dismissed: the rows it was to settle are open again. Returns how many */
   answerDropped(answerId: string): number {
     return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND settled IS NULL`).run(answerId).changes
+  }
+
+  /** Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5) */
+  unsettledTasks(): { messageId: string; sender: string; recipient: string }[] {
+    return this.db
+      .prepare<[], { message_id: string; sender: string; recipient: string }>(
+        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE m.kind = 'task' AND r.settled IS NULL ORDER BY m.created_at, m.id`,
+      )
+      .all()
+      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient }))
+  }
+
+  /**
+   * The task rows whose cause is `causeId`, not settled and not held: the work handed on in that task (§9.4), each with its sender and recipient
+   */
+  handedOn(causeId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
+    return this.db
+      .prepare<[string], { message_id: string; sender: string; recipient: string; delivered_at: number | null }>(
+        `SELECT r.message_id, m.sender, r.recipient, r.delivered_at FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE m.cause_id = ? AND m.kind = 'task' AND r.settled IS NULL AND (r.held IS NULL OR r.held = 'released') ORDER BY m.created_at, m.id`,
+      )
+      .all(causeId)
+      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient, delivered: r.delivered_at !== null }))
+  }
+
+  /**
+   * The work handed on in the newest unsettled task from session `ownerId` to session `childId` (`handedOn`), from the two sessions' ids alone: for
+   * the host's start, which knows no address yet (an address ends in `/<session id>`)
+   */
+  handedOnBySessions(ownerId: string, childId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
+    const task = this.messages(
+      `m.sender LIKE ? AND m.kind = 'task' AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient LIKE ? AND r.settled IS NULL)
+       ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
+      `session:%/${ownerId}`,
+      `session:%/${childId}`,
+    )[0]
+    return task ? this.handedOn(task.id) : []
   }
 
   /** The watched rows to `recipient` not settled */
@@ -788,6 +834,78 @@ export class MailboxRecords {
     }
   }
 
+  // ── Turns (`mail_turns`, read and written by `MailTurns`, M3a) ──
+
+  /**
+   * A turn begins: its work message and the message that started it (§8.2 step 6), and `thread_id` NULL. An older build
+   * serving the same store writes `thread_id` and leaves these two NULL; each reads only its own columns (§6.2)
+   */
+  startTurn(t: Omit<TurnRecord, 'endedAt' | 'outcome'>): void {
+    this.db
+      .prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, message_id, starter_id, started_by, started_at) VALUES (?, ?, NULL, ?, ?, ?, ?)`)
+      .run(t.sessionId, t.turnSeq, t.messageId, t.starterId, t.startedBy, t.startedAt)
+  }
+
+  nextTurnSeq(sessionId: string): number {
+    return this.count(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`, sessionId)
+  }
+
+  /** Turns no host recorded an end of: what a host that starts finds the last one left (`MailTurns.closeStale`) */
+  openTurns(): TurnRecord[] {
+    return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurnRecord)
+  }
+
+  turnsOf(sessionId: string): TurnRecord[] {
+    return this.db.prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`).all(sessionId).map(toTurnRecord)
+  }
+
+  endTurn(sessionId: string, turnSeq: number, at: number, outcome: string): void {
+    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(at, outcome, sessionId, turnSeq)
+  }
+
+  /** The running turn's work message is known only now (a delegation is written after its turn began): it is that work's, and the task started it */
+  setTurnMessage(sessionId: string, turnSeq: number, messageId: string): void {
+    this.db
+      .prepare(`UPDATE mail_turns SET message_id = ?, starter_id = COALESCE(starter_id, ?) WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL AND message_id IS NULL`)
+      .run(messageId, messageId, sessionId, turnSeq)
+  }
+
+  /**
+   * Turns since `since` that mail from a session or a Centralu follow-up started (the host-wide cap, §7.5): `started_by = 'mail'`
+   * and a starter that is a session's message, or Centralu's reminder or notice of unanswered mail. The person's words and a
+   * report do not count, nor a turn whose delivery was not taken (`canceled`). One session's when `session` is given
+   */
+  mailStartedSince(since: number, session?: string): number {
+    return this.count(`SELECT COUNT(*) AS n FROM (${MAIL_STARTED}) WHERE (@session IS NULL OR session_id = @session)`, { since, session: session ?? null })
+  }
+
+  /** When the oldest of `session`'s counted turns since `since` began (`mailStartedSince`): when the cap lets its next one go. Null when none */
+  oldestMailStartedSince(since: number, session: string): number | null {
+    return this.db.prepare<{ since: number; session: string }, { at: number | null }>(`SELECT MIN(started_at) AS at FROM (${MAIL_STARTED}) WHERE session_id = @session`).get({ since, session })?.at ?? null
+  }
+
+  /** When the person last started a turn of the session (their word, §7.5's pair guard), or null */
+  lastPersonTurn(sessionId: string): number | null {
+    return this.db.prepare<[string], { at: number | null }>(`SELECT MAX(started_at) AS at FROM mail_turns WHERE session_id = ? AND started_by = 'person'`).get(sessionId)?.at ?? null
+  }
+
+  /** When the person last wrote to `recipient`, or null */
+  lastFromPerson(recipient: string): number | null {
+    return (
+      this.db
+        .prepare<[string], { at: number | null }>(`SELECT MAX(m.created_at) AS at FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.sender = 'person' AND r.recipient = ?`)
+        .get(recipient)?.at ?? null
+    )
+  }
+
+  /** The parties of watched rows not settled, as recipients or senders: whom the delivery's sweep checks are still here (`partyGone`, §7.7) */
+  openParties(): string[] {
+    return this.db
+      .prepare<[], { a: string }>(`SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND ${WATCHED} UNION SELECT m.sender FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE r.settled IS NULL AND ${WATCHED}`)
+      .all()
+      .map((r) => r.a)
+  }
+
   // ── Rows ──
 
   private toMail(r: MailSql): MailRow {
@@ -869,6 +987,18 @@ export class MailboxRecords {
     this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)`).run(idList(ids))
   }
 }
+
+/** A turn as this build records it (§6.1): its work message and its starter; `thread_id` is the older build's */
+export type TurnRecord = { sessionId: string; turnSeq: number; messageId: string | null; starterId: string | null; startedBy: string; startedAt: number; endedAt: number | null; outcome: string | null }
+type TurnSql = { session_id: string; turn_seq: number; message_id: string | null; starter_id: string | null; started_by: string; started_at: number; ended_at: number | null; outcome: string | null }
+function toTurnRecord(r: TurnSql): TurnRecord {
+  return { sessionId: r.session_id, turnSeq: r.turn_seq, messageId: r.message_id, starterId: r.starter_id, startedBy: r.started_by, startedAt: r.started_at, endedAt: r.ended_at, outcome: r.outcome }
+}
+/** The turns `mailStartedSince` counts, as a subquery over `@since` */
+const MAIL_STARTED = `SELECT t.session_id, t.started_at FROM mail_turns t JOIN mail s ON s.id = t.starter_id
+   WHERE t.started_by = 'mail' AND t.started_at >= @since AND COALESCE(t.outcome, '') <> 'canceled'
+     AND (s.sender LIKE 'session:%' OR (s.sender = 'centralu' AND s.kind = 'notice' AND json_valid(s.facts)
+          AND (json_type(s.facts, '$.reminder') IS NOT NULL OR json_type(s.facts, '$.unanswered') IS NOT NULL)))`
 
 function toRecipient(r: RecipientSql): RecipientRow {
   return {

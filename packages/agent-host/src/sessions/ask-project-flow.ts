@@ -59,7 +59,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'> & {
     /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
@@ -124,9 +124,10 @@ export class AskProjectFlow {
   /**
    * What ask_project rests on in the caller, read before its card, again once the person answered it, and again before a
    * queued ask goes in (`drainQueue`): a card or a queue can outlast any of it. `quiet`: an earlier read of this ask
-   * already logged the `auto` boundary it opens, so this one does not log it again.
+   * already logged the `auto` boundary it opens, so this one does not log it again. `trust`: false leaves the project's
+   * trust out, for the one read that decides it once the target is known (§7.4).
    */
-  askGateError(callerId: string, quiet = false): string | null {
+  askGateError(callerId: string, quiet = false, trust = true): string | null {
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) return 'This session belongs to no project, so it cannot ask another one'
     /*
@@ -140,7 +141,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, quiet ? undefined : 'delegate from an untrusted project')) {
+    if (trust && this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, quiet ? undefined : 'delegate from an untrusted project')) {
       return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
     }
     return null
@@ -171,8 +172,15 @@ export class AskProjectFlow {
    * stop an assigned idle target only while waiting; a task that joined the person's turn only ends the wait.
    */
   async askProject(callerId: string, opts: { project: string; session?: string; task?: string; ifBusy?: 'note' | 'queue' }, signal?: AbortSignal): Promise<AskProjectResult> {
-    const refused = this.askGateError(callerId)
+    const refused = this.askGateError(callerId, false, false)
     if (refused) return { ok: false, error: refused }
+    /*
+     * The project's trust is read now and answered once the target is known (docs/plans/mailbox.md §7.4): a task out of an
+     * untrusted project is the mailbox's to refuse (S15), which records it for the person. Until then every refusal is
+     * the trust sentence, as before, so an untrusted caller learns nothing of the other projects
+     */
+    const untrusted = this.askGateError(callerId)
+    const fail = (error: string) => ({ ok: false as const, error: untrusted ?? error })
     // The gate read both; read here once more, with no wait in between, so the caller's project is known for what follows
     const caller = this.host.meta.get(callerId)
     const callerProjectId = caller?.projectId
@@ -210,16 +218,13 @@ export class AskProjectFlow {
     const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]
     const elsewhere = !!reader || fromHubs.projects.length > 0 || fromHubs.away.length > 0
     if (found.length > 1) {
-      return {
-        ok: false,
-        error: `More than one project is called "${wanted}": ${found.map(projectChoice).join('; ')}. Ask again with the id of the one you mean, or machine/name for a project on a linked machine.`,
-      }
+      return fail(`More than one project is called "${wanted}": ${found.map(projectChoice).join('; ')}. Ask again with the id of the one you mean, or machine/name for a project on a linked machine.`)
     }
     if (!found[0]) {
       const slash = wanted.indexOf('/')
       const prefix = slash > 0 ? wanted.slice(0, slash).trim().toLowerCase() : null
       const down = awayAll.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
-      if (down) return { ok: false, error: awayRefusal(down.machine, down.why, `"${wanted}" cannot be asked there`) }
+      if (down) return fail(awayRefusal(down.machine, down.why, `"${wanted}" cannot be asked there`))
       const others = [
         ...projects.filter((p) => p.id !== caller.projectId).map((p) => (elsewhere ? `${p.name} (this computer)` : p.name)),
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
@@ -227,19 +232,25 @@ export class AskProjectFlow {
       ]
       const missing = awayFor(wanted, awayAll, [...there.machines.map((m) => m.machineId), ...fromHubs.projects.map((p) => p.hubId)])
       const unasked = missing.length ? ` Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
-      return {
-        ok: false,
-        error: others.length
-          ? `No project named "${wanted}". The other projects are: ${others.join(', ')}.${unasked}`
-          : `No project named "${wanted}" — this is the only project in Centralu.${unasked}`,
-      }
+      return fail(others.length
+        ? `No project named "${wanted}". The other projects are: ${others.join(', ')}.${unasked}`
+        : `No project named "${wanted}" — this is the only project in Centralu.${unasked}`)
     }
-    const hubTarget = fromHubs.projects.find((p) => p.id === found[0]!.id)
+    const asked = found[0]
+    const hubTarget = fromHubs.projects.find((p) => p.id === asked.id)
+    const remoteTarget = there.projects.find((p) => p.id === asked.id)
+    const local = hubTarget || remoteTarget ? undefined : projects.find((p) => p.id === asked.id)
+    // §7.4: a task is the mailbox's to refuse before anything is asked or delivered; a wait (no task) gives nothing
+    if (opts.task) {
+      const away = hubTarget ? { name: hubTarget.name, machine: hubTarget.hub } : remoteTarget ? { name: remoteTarget.name, machine: remoteTarget.machine } : null
+      const s15 = this.host.refusesDelegation(callerId, away ? { projectId: asked.id, linked: true } : { projectId: asked.id }, { tool: 'ask_project', target: away ? `${away.name} on ${away.machine}` : (local?.name ?? asked.name), text: opts.task })
+      if (s15) return { ok: false, error: s15 }
+    }
+    if (untrusted) return { ok: false, error: untrusted }
     if (hubs && hubTarget) {
       const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
       return this.askHubProject(callerId, callerProject, hubTarget, hubs, opts, signal)
     }
-    const remoteTarget = there.projects.find((p) => p.id === found[0]!.id)
     if (reader && remoteTarget) {
       const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
       return this.askLinkedProject(callerId, callerProjectId, callerProject, remoteTarget, reader, opts, signal)

@@ -227,6 +227,8 @@ export const MAX_DEPTH = 4
 /** Mail-started turns an hour on the host before a wake that would start one is deferred, and the share a quiet session keeps (D13) */
 export const HOST_MAIL_TURNS_PER_HOUR = 120
 export const HOST_SHARE = 10
+/** Mail-started turns an hour between one pair of sessions, with no word from the person, before their mail is held `loop` (D13) */
+export const PAIR_TURNS_PER_HOUR = 20
 /** The unanswered reminder's limits (§10.4), counted from the store so a swap or restart does not reset them */
 export const REMINDER = {
   /** After a session came to rest, before the first reminder */
@@ -264,6 +266,9 @@ export const REFUSAL_TEXT = {
   untrusted_project: (project: string, target: string) =>
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,
 } as const
+
+/** The text of a task written for a report mark an earlier build left with no task (§9.5) */
+export const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
 
 /** The line an over-long task ends with once cut: the full text stays in the session's conversation */
 export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"

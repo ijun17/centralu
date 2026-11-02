@@ -1,61 +1,60 @@
 /**
- * A session that goes to the trash leaves the work it held in the mailbox (#1347, docs/plans/mailbox.md §3.3, §4.1): a thread
- * it was assigned is open again with nobody on it, one it owned is the person's, and the trash move is not undone by a
+ * A session that goes to the trash leaves the work it held in the mailbox (#1347, docs/plans/mailbox.md §7.7, `partyGone`): what waited for its
+ * answer is settled `gone` and each sender is told once, its own unsettled messages are withdrawn, and the trash move is not undone by a
  * mailbox that fails.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { SessionInfo } from '@cc/protocol'
-import { MailService } from '../mail/service.js'
-import { PERSON } from '../mail/address.js'
-import { openBy } from '../mail/mail.test-helpers.js'
+import type { HostMail } from '../mail/host-mail.js'
 import { managerWorld } from './manager.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let world: ReturnType<typeof managerWorld>
-let mail: MailService
+let m: HostMail
+let read: ReturnType<typeof mailReader>
 
 beforeEach(() => {
   world = managerWorld()
-  mail = new MailService(world.store.mail, { hostId: () => 'hub-aaaaaaaa' })
-  world.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), openWork: (id) => mail.openWorkOf(id), sessionChanged: () => {} })
+  m = wireHostMail(world.mgr, world.store)
+  read = mailReader(world.store)
 })
 
 const create = async () => (await world.rpc('agents.createSession', { projectId: ((await world.rpc('projects.add', { path: tmpdir() })) as { id: string }).id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+/** A task from `giver` to `worker`, as a delegation writes it (delivered and read) */
+const task = (giver: SessionInfo, worker: SessionInfo, text: string) => m.service.task(addressOf(giver.id), addressOf(worker.id), { text, origin: 'agent_session', delivered: true })
 
 describe('deleting a session while it holds work in the mailbox', () => {
-  it('a thread it was assigned is open again with nobody on it, and one it owned is the person’s, each with an event', async () => {
+  it('a task it was given and a question that waits for its answer are gone, the asker is told once, and what it sent is withdrawn', async () => {
     const worker = await create()
     const giver = await create()
-    const a = mail.sessionAddress(worker.id)
-    const g = mail.sessionAddress(giver.id)
-    const { thread } = openBy(mail, { by: g, kind: 'assign', subject: 'Land #12', body: 'please', assignee: a })
-    mail.update(thread.id, a, { state: 'running' })
+    const a = addressOf(worker.id)
+    const g = addressOf(giver.id)
+    const t = task(giver, worker, 'Land #12')
+    const asked = m.service.send(g, { to: [a], text: 'Which branch?', needsReply: true }).message
+    const own = m.service.send(a, { to: [g], text: 'Can you review it?', needsReply: true }).message
 
     await world.rpc('agents.deleteSession', { sessionId: worker.id })
-    expect(world.store.mail.thread(thread.id)).toMatchObject({ assignee: null, state: 'open', owner: g })
-    expect(world.store.mail.messagesAfter(thread.id, 0).at(-1)).toMatchObject({ kind: 'event', facts: { change: 'assignee_gone', party: a } })
-
-    await world.rpc('agents.deleteSession', { sessionId: giver.id })
-    expect(world.store.mail.thread(thread.id)).toMatchObject({ owner: PERSON, assignee: null })
+    expect(read.row(t.id, a)).toMatchObject({ settled: 'gone' })
+    expect(read.row(asked.id, a)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
+    expect(read.row(own.id, g)).toMatchObject({ settled: 'withdrawn' })
+    const told = read.to(g).filter((x) => x.message.kind === 'notice' && x.message.facts.unanswered)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.message.facts.unanswered).toEqual([{ id: asked.id, recipient: a, why: 'gone' }])
   })
 
-  it('work that is done is left as it was, and a session with no mail costs the mailbox nothing', async () => {
+  it('work that is done is left as it was, and a session with no mail leaves no mail behind', async () => {
     const worker = await create()
     const giver = await create()
-    const a = mail.sessionAddress(worker.id)
-    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 's', body: 'b', assignee: a })
-    mail.update(thread.id, a, { state: 'done', outcome: 'finished' })
+    const a = addressOf(worker.id)
+    const t = task(giver, worker, 's')
+    m.service.report(t.id, { outcome: 'finished', body: 'done' })
     await world.rpc('agents.deleteSession', { sessionId: worker.id })
-    expect(world.store.mail.thread(thread.id)).toMatchObject({ state: 'done', assignee: a })
+    expect(read.row(t.id, a)).toMatchObject({ settled: 'reported' })
 
-    // A host that never made mail: no thread, so no host id is asked for
-    const fresh = managerWorld()
-    let asked = 0
-    const quiet = new MailService(fresh.store.mail, { hostId: () => (asked++, 'hub-aaaaaaaa') })
-    fresh.mgr.useMail({ sessionGone: (id) => void quiet.sessionGone(id), sessionChanged: () => {} })
-    const s = (await fresh.rpc('agents.createSession', { projectId: ((await fresh.rpc('projects.add', { path: tmpdir() })) as { id: string }).id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
-    await fresh.rpc('agents.deleteSession', { sessionId: s.id })
-    expect(asked).toBe(0)
+    const s = await create()
+    await world.rpc('agents.deleteSession', { sessionId: s.id })
+    expect(world.store.mailbox.feedOf(addressOf(s.id), { limit: 10 })).toEqual([])
   })
 
   it('a mailbox that fails does not undo the move to the trash, and says so', async () => {
@@ -76,7 +75,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
 
 /**
  * The window's archive of a session that looks idle (#1512, `agents.archiveIfAtRest`): the host moves it only when nothing it holds would be
- * lost, and the mailbox is part of that. Restoring does not hand a thread back, so a session that holds one asks first.
+ * lost, and the mailbox is part of that. Restoring does not bring its mail back, so a session that holds a task or a question asks first.
  */
 describe('archiving a session that looks idle', () => {
   const archive = (sessionId: string) => world.rpc('agents.archiveIfAtRest', { sessionId }) as Promise<{ archived: boolean; asks?: string[] }>
@@ -89,31 +88,29 @@ describe('archiving a session that looks idle', () => {
     expect(world.store.trash.isTrashed(worker.id)).toBe(true)
   })
 
-  it('does not move the assignee of an unfinished thread, names it, and leaves the thread as it was', async () => {
+  it('does not move a session given a task it has not been reported on, names it, and leaves the task as it was', async () => {
     const worker = await create()
     const giver = await create()
-    const a = mail.sessionAddress(worker.id)
-    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #12', body: 'please', assignee: a })
-    mail.update(thread.id, a, { state: 'running' })
+    const t = task(giver, worker, 'Land #12\nwith the tests')
 
     const r = await archive(worker.id)
     expect(r.archived).toBe(false)
-    expect(r.asks).toEqual([expect.stringContaining('assignee of an unfinished mail thread ("Land #12")')])
+    expect(r.asks).toEqual(['It was given a task it has not been reported on ("Land #12"); whoever gave it is told the work stopped.'])
     expect(listed()).toContain(worker.id)
-    expect(world.store.mail.thread(thread.id)).toMatchObject({ assignee: a, state: 'running' })
-    // Once the work is done there is nothing to hand back
-    mail.update(thread.id, a, { state: 'done', outcome: 'finished' })
+    expect(read.taskRow(t.id, worker.id)).toMatchObject({ settled: null })
+    // Once the work is reported there is nothing to lose
+    m.service.report(t.id, { outcome: 'finished', body: 'done' })
     expect(await archive(worker.id)).toEqual({ archived: true })
   })
 
-  it('does not move the owner of an unfinished thread either', async () => {
-    const owner = await create()
+  it('does not move a session a question waits on either', async () => {
+    const asker = await create()
     const worker = await create()
-    openBy(mail, { by: mail.sessionAddress(owner.id), kind: 'assign', subject: 'Review it', body: 'b', assignee: mail.sessionAddress(worker.id) })
-    const r = await archive(owner.id)
+    m.service.send(addressOf(asker.id), { to: [addressOf(worker.id)], text: 'Review it', needsReply: true })
+    const r = await archive(worker.id)
     expect(r.archived).toBe(false)
-    expect(r.asks?.join(' ')).toContain('It owns an unfinished mail thread ("Review it"); it becomes the person\'s.')
-    expect(listed()).toContain(owner.id)
+    expect(r.asks).toEqual(['A message waits for its answer ("Review it"); its sender is told it is gone.'])
+    expect(listed()).toContain(worker.id)
   })
 
   it('asks for what the report marks hold too, and does not move a session that is not at rest', async () => {
@@ -139,19 +136,17 @@ describe('archiving a session that looks idle', () => {
 
     const worker = await create()
     const giver = await create()
-    const a = mail.sessionAddress(worker.id)
-    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #13', body: 'please', assignee: a })
-    mail.update(thread.id, a, { state: 'running' })
+    const t = task(giver, worker, 'Land #13')
     const waited = await create()
     const caller = await create()
     ;(world.mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children.markReport(waited.id, caller.id)
 
     // The same lines the move itself would answer with
-    expect((await losses(worker.id)).asks).toEqual([expect.stringContaining('assignee of an unfinished mail thread ("Land #13")')])
+    expect((await losses(worker.id)).asks).toEqual([expect.stringContaining('task it has not been reported on ("Land #13")')])
     expect((await losses(waited.id)).asks.join(' ')).toContain('is waiting for the report of the work it gave this session')
     expect((await losses(worker.id)).asks).toEqual((await archive(worker.id)).asks)
     expect(listed()).toEqual(expect.arrayContaining([clean.id, worker.id, waited.id]))
-    expect(world.store.mail.thread(thread.id)).toMatchObject({ assignee: a, state: 'running' })
+    expect(read.taskRow(t.id, worker.id)).toMatchObject({ settled: null })
     expect(await losses('s-nothing')).toEqual({ asks: [] })
   })
 

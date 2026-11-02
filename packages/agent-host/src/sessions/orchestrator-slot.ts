@@ -20,6 +20,8 @@ export type OrchestratorSlotHost = Pick<DelegationHost, 'meta' | 'store' | 'emit
   Pick<SessionStartsHost, 'tools'> & {
     /** Why a tool cannot run a session that demands this, or null (`ToolRegistry.refusal`) */
     refusal: (tool: ToolName, demands: LaunchDemands) => string | null
+    /** The role moved from the orchestrator that is gone to the one made now: its unsettled mail follows (mailbox §7.7, D15). Never throws */
+    roleMoved?: (fromSessionId: string, toSessionId: string) => void
   }
 
 /**
@@ -160,7 +162,17 @@ export class OrchestratorSlot {
       // The id remains but the session is gone — the marker alone is cleared, and a new one is created
     }
     if (this.orchestratorCreating) return this.orchestratorCreating
-    const creating = this.createOrchestrator().finally(() => {
+    const creating = this.createOrchestrator().then((made) => {
+      // The one before it is gone: what was sent to the role and is not settled goes to this one, delivered afresh (#1683)
+      if (known) {
+        try {
+          this.host.roleMoved?.(known, made.id)
+        } catch (e) {
+          console.error(`[mail] the orchestrator's mail could not follow its role: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+      return made
+    }).finally(() => {
       if (this.orchestratorCreating === creating) this.orchestratorCreating = null
     })
     this.orchestratorCreating = creating

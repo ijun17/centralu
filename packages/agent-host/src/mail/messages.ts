@@ -43,7 +43,7 @@ import {
   wakesMessage,
   type SenderClass,
 } from './rules.js'
-import type { TurnStartedBy } from './turns.js'
+import type { TurnNow } from './turns.js'
 
 /*
  * The message service (#1684, docs/plans/mailbox.md §16 M2): mail without threads. It stores and answers over `MailboxRecords` and asks `MailReach`
@@ -75,7 +75,7 @@ export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_sessio
 export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
-export type TurnNow = { turnSeq: number; by: TurnStartedBy; starter: string | null; messageId: string | null; asker: string | null; startedAt: number }
+export type { TurnNow }
 
 export type TurnReport = {
   outcome: 'finished' | 'failed' | 'stopped' | 'paused' | 'waiting'
@@ -86,6 +86,8 @@ export type TurnReport = {
   paused?: number
   waitingOn?: number
   personNote?: boolean
+  /** When the turn that ended began, for the tasks its report covers (§9.3): the turn has ended by the time the old path reports it */
+  startedAt?: number
 }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
@@ -253,6 +255,8 @@ export class MessageService {
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
+      // What is held waits for the person: the Inbox lists it (§7.4), so it hears of it
+      if (held.length > 0) this.changed(stored, [PERSON])
 
       // The sender's own row on what it answers: settled, or while the answer is held, marked so the question stays open (D8)
       if (target?.kind === 'message' && target.needsReply && this.records.recipient(target.id, sender)) {
@@ -303,14 +307,16 @@ export class MessageService {
   report(taskId: string, input: TurnReport): ReportWritten {
     return this.run(() => {
       const task = this.records.message(taskId)
-      const row = task?.kind === 'task' ? this.records.recipients(taskId)[0] : undefined
+      // A task, or for the orchestrator's request turn the request it was for (§9.2): Centralu reports either to its sender
+      const row = task && (task.kind === 'task' || task.kind === 'message') ? this.records.recipients(taskId).find((r) => task.kind === 'task' || this.isRequest(task, r.recipient)) : undefined
       if (!task || !row) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(taskId))
-      if (row.settled !== null) return { settledAlready: true }
+      // A request's turn is reported whatever its row says: a moved request is settled `legacy`, and its asker is told all the same (§6.3)
+      if (row.settled !== null && task.kind === 'task') return { settledAlready: true }
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
       const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
-      const startedAt = this.opts.turn?.(row.recipient)?.startedAt
-      const covers = pause || startedAt === undefined
+      const startedAt = input.startedAt ?? this.opts.turn?.(row.recipient)?.startedAt
+      const covers = pause || startedAt === undefined || task.kind !== 'task'
         ? []
         : this.records
             .watchedFrom(task.sender)
@@ -340,6 +346,22 @@ export class MessageService {
       }
       return { message: stored, duplicate: stored.duplicate, first }
     })
+  }
+
+  /** A task the old report paths no longer owe is settled `reported` with no report: the old path told its sender (§9.5). Returns the rows settled */
+  settleReported(taskId: string, recipient: string): number {
+    return this.run(() => (this.records.message(taskId)?.kind === 'task' ? this.records.settle(taskId, recipient, 'reported', this.now()) : 0))
+  }
+
+  /**
+   * The work handed on in the child's current work for `owner` that is still owed (§9.4): task rows caused by the child's turn's task from `owner`
+   * (else its newest unsettled task from `owner`), not settled, not held, and still owed by the old report paths (`oldOwes`, §9.5)
+   */
+  waitingOn(owner: string, child: string, current: string | null, oldOwes: (sender: string, recipient: string) => boolean): number {
+    const work = current === null ? undefined : this.records.message(current)
+    const task = work?.kind === 'task' && work.sender === owner ? work : this.records.newestTask(owner, child)
+    // A task not delivered yet is owed too: the old path marks its report when the delivery gives it (§9.7), so until then only the row says so
+    return task ? this.records.handedOn(task.id).filter((r) => !r.delivered || oldOwes(r.sender, r.recipient)).length : 0
   }
 
   /** A notice from Centralu (D2, D21): quiet when `facts.quiet`. Undefined when its `dedupeKey` was used already */
@@ -553,9 +575,38 @@ export class MessageService {
     return this.run(() => this.settleUncertain(recipient, this.records.undeliver(recipient, ids, deliveredAt)))
   }
 
-  /** The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust or the depth has its own way out */
-  resendHeld(recipient: string, ids: readonly string[]): number {
-    return this.run(() => this.records.release(recipient, this.heldBy(recipient, ids, ['uncertain', 'failed']), this.now()))
+  /**
+   * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust or the depth has its own way out. The
+   * delivery passes `loop` (a pair's Resume) or `budget` (a session's Resume) for the guards' holds, which the drain judges again
+   */
+  resendHeld(recipient: string, ids: readonly string[], why: readonly ('uncertain' | 'failed' | 'loop' | 'budget')[] = ['uncertain', 'failed']): number {
+    return this.run(() => {
+      const released = this.heldBy(recipient, ids, why)
+      const n = this.records.release(recipient, released, this.now())
+      // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
+      for (const id of released) {
+        const m = this.records.message(id)
+        if (m) this.changed(m, [recipient, PERSON])
+      }
+      return n
+    })
+  }
+
+  /** The delivery held these rows for the person (a guard, the one hold, a quiet wake that could not go): written, and the Inbox is told */
+  hold(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
+    if (held.length === 0) return
+    this.run(() => {
+      for (const reason of new Set(held.map((h) => h.reason))) this.records.hold(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
+      for (const h of held) {
+        const m = this.records.message(h.messageId)
+        if (m) this.changed(m, [PERSON])
+      }
+    })
+  }
+
+  /** Something the Inbox shows changed that is no message (the question about sleeping sessions): the listeners hear an empty change for the person */
+  announce(): void {
+    this.listeners.emit({ messageId: '', rootId: '', recipients: [PERSON] })
   }
 
   /** The person says never: held `uncertain` or `failed` mail is left undelivered, and not held against anyone */
@@ -682,6 +733,8 @@ export class MessageService {
       const now = this.now()
       const senders = new Set<string>()
       for (const row of this.records.watchedTo(address)) {
+        // Mail sent to the orchestrator's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
+        if (row.via === 'orchestrator') continue
         const m = this.records.message(row.messageId)
         this.records.settle(row.messageId, address, 'gone', now)
         if (m?.needsReply && this.records.markReleased(row.messageId, address, now, 'gone')) senders.add(m.sender)
@@ -898,7 +951,8 @@ export class MessageService {
     const unsure = messages.filter((m) => !again.includes(m.id)).map((m) => m.id)
     if (again.length > 0) this.records.markMaybeRepeated(recipient, again, this.now())
     if (unsure.length > 0) this.records.markUncertain(recipient, unsure)
-    for (const m of messages) this.changed(m, [PERSON])
+    // What goes again is the delivery's to look at; what is held, the Inbox's
+    for (const m of messages) this.changed(m, again.includes(m.id) ? [recipient, PERSON] : [PERSON])
     return { resent: again.length, held: unsure.length }
   }
 

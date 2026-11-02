@@ -450,18 +450,36 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 rates and the limit windows' percentages kept on this computer, with the names of sessions and projects and no conversation content.
 
 **The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
-whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Who may write to
-whom is `mail/relations.ts` (§9.1): a session to the sessions it started, the one that started it and the person; the orchestrator
-to any session; any session to the orchestrator, a new thread too (3.11, below); the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
-session that runs `auto` holds, without waking, what another session or an app that is only in a thread sends it (§7.7), and the person
-releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
+whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Since M3a (#1684, §7)
+mail is messages without threads, and who may write to whom, which project is trusted and what is held is one module, `mail/reach.ts`:
+every session may write to every session here, the person and the orchestrator; a send is refused only for a receiver whose seat has no `mail`
+tool (`no_mailbox`: a coordinator, a builder, an app's agent), one that is gone, `centralu`, one on another computer (`elsewhere`), a request to an
+orchestrator whose tool cannot put each step to the person (`orchestrator_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
+from a session whose project is untrusted now (read live: no project is trusted, an unknown project is not) to a party outside that project
+(another project's session, the orchestrator) is held `policy` until the person trusts the project; mail into an untrusted project, within one
+project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
+leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
+S15): `start_agent`, `create_session` with a first message, `agent_session send`, `send_to_session` with `reportBack`, `ask_project` and the
+linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (§7.5): a
+`message` more than 4 hops in a row from the person's word is held `loop` until the person's Resume; two sessions whose mail started more than
+20 turns in an hour with no word from the person are held `loop`; 5 new conversations an hour per ordered pair (`pair_rate`); identical
+repeats within 10 minutes (`repeat`); 5 requests an hour to the orchestrator per asker group (`ask_rate`, no one-open rule any more); the token
+guard; and the host-wide cap of 120 mail-started turns an hour, which defers a session over its share but never the person's words or a report.
+**Accepted gaps of the one hold** (§1.6, D11): what a trusted session read of an untrusted project (a session's words through `read_session`
+or `agent_session`, an `ask_project` answer, `recall`, a file, a handoff's note, a fork's copied conversation) it can send on by mail or a task
+unheld, and the receiver sees the sender, not the origin; a report's `answer` from a session of an untrusted project that a trusted session
+delegated to reaches the owner unheld (reports are never held); the CLI's own file tools reading another project's folder, and folders two
+projects share; the person pasting another project's text; MCP servers a CLI loads by itself and outside text a tool fetches; text leaving
+through an app, git or the network; and work on a linked machine until mail crosses links (a delegation to one from an untrusted project is
+refused, and what comes back is not marked). `find_apps` and `attach_app` offer no app of an untrusted project. A
+row held for the person is listed in the Inbox until the person trusts the project, resumes the chain, or releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
 quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
 word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the orchestrator's window-call list, and
 the `mail` tool is the ordinary session's and the orchestrator's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
 
-**A session asking the orchestrator (#1447, [plans/mailbox.md](plans/mailbox.md) §9.7).** Any session of this host may open a thread to the orchestrator
-(`mail send` with `to: "orchestrator"`, an `assign`): the session owns it and the orchestrator is its assignee. The request is a session's text, so it
+**A session asking the orchestrator (#1447, [plans/mailbox.md](plans/mailbox.md) §9.7).** Any session of this host may send the orchestrator a request
+(`mail send` with `to: "orchestrator"`: a message from a session that answers no question or task of the orchestrator's, §7.6). The request is a session's text, so it
 is not the person's word, and these follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
 for something", and `mail read` quotes the words under a header Centralu writes from its own record (the session's name, its project, whether the
 project is trusted). The words are read in the turn mail starts for the request and in no other: read in the person's turn, or in another request's, they would be a session's
@@ -500,10 +518,8 @@ is not yet measured here), a session cannot ask the orchestrator at all, in a th
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
 (reading needs no card, §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; what the conversation has read is kept in memory, so after a host swap or restart it is treated as having read everything (every word to a session in a request asks) until a new conversation begins; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
 later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (3) Limits:
-a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
-its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused; one request is open at a time and at most 5 words an hour (a request's first word and every word written into it after, so a follow-up in an answered request is no way round the
-limit), both counted over the sessions of the asker's project and the sessions under its root session, so starting sessions does not multiply them (a refusal names the open
-request only when it is the session's own). The sessions the orchestrator itself started are not one group: the walk up to the root stops before the orchestrator, so its sessions in
+a request from an untrusted project is held by the one hold (`policy`, above) until the person trusts the project, and a held row is a phantom to the orchestrator: `mail read` shows none of
+its words meanwhile, and marking it handled or answering it is refused as for any message it cannot read; there is no one-open rule (#1683), and at most 5 requests an hour (a clarification of a task the orchestrator gave is no request), counted over the sessions of the asker's project and under its root session, so starting sessions does not multiply them. The sessions the orchestrator itself started are not one group: the walk up to the root stops before the orchestrator, so its sessions in
 other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
 orchestrator's turn is reported in Centralu's words alone, never with the orchestrator's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 

@@ -5,11 +5,10 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionH
 import { ClaudeAdapter } from '../adapters/claude/index.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
-import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
-import { MailService } from '../mail/service.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 import { FakeProcess } from './kept-host.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * A host restart under the keeper (#280 step 2), seen by the session manager: the leaving host lets
@@ -230,31 +229,27 @@ describe('a host restart under the keeper', () => {
     expect(b.claude.listed).toBe(0)
   })
 
-  it('work the person owns (a script started the session, §8.1) in a kept process that cannot be re-attached: the person is told it stopped, and the thread closes', async () => {
+  it('work the person owns (a script started the session, §8.1) in a kept process that cannot be re-attached: the person is told it stopped, and the task is settled', async () => {
     const a = host()
     const id = await workingSession(a)
-    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
-    personWorkRecorder(mail, () => ({ projectId: null, depth: 0 }))(id, 'a long job')
+    // The person's task, as the script's first message wrote it under the old host
+    const first = wireHostMail(a.mgr, store)
+    const task = first.service.task(PERSON, addressOf(id), { text: 'a long job', origin: 'script', delivered: true })
     await a.mgr.detachAll()
 
     const b = host(new Set([id]))
-    b.mgr.useMail({
-      sessionGone: () => {},
-      sessionChanged: () => {},
-      sessionEvent: () => {},
-      personWork: {
-        started: personWorkRecorder(mail, () => ({ projectId: null, depth: 0 })),
-        owes: (sid) => mail.personOwes(mail.sessionAddress(sid)),
-        report: personReportRecorder(mail, store.mail),
-      },
-    })
+    wireHostMail(b.mgr, store)
     b.claude.createSession = async () => {
       throw new Error('the conversation is gone')
     }
     await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
-    const thread = store.mail.latestBetween(PERSON, mail.sessionAddress(id))!
-    expect(thread.state).toBe('review')
-    expect(store.mail.messagesAfter(thread.id, 0).find((m) => m.sender === 'centralu' && m.kind === 'report')?.facts).toMatchObject({ outcome: 'quit' })
+    const read = mailReader(store)
+    const reports = read.reportsOn(task.id)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: task.id })
+    expect(reports[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'quit' })
+    expect(read.row(reports[0]!.id, PERSON)).toBeDefined()
+    expect(read.taskRow(task.id, id)).toMatchObject({ settled: 'reported' })
   })
 
   /** Without the keeper's list the startup reset turns the running session idle — today's rule for a host with no keeper */

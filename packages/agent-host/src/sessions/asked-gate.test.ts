@@ -6,7 +6,7 @@ import type { Asker } from '../mail/asked-by.js'
 import { AskedGate, type AskedGateHost } from './asked-gate.js'
 import { HostCards } from './host-cards.js'
 
-const ASKER: Asker = { threadId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }
+const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }
 
 type Out = { text: string; isError?: boolean }
 const refused = (text: string): Out => ({ text, isError: true })
@@ -313,7 +313,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     const w = world({ asker: () => asker, answer: 'allow', reachOf: (id) => ({ folders: [id === 'asker' ? HOME : OTHER_HOME], project: id === 'asker' ? 'p1' : 'p2' }) })
     w.gate.seen('orc', 'Read', { file_path: resolve('/work/zed/notes.txt') })
     // Its own folder's file: free
-    asker = { ...ASKER, sessionId: 'zed', threadId: 't2' }
+    asker = { ...ASKER, sessionId: 'zed', messageId: 't2' }
     expect((await send(w, reply('fine', 't2'))).r.calls).toHaveLength(1)
     expect(w.asked).toEqual([])
     // Another session's request: the file is not in its reach

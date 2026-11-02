@@ -9,7 +9,7 @@ import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
-import type { HandedOverThread, HandOverPreview, HandOverScope } from '../mail/service.js'
+import type { HandedOverMessage } from '../mail/messages.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -58,7 +58,6 @@ import type {
   RebuildCause,
   ApprovalDecision,
   Attachment,
-  BackgroundTask,
   ApprovalScope,
   MachineInfo,
   NormalizedEvent,
@@ -99,14 +98,14 @@ export type AgentProcessHost = {
 export type MailHooks = {
   sessionGone(sessionId: string): void
   /**
-   * A handoff moves the original's mail to the successor (§4.1, `MailService.handOver`): every thread for an original that goes,
-   * the threads of the children that moved for one that stays. Run inside the transaction of the children's move; it throws to undo both
+   * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
+   * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
    */
-  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverThread[]
-  /** What `handOver` would do with an original that goes, read only: the archive preview says it (#1574) */
-  handOverPreview?(fromSessionId: string, toSessionId: string): HandOverPreview
-  /** The subjects of the unfinished threads the session is assigned or owns, which `sessionGone` would move on (#1512) */
-  openWork?(sessionId: string): { assigned: string[]; owned: string[] }
+  handOver?(fromSessionId: string, toSessionId: string, which: 'all' | { senders: readonly string[] }): HandedOverMessage[]
+  /** What `handOver` would give the successor of an original that goes, read only: the archive preview says it (#1574) */
+  handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
+  /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
+  openWork?(sessionId: string): { unanswered: string[]; owed: string[] }
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
@@ -129,8 +128,12 @@ export type MailHooks = {
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
+  /** The orchestrator's role moved to a new session (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
+  roleMoved?(fromSessionId: string, toSessionId: string): void
   /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
   askedBy?(orchestratorId: string): Asker | null
+  /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
+  refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -149,6 +152,7 @@ import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, agentStartPersonText } from './delegation-flow.js'
+import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
@@ -903,10 +907,19 @@ export class SessionManager {
   /** The sessions the keeper handed over from the last host, which this one took over mid-run */
   private keptAtStart: ReadonlySet<string> = new Set()
 
-  /** Whether the session's turn goes on under the keeper from the host before: its mail turn row is not lost (§6) */
+  /**
+   * Whether the session's turn goes on from the host before: kept by the keeper, or cut by an update and continued (#1618). Its mail turn row is not
+   * lost, so what the turn sends keeps that turn's cause and depth (mailbox §8.2 step 6)
+   */
   keptInTurn(sessionId: string): boolean {
     const m = this.meta.get(sessionId)
-    return this.keptAtStart.has(sessionId) && !!m && inTurn(m.state)
+    const goesOn = this.keptAtStart.has(sessionId) || this.continuedAfterUpdate.some((c) => c.sessionId === sessionId)
+    return goesOn && !!m && inTurn(m.state)
+  }
+
+  /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
+  oldOwes(ownerId: string, childId: string): boolean {
+    return this.children.oldOwes(ownerId, childId)
   }
 
   useMail(hooks: MailHooks): void {
@@ -968,69 +981,9 @@ export class SessionManager {
     }
   }
 
-  /**
-   * The background work that goes with a turn that is stopped (3.10, #1474): what a paused report for the owner waits on, or, for a turn that is
-   * going, the tasks that turn's own tool calls started (`parentCallId` names the call, and the calls since the turn began are its). Work the
-   * tool cannot place (no `parentCallId`), a dev server the person started and another turn's work are left running
-   */
-  private tasksOfStoppedTurn(sessionId: string, since: number | undefined, ownerId: string): BackgroundTask[] {
-    const running = this.reports.ownTasksRunning(sessionId)
-    // What a paused report for the owner waits on; the turn that is going may have started more, so this is not instead of the turn's own
-    const held = this.pausedFor(sessionId, ownerId) ? new Set((this.children.pausedReports.get(sessionId) ?? []).map((t) => t.id)) : new Set<string>()
-    const calls = new Set(
-      since === undefined
-        ? []
-        : this.store.messages
-            .loadMessages(sessionId, 400)
-            .filter((m) => m.kind === 'tool_call' && m.ts >= since)
-            .map((m) => (typeof m.payload === 'object' && m.payload !== null && 'callId' in m.payload ? m.payload.callId : undefined))
-            .filter((id): id is string => typeof id === 'string'),
-    )
-    return running.filter((t) => held.has(t.id) || (t.parentCallId !== undefined && calls.has(t.parentCallId)))
-  }
-
   /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
   pausedFor(sessionId: string, ownerId: string): boolean {
     return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
-  }
-
-  /**
-   * A thread whose work was going was closed by the person or its owner (docs/plans/mailbox.md §3.3, 3.10): its work is not wanted. A running turn
-   * of the thread is stopped as `agent_session stop` stops it, with the background work it started, and the owner's report is the notice that
-   * the thread was closed (the mark is dropped, so the stopped turn is not reported a second time). The helper is told once, in Centralu's words,
-   * without a wake; a helper in a turn that is not the thread's (the person's own, another thread's) is not interrupted and gets the same note
-   */
-  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string; since?: number }): Promise<void> {
-    const helper = this.meta.get(c.helperId)
-    if (!helper || this.handingOver || this.disposing) return
-    if (c.stopped) {
-      // The work to stop is read before the mark goes: a paused report names the tasks it waits on
-      const tasks = this.tasksOfStoppedTurn(c.helperId, c.since, c.threadOwner)
-      if (this.children.awaitingReport.get(c.helperId) === c.threadOwner) this.children.clearReport(c.helperId)
-      this.children.closeMailTurn(c.helperId, c.threadOwner)
-      try {
-        this.interrupt(c.helperId)
-      } catch {
-        // No process: there is no turn to stop
-      }
-      for (const t of tasks) {
-        try {
-          await this.sessionSettings.stopBackgroundTask(c.helperId, t.id)
-        } catch {
-          // Not stoppable from here: the tool ends it with its process
-        }
-      }
-    }
-    /*
-     * Without a wake: into a live process as quiet input. A helper that sleeps has no turn to mislead, and is not woken for a note. A tool that
-     * has no quiet input (Codex starts a turn for any input) is not sent it: that would be a turn nobody reports, so the thread's event is all it has
-     */
-    if (!this.handles.has(c.helperId) || this.adapters.get(helper.tool)?.quietInput !== true) return
-    try {
-      await this.events.deliverMail(c.helperId, { text: `[Centralu] ${c.text}`, quiet: true, line: '✉ Centralu told it a thread of its was closed' })
-    } catch (e) {
-      console.error(`[mail] could not tell ${c.helperId.slice(0, 8)} that its thread was closed (${errorMessage(e)})`)
-    }
   }
 
   /** Whether a session can be told of mail now, and how (`ReceiverState`, mail/delivery.ts) */
@@ -1961,6 +1914,8 @@ export class SessionManager {
       },
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
+      roleMoved: (fromId, toId) => self.mailHooks?.roleMoved?.(fromId, toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
       newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
       requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
@@ -2094,7 +2049,7 @@ export class SessionManager {
       },
       mailWork: (id) => {
         try {
-          return self.mailHooks?.openWork?.(id) ?? { assigned: [], owned: [] }
+          return self.mailHooks?.openWork?.(id) ?? { unanswered: [], owed: [] }
         } catch (e) {
           console.error(`[mail] ${id.slice(0, 8)}: its open work could not be read (${errorMessage(e)})`)
           return null
@@ -2103,7 +2058,7 @@ export class SessionManager {
       mailHandOver: (...a) => self.mailHooks?.handOver?.(...a) ?? [],
       mailHandOverPreview: (from, to) => {
         try {
-          return self.mailHooks?.handOverPreview?.(from, to) ?? { moved: [], closed: [], left: [] }
+          return self.mailHooks?.handOverPreview?.(from, to) ?? []
         } catch (e) {
           console.error(`[mail] ${from.slice(0, 8)}: what a handoff would move could not be read (${errorMessage(e)})`)
           return null

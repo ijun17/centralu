@@ -122,7 +122,12 @@ export class AgentStartFlow {
   async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     // A child on a linked machine (#1038) is made over the link, behind its own card that names the machine
     const machine = opts.machine?.trim()
-    if (machine) return this.flow.remote.startAgent(callerId, { ...opts, machine }, signal)
+    if (machine) {
+      // §7.4: asked before anything is made there
+      const refused = this.host.refusesDelegation(callerId, { linked: true }, { tool: 'start_agent', target: `a session on ${this.host.linkedReader?.machineNamed(machine)?.name ?? machine}`, text: opts.task })
+      if (refused) return { ok: false, error: refused }
+      return this.flow.remote.startAgent(callerId, { ...opts, machine }, signal)
+    }
     /*
      * **The setup has a bound of its own (#660).** Before the child exists the call can wait on the person's card, a
      * model list and the tool's own start, none of which `wait: false` shortens; the Codex bridge cuts the call at 280
@@ -201,6 +206,9 @@ export class AgentStartFlow {
     if (deep) return done({ ok: false, error: deep })
     const project = fromOrchestrator ? orchestratorPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
+    // §7.4: the mailbox decides before anything is asked or made (the child is made in `project`)
+    const refused = this.host.refusesDelegation(callerId, { projectId: fromOrchestrator ? null : project.id }, { tool: 'start_agent', target: project.name, text: opts.task })
+    if (refused) return done({ ok: false, error: refused })
     if (fromOrchestrator && (opts.worktree || opts.branch)) {
       return done({ ok: false, error: 'A session the orchestrator starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
     }

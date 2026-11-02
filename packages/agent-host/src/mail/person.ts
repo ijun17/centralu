@@ -25,7 +25,7 @@ export class MailPerson {
   constructor(
     private readonly service: MailService,
     private readonly records: MailRecords,
-    private readonly delivery: Pick<MailDelivery, 'resumeSession' | 'resumeThread' | 'answerCrowd' | 'crowdWaiting'>,
+    private readonly delivery: Pick<MailDelivery, 'resumeSession' | 'resumeRoot' | 'answerCrowd' | 'crowdWaiting'>,
     private readonly host: PersonHost,
   ) {}
 
@@ -94,7 +94,7 @@ export class MailPerson {
 
   resume(target: { sessionId?: string | undefined; threadId?: string | undefined }): void {
     if (target.sessionId !== undefined) this.delivery.resumeSession(target.sessionId)
-    else if (target.threadId !== undefined) this.delivery.resumeThread(target.threadId)
+    else if (target.threadId !== undefined) this.delivery.resumeRoot(target.threadId)
   }
 
   /**

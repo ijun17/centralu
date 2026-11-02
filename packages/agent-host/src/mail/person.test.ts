@@ -27,7 +27,7 @@ function setup() {
   const calls: string[] = []
   const delivery = {
     resumeSession: (id: string) => void calls.push(`session:${id}`),
-    resumeThread: (id: string) => void calls.push(`thread:${id}`),
+    resumeRoot: (id: string) => void calls.push(`thread:${id}`),
     answerCrowd: async (wake: boolean) => void calls.push(`crowd:${wake}`),
     crowdWaiting: () => 3,
   }
@@ -224,7 +224,7 @@ describe('the person gives work only to a session that can read it (§9.3)', () 
       inThread: () => false,
     })
     const mail = new MailService(store.mail, { hostId: () => HOST, now: () => NOW, policy })
-    const person = new MailPerson(mail, store.mail, { resumeSession: () => {}, resumeThread: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 }, { session: () => undefined })
+    const person = new MailPerson(mail, store.mail, { resumeSession: () => {}, resumeRoot: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 }, { session: () => undefined })
     const { thread } = openBy(mail, { by: PERSON, kind: 'assign', subject: 's', body: 'b', assignee: S2 })
     let reason: string | undefined
     try {
@@ -244,7 +244,7 @@ describe('waking the sleeping sessions', () => {
     const mail = new MailService(store.mail, { hostId: () => HOST, now: () => NOW })
     let release!: () => void
     const slow = new Promise<void>((r) => (release = r))
-    const person = new MailPerson(mail, store.mail, { resumeSession: () => {}, resumeThread: () => {}, answerCrowd: () => slow, crowdWaiting: () => 12 }, { session: () => undefined })
+    const person = new MailPerson(mail, store.mail, { resumeSession: () => {}, resumeRoot: () => {}, answerCrowd: () => slow, crowdWaiting: () => 12 }, { session: () => undefined })
     const rpc = createRpcHandler({} as SessionManager, new Map(), { mail: person })
     await expect(rpc('mail.wake', { wake: true })).resolves.toEqual({ ok: true })
     release()

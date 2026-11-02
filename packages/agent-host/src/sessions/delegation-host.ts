@@ -21,6 +21,11 @@ import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 
+/** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the orchestrator, or a linked machine's session */
+export type DelegationTarget = { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }
+/** The delegation call as S15 names it: the tool, the target as the sentence names it, and the words given */
+export type DelegationCall = { tool: 'start_agent' | 'create_session' | 'agent_session' | 'send_to_session' | 'ask_project'; target: string; text: string }
+
 /**
  * What the delegation flow reaches of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
@@ -86,4 +91,9 @@ export type DelegationHost = {
   linkedTasksRunning: (sessionId: string) => BackgroundTask[]
   /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
   settleLinkedTurn: (sessionId: string) => void
+  /**
+   * §7.4: asked before a delegation creates, starts or delivers anything. S15, the whole refusal the tool answers, when
+   * the mailbox refuses it (it has written the record S16 is built from); null when it may go, or with no mailbox
+   */
+  refusesDelegation: (callerId: string, target: DelegationTarget, call: DelegationCall) => string | null
 }

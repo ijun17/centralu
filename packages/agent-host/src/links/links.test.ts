@@ -1279,15 +1279,17 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
   }
 
-  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean; unmanaged?: boolean }) {
+  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean; unmanaged?: boolean; oldVersion?: string }) {
+    /** The version the remote runs before the update, and goes back to on a rollback */
+    const OLD_VERSION = o.oldVersion ?? '0.0.1'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: o.busy === false ? 0 : 2, approvals: o.busy === false ? 0 : 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
     const idle = () => Object.assign(activity, { working: 0, approvals: 0, questions: 0, background: 0 })
-    let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: () => activity }) })
-    let line = lineFor(running.port, { version: '0.0.1' })
+    let running = await remoteHost(0, new Store(), { version: OLD_VERSION, ...(o.noActivity ? {} : { activity: () => activity }) })
+    let line = lineFor(running.port, { version: OLD_VERSION })
     const runs: string[] = []
-    const old = { version: '0.0.1', node: NODE }
+    const old = { version: OLD_VERSION, node: NODE }
     const next = { version: RELEASE, node: NODE }
     const done = (o: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(o)}\n`
     let hub: Hub | null = null
@@ -1311,7 +1313,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
         }
         case 'pointers':
-          return out(done(starts === '0.0.1' ? { current: old, previous: null } : { current: next, previous: old }))
+          return out(done(starts === OLD_VERSION ? { current: old, previous: null } : { current: next, previous: old }))
         case 'prune':
           return out(done({ current: next, previous: old, removed: [], left: [] }))
         case 'tail':
@@ -1323,11 +1325,11 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     let starts = o.startsVersion
     const startHost = async (): Promise<HostStart> => {
       runs.push('start')
-      running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? '0.0.1' : starts })
-      line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? '0.0.1' : starts })
+      running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? OLD_VERSION : starts })
+      line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? OLD_VERSION : starts })
       // What the pointers say once that host runs: after an update the old one is kept to go back to
       if (starts === RELEASE && !runs.includes('tail')) line = { ...line, install: { managed: true, current: next, previous: old, node: NODE } }
-      else if (starts === '0.0.1') line = { ...line, install: { managed: true, current: old, previous: null, node: NODE } }
+      else if (starts === OLD_VERSION) line = { ...line, install: { managed: true, current: old, previous: null, node: NODE } }
       return { how: 'detached', note: null }
     }
     const tunnel = Object.assign(
@@ -1348,13 +1350,27 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   it('rolls back to the version before, which is older than this hub, and checks it by its connection line (measured 2026-10-11)', async () => {
     // A rolled-back host is older than the hub, so the link does not open to it (plan §4) and no hello
     // comes: on a real Windows PC every rollback timed out and put the newer version back
-    const { hub, u, setStarts } = await setup({ startsVersion: RELEASE, busy: false })
+    // Both after the mail switch (docs/plans/mailbox.md D28): a rollback within one side of it runs
+    const before = '0.1.0-beta.50'
+    const { hub, u, setStarts } = await setup({ startsVersion: RELEASE, busy: false, oldVersion: before })
     await u.call('machines.update', { machineId: 'm1' })
     await eventually(() => status(hub) === 'connected')
-    setStarts('0.0.1')
+    setStarts(before)
     const r = await u.call('machines.rollback', { machineId: 'm1' })
-    expect(r).toMatchObject({ current: { version: '0.0.1' } })
-    await eventually(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
+    expect(r).toMatchObject({ current: { version: before } })
+    await eventually(() => hub.links.list()[0]!.versions?.remote.version === before && status(hub) === 'connected')
+  })
+
+  it('refuses a rollback back across the mail switch with S17, and runs nothing there (docs/plans/mailbox.md D28)', async () => {
+    const { hub, u, runs } = await setup({ startsVersion: RELEASE, busy: false })
+    await u.call('machines.update', { machineId: 'm1' })
+    await eventually(() => status(hub) === 'connected')
+    const ran = runs.length
+    await expect(u.call('machines.rollback', { machineId: 'm1' })).rejects.toThrow(
+      `cannot go back to Centralu 0.0.1: since ${RELEASE} its mail is kept in a form 0.0.1 cannot read, so mail waiting there would never arrive. Update it instead.`,
+    )
+    expect(runs.slice(ran).filter((k) => k !== 'open')).toEqual([])
+    expect(hub.links.list()[0]!.versions?.remote.version).toBe(RELEASE)
   })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {

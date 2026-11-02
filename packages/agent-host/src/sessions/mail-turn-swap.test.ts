@@ -1,22 +1,21 @@
 /**
- * The turn records across a host swap (docs/plans/mailbox.md §6, §4.2): a session the keeper kept goes on in its turn under the next
- * host, whose start must not close that turn's row as lost, so that its end is recorded; the rows of everything else are.
+ * The turn records across a host swap (docs/plans/mailbox.md §6, §4.2, §16 M3a): a session the keeper kept goes on in its turn under the next
+ * host, whose start must not close that turn's row as lost, so that its end is recorded; the rows of everything else are. The rows name the
+ * turn's work message (`mail_turns.message_id`) and its starter (`starter_id`).
  */
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { answerRecorder, delegationRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
-import { MailDelivery } from '../mail/delivery.js'
-import { mailRelations } from '../mail/relations.js'
-import { MailService } from '../mail/service.js'
+import { PERSON } from '../mail/address.js'
 import { takeOverFromEarlierBuild } from '../mail/adoption.js'
-import { MailTurns } from '../mail/turns.js'
+import type { HostMail } from '../mail/host-mail.js'
 import { SessionManager } from './manager.js'
 import { Adapter, FakeProcess, processes } from './kept-host.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let store: Store
 let root: string
@@ -32,26 +31,33 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** One host of the mailbox: the manager, the turn records it keeps, and the claude adapter behind it */
+/** One host of the mailbox: the manager, its mail wired as `main.ts` wires it (delivery not started), and the claude adapter behind it */
 function host(kept: ReadonlySet<string> = new Set()) {
   const claude = new Adapter(true)
   const events: NormalizedEvent[] = []
   const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
   mgr.prLookup = async () => null
   hosts.push(mgr)
-  const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
-  const turns = new MailTurns(store.mail, { keepOpen: (id) => mgr.keptInTurn(id) })
-  mgr.useMail({
-    sessionGone: () => {},
-    sessionChanged: () => {},
-    sessionEvent: (e, ended) => turns.observe(e, ended),
-    delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id), turns),
-    answered: answerRecorder(mail, store.mail),
-    report: reportRecorder(mail, store.mail),
-    waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
-    turnStarted: turnRecorder(mail, store.mail, turns),
-  })
-  return { mgr, claude, mail, turns }
+  const m = wireHostMail(mgr, store)
+  return { mgr, claude, m }
+}
+
+const read = () => mailReader(store)
+
+/**
+ * The delivery of `m` runs once for `address`: started (its first sweep, which is awaited, so nothing of it is left running when the store
+ * closes), then the mailbox looked at, then stopped
+ */
+async function deliverTo(m: HostMail, address: string): Promise<void> {
+  const sweep = vi.spyOn(m.delivery, 'sweep')
+  m.delivery.start()
+  try {
+    await sweep.mock.results[0]?.value
+    await m.delivery.process(address)
+  } finally {
+    m.delivery.stop()
+    sweep.mockRestore()
+  }
 }
 
 async function parentAndChild(h: ReturnType<typeof host>) {
@@ -70,35 +76,24 @@ describe('a session the keeper handed over after a swap', () => {
     const { child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('first turn')
     // Mail written under the old host, still waiting when it leaves
-    const waiting = a.mail.open('person', { kind: 'assign', subject: 'More', body: 'also run the linter', assignee: a.mail.sessionAddress(child) })
+    const waiting = a.m.service.send(PERSON, { to: [addressOf(child)], text: 'also run the linter' }).message
     await a.mgr.detachAll()
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // The process is one an earlier build started; the receive rule is the seat's, as for any other
     expect(b.mgr.canReadMail(child)).toBe(true)
-    const policy = mailRelations({
-      session: (id) => b.mgr.sessionInfo(id),
-      ...b.mgr.mailSeats(() => true),
-      inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
-    })
-    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa', policy, now: () => Date.now() + 10_000 })
-    const reply = mail.post(waiting.thread.id, 'person', { kind: 'note', body: 'and the formatter' })
-    expect(reply.message.body).toBe('and the formatter')
-    const opened = mail.open('person', { kind: 'assign', subject: 'New', body: 'a new thread', assignee: mail.sessionAddress(child) })
-    expect(opened.thread.assignee).toBe(mail.sessionAddress(child))
+    const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 10_000 })
+    const reply = later.service.send(PERSON, { to: [addressOf(child)], replyTo: waiting.id, text: 'and the formatter' })
+    expect(reply.message).toMatchObject({ body: 'and the formatter', replyTo: waiting.id })
+    expect(reply.held).toEqual([])
 
-    const delivery = new MailDelivery(mail, store.mail, b.mgr.mailSessions(), { now: () => Date.now() + 60_000, schedule: () => () => {} })
-    delivery.start()
-    try {
-      await delivery.process(mail.sessionAddress(child))
-    } finally {
-      delivery.stop()
-    }
+    const delivering = wireHostMail(b.mgr, store, { now: () => Date.now() + 60_000 })
+    await deliverTo(delivering, addressOf(child))
     const sent = b.claude.handles.get(child)!.sent
     expect(sent.some((t) => t.includes('also run the linter'))).toBe(true)
     expect(sent.some((t) => t.includes('and the formatter'))).toBe(true)
-    expect(store.mail.receiptsOf(waiting.message.id)[0]).toMatchObject({ attempts: 1 })
+    expect(read().row(waiting.id, addressOf(child))).toMatchObject({ attempts: 1 })
   })
 })
 
@@ -106,6 +101,8 @@ describe('an owner the keeper handed over after a swap', () => {
   it('hears of its child’s end by mail alone, like any other owner: no relayed message goes into its process', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
+    const [task] = read().tasks(addressOf(parent), child)
+    expect(task).toBeDefined()
     await a.mgr.detachAll()
 
     const b = host(new Set([parent, child]))
@@ -115,8 +112,10 @@ describe('an owner the keeper handed over after a swap', () => {
     ])
     await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
-    const reports = () => store.mail.messagesAfter(store.mail.threadsOfParty(b.mail.sessionAddress(parent), 'owner')[0]!.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
-    await until(() => store.mail.threadsOfParty(b.mail.sessionAddress(parent), 'owner').length > 0 && reports().length === 1)
+    const reports = () => read().between('centralu', addressOf(parent), 'report')
+    await until(() => reports().length === 1)
+    expect(reports()[0]).toMatchObject({ replyTo: task!.id })
+    expect(read().taskRow(task!.id, child)).toMatchObject({ settled: 'reported' })
     // The mailbox tells it; the relayed message that told a process of an earlier build is not sent
     await new Promise((r) => setTimeout(r, 30))
     expect(b.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toEqual([])
@@ -124,15 +123,9 @@ describe('an owner the keeper handed over after a swap', () => {
     // (its own turn, which the swap kept, ends first: mail waits for a turn's end)
     b.claude.handles.get(parent)!.answer('its own turn ends')
     await until(() => b.mgr.mailSessions().receiver(parent).kind === 'ready')
-    const later = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => Date.now() + 300_000 })
-    const delivery = new MailDelivery(later, store.mail, b.mgr.mailSessions(), { now: () => Date.now() + 300_000, schedule: () => () => {} })
-    delivery.start()
-    try {
-      await delivery.process(b.mail.sessionAddress(parent))
-    } finally {
-      delivery.stop()
-    }
-    expect(store.mail.receiptsOf(reports()[0]!.id)[0]).toMatchObject({ attempts: 1 })
+    const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 300_000 })
+    await deliverTo(later, addressOf(parent))
+    expect(read().row(reports()[0]!.id, addressOf(parent))).toMatchObject({ attempts: 1 })
     expect(b.claude.handles.get(parent)!.sent.some((t) => t.includes("Centralu's mail"))).toBe(true)
   })
 })
@@ -148,14 +141,16 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     const a = host()
     a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
-    const helper = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
-    expect(helper.ok).toBe(true)
+    const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
+    if (!helperStarted.ok) throw new Error(helperStarted.error)
+    const helper = helperStarted.sessionId
     a.claude.handles.get(child)!.answer('handed the tests on')
-    const work = () => store.mail.threadsOfParty(a.mail.sessionAddress(parent), 'owner')[0]!
-    const reports = () => store.mail.messagesAfter(work().id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
+    const work = read().tasks(addressOf(parent), child)[0]!
+    const reports = () => read().reportsOn(work.id)
     await until(() => reports().length === 1)
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'paused', waitingOn: [expect.any(String)] })
-    expect(work().state).toBe('running')
+    // A pause over the work it handed on: reported, and the task stays open
+    expect(reports()[0]!.facts).toMatchObject({ outcome: 'waiting', waitingOn: 1 })
+    expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
     expect(marksOf(a).get(child)).toBe(parent)
     await a.mgr.detachAll()
 
@@ -163,34 +158,37 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(marksOf(b).get(child)).toBe(parent)
-    expect(work().state).toBe('running')
+    expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
     // The helper is done; the session has a turn of its own, and ends it
-    const handed = store.mail.threadsOfParty(b.mail.sessionAddress(child), 'owner')[0]!
-    b.mail.update(handed.id, b.mail.sessionAddress(child), { state: 'done', outcome: 'finished' })
+    const handed = read().tasks(addressOf(child), helper)[0]!
+    b.m.service.report(handed.id, { outcome: 'finished', body: '[Centralu] The helper finished.' })
     await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
     await until(() => reports().length === 2)
-    expect(reports().map((m) => m.facts.outcome)).toEqual(['paused', 'finished'])
-    expect(work().state).toBe('review')
+    expect(reports().map((m) => m.facts.outcome)).toEqual(['waiting', 'finished'])
+    expect(read().taskRow(work.id, child)).toMatchObject({ settled: 'reported' })
     expect(marksOf(b).has(child)).toBe(false)
     // Once: nothing follows
     await new Promise((r) => setTimeout(r, 30))
     expect(reports()).toHaveLength(2)
     // Nor a notice of a turn that "ended in the swap"
-    expect(store.mail.messagesAfter(work().id, 0).some((m) => String(m.body).includes('swap'))).toBe(false)
+    expect(read().to(addressOf(parent)).some((x) => x.message.body.includes('swap'))).toBe(false)
   })
 
   it('a kept session at rest whose helper is gone has no pause to keep: its mark is dropped as before', async () => {
     const a = host()
     a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
-    await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
+    const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
+    if (!helperStarted.ok) throw new Error(helperStarted.error)
+    const helper = helperStarted.sessionId
     a.claude.handles.get(child)!.answer('handed the tests on')
-    await until(() => marksOf(a).get(child) === parent && store.mail.threadsOfParty(a.mail.sessionAddress(child), 'owner').length === 1)
-    // The helper's thread is going while its session is there
-    expect(store.mail.waitingOnSessions(parent, child)).toBe(1)
-    // The helper's session was archived while the old host served: nobody is on its thread
-    a.mail.sessionGone(store.mail.threadsOfParty(a.mail.sessionAddress(child), 'owner')[0]!.assignee!.split('/')[1]!)
+    await until(() => marksOf(a).get(child) === parent && read().tasks(addressOf(child), helper).length === 1)
+    // The helper's task is going while its session is there
+    expect(a.m.hooks.waitingOn!(parent, child)).toBe(1)
+    // The helper's session was archived while the old host served: its task is gone
+    a.m.service.partyGone(addressOf(helper))
+    expect(read().taskRow(read().tasks(addressOf(child), helper)[0]!.id, helper)).toMatchObject({ settled: 'gone' })
     await a.mgr.detachAll()
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
@@ -199,64 +197,78 @@ describe('a parent that waits for what it handed on, across a swap', () => {
 })
 
 describe('a rollback to an earlier build, then forward', () => {
-  it('closes the helper’s thread the earlier build finished: the parent’s next turn end is reported, not taken for the same pause', async () => {
+  it('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause', async () => {
     const a = host()
     a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
-    const helper = helperStarted.ok ? helperStarted.sessionId : ''
+    if (!helperStarted.ok) throw new Error(helperStarted.error)
+    const helper = helperStarted.sessionId
     a.claude.handles.get(child)!.answer('handed the tests on')
-    const work = () => store.mail.threadsOfParty(a.mail.sessionAddress(parent), 'owner')[0]!
-    const reports = () => store.mail.messagesAfter(work().id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
-    await until(() => reports().length === 1)
-    const part = store.mail.threadsOfParty(a.mail.sessionAddress(child), 'owner')[0]!
-    expect(part).toMatchObject({ state: 'running', parentId: work().id })
-    // The helper finishes. An earlier build serving instead of this one would report it the old way (its marks cleared) and leave the thread as it is
+    const work = read().tasks(addressOf(parent), child)[0]!
+    await until(() => read().reportsOn(work.id).length === 1)
+    const part = read().tasks(addressOf(child), helper)[0]!
+    // The helper's task was handed on in the parent's work
+    expect(part.causeId).toBe(work.id)
+    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
+    // The helper finishes. An earlier build serving instead of this one would report it the old way (its mark cleared) and leave the task row
+    // unsettled: it does not know the message tables
     a.claude.handles.get(helper)!.answer('the tests are written')
-    await until(() => store.mail.thread(part.id)?.state === 'review')
+    await until(() => read().taskRow(part.id, helper)?.settled === 'reported')
     await a.mgr.detachAll()
     store.children.clearReportMark(helper)
-    store.mail.updateThread(part.id, { state: 'running' }, Date.now(), false)
+    ;(store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
+      .prepare('UPDATE mail_recipients SET settled = NULL, settled_at = NULL WHERE message_id = ?')
+      .run(part.id)
 
-    // This build again: without the step, the parent still counts the helper as going
+    // This build again: the step after ready settles the task no old path owes any more, so nothing counts the helper as going
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    expect(b.mail.waitingOn(b.mail.sessionAddress(parent), b.mail.sessionAddress(child))).toBe(1)
-    const result = takeOverFromEarlierBuild(b.mail, store, { info: (id) => b.mgr.sessionInfo(id), depth: () => 0, paused: () => null })
-    expect(result.closed).toBe(1)
-    expect(store.mail.thread(part.id)?.state).toBe('review')
-    expect(b.mail.waitingOn(b.mail.sessionAddress(parent), b.mail.sessionAddress(child))).toBe(0)
+    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
+    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.oldOwes(o, c) })
+    expect(result.settled).toBe(1)
+    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: 'reported' })
+    expect(b.m.hooks.waitingOn!(parent, child)).toBe(0)
+    const before = read().between('centralu', addressOf(parent), 'report').length
 
-    // The owner sends more work, and the session ends its turn: the work's end is reported, once
+    // The owner sends more work, and the session ends its turn: the work's end is reported, once, and as an end, not as the same pause again
     const again = b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })
     await until(() => (b.claude.handles.get(child)?.sent.length ?? 0) >= 1)
     b.claude.handles.get(child)!.answer('all done')
     expect(await again).toMatchObject({ ok: true })
-    expect(reports().map((m) => m.facts.outcome)).toEqual(['paused', 'finished'])
-    expect(work().state).toBe('review')
+    const after = read().between('centralu', addressOf(parent), 'report').slice(before)
+    expect(after.map((m) => m.facts.outcome)).toEqual(['finished'])
+    expect(read().between('centralu', addressOf(parent), 'report').filter((m) => m.facts.outcome === 'waiting')).toHaveLength(1)
+    // No work of the parent's with the child is left open
+    expect(store.mailbox.newestTask(addressOf(parent), addressOf(child))).toBeUndefined()
   })
 })
 
 describe('the turn of a session the keeper kept', () => {
   it('stays open across the swap, and its end is recorded by the next host; the open rows of the rest are closed lost', async () => {
     const a = host()
-    const { child } = await parentAndChild(a)
-    expect(store.mail.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, threadId: expect.any(String) })])
+    const { parent, child } = await parentAndChild(a)
+    const task = read().tasks(addressOf(parent), child)[0]!
+    // The turn is the task's: its work message and its starter
+    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, messageId: task.id, starterId: task.id })])
     // A turn of a session that is not kept (its process went with the old host)
-    store.mail.startTurn({ sessionId: 'gone-with-the-old-host', turnSeq: 1, threadId: null, startedBy: 'person', startedAt: 1 })
+    store.mailbox.startTurn({ sessionId: 'gone-with-the-old-host', turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: 1 })
     await a.mgr.detachAll()
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // What the delivery does when it starts
-    b.turns.closeStale()
-    expect(store.mail.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, outcome: null })])
-    expect(store.mail.turnsOf('gone-with-the-old-host')).toEqual([expect.objectContaining({ outcome: 'lost' })])
-    expect(b.turns.current(child)).toMatchObject({ by: 'caller' })
+    b.m.turns.closeStale()
+    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, outcome: null, messageId: task.id })])
+    expect(store.mailbox.turnsOf('gone-with-the-old-host')).toEqual([expect.objectContaining({ outcome: 'lost' })])
+    // Read back with its work message and starter (§8.2 step 6)
+    expect(b.m.turns.current(child)).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
 
     b.claude.handles.get(child)!.answer('finished under the new host')
-    expect(store.mail.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', outcome: 'empty' })])
-    expect(store.mail.hasOpenTurn(store.mail.turnsOf(child)[0]!.threadId!)).toBe(false)
+    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', outcome: 'empty', endedAt: expect.any(Number) })])
+    expect(b.m.turns.current(child)).toBeUndefined()
+    // Its end is the task's: reported once, under the new host
+    expect(read().reportsOn(task.id)).toHaveLength(1)
   })
 
   it('is closed lost when the session is not in its turn any more: it finished while the old host let go', async () => {
@@ -264,11 +276,11 @@ describe('the turn of a session the keeper kept', () => {
     const { child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('finished during the swap')
     // The old host did not see the end (a crash): the row is still open in the store
-    store.mail.startTurn({ sessionId: child, turnSeq: 9, threadId: null, startedBy: 'caller', startedAt: 1 })
+    store.mailbox.startTurn({ sessionId: child, turnSeq: 9, messageId: null, starterId: null, startedBy: 'caller', startedAt: 1 })
     await a.mgr.detachAll()
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    b.turns.closeStale()
-    expect(store.mail.turnsOf(child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
+    b.m.turns.closeStale()
+    expect(store.mailbox.turnsOf(child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
   })
 })

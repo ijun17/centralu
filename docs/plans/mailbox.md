@@ -2453,6 +2453,30 @@ login).
 5. A process from before the slice reads and answers with its old tool.
 6. Every §9.3 case answers the `ReportedAs` the table gives.
 
+**Design questions** (found while building M3a-host; each keeps mail delivered and nothing lost, to be confirmed or overruled by the
+orchestrator or the owner)
+
+| # | Question | Choice made |
+|---|---|---|
+| Q-M3a-1 | M3a-host lands before M3a-person in the stack: what serves the person's window in between | The old `MailService` stays constructed for `MailPerson` alone (the window's methods over the thread tables) until M3a-person; the host's mail, delivery, tool and recorders run on the message tables. The stack is merged as one, so no build ships this state |
+| Q-M3a-2 | S9 `removed` says "sessions started from now on use mail(action="send", id="…")", which is not true until M3b | M3a's sentence names the old tool's calls only: `… so "<action>" is gone. Answer a message with mail(action="reply", thread="<message id>", text="…"), and mark one that needs nothing with mail(action="handled", thread="<message id>").` M3b adds the version-2 clause |
+| Q-M3a-3 | §8.2 step 6 (a turn continued after an update writes no row) against `keptInTurn`, which only knew the keeper's kept sessions | `SessionManager.keptInTurn` is also true for a session whose turn an update cut and this host continued (`continuedAfterUpdate`), so `MailTurns.closeStale` reads its row back instead of closing it `lost`. A report of the old path's `resumed` outcome (a cut turn that goes on) is `ReportedAs` `none`: the old path says it, and the task stays open |
+| Q-M3a-4 | §7.5 "a deferred row stays due, quiet mail still rides along" | A wake the host-wide cap defers waits whole: its quiet items ride the next wake. Nothing is lost; a quiet item is delivered at most one wake later |
+| Q-M3a-5 | §9.6 `answerRecorder`: "the reports replying to the task are marked read; no state" | It also writes the report the call gave, as told (delivered and read), which settles the task, as the old path's told report moved the thread to review. Without it a task given with `wait=true` stayed open until the next ready. With work handed on still owed, the report is `waiting` and the task stays open |
+| Q-M3a-6 | The old path's outcome words (`limit_reached`, `network`, `interrupted`, `quit`, `swapped`, `took_over`, `settled`) against §5.4's five | `finished` (also `settled`), `failed` (also `limit_reached`), else `stopped`; the old word is kept in `facts.reason` when they differ, and taking the session over is `stopped`, `taken_over` |
+| Q-M3a-7 | `openWork` and the handoff's message forms change words the person and the agent see | The archive card and the handoff note name messages and tasks (owner items in the PR); the protocol is unchanged |
+| Q-M3a-8 | `MailTurns.lastEnded` and `lastPersonTurn` in the M3a list | `lastPersonTurn` is the store's (the pair guard reads it); `lastEnded` has no reader before M5 and is not built |
+| Q-M3a-9 | A request turn's card skips "answering in the request's own thread": which message is the request's own | The turn's work message (`Asker.messageId`). An answer to another request of the same asker in that turn asks the person (conservative) |
+| Q-M3a-10 | §9.5 step 1 writes `facts.paused` on an adopted mark's task | Not written: nothing reads a task's `facts.paused` before M8 |
+| Q-M3a-11 | A script's first message: origin and the credential's label | The task's origin is `script`; the label stays on the conversation's message, not on the task |
+| Q-M3a-12 | D9 (the starter is the wake's first item) against D13 (the person's words count toward no guard) when one wake carries both | The starter is the work message, else the person's message when the wake carries one, else the first item: the turn is the person's, counts toward neither the cap nor the pair guard, and what it sends starts at depth 0 |
+| Q-M3a-13 | §9.4 counts only handed-on tasks the old paths still owe, but a task not delivered yet (an answer to a clarification, stored as a task) is marked only when the delivery gives it | A handed-on task row not delivered yet counts too: otherwise the first owner was told `finished` while the work it caused was about to run |
+| Q-M3a-14 | D15 (the role's mail follows the role) against `partyGone` (a trashed session's watched rows are `gone`) | `partyGone` leaves rows sent to the role (`via = 'orchestrator'`); when the next orchestrator is made, `roleMoved` gives them to it, delivered afresh |
+| Q-M3a-15 | `MAIL_SWITCH_VERSION` | `0.1.0-beta.46`, the release after the last tag; the stack's release check confirms or changes it |
+| Q-M3a-16 | `ask_project` from an untrusted project: the old trust refusal came before the target was known, so S15 could not be written | The trust check runs once the target is resolved; until then every resolution error an untrusted caller meets reads as the old trust sentence, so it learns nothing of other projects. A linked `send_to_session` is refused out of an untrusted project whether or not it asks for a report |
+| Q-M3a-17 | A handoff that keeps the original: the original's task to a moved child is from the original, and the child's report goes to the successor | The report finds no task from the successor and is `none` (the old path tells the successor); the next ready settles the task, since no old path owes it to the original. Nothing is lost; the task row lags one ready |
+| Q-M3a-18 | `pair_rate` (5 new conversations an hour per pair) is reached before `ask_rate` (5 requests an hour per group) by one session alone | Kept as written: `ask_rate` bounds a group of sessions, `pair_rate` one session |
+
 ### M3b. The version-2 tool
 
 **Changes**
