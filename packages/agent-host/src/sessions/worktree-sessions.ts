@@ -1,7 +1,6 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
 import { dirname, join } from 'node:path'
-import { traitsFor } from '../os.js'
 import { lstatSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
@@ -30,7 +29,7 @@ import {
   type Worktree,
   gitWorktreeRemove,
   gitWorktreePrune,
-  gitWorktreePaths,
+  pathKey,
   gitWorktreeList,
   gitBranchAhead,
   gitUnpublishedCommits,
@@ -54,12 +53,6 @@ import { sleep } from '../timing.js'
  * tool at once, and its turn's end comes a moment later. Past it the worktree stays, said as such.
  */
 export const STOPPING_WAIT_MS = 10_000
-
-/** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
-function pathKey(path: string): string {
-  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
-  return traitsFor().foldsPathCase ? key.toLowerCase() : key
-}
 
 /**
  * Whether a worktree folder is there, gone, or cannot be judged (#715). Gone means `lstat` failed with ENOENT and
@@ -242,7 +235,7 @@ export class WorktreeSessions {
    */
   async discardNewWorktree(cwd: string, worktree: Worktree, projectId: string): Promise<string | null> {
     const left: string[] = []
-    await gitWorktreeRemove(cwd, worktree.path, true).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
+    await gitWorktreeRemove(cwd, worktree.path).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
     await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
     if (!left.length) return null
     const said = left.join('; ')
@@ -481,7 +474,7 @@ export class WorktreeSessions {
       const appearedSince = occupied()
       if (appearedSince) return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${appearedSince.error}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       try {
-        await gitWorktreeRemove(cwd, path, true, true)
+        await gitWorktreeRemove(cwd, path, true)
       } catch (e) {
         return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       }
@@ -581,7 +574,7 @@ export class WorktreeSessions {
     const gone = `The worktree folder was already gone (${path})`
     await this.host.trashSession(target.id, false, false, undefined, true)
     const key = pathKey(path)
-    const listedNow = async () => (await gitWorktreePaths(cwd)).some((p) => pathKey(p) === key)
+    const listedNow = async () => (await gitWorktreeList(cwd)).some((w) => pathKey(w.path) === key)
     const had = await listedNow().catch(() => false)
     let entry: string
     try {

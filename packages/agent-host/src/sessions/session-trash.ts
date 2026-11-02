@@ -671,7 +671,7 @@ export class SessionTrash {
          */
         const path = s.worktree.path
         const repo = record.projectPath
-        await gitWorktreeRemove(repo, path, true).catch((e: Error) => {
+        await gitWorktreeRemove(repo, path).catch((e: Error) => {
           if (!existsSync(path)) return
           // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
           if (!existsSync(repo)) {

@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { writeFileSync, existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
-import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreeRemove, resolveForkBase } from './git-worktree.js'
+import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
 
 /**
  * A worktree can only be tested against **real git.**
@@ -48,16 +48,12 @@ describe('worktrees', () => {
     expect((await gitWorktreeDirty(repo)).dirty).toBe(false)
   })
 
-  it('an uncommitted change blocks removal unless force is given', async () => {
+  it('removal takes a worktree with uncommitted changes too: the caller has saved them or the person chose to lose them', async () => {
     const path = join(root, 'outside', 'session-3')
     await gitWorktreeAdd(repo, path, 'centralu/wt3', undefined, TRUSTED)
     writeFileSync(join(path, 'a.txt'), 'not committed yet\n')
 
-    // Confirms git itself rejects this — this is exactly why we attach force
-    await expect(gitWorktreeRemove(repo, path)).rejects.toThrow()
-    expect(existsSync(path)).toBe(true)
-
-    await gitWorktreeRemove(repo, path, true)
+    await gitWorktreeRemove(repo, path)
     expect(existsSync(path)).toBe(false)
   })
 
@@ -83,6 +79,91 @@ describe('worktrees', () => {
 
   it('the list comes back empty, not thrown, when this is not a git repository', async () => {
     expect(await gitWorktreeList(root)).toEqual([])
+  })
+})
+
+/**
+ * Removing a worktree (#1655, #1560): the host removes the folder and git only drops its entry. On Windows git stopped at
+ * a path past 260 characters after it had already dropped its entry and the `.git` file, and it deleted through a
+ * junction what the junction led to (measured, git 2.47).
+ */
+describe('removing a worktree (#1655, #1560)', () => {
+  const listed = async (path: string) => (await gitWorktreeList(repo)).some((w) => pathKey(w.path) === pathKey(path))
+  /** A pnpm-style node_modules: one path past 260 characters, a junction inside the worktree, and one leading out of it */
+  const install = (path: string, outside: string) => {
+    let deep = join(path, 'node_modules', '.pnpm')
+    for (let i = 0; i < 12; i++) deep = join(deep, `segment-${i}-abcdefghijklmnopqrst`)
+    mkdirSync(deep, { recursive: true })
+    writeFileSync(join(deep, 'index.js'), 'x')
+    expect(deep.length).toBeGreaterThan(260)
+    symlinkSync(join(path, 'node_modules', '.pnpm', 'segment-0-abcdefghijklmnopqrst'), join(path, 'node_modules', 'inside'), 'junction')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'keep.txt'), 'not the worktree\'s')
+    symlinkSync(outside, join(path, 'node_modules', 'away'), 'junction')
+  }
+
+  it('removes a worktree with paths past 260 characters, and never what a junction in it leads to', async () => {
+    const path = join(root, 'worktrees', 'p', 'session-long')
+    const outside = join(root, 'outside')
+    await gitWorktreeAdd(repo, path, 'centralu/long', undefined, TRUSTED)
+    install(path, outside)
+
+    await gitWorktreeRemove(repo, path)
+    expect(existsSync(path)).toBe(false)
+    expect(await listed(path)).toBe(false)
+    expect(existsSync(join(outside, 'keep.txt'))).toBe(true)
+  })
+
+  it('finishes a removal git left part way: a folder git no longer lists, without its .git', async () => {
+    const path = join(root, 'worktrees', 'p', 'session-left')
+    await gitWorktreeAdd(repo, path, 'centralu/left', undefined, TRUSTED)
+    install(path, join(root, 'outside'))
+    // What git leaves when its delete stops: the entry and the `.git` file gone, the rest still there
+    rmSync(join(path, '.git'))
+    await gitWorktreePrune(repo)
+    expect(await listed(path)).toBe(false)
+
+    await gitWorktreeRemove(repo, path)
+    expect(existsSync(path)).toBe(false)
+    expect(existsSync(join(root, 'outside', 'keep.txt'))).toBe(true)
+  })
+
+  it('keeps a folder git does not list that has a .git of its own', async () => {
+    const other = join(root, 'other')
+    fixtureGit(root, ['init', '-q', other])
+    writeFileSync(join(other, 'work.txt'), 'someone else\'s')
+
+    await expect(gitWorktreeRemove(repo, other)).rejects.toThrow(/not a worktree/)
+    expect(existsSync(join(other, 'work.txt'))).toBe(true)
+  })
+
+  it('keeps a locked worktree unless asked to take it anyway', async () => {
+    const path = join(root, 'worktrees', 'p', 'session-locked')
+    await gitWorktreeAdd(repo, path, 'centralu/locked', undefined, TRUSTED)
+    fixtureGit(repo, ['worktree', 'lock', path])
+
+    await expect(gitWorktreeRemove(repo, path)).rejects.toThrow(/locked/)
+    expect(existsSync(join(path, 'a.txt'))).toBe(true)
+    await gitWorktreeRemove(repo, path, true)
+    expect(existsSync(path)).toBe(false)
+  })
+
+  // A folder POSIX lets no one empty; root may empty it anyway
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('says what was left when the folder cannot all be removed, and keeps git\'s entry so it can be tried again', async () => {
+    const path = join(root, 'worktrees', 'p', 'session-stuck')
+    await gitWorktreeAdd(repo, path, 'centralu/stuck', undefined, TRUSTED)
+    mkdirSync(join(path, 'held'))
+    writeFileSync(join(path, 'held', 'f.txt'), 'x')
+    chmodSync(join(path, 'held'), 0o500)
+    try {
+      await expect(gitWorktreeRemove(repo, path)).rejects.toThrow(/left/)
+      expect(existsSync(join(path, 'held', 'f.txt'))).toBe(true)
+      expect(await listed(path)).toBe(true)
+    } finally {
+      chmodSync(join(path, 'held'), 0o700)
+    }
+    await gitWorktreeRemove(repo, path)
+    expect(existsSync(path)).toBe(false)
   })
 })
 

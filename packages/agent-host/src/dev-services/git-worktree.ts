@@ -1,9 +1,14 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 import { execFailure } from './exec-error.js'
 import { runGit } from './git-exec.js'
 import { git, gitHeadSha, gitRevParse, gitSummary, isRepo, type GitTrust, type SummaryLimits } from './git.js'
 import { cloneEnv } from './project-clone.js'
 import { gitWrite } from './git-write.js'
+import { removeData } from './data-folder.js'
+import { canonicalPath } from './path-guard.js'
 
 
 /*
@@ -245,14 +250,36 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
   }
 }
 
+/** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
+export function pathKey(path: string): string {
+  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
+  return traitsFor().foldsPathCase ? key.toLowerCase() : key
+}
+
 /**
- * Removes a worktree. `force` discards even uncommitted changes.
+ * Removes a worktree for good, uncommitted changes and all: its folder, then git's entry for it. The caller has saved
+ * the work in it or has the person's decision to lose it. A locked worktree stays unless `unlocked` (git's second
+ * `--force`).
  *
- * The caller must preserve local work or obtain the person's discard decision before forcing
- * removal. `withSubmodules` also removes initialized submodules (git requires a second force).
+ * **The host removes the folder, not git (#1655, #1560).** On Windows git deleted through a junction what the junction
+ * led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters once it had already
+ * dropped its entry and the worktree's `.git` file, leaving a folder that nothing would clean (measured, git 2.47).
+ * `removeData` never follows a link and takes long paths. git then drops its entry for the folder that is gone.
+ *
+ * A folder git no longer lists is what such a removal left part way when it has no `.git` of its own, and is removed
+ * the same way; one with its own `.git` is someone else's and stays. A folder that cannot all be removed (a file held
+ * open) throws with what was left, and git's entry stays so the removal can be tried again.
  */
-export async function gitWorktreeRemove(repoCwd: string, path: string, force = false, withSubmodules = false): Promise<void> {
-  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force', ...(withSubmodules ? ['--force'] : [])] : []), path])
+export async function gitWorktreeRemove(repoCwd: string, path: string, unlocked = false): Promise<void> {
+  const key = pathKey(path)
+  const entry = (await gitWorktreeList(repoCwd)).find((w) => pathKey(w.path) === key)
+  if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
+  if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
+  if (!entry && existsSync(join(path, '.git'))) throw new Error(`${path} is not a worktree of ${repoCwd}`)
+  await removeData(path).catch((e: Error) => {
+    throw new Error(`${path} was removed only in part, and what is left stays there: ${e.message}`)
+  })
+  if (entry) await git(repoCwd, ['worktree', 'remove', '--force', '--force', path])
 }
 
 /**
@@ -316,30 +343,26 @@ export async function gitWorktreeDirty(
   return { dirty: changedFiles > 0, changedFiles, ...(summary.more ? { more: true as const } : {}) }
 }
 
+/** One worktree git lists (#715, #1655): detached ones have no branch; the first git lists is the project's own folder */
+export type WorktreeEntry = { path: string; branch: string | null; main: boolean; locked: boolean }
+
 /**
- * The list of registered worktrees. Used to filter out one a person deleted from Finder
+ * Every worktree git lists for this repository, detached ones too. Used to filter out one a person deleted from Finder
  * (git still lists it too — that state is what `prune` is for).
  */
-export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
+export async function gitWorktreeList(repoCwd: string): Promise<WorktreeEntry[]> {
   if (!(await isRepo(repoCwd))) return []
   const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  const list: Worktree[] = []
-  let path = ''
-  for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) path = line.slice('worktree '.length).trim()
-    else if (line.startsWith('branch ') && path) {
-      list.push({ path, branch: line.slice('branch refs/heads/'.length).trim() })
-      path = ''
+  return out.split('\n\n').filter((block) => block.startsWith('worktree ')).map((block, i) => {
+    const lines = block.split('\n').map((line) => line.trim())
+    const branch = lines.find((line) => line.startsWith('branch refs/heads/'))
+    return {
+      path: (lines[0] ?? '').slice('worktree '.length),
+      branch: branch ? branch.slice('branch refs/heads/'.length) : null,
+      main: i === 0,
+      locked: lines.some((line) => line === 'locked' || line.startsWith('locked ')),
     }
-  }
-  return list
-}
-
-/** Every path git lists as a worktree of this repository, detached ones too (#715). */
-export async function gitWorktreePaths(repoCwd: string): Promise<string[]> {
-  if (!(await isRepo(repoCwd))) return []
-  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  return out.split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length).trim())
+  })
 }
 
 /** Cleans up only the registration of a worktree that is gone (does not delete the directory) */

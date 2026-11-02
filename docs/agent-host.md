@@ -839,6 +839,15 @@ failing) is a warning notice at the top of the new session, and a `start_agent` 
 since an agent does not read notices (#841). A step after `git worktree add` that throws before a session owns
 the worktree removes the folder and its branch again (#774); what could not be removed is named in the error.
 
+**Removing a worktree** (#1655, #1560, `gitWorktreeRemove`, the one path for every removal: a start that failed, an
+agent's cleanup, a purge, a branch taken over). The host removes the folder (`removeData`: never through a link, long
+paths taken), then git drops its entry. git did the delete before, and on Windows it deleted through a junction what
+the junction led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters after it had
+already dropped its entry and the `.git` file, so the folder stayed with nothing to clean it. A folder git no longer
+lists and with no `.git` of its own (what such a stop left) is removed the same way; one with its own `.git` is refused.
+A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
+retry; the archive's answer and the purge say so.
+
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
 extra roots (#585). Codex keeps `.git` read-only even inside writable roots, so this does not permit commits
@@ -955,7 +964,7 @@ occupants are checked again after the snapshot and again after archiving: one th
 from the archive, opened there) keeps the worktree in place, with the snapshot kept. A sidebar delete already
 under way refuses it too, and a cleanup cannot join a delete that started first: that delete's archive record
 carries no recovery snapshot, so the worktree stays in place for that path. Failed capture leaves the worktree and branch in place. Once captured,
-the session goes to the archive, then git removes the worktree (including initialized submodules) and branch.
+the session goes to the archive, then the worktree (including initialized submodules) and branch are removed.
 After archiving, removal errors return `deleted` with a warning naming the leftover worktree/branch and
 recovery location. The parent cannot retry an archived session through `agent_session`. Capture errors still
 return a refusal before archiving. The
@@ -3701,8 +3710,10 @@ per `CALL_WINDOW_MS` (15 s); a call inside the window is answered at once with t
 reach the machine through `linkedSessions` (`start_agent`, `ask_project` and `create_session` through their project lookup, but
 only for the machine the act needs: `start_agent`'s `machine`, or the one a project name, qualified id or `machine/name` points to
 (`projects(need)`); a lookup never waits on another machine, nor on an attempt to one, with one exception (#1547): a bare name that matches no project at all (not on this computer, not on a machine that is up, not in any machine's mirror, which is empty after a restart and cannot know a project made since) tries every machine that is down, within the same bound (`ProjectNeed.anyDown`, asked by `ask_project` and `create_session` after their first lookup found nothing; the machines that are up are not asked again, their rows are the first answer, `prior`), and only then answers "No project named" (`create_session`: "No such project"), naming the machines it could not ask. A machine is waited for once per its call window (`callWindowMs`, 15 s) that way, counted from the guess whether it started an attempt or only joined one under way: a call inside the window joins the wait if it is still going, or is answered at once, without joining an attempt under way as `reachForCall` would. A name qualified with a machine or hub is answered by the first lookup alone, and the machines that did not answer stand as it held them. `create_session` names a project by the same match as `ask_project` (`matchProjects`: id, exact name, `machine/name`, the name in any case), over this computer and the machines, and says which machines it could not ask; a qualified name speaks only of its own machine (`awayFor`, which tells a machine's id from a bare name by the machines the lookup saw, `ProjectLookup.machines`, not by their projects), and the name is trimmed as `ask_project` trims it. The answer waits for the slowest of the down machines, since a same name on another one would make the choice ambiguous. A name qualified with a machine or hub never widens to the others; `agent_session`, a send to or a read of one
-of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
-a window's own calls start nothing, they poll. Not for a machine that waits for the person, one whose host the person stopped
+of its sessions) and the router's calls that come from no socket (no `ctx`: an agent's, an app view's);
+a socket's calls (a window's, a hub's, a script's) start nothing, they poll. A refusal tells only the person where Connect is:
+a call from their window (a full socket that shows their cards, `RpcContext.window`) or an app view (#1143); a hub, a script,
+an app and an agent read the agent's sentence. Not for a machine that waits for the person, one whose host the person stopped
 there, one at `versions_differ` or `updating`, or one held by an operation. What a child there reported meanwhile is read once the
 link is up again. A parent waiting on a child whose turn is running is
 told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask
