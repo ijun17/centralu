@@ -399,6 +399,29 @@ describe('a session purged from the session archive (§4.1)', () => {
     expect(s.mail.messagesAfter(tid(1), 0)).toHaveLength(3)
   })
 
+  it('takes its rows in the message tables, and each message left with no row; a message another party still has stays', async () => {
+    const s = new Store()
+    s.settings.setAppSetting('hub.selfId', HOST)
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'alpha' })
+    sessionRow(s, 'gone')
+    sessionRow(s, 'stays')
+    const gone = `session:${HOST}/gone`
+    const stays = `session:${HOST}/stays`
+    const put = (id: string, sender: string, to: string[]) =>
+      s.mailbox.insert(
+        { id, sender, senderProject: 'p1', kind: 'message', needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, body: id, facts: {}, dedupeKey: null, origin: 'mail', legacyThread: null, createdAt: NOW },
+        to.map((recipient) => ({ recipient, dueAt: NOW })),
+      )
+    put('m-only-gone', stays, [gone])
+    put('m-both', stays, [gone, 'person'])
+    put('m-from-gone', gone, [stays])
+    await s.trash.trashSession('gone', KEEP)
+    expect(await s.trash.purgeSession('gone')).toBe(true)
+    expect(s.mailbox.message('m-only-gone')).toBeUndefined()
+    expect(s.mailbox.recipients('m-both').map((r) => r.recipient)).toEqual(['person'])
+    expect(s.mailbox.recipients('m-from-gone').map((r) => r.recipient)).toEqual([stays])
+  })
+
   it('on a host that never made mail there is no id and nothing to delete, and a purge still works', async () => {
     const s = new Store()
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'alpha' })
