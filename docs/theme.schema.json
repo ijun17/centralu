@@ -99,6 +99,11 @@
           "maxLength": 400,
           "description": "Ink: Background information. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
         },
+        "mark-waiting": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Session mark waiting on an approval: fill. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
         "diff-add": {
           "type": "string",
           "maxLength": 400,

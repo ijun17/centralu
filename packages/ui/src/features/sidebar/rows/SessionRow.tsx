@@ -1,6 +1,4 @@
 import type { ReactNode } from 'react'
-import type { SessionSummary } from '@cc/core'
-import { RowApproval } from '../../approval/RowApproval.jsx'
 import { SESSION_MIME, projectItemMime } from '../reorder.js'
 import { INDENT, GUIDE } from '../layout.js'
 import { useDropLine, dropLine } from '../dragDrop.js'
@@ -19,7 +17,6 @@ export function SessionRow({
   nested,
   level,
   children,
-  below,
 }: {
   id: string
   /** Carried in the drag, so the project screen can tell its own sessions from another project's (reorder.ts) */
@@ -46,11 +43,6 @@ export function SessionRow({
    */
   level: keyof typeof INDENT
   children: ReactNode
-  /**
-   * A second line under the row (#543: what its approval asks, with Allow and Deny). The row's own line is a box of
-   * its own, so the chevron in the gutter and the ⋯ at the right edge stay centred on it, not on both lines.
-   */
-  below?: ReactNode
 }) {
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
@@ -67,16 +59,6 @@ export function SessionRow({
       {...drop.handlers}
     >
       <div className="relative">{children}</div>
-      {below}
     </li>
   )
-}
-
-/**
- * The line under a session's row while it waits on an approval (#543): what it asks, and Allow / Deny where its card's
- * question is a plain yes or no (`RowApproval`). Only while it waits, and not while the name is being edited.
- */
-export function approvalLine(s: SessionSummary, renaming: string | null, open: () => void): ReactNode {
-  if (s.state !== 'waiting_approval' || !s.pendingApproval || renaming === s.id) return null
-  return <RowApproval sessionId={s.id} place="sidebar" onOpen={open} />
 }

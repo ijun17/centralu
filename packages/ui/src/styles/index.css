@@ -107,6 +107,8 @@
   --color-ink: #ededed; /* body text */
   --color-ink-muted: #a8a8a8; /* secondary */
   --color-ink-faint: #707070; /* background information */
+  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a4a4a4`, light its inverse; the high-contrast presets take a fill the letter stays readable on */
+  --color-mark-waiting: #a4a4a4;
 
   /*
    * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
@@ -393,6 +395,7 @@
   --color-ink: #2a2a2a;
   --color-ink-muted: #5a5a5a;
   --color-ink-faint: #7a7a7a;
+  --color-mark-waiting: #5b5b5b;
 
   --color-diff-add: #1a7f37;
   --color-diff-add-bg: #dafbe1;
@@ -468,6 +471,7 @@
   --color-ink: #f0f0f0;
   --color-ink-muted: #c8c8c8;
   --color-ink-faint: #9e9e9e;
+  --color-mark-waiting: #6e6e6e;
 
   --color-diff-add: #8af59a;
   --color-diff-add-bg: #0a2e14;
@@ -509,6 +513,7 @@
   --color-ink: #121212;
   --color-ink-muted: #3a3a3a;
   --color-ink-faint: #595959;
+  --color-mark-waiting: #919191;
 
   --color-diff-add: #0b5a1f;
   --color-diff-add-bg: #d1f5d8;
@@ -1321,6 +1326,8 @@
   /* The letter sits high in the readout font's line box (measured at 4x: its middle up to 0.75px above the chip's);
      1px on top brings every look within a quarter pixel of the middle */
   padding-top: 1px;
+  /* A look changing (a session starts to wait, an approval is answered) fades in the short time every state change takes */
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 /* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
    the 1px goes under it (measured at 4x) */
@@ -1335,6 +1342,12 @@
 .cc-mark[data-look='waiting'] > .cc-chip {
   border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
+}
+/* A session waiting on an approval: its own fill, set per preset (`mark-waiting`), and the letter in the edge's ink, so it
+   stands out without a line under the row (#1740) */
+.cc-mark[data-look='waiting'][data-state='waiting_approval'] > .cc-chip {
+  background-color: var(--color-mark-waiting);
+  color: var(--color-ink-signal);
 }
 .cc-mark[data-look='stopped'] > .cc-chip {
   border: 2px dashed var(--color-ink-signal);

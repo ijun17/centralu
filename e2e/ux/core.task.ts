@@ -138,21 +138,6 @@ const allowedInPlace = async (page: Page) => {
 }
 
 uxTask({
-  id: 'approve.mouse',
-  task: 'Answer an approval waiting in another session',
-  path: 'mouse',
-  access: 'discoverable',
-  notes: ["Allow on the session's sidebar row, under the command it asks to run (#543)"],
-  start: demo,
-  run: async (u, page) => {
-    const id = await sessionId(page, APPROVING)
-    await u.click(page.getByTestId(`sidebar-approve-allow-${id}`), { label: `Allow on the sidebar row "${APPROVING}"` })
-  },
-  goal: allowedInPlace,
-  budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
-})
-
-uxTask({
   id: 'approve.mouse-inbox',
   task: 'Answer an approval waiting in another session',
   path: 'mouse',

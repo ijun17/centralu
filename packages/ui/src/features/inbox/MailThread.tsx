@@ -36,7 +36,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const parties = [thread.owner, ...(thread.assignee ? [thread.assignee] : []), ...view.parties.map((p) => p.party)]
   const unique = [...new Map(parties.filter((p) => p.sessionId !== null).map((p) => [p.address, p])).values()]
   return (
-    <div className="flex flex-col" data-testid="mail-thread">
+    <div className="flex min-h-0 flex-col" data-testid="mail-thread">
       <header className="flex items-center gap-2 border-b border-line/60 px-4 py-2.5">
         <button className="shrink-0 rounded-full px-2 py-0.5 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink" onClick={back} aria-label="Back to the list" data-testid="mail-back">
           ←
@@ -79,7 +79,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         </ul>
       )}
 
-      <ol ref={list} className="flex max-h-[calc(40vh/var(--text-zoom))] flex-col gap-2 overflow-y-auto px-4 py-2" data-testid="mail-messages">
+      <ol ref={list} className="flex max-h-[calc(40vh/var(--text-zoom))] min-h-0 flex-col gap-2 overflow-y-auto px-4 py-2" data-testid="mail-messages">
         {view.older && (
           <li className="text-center">
             <Button size="sm" variant="quiet" onClick={() => void older()} data-testid="mail-earlier">

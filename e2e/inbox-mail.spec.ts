@@ -124,3 +124,35 @@ test('Mail: work is offered only to the sessions the host would accept it for', 
   expect(options.slice(1)).toHaveLength(1)
   expect(options.slice(1)[0]?.trim()).toBeTruthy()
 })
+
+// #1772: however much mail there is, the panel stays inside the window and the mail scrolls inside it
+test('Mail: a pile of threads and held mail scrolls inside the panel, and nothing else on screen moves', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 1100, height: 560 })
+  for (let i = 0; i < 24; i++) await seed(page, { subject: `Question ${i}`, from: PARSER, body: 'x' })
+  for (let i = 0; i < 8; i++) {
+    await seed(page, { subject: `Held ${i}`, from: { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }, body: 'y', kind: 'assign', held: { reason: 'loop', recipient: PARSER } })
+  }
+  const frame = () =>
+    page.evaluate(() => {
+      const box = (id: string) => {
+        const r = document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect()
+        return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null
+      }
+      const doc = document.scrollingElement!
+      return { counter: box('counter'), doc: { top: doc.scrollTop, height: doc.scrollHeight, view: window.innerHeight }, inbox: box('inbox') }
+    })
+  const before = await frame()
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-mail')).toBeVisible()
+
+  const after = await frame()
+  // The panel ends inside the window, the page itself does not scroll, and the top bar stays where it was
+  expect(after.inbox!.y + after.inbox!.h).toBeLessThanOrEqual(after.doc.view)
+  expect(after.doc.height).toBeLessThanOrEqual(after.doc.view)
+  expect(after.doc.top).toBe(0)
+  expect(after.counter).toEqual(before.counter)
+  // The mail is what scrolls: the thread list holds more than it shows
+  const list = page.getByTestId('inbox-mail').locator('ul').last().locator('..')
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+})

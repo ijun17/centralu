@@ -9,7 +9,7 @@ import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
 import { GroupToggle } from './GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from './groupFold.js'
-import { SessionRow, approvalLine } from './SessionRow.jsx'
+import { SessionRow } from './SessionRow.jsx'
 import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
@@ -62,7 +62,6 @@ export function SessionListRow({
       projectId={projectId}
       nested={inApp ? depth + 1 : nested}
       level={Math.min((inApp ? 2 : 1) + depth, MAX_LEVEL) as keyof typeof INDENT}
-      below={approvalLine(s, renaming, () => focusSession(s.id))}
       /*
        * A child row cannot be dragged — position is membership (#69). Letting a row
        * drawn indented under a parent be moved by hand would make the new position read

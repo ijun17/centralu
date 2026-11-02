@@ -2,9 +2,9 @@ import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './project-screen.js'
 
 /**
- * Answering an approval from a list row (#543, audit items 1 and 2): the waiting list's row and the sidebar's row of a
- * session waiting on an approval show what it asks (the verb and the command or path, the card's own text in the
- * tooltip), and offer Allow and Deny when the card's question is a plain yes or no. A card that offers more (start an
+ * Answering an approval from a list row (#543, audit items 1 and 2): the waiting list's row of a
+ * session waiting on an approval shows what it asks (the verb and the command or path, the card's own text in the
+ * tooltip), and offers Allow and Deny when the card's question is a plain yes or no. A card that offers more (start an
  * agent, reach another project, several files, a question beside it) shows Open instead.
  *
  * The answer goes through the card's own path (`respondApproval`) with the request id the row shows, so a request the
@@ -23,8 +23,6 @@ type Mock = {
 }
 
 const COMMAND = 'kill -TERM 40321 && rm -rf ./tmp/orphans'
-/** Short enough for the sidebar's 240 px row: a command is answered from a row only when it fits whole */
-const SHORT = 'kill -TERM 40321'
 const CWD = '/tmp/alpha'
 
 /** Two sessions in alpha; the second is on screen. Returns the first (the one the tests are about) and the second. */
@@ -106,23 +104,6 @@ export function rowApprovalTests() {
     expect((await answers(page))[1]).toEqual({ sessionId: firstId, requestId: firstId === a ? 'ra' : 'rb', decision: 'allow' })
   })
 
-  test('the sidebar row of a waiting session shows the command and answers it in place', async ({ page }) => {
-    const { target, shown } = await twoSessions(page)
-    await ask(page, target, { kind: 'command', command: SHORT, cwd: CWD })
-
-    const what = page.getByTestId(`sidebar-approval-what-${target}`)
-    await expect(what).toContainText(SHORT)
-    await what.hover()
-    await expect(page.getByTestId(`sidebar-approval-tip-${target}`)).toContainText(CWD)
-
-    await page.getByTestId(`sidebar-approve-deny-${target}`).click()
-
-    await expect.poll(() => answers(page)).toEqual([{ sessionId: target, requestId: 'r1', decision: 'deny' }])
-    expect(await focused(page)).toBe(shown)
-    // Only while it waits: the line goes once the approval is answered
-    await expect(page.getByTestId(`sidebar-approval-${target}`)).toHaveCount(0)
-  })
-
   // #683 review: the list listens on the window; a key typed into a layer over it, or composing, is not the list's
   test('typing in the palette over the waiting list, or composing a syllable, answers nothing', async ({ page }) => {
     const { target } = await twoSessions(page)
@@ -159,25 +140,26 @@ export function rowApprovalTests() {
   // #683 review: a cut line can hide what matters, so a command that does not fit opens the session
   test('a command too long for the row shows Open there; an edit shows its file name first', async ({ page }) => {
     const { target } = await twoSessions(page)
-    // Longer than the sidebar's row, short enough for the waiting list's
+    // Short enough for the waiting list's row: it fits whole, and answers there
     await ask(page, target, { kind: 'command', command: COMMAND, cwd: CWD })
-    // The sidebar's row is too narrow for it: Open, and the tooltip has it whole
-    await expect(page.getByTestId(`sidebar-approve-open-${target}`)).toBeVisible()
-    await expect(page.getByTestId(`sidebar-approve-allow-${target}`)).toHaveCount(0)
-    await page.getByTestId(`sidebar-approval-what-${target}`).hover()
-    await expect(page.getByTestId(`sidebar-approval-tip-${target}`)).toContainText(COMMAND)
-    // The waiting list's wider row fits it whole, and answers it there
     await openInbox(page)
     await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toBeEnabled()
-    await page.keyboard.press('Escape')
-
+    // A command wider than the row shows Open, and the tooltip has it whole
+    const LONG = `${COMMAND} && ${COMMAND} && ${COMMAND}`
     await page.evaluate(({ sid }) => ((window as any).__mock as Mock).emit({ type: 'approval_resolved', sessionId: sid, requestId: 'r1', decision: 'deny' }), { sid: target })
+    await ask(page, target, { kind: 'command', command: LONG, cwd: CWD }, 'r1b')
+    await expect(page.getByTestId(`inbox-approve-open-${target}`)).toBeVisible()
+    await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toHaveCount(0)
+    await page.getByTestId(`inbox-approval-what-${target}`).hover()
+    await expect(page.getByTestId(`inbox-approval-tip-${target}`)).toContainText(LONG)
+
+    await page.evaluate(({ sid }) => ((window as any).__mock as Mock).emit({ type: 'approval_resolved', sessionId: sid, requestId: 'r1b', decision: 'deny' }), { sid: target })
     await ask(page, target, { kind: 'file_edit', path: '/tmp/alpha/packages/ui/src/features/approval/RowApproval.tsx', diffPreview: '+x', multi: false }, 'r2')
     // The name stands whole at the front; the folder, relative to the project, gives way
-    await expect(page.getByTestId(`sidebar-approval-file-${target}`)).toHaveText('RowApproval.tsx')
-    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).toContainText('packages/ui/')
-    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).not.toContainText('/tmp/alpha')
-    await expect(page.getByTestId(`sidebar-approve-allow-${target}`)).toBeEnabled()
+    await expect(page.getByTestId(`inbox-approval-file-${target}`)).toHaveText('RowApproval.tsx')
+    await expect(page.getByTestId(`inbox-approval-what-${target}`)).toContainText('packages/ui/')
+    await expect(page.getByTestId(`inbox-approval-what-${target}`)).not.toContainText('/tmp/alpha')
+    await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toBeEnabled()
   })
 
   // #683 review: requests whose line says nothing, or that carry a risk the line does not show
@@ -191,49 +173,52 @@ export function rowApprovalTests() {
     await ask(page, ids[3]!, { kind: 'command', command: 'curl x', cwd: CWD, unsandboxed: true })
     // #683 re-review: a path that starts in the project and climbs out of it
     await ask(page, ids[4]!, { kind: 'file_edit', path: '/tmp/alpha/src/../../../etc/zshrc', diffPreview: '+x', multi: false })
+    await openInbox(page)
     for (const id of ids) {
-      await expect(page.getByTestId(`sidebar-approve-open-${id}`)).toBeVisible()
-      await expect(page.getByTestId(`sidebar-approve-allow-${id}`)).toHaveCount(0)
+      await expect(page.getByTestId(`inbox-approve-open-${id}`)).toBeVisible()
+      await expect(page.getByTestId(`inbox-approve-allow-${id}`)).toHaveCount(0)
     }
-    await expect(page.getByTestId(`sidebar-approval-what-${ids[0]}`)).toContainText('network access to docs.example.com')
-    await expect(page.getByTestId(`sidebar-approval-what-${ids[2]}`)).toContainText('Delete')
+    await expect(page.getByTestId(`inbox-approval-what-${ids[0]}`)).toContainText('network access to docs.example.com')
+    await expect(page.getByTestId(`inbox-approval-what-${ids[2]}`)).toContainText('Delete')
     // Shown where it really lands, not as a file of the project
-    await expect(page.getByTestId(`sidebar-approval-what-${ids[4]}`)).toContainText('zshrc/etc/')
+    await expect(page.getByTestId(`inbox-approval-what-${ids[4]}`)).toContainText('zshrc/etc/')
     // The card says it too
-    await page.getByTestId(`sidebar-approve-open-${ids[3]}`).click()
+    await page.getByTestId(`inbox-approve-open-${ids[3]}`).click()
     await expect(page.getByTestId('approval-detail')).toContainText('Runs outside the sandbox')
   })
 
   test('a row that just appeared or moved does not answer until the rows stand still', async ({ page }) => {
     const { target } = await twoSessions(page)
+    await openInbox(page)
     // Read in the page, on the first frame the row is drawn: well inside the settle time, whatever the machine's load
     const disabledWhenDrawn = await page.evaluate(async ({ sid }) => {
       ;((window as any).__mock as Mock).requestApproval(sid, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' }, 'r1')
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => requestAnimationFrame(r))
-        const b = document.querySelector<HTMLButtonElement>(`[data-testid="sidebar-approve-allow-${sid}"]`)
+        const b = document.querySelector<HTMLButtonElement>(`[data-testid="inbox-approve-allow-${sid}"]`)
         if (b) return b.disabled
       }
       return null
     }, { sid: target })
     expect(disabledWhenDrawn).toBe(true)
     // Then it settles and answers
-    await expect(page.getByTestId(`sidebar-approve-allow-${target}`)).toBeEnabled()
-    await page.getByTestId(`sidebar-approve-allow-${target}`).click()
+    await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toBeEnabled()
+    await page.getByTestId(`inbox-approve-allow-${target}`).click()
     await expect.poll(() => answers(page)).toEqual([{ sessionId: target, requestId: 'r1', decision: 'allow' }])
   })
 
   test('a row whose request the host has replaced is refused there, and the new request is not answered', async ({ page }) => {
     const { target } = await twoSessions(page)
     await ask(page, target, { kind: 'command', command: 'ls', cwd: CWD }, 'old')
-    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).toContainText('ls')
+    await openInbox(page)
+    await expect(page.getByTestId(`inbox-approval-what-${target}`)).toContainText('ls')
 
     // The host moved on to another request whose event has not reached this window yet
     await page.evaluate(
       ({ sid }) => ((window as any).__mock as Mock).replaceApprovalUnseen(sid, { kind: 'command', command: 'rm -rf /', cwd: '/' }, 'new'),
       { sid: target },
     )
-    await page.getByTestId(`sidebar-approve-allow-${target}`).click()
+    await page.getByTestId(`inbox-approve-allow-${target}`).click()
 
     // Refused by the id the row carried: said so, and nothing was answered
     await expect(page.getByTestId('toast')).toContainText('already gone')
@@ -245,7 +230,7 @@ export function rowApprovalTests() {
       ({ sid }) => ((window as any).__mock as Mock).emit({ type: 'approval_request', sessionId: sid, requestId: 'new', detail: { kind: 'command', command: 'rm -rf /', cwd: '/' } }),
       { sid: target },
     )
-    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).toContainText('rm -rf /')
+    await expect(page.getByTestId(`inbox-approval-what-${target}`)).toContainText('rm -rf /')
   })
 
   test('a card that offers more than allow and deny shows Open on its row, which opens the session', async ({ page }) => {
@@ -277,14 +262,9 @@ export function rowApprovalTests() {
       { sid: asking },
     )
 
-    for (const id of [agents, files, asking]) {
-      await expect(page.getByTestId(`sidebar-approve-open-${id}`)).toBeVisible()
-      await expect(page.getByTestId(`sidebar-approve-allow-${id}`)).toHaveCount(0)
-    }
-    // Still says what it asks
-    await expect(page.getByTestId(`sidebar-approval-what-${agents}`)).toContainText('Start Codex in "alpha"')
-
     await openInbox(page)
+    // Still says what it asks
+    await expect(page.getByTestId(`inbox-approval-what-${agents}`)).toContainText('Start Codex in "alpha"')
     for (const id of [agents, files, asking]) {
       await expect(page.getByTestId(`inbox-approve-open-${id}`)).toBeVisible()
       await expect(page.getByTestId(`inbox-approve-allow-${id}`)).toHaveCount(0)
@@ -297,5 +277,25 @@ export function rowApprovalTests() {
     expect(await focused(page)).toBe(agents)
     await expect(page.getByTestId('approval-card')).toBeVisible()
     expect(await answers(page)).toEqual([])
+  })
+
+  // #1740: the sidebar has no line under a waiting session; its mark is lighter instead, and goes back once answered
+  test('the sidebar draws no approval line for a waiting session, and its mark is lighter while it waits', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    const mark = page.getByTestId(`session-row-${target}`).locator('.cc-mark > .cc-chip')
+    const fill = () => mark.evaluate((el) => getComputedStyle(el).backgroundColor)
+    const resting = await fill()
+    await ask(page, target, { kind: 'command', command: 'ls', cwd: CWD })
+
+    await expect(page.getByTestId(`session-row-${target}`).locator('[data-state="waiting_approval"]')).toBeVisible()
+    // The preset's `mark-waiting` (Dark `#a4a4a4`), not the grey or the floor it had
+    await expect.poll(fill).toBe('rgb(164, 164, 164)')
+    expect(await fill()).not.toBe(resting)
+    // Nothing under the row: no line, no Allow or Deny in the sidebar
+    await expect(page.getByTestId('sidebar').locator('[data-testid*="approval"], [data-testid*="approve-"]')).toHaveCount(0)
+
+    await openInbox(page)
+    await page.getByTestId(`inbox-approve-allow-${target}`).click()
+    await expect.poll(fill).toBe(resting)
   })
 }

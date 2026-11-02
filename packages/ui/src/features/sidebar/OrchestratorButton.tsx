@@ -3,7 +3,6 @@ import { isInTurn, isMirrored, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useSelectedSessionId } from '../../store/selectors.js'
 import { INDENT, GUIDE } from './layout.js'
-import { approvalLine } from './rows/SessionRow.jsx'
 import { ToolMark } from './marks/ToolMark.jsx'
 import { RowMenu } from './menus/RowMenu.jsx'
 import { ActionRow } from './menus/ActionRow.jsx'
@@ -304,7 +303,6 @@ function OrchestratorChildRow({ s, onHold, setConfirming }: { s: SessionSummary;
           />
         </RowMenu>
       )}
-      {approvalLine(s, null, () => focusSession(s.id))}
     </li>
   )
 }

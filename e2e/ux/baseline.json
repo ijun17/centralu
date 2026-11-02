@@ -550,64 +550,6 @@
       "breaches": []
     },
     {
-      "id": "approve.mouse",
-      "task": "Answer an approval waiting in another session",
-      "path": "mouse",
-      "access": "discoverable",
-      "operators": "H M P B B M P B B",
-      "counts": {
-        "K": 0,
-        "P": 2,
-        "B": 4,
-        "H": 1,
-        "M": 2,
-        "R": 2
-      },
-      "seconds": 5.56,
-      "waitMs": 32,
-      "travelPx": 741,
-      "steps": [
-        {
-          "kind": "click",
-          "label": "session row \"Clean up leftover processes\"",
-          "operators": "H M P B B",
-          "seconds": 3.03,
-          "pointer": {
-            "D": 551,
-            "W": 96,
-            "ID": 2.76
-          }
-        },
-        {
-          "kind": "wait",
-          "label": "the approval card",
-          "operators": "R",
-          "seconds": 0,
-          "waitMs": 6
-        },
-        {
-          "kind": "click",
-          "label": "approve-allow",
-          "operators": "M P B B",
-          "seconds": 2.54,
-          "pointer": {
-            "D": 190,
-            "W": 70,
-            "ID": 1.89
-          }
-        },
-        {
-          "kind": "wait",
-          "label": "goal",
-          "operators": "R",
-          "seconds": 0,
-          "waitMs": 27
-        }
-      ],
-      "notes": [],
-      "breaches": []
-    },
-    {
       "id": "approve.mouse-inbox",
       "task": "Answer an approval waiting in another session",
       "path": "mouse",
