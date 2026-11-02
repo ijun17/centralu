@@ -73,6 +73,11 @@ export type HostControl = {
   step: (step: UpdateStep, count?: number) => void
 }
 
+/** Whether a host answering as `got` is the one `HostControl.answers` waits for: `want` null takes any (#1903) */
+export function answersAs(want: string | null, got: string | null | undefined): boolean {
+  return want === null || got === want
+}
+
 /** `{ v: 1, stop: { ok, wasRunning, how?, message? } }`, the line `serve --stop` prints; null when there is none */
 export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolean; message: string | null } | null {
   for (const line of stdout.split(/\r?\n/).reverse()) {

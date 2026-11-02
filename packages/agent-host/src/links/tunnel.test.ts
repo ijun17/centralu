@@ -635,11 +635,28 @@ describe('the remote command per shell (#82)', () => {
   it('sets the data folder the link names before the lookup, in each shell, and refuses one a shell would read into', () => {
     expect(connectionCommand({ shell: 'posix', dataDir: '/tmp/cc try' })).toMatch(/^sh -c 'CC_DATA_DIR="\/tmp\/cc try"; export CC_DATA_DIR; d=/)
     expect(decode(stopCommand({ shell: 'powershell', dataDir: 'C:\\cc try' }, { forUpdate: true }))).toContain("$env:CC_DATA_DIR = 'C:\\cc try'; $env:CENTRALU_STOP_BY = 'hub'")
-    expect(connectionCommand({ shell: 'posix', command: 'x', dataDir: '/tmp/cc' })).toBe('x serve --connection')
-    for (const bad of ['relative', '~/cc', '/tmp/$HOME', "/tmp/a'b", '/tmp/a"b', '/tmp/`id`', 'C:\\a;b']) {
-      expect(dataDirError(bad), bad).not.toBeNull()
-      expect(() => connectionCommand({ shell: 'posix', dataDir: bad }), bad).toThrow(/Not a data folder Centralu can name there/)
+    expect(connectionCommand({ shell: 'wsl', wslDistro: 'Ubuntu', dataDir: '/tmp/cc' })).toMatch(/^powershell/)
+    // A POSIX shell (and WSL): an absolute / path. A backslash before the closing quote would escape it (`CC_DATA_DIR="/tmp/cc\"`),
+    // and a drive path would be a folder of that name in the ssh home
+    for (const bad of ['relative', '~/cc', '/tmp/$HOME', "/tmp/a'b", '/tmp/a"b', '/tmp/`id`', '/tmp/cc\\', '/tmp/a\\b', 'C:\\cc', 'C:/cc', '/tmp/cc/', '//', '/']) {
+      for (const shell of ['posix', 'wsl'] as const) {
+        expect(dataDirError(bad, shell), `${shell} ${bad}`).not.toBeNull()
+        expect(() => connectionCommand({ shell, wslDistro: 'Ubuntu', dataDir: bad }), bad).toThrow(/Not a data folder Centralu can name there/)
+      }
     }
+    // Windows: a drive path, with no trailing separator, and no / path (a folder on whatever drive the session is on)
+    for (const bad of ['/tmp/cc', 'C:', 'C:\\', 'C:\\x y\\', "C:\\a'b", 'C:\\$env', 'C:\\a;b', 'cc', 'C:cc']) {
+      expect(dataDirError(bad, 'powershell'), bad).not.toBeNull()
+      expect(() => connectionCommand({ shell: 'powershell', dataDir: bad }), bad).toThrow(/Not a data folder Centralu can name there/)
+    }
+    expect(dataDirError('C:\\Users\\me\\cc try', 'powershell')).toBeNull()
+    expect(dataDirError('/home/me/cc try', 'posix')).toBeNull()
+  })
+
+  // What a real sh makes of the line: the folder exactly as given, spaces included
+  it.skipIf(process.platform === 'win32')('a real sh reads the data folder the link names as given', () => {
+    const env = execFileSync('/bin/sh', ['-c', `${connectionCommand({ shell: 'posix', dataDir: '/tmp/cc try' }).slice("sh -c '".length).split('; d=')[0]}; echo "$CC_DATA_DIR"`], { encoding: 'utf8' })
+    expect(env.trim()).toBe('/tmp/cc try')
   })
 
   // Run by a real sh, as a POSIX remote would: the order is the shell's, not a string's. Skipped on

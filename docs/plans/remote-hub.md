@@ -494,8 +494,11 @@ and takes no lock, is put back. Two gaps were closed in the steps above:
 
 - A new version whose host took `host.lock` and then hung never listened, so `serve --stop` probed its port, answered
   "not running" and signalled nothing, and the old version then failed on the lock: no host at all. `--stop` now also
-  stops a host that holds the lock without answering, when the lock names a process `serve` started and that process is
-  the one that wrote it (`lockHolderIsAlive`, #1888's check). It is ended by that pid, since there is nothing to ask.
+  stops a host that holds the lock while nothing listens on its port, when the lock names a process `serve` started and
+  that process is the one that wrote it (`lockHolderIsAlive`, #1888's check). It is ended by that pid, since there is
+  nothing to ask. "Nothing listens" is a listen on the port that succeeds, not a probe that got no answer: a host whose
+  event loop is stalled answers no probe in 2 s either, and is running with its turns. The hand-over's stop (`ifIdle`,
+  #1224) never ends such a holder: it stops only a host that said it is idle.
 - Step 5 counted the old version back once its start went through. It now counts it back only after its hello (30 s);
   otherwise the update fails saying the put-back failed too.
 
@@ -508,8 +511,10 @@ its own (#1903).
 **Trying it on a temporary folder.** A link can name the data folder on its machine (`RemoteSpec.dataDir`, `machines.add`'s
 `dataDir`, kept as the `links.dataDir.<id>` setting): every command and script the hub sends sets `CC_DATA_DIR` to it
 first, so the scripts' `$d`, `serve`, and the host it starts all use it, and the machine's own installation is left alone.
-Only an absolute path of letters, digits, spaces and `. _ - : / \` is taken, since it goes on the shell's line. A hub
-build from before it ignores the setting and links the machine's own data folder.
+It goes on the shell's line, so one rule per shell: a POSIX or WSL link takes an absolute `/` path, a Windows link a drive
+path, each of letters, digits, spaces and `. _ -` with no trailing separator. A machine with a command of its own is
+refused one, since that command sets its own folder. A stored folder this build does not take is said once on the row,
+with no ssh and no retry. A hub build from before it ignores the setting and links the machine's own data folder.
 
 **Rollback** is the same switch in the other direction, offered while `previous` exists. Two steps back is not
 offered: a store migrated twice may no longer be readable by it, and that host would refuse to start with the

@@ -340,19 +340,25 @@ export type RemoteSpec = {
   dataDir?: string | null
 }
 
-/** An absolute path, POSIX or Windows, with nothing a shell reads inside quotes ($, quotes, backquotes, ~) */
-const DATA_DIR_RE = /^(?:\/|[A-Za-z]:[\\/])[A-Za-z0-9._/\\: -]{0,240}$/
+/**
+ * The data folders a link may name, per shell: what goes inside the shell's quotes with nothing read into it ($, quotes,
+ * backquotes, ~, and no backslash in sh, where one before the closing quote escapes it). A POSIX shell (and WSL) gets an
+ * absolute `/` path; Windows a drive path. No trailing separator
+ */
+const DATA_DIR_RE = { posix: /^\/(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+$/, powershell: /^[A-Za-z]:(?:\\[A-Za-z0-9._ -]+)+$/ }
 
-/** Why a remote data folder is not taken, or null when it is (`RemoteSpec.dataDir`) */
-export function dataDirError(dir: string): string | null {
-  return DATA_DIR_RE.test(dir) ? null : `Not a data folder Centralu can name there: ${dir} (an absolute path of letters, digits, spaces and . _ - : / \\)`
+/** Why a data folder is not taken for a link of `shell`, or null when it is (`RemoteSpec.dataDir`) */
+export function dataDirError(dir: string, shell: RemoteShell): string | null {
+  const ps = shell === 'powershell'
+  if (dir.length <= 240 && DATA_DIR_RE[ps ? 'powershell' : 'posix'].test(dir)) return null
+  return `Not a data folder Centralu can name there: ${dir} (${ps ? 'a drive path such as C:\\centralu-try' : 'an absolute path such as /tmp/centralu-try'}, of letters, digits, spaces and . _ -)`
 }
 
 /** `CC_DATA_DIR` set to the spec's data folder, in the shell's terms, before what runs after it; "" when it names none */
 function dataDirSet(spec: RemoteSpec, shell: 'sh' | 'ps'): string {
   const dir = spec.dataDir
   if (!dir) return ''
-  const why = dataDirError(dir)
+  const why = dataDirError(dir, spec.shell)
   if (why) throw new Error(why)
   return shell === 'ps' ? `$env:CC_DATA_DIR = '${dir}'; ` : `CC_DATA_DIR="${dir}"; export CC_DATA_DIR; `
 }

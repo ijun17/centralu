@@ -66,7 +66,8 @@ export class Links {
     const badDistro = remote.shell === 'wsl' ? wslDistroError(remote.wslDistro) : null
     if (badDistro) throw rpcError(`${badDistro}; a distro's name is letters, digits, '.', '_' and '-' (\`wsl.exe -l -v\` lists the ones there)`)
     if (remote.command && /[\r\n]/.test(remote.command)) throw rpcError('The remote command must be one line')
-    const badDataDir = remote.dataDir ? dataDirError(remote.dataDir) : null
+    if (remote.dataDir && remote.command) throw rpcError('A machine with a command of its own sets its data folder in that command, not as a data folder')
+    const badDataDir = remote.dataDir ? dataDirError(remote.dataDir, remote.shell) : null
     if (badDataDir) throw rpcError(badDataDir)
     if (!trimmed.name) throw rpcError('A machine needs a name')
     if (!trimmed.sshTarget || trimmed.sshTarget.startsWith('-') || /\s/.test(trimmed.sshTarget)) {

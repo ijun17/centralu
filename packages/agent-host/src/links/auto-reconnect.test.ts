@@ -153,6 +153,20 @@ function checkout(url: string): string {
   return dir
 }
 
+describe('a data folder kept with the machine that this build does not take (#1903)', () => {
+  it('is said once on the row, with no ssh and no retry', async () => {
+    const store = new Store()
+    storeRegistry(store).add({ id: 'm1', name: 'Laptop', sshTarget: 'laptop', remote: { shell: 'posix', dataDir: '/tmp/cc\\' }, addedAt: 1, acceptedVersions: null })
+    const hub = await hubHost(() => lineFor(1), { store })
+    await eventually(() => hub.row().status === 'unreachable')
+    expect(hub.row().error).toMatch(/^Not a data folder Centralu can name there: \/tmp\/cc\\ .*; remove Laptop and add it again with another$/)
+    // Well past the backoff's first steps (50 ms, 200 ms): nothing tried again
+    await new Promise((r) => setTimeout(r, 600))
+    expect(hub.events.filter((e) => e.type === 'machine_status' && e.machine.status === 'connecting')).toEqual([])
+    expect(hub.tunnel().opens).toBe(0)
+  })
+})
+
 describe('the switch is kept with the machine (#1341)', () => {
   it('is on by default; a restarted hub reads the person’s choice, and the row says it', async () => {
     const remote = await remoteHost()

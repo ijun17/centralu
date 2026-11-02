@@ -2269,6 +2269,44 @@ describe('asking the host on the port without handing the token to anyone else (
     expect(holder.alive()).toBe(false)
   }, 90_000 * SLOW)
 
+  /*
+   * #1906 review: a host that listens but whose event loop is stalled answers no probe within 2 s either. It is running,
+   * with turns and terminals, so it is not ended without its shutdown: only a port where nothing listens counts. And the
+   * hand-over's stop (`ifIdle`), which asks again for 30 minutes, never ends a host it could not ask.
+   */
+  it.each([[false], [true]])('a host that listens but answers nothing in time is not ended (ifIdle %s)', async (ifIdle) => {
+    const d = tempDir()
+    ensureServeState(d)
+    const held: Array<{ destroy(): void }> = []
+    // Takes each connection and never answers it, as a host whose event loop is blocked
+    const stalled = createServer((socket) => void held.push(socket))
+    await new Promise<void>((r) => stalled.listen(0, '127.0.0.1', () => r()))
+    try {
+      recordServePort(d, (stalled.address() as { port: number }).port)
+      const holder = lockHolderProcess(d, 'serve')
+      const signals: Array<[number, string]> = []
+      const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, ifIdle, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
+      expect(signals).toEqual([])
+      expect(holder.alive()).toBe(true)
+      expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+    } finally {
+      for (const s of held) s.destroy()
+      await new Promise<void>((r) => stalled.close(() => r()))
+    }
+  }, 60_000 * SLOW)
+
+  it('the hand-over’s stop does not end a lock holder that never listened either: it is not idle, it is not answering', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const holder = lockHolderProcess(d, 'serve')
+    const signals: Array<[number, string]> = []
+    const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, ifIdle: true, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
+    expect(signals).toEqual([])
+    expect(holder.alive()).toBe(true)
+    expect(stopped).toMatchObject({ ok: false, wasRunning: true })
+  }, 60_000 * SLOW)
+
   // On Windows no signal reaches the launcher, so the host is ended and the launcher goes with it (#1723)
   it('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()

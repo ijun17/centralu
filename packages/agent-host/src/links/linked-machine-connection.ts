@@ -19,7 +19,7 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
 import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
@@ -929,6 +929,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.readsOnly = false
     const quiet = this.quietRetry
     this.quietRetry = false
+    // A data folder this build does not take (#1903, kept by another): every command there would be refused, so it is said once and not retried
+    const { dataDir, shell } = this.record.remote
+    const badDir = dataDir ? dataDirError(dataDir, shell) : null
+    if (badDir) return this.setStatus('unreachable', `${badDir}; remove ${this.name} and add it again with another`)
     // Kept only when it gave up redialling: `connectClient` points it at what the connection line says
     if (this.client !== this.gaveUp) {
       this.client?.close()
