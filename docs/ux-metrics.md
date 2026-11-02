@@ -130,7 +130,7 @@ A task is a named Playwright scenario with a start state and a checked goal, in
 
 ```ts
 uxTask({
-  id: 'approve.mouse', // <task>.<path>
+  id: 'approve.mouse-inbox', // <task>.<path>
   task: 'Answer an approval waiting in another session',
   path: 'mouse', // or 'keyboard' or 'mixed': how the person moves through the app
   access: 'discoverable', // or 'shortcut' (see "Discoverable paths first")

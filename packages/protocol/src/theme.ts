@@ -60,6 +60,8 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
     ['ink', 'Text'],
     ['ink-muted', 'Secondary'],
     ['ink-faint', 'Background information'],
+    ['mark-waiting', 'Session mark waiting on an approval: fill'],
+    ['mark-waiting-ink', 'Session mark waiting on an approval: letter'],
   ]),
   ...defs('Diff and danger', 'color', [
     ['diff-add', 'Added'],

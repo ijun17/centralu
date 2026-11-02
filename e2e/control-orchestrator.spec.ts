@@ -589,3 +589,24 @@ test("Turning on ⌘Enter to send also keeps the orchestrator's first composer f
   await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
 })
+
+// #1653: the orchestrator's session is deleted: the start screen comes back, and the next first question starts a new one
+test('When the orchestrator session is deleted, its screen is the start screen again and a new question starts a new session', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+  const first = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+
+  await page.evaluate((id) => {
+    const mock = (window as any).__mock
+    mock.sessions.delete(id)
+    mock.emit({ type: 'session_deleted', sessionId: id })
+  }, first)
+
+  await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
+  await page.getByTestId('orchestrator-input').fill('again')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().orchestratorId as string)).not.toBe(first)
+})
