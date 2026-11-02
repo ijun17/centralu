@@ -283,7 +283,7 @@ export class UserAppAdoption {
     let adopted = 0
     for (const app of this.waiting()) {
       try {
-        this.adopt(app)
+        await this.adopt(app)
         adopted++
       } catch (e) {
         this.failed.add(app.appId)
@@ -372,14 +372,14 @@ export class UserAppAdoption {
     }
   }
 
-  private adopt(app: ExternalAppInfo): void {
+  private async adopt(app: ExternalAppInfo): Promise<void> {
     const path = spelled(app.dir)
     // An import the person has not enabled stays off: its project starts untrusted, and trusting it is enabling it
     const held = app.status === 'unconfirmed' || (app.imported !== undefined && app.imported.confirmedAt === null)
     const known = this.deps.store.projects.findProjectByPath(path)?.id
     const projectId = known ?? randomUUID()
     // The files first: copies, made only where the new key has none, so an interrupted run repeats them harmlessly
-    this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
+    await this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
     // The mark before the record: a mark the record never took (a failed transaction) is replaced by the next attempt
     const mark = randomUUID()
     mkdirSync(join(app.dir, ADOPTION_MARK[0]), { recursive: true })

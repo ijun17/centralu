@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { canSymlink } from '../../link.test-helpers.js'
 import { realOs } from '../../os/real.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { copyTreeAsync } from '../../os/copy.js'
+import { HOST_FAMILY } from '../../os/real.js'
+import type { Os } from '../../os/port.js'
 import { carryAppFiles } from './carry.js'
 
 /**
@@ -18,7 +21,7 @@ afterEach(async () => {
 })
 
 describe('carrying an app to a new key', () => {
-  it('copies a junction back to its own folder, and a link in a circle, as links, and the rest as it was', () => {
+  it('copies a junction back to its own folder, and a link in a circle, as links, and the rest as it was', async () => {
     const root = tempRoot('cc-carry-')
     made.push(root)
     const from = join(root, 'app-data', 'keyA')
@@ -27,7 +30,7 @@ describe('carrying an app to a new key', () => {
     os.files.symlinkSync(from, join(from, 'sub', 'j'), 'junction')
     if (canSymlink) os.files.symlinkSync('x', join(from, 'x'), 'file')
 
-    carryAppFiles(root, 'keyA', 'keyB')
+    await carryAppFiles(root, 'keyA', 'keyB')
 
     const to = join(root, 'app-data', 'keyB')
     expect(os.files.readFileSync(join(to, 'sub', 'f'), 'utf8')).toBe('k')
@@ -36,7 +39,7 @@ describe('carrying an app to a new key', () => {
     if (canSymlink) expect(os.files.readlinkSync(join(to, 'x'))).toBe('x')
   })
 
-  it("a link into the app's folder leads into the new key's, so what the app writes through it stays with the new key; one outside is kept", () => {
+  it("a link into the app's folder leads into the new key's, so what the app writes through it stays with the new key; one outside is kept", async () => {
     const root = tempRoot('cc-carry-')
     made.push(root)
     const from = join(root, 'app-data', '_user', 'notes')
@@ -45,12 +48,43 @@ describe('carrying an app to a new key', () => {
     os.files.symlinkSync(join(from, 'sub'), join(from, 'subj'), 'junction')
     os.files.symlinkSync(join(root, 'shared'), join(from, 'out'), 'junction')
 
-    carryAppFiles(root, '_user/notes', 'p1/notes')
+    await carryAppFiles(root, '_user/notes', 'p1/notes')
 
     const to = join(root, 'app-data', 'p1', 'notes')
     os.files.writeFileSync(join(to, 'subj', 'new'), 'n')
     expect(os.files.readFileSync(join(to, 'sub', 'new'), 'utf8')).toBe('n')
     expect(os.files.existsSync(join(from, 'sub', 'new'))).toBe(false)
     expect(os.paths.same(os.files.readlinkSync(join(to, 'out')), join(root, 'shared'))).toBe(true)
+  })
+
+  /*
+   * #1707: an app's data may hold a link into a share that does not answer; Windows waits about 21 s for the first stat of
+   * one, and the synchronous copy held the host's event loop that long (measured: 21.1 s without a tick). The copy is a
+   * promise copy now, and a step that does not answer in time fails the carry. Here an `Os` whose files never answer.
+   */
+  describe('when the files do not answer (a link into a share that is not there)', () => {
+    const never = () => new Promise<never>(() => {})
+    const stalling: Os = {
+      ...os,
+      files: { ...os.files, promises: { ...os.files.promises, cp: (a, b, o) => copyTreeAsync({ ...os.files.promises, lstat: never }, a, b, o, HOST_FAMILY, os.paths.path) } },
+    }
+
+    it('keeps the host serving meanwhile, and fails within the bound with the step named and nothing left beside the place', async () => {
+      const root = tempRoot('cc-carry-')
+      made.push(root)
+      os.files.mkdirSync(join(root, 'app-data', 'keyA'), { recursive: true })
+      os.files.writeFileSync(join(root, 'app-data', 'keyA', 'f'), 'k')
+      let ticks = 0
+      const timer = setInterval(() => ticks++, 10)
+      const t0 = Date.now()
+      try {
+        await expect(carryAppFiles(root, 'keyA', 'keyB', { os: stalling, stepMs: 200 })).rejects.toMatchObject({ code: 'ETIMEDOUT', message: expect.stringContaining('did not answer within 200 ms') })
+      } finally {
+        clearInterval(timer)
+      }
+      expect(Date.now() - t0).toBeLessThan(5000)
+      expect(ticks).toBeGreaterThan(5)
+      expect(os.files.readdirSync(join(root, 'app-data'))).toEqual(['keyA'])
+    })
   })
 })

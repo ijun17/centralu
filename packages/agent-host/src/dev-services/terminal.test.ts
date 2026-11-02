@@ -213,12 +213,17 @@ describe('multiple terminals', () => {
       },
     }
     let pids: number[] = []
+    const services: TerminalService[] = []
     // Not in a `finally`: an error there would replace the assertion that failed
     onTestFinished(async (test) => {
-      await cleanUp(pids, test)
+      // A test that gave up waiting for the tree (a loaded machine) leaves the typed command to run later: the tab's own tree
+      // kill ends it with the shell, and the pid file names what it planted since, which `pids` does not hold (#1644)
+      for (const service of services) service.disposeAll()
+      await cleanUp([...new Set([...pids, ...treePids(pidFile)])], test)
       rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     })
     const svc = new TerminalService(() => {}, recording)
+    services.push(svc)
     const t = svc.create(dir, 120, 30)
     expect(shells).toHaveLength(1)
     pids = [...shells]

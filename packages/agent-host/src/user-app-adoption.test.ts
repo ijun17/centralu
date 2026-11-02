@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type NormalizedEvent, type ProjectInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from './adapters/contract.js'
 import { returnAppFiles } from './apps/external/carry.js'
@@ -13,7 +13,7 @@ import { SessionManager } from './sessions/manager.js'
 import type { AppSessionKey } from './sessions/session-apps.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 import { SLOW } from '../../../tooling/test-timing.js'
-import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
+import { ADOPTION_MARK, UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 
 /**
  * Existing user-folder apps become projects in place (#1141, docs/plans/root-apps.md §4). Each item kept under the
@@ -660,6 +660,22 @@ describe('what is not moved, and when', () => {
     expect(left.map((a) => [a.appId, a.status])).toEqual([['broken', 'invalid'], ['notes-copy', 'invalid']])
     // One runnable app of the id, the one adopted
     expect(rt.list().filter((a) => a.appId === 'notes' && a.status !== 'invalid')).toHaveLength(1)
+  })
+
+  // #1707: the files of an app that does not answer (a link into a share that is not there) fail the carry within a bound
+  it('an app whose files cannot be carried stays in the user folder, with no project, no mark and nothing recorded, and is not tried again this run', async () => {
+    plantUserApp('slow')
+    rt.refresh()
+    const carry = vi.spyOn(rt, 'carryAppState').mockRejectedValue(Object.assign(new Error("ETIMEDOUT: lstat 'x' did not answer within 5000 ms"), { code: 'ETIMEDOUT' }))
+    const before = store.projects.listProjects().length
+    expect(await adoption.run()).toBe(0)
+    expect(carry).toHaveBeenCalledTimes(1)
+    expect(store.projects.listProjects()).toHaveLength(before)
+    expect(existsSync(join(dataRoot, 'apps', 'slow', ...ADOPTION_MARK))).toBe(false)
+    expect((JSON.parse(store.settings.appSetting(ADOPTED_USER_APPS_KEY) ?? '{}') as Record<string, unknown>).slow).toBeUndefined()
+    expect(rt.list().some((a) => a.appId === 'slow' && a.projectId === null)).toBe(true)
+    expect(await adoption.run()).toBe(0)
+    expect(carry).toHaveBeenCalledTimes(1)
   })
 
   it('half copies an interrupted move left are swept', () => {

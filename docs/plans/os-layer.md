@@ -462,9 +462,10 @@ answer, and a test on memory says what the host does:
   - On Windows the copy stats each link (follows it one step) to choose its kind, as Node's `symlink` does when no
     kind is given: a link to a share that does not answer waits as long as Windows does, about 21 s for the first
     `stat` of `\\10.255.255.7\share\x` (then about 6 ms while Windows keeps the failure). The sync copy holds the
-    event loop that long, the promise copy a pool thread. `carry.ts` copies synchronously: it runs inside the user-app
-    adoption (`UserAppAdoption.adopt`, then `carryAppState`, both synchronous, between store steps), so the promise
-    copy is no small change there. A directory symlink whose target cannot be reached at copy time is made as a file
+    event loop that long (measured: 21.1 s without a tick), the promise copy a pool thread. `carry.ts` copies with the
+    promise copy (#1707): the user-app adoption awaits it before its store step, and `stepMs` bounds each step (one
+    that does not answer within 5 s fails the carry with `ETIMEDOUT`: the app stays in the user folder and the copy
+    beside its place is removed). A directory symlink whose target cannot be reached at copy time is made as a file
     symlink (Node's does the same), so it does not work as a folder once the share is back.
   The host's copies go through it: `apps/external/carry.ts` (an app's data, which the app writes, so may hold any
   link), `apps/external/handover.ts` (an import moved to another volume) and `dev-services/fs.ts` off Windows (a
