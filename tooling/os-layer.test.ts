@@ -188,6 +188,8 @@ describe('the allowlist', () => {
       "import * as cp from 'child_process'\nexport const e = cp\n",
       "export const cp = await import('node:child_process')\n",
       "export const cp = process.getBuiltinModule('node:child_process')\n",
+      "import { createRequire } from 'node:module'\nexport const cp = createRequire(import.meta.url)('child_process')\n",
+      "export const cp = module.createRequire(import.meta.url)('node:child_process')\n",
     ]) {
       expect(await refused(app, code), code).toEqual([expect.stringContaining("this app's door (.centralu/apps/project-board/system.mjs)")])
     }
@@ -211,6 +213,11 @@ describe('the allowlist', () => {
       expect.stringContaining("the app's clock"),
     ])
     expect(await lint('.centralu/apps/project-board/bin/merge-queue.mjs', code)).toHaveLength(3)
+    // Under another name, or from globalThis, it is the same clock
+    for (const alias of ['const D = Date\nexport const a = D.now()\n', 'const { now } = Date\nexport const a = now()\n', 'export const a = globalThis.Date.now()\n', 'let D\nD = Date\nexport const a = D.now()\n']) {
+      expect((await lint('.centralu/apps/project-board/queue.mjs', alias)).length, alias).toBeGreaterThan(0)
+    }
+    expect(await lint('.centralu/apps/project-board/clock.mjs', 'const D = Date\nexport const a = D.now()\n')).toEqual([])
     expect(await lint('.centralu/apps/project-board/clock.mjs', code)).toEqual([])
   })
 

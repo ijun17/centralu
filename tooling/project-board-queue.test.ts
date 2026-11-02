@@ -23,7 +23,7 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+import { latestRuns, LEASE_MS, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -1659,6 +1659,15 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     // Shortened, it is back in CI: busy as any item in CI
     q.items[0].state = 'ci'
     expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
+  })
+
+  it("writes the lease on the system clock, which another process shares, not on the queue's stepped one (#1656)", async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
+    // 200 steps of 100 ms: a lease written on the stepped clock would end 20 s later than one written on the system's
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await polls(200)
+    const lease = JSON.parse(readFileSync(filesNamed(join(root, 'data'), 'merge-queue.lease.json')[0]!, 'utf8'))
+    expect(Math.abs(Date.parse(lease.until) - LEASE_MS - Date.now())).toBeLessThan(6_000)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
@@ -5688,5 +5697,80 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       expect(it.lastError).toContain('could not reach the remote while restacking')
       expect(events().filter((e) => e.kind === 'attention' || e.kind === 'handoff')).toEqual([])
     })
+  })
+})
+
+describe('the main guard does not blame a commit for a bisect probe the runner broke (#1453)', { timeout: 120_000 * SLOW }, () => {
+  const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+  const installFailure = (id: number) => ({
+    id,
+    name: 'e2e (webkit 4/5)',
+    status: 'completed',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Set up job', conclusion: 'success' },
+      { name: 'Install WebKit', conclusion: 'failure' },
+      { name: 'pnpm e2e (shard 4/5)', conclusion: 'skipped' },
+    ],
+  })
+  const attempt2 = (sha: string, conclusion: string) => ({ ...probeRun(991, sha, conclusion), run_attempt: 2 })
+  const rerunsOf = () => writes().filter((w) => w[0] === 'rerun-failed')
+  const setup = (second: string) => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [, c2, c3, c4] = repo.shas as [string, string, string, string]
+    landed(c4)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [installFailure(41)] },
+      logs: { '41': WEBKIT_INSTALL_LOG },
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'failure')] } },
+        'rerun-failed:991': { branchRuns: { [probe(c2)]: [attempt2(c2, second)] } },
+        [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(992, c3, 'failure')] }, jobs: { 992: [failedJob(42, 'verify')] } },
+      },
+    })
+    return { c2, c3 }
+  }
+
+  it('ends the hunt with an issue and no revert when a probe fails in Install WebKit twice', async () => {
+    const { c2 } = setup('failure')
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the report', 60_000)
+    await polls(11)
+    expect(rerunsOf()).toEqual([['rerun-failed', '991']])
+    expect(guardOnDisk().hunt.culprit).toBeUndefined()
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(issues()[0]!.body).toContain(`the full tier's run on ${c2.slice(0, 7)} (a bisect step) failed in`)
+    expect(issues()[0]!.body).toContain('the same way again after one rerun')
+    expect(gh().dispatched).toEqual([{ ref: probe(c2), inputs: { tier: 'full' } }])
+  })
+
+  it('keeps a probe red that times out in a test step, so a commit that makes a test hang is still found', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: String.raw`feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, , c4] = repo.shas as [string, string, string, string]
+    landed(c4)
+    const hang = { id: 41, name: 'verify', status: 'completed', conclusion: 'timed_out', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run pnpm verify', conclusion: 'cancelled' }] }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [hang] },
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'timed_out')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(992, c1, 'success')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
+    expect(rerunsOf()).toEqual([])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2 })
+  })
+
+  it('reads the rerun of a probe that passes, and goes on bisecting; a probe that fails in a test step is red', async () => {
+    const { c3 } = setup('success')
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
+    expect(rerunsOf()).toEqual([['rerun-failed', '991']])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3, how: expect.stringContaining('bisected') })
+    expect(rerunsOf()).toHaveLength(1)
   })
 })

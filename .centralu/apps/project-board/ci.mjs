@@ -109,15 +109,16 @@ function matrixRows(lines) {
  * The check names a workflow's jobs report under, the way GitHub names them: the job's `name`, with
  * `${{ matrix.x }}` filled in for each matrix row, or the job id. A name this cannot work out (an
  * expression other than a matrix value, a matrix job without a name) is listed in `unresolved`, so the
- * caller knows the required set is incomplete instead of silently smaller.
+ * caller knows the required set is incomplete instead of silently smaller. `jobs` gives each fully
+ * resolved job id its names.
  */
 export function workflowCheckNames(text) {
   const lines = yamlLines(text)
   const j = lines.findIndex((l) => l.indent === 0 && l.text === 'jobs:')
-  if (j < 0) return { names: [], unresolved: [] }
+  if (j < 0) return { names: [], unresolved: [], jobs: {} }
   const body = []
   for (let i = j + 1; i < lines.length && lines[i].indent > 0; i++) body.push(lines[i])
-  if (!body.length) return { names: [], unresolved: [] }
+  if (!body.length) return { names: [], unresolved: [], jobs: {} }
   const jobIndent = body[0].indent
   const jobs = []
   for (const l of body) {
@@ -128,6 +129,7 @@ export function workflowCheckNames(text) {
   }
   const names = []
   const unresolved = []
+  const byJob = {}
   for (const job of jobs) {
     const inner = job.lines[0]?.indent
     let name = null
@@ -150,32 +152,34 @@ export function workflowCheckNames(text) {
     }
     if (!name) {
       if (rows.length) unresolved.push(job.id)
-      else names.push(job.id)
+      else (names.push(job.id), (byJob[job.id] = [job.id]))
       continue
     }
     if (!name.includes('${{')) {
       if (rows.length) unresolved.push(job.id)
-      else names.push(name)
+      else (names.push(name), (byJob[job.id] = [name]))
       continue
     }
     if (!rows.length) {
       unresolved.push(job.id)
       continue
     }
+    const got = []
     for (const row of rows) {
       let ok = true
       const filled = name.replace(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g, (_, k) => {
         if (row[k] === undefined) ok = false
         return row[k] ?? ''
       })
-      if (ok && !filled.includes('${{')) names.push(filled)
+      if (ok && !filled.includes('${{')) names.push(filled), got.push(filled)
       else {
         unresolved.push(job.id)
         break
       }
     }
+    if (got.length === rows.length) byJob[job.id] = got
   }
-  return { names: [...new Set(names)], unresolved: [...new Set(unresolved)] }
+  return { names: [...new Set(names)], unresolved: [...new Set(unresolved)], jobs: byJob }
 }
 
 // --- What the reported checks add up to -----------------------------------------------------------

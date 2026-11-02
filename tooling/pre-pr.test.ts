@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -938,5 +938,57 @@ describe('pre-pr and the guards a branch adds', () => {
     const bad = openPr(21, { 'src/bad.txt': 'a banned word\n' })
     run(runners([bad]))
     expect(git(repo, 'for-each-ref', 'refs/centralu-pre-pr-guards')).toBe('')
+  })
+})
+
+describe('a tool that runs out of time is stopped with everything it started (#1816)', () => {
+  it('ends the grandchild a timed-out entry point left behind, and says it ran out of time', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-limit-'))
+    mkdirSync(join(dir, 'node_modules'))
+    const pidFile = join(dir, 'pid')
+    // The entry point starts a worker (as vitest does) and both then wait; the worker writes its pid
+    writeFileSync(join(dir, 'node_modules', 'worker.js'), `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`)
+    writeFileSync(join(dir, 'node_modules', 'main.js'), `require('child_process').spawn(process.execPath, [require('path').join(__dirname, 'worker.js')], { stdio: 'ignore' }); setInterval(() => {}, 1000)`)
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    try {
+      const r = nodeBin(dir, 'main.js', [], {}, 3000)
+      expect(r.timedOut).toBe(true)
+      const pid = Number(readFileSync(pidFile, 'utf8'))
+      // Gone, or about to be: the kill is asked for before the answer, the system finishes it
+      for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r2) => setTimeout(r2, 100))
+      expect(alive(pid)).toBe(false)
+      // A tool that ends on its own is not timed out, and its failure is its own
+      writeFileSync(join(dir, 'node_modules', 'bad.js'), 'process.exit(3)')
+      expect(nodeBin(dir, 'bad.js', [], {}, 60_000)).toMatchObject({ ok: false, timedOut: false })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('is ended with its tool when the group it runs in is killed (the board cancelling pre-pr)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-group-'))
+    const pidFile = join(dir, 'pid')
+    writeFileSync(join(dir, 'worker.js'), `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`)
+    writeFileSync(join(dir, 'main.js'), `require('child_process').spawn(process.execPath, [require('path').join(__dirname, 'worker.js')], { stdio: 'ignore' }); setInterval(() => {}, 1000)`)
+    const { spawn } = await import('node:child_process')
+    // Its own process group, as pre-pr's is when the board starts it
+    const lead = spawn(process.execPath, [fileURLToPath(new URL('../scripts/run-limited.mjs', import.meta.url)), '600000', process.execPath, join(dir, 'main.js')], { detached: true, stdio: 'ignore' })
+    try {
+      for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 100))
+      const pid = Number(readFileSync(pidFile, 'utf8'))
+      process.kill(-lead.pid!, 'SIGKILL')
+      const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
+      for (let i = 0; i < 50 && alive(); i++) await new Promise((r) => setTimeout(r, 100))
+      expect(alive()).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

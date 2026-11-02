@@ -210,6 +210,10 @@ export default tseslint.config(
         'error',
         { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: "Read the time through the app's clock: `new Date(now())` (clock.mjs)" },
         { selector: "CallExpression[callee.name='Date'][arguments.length=0]", message: "Read the time through the app's clock: `new Date(now()).toString()` (clock.mjs)" },
+        // The same clock under another name: `const D = Date; D.now()`, `const { now } = Date`, `globalThis.Date.now()`
+        { selector: "VariableDeclarator[init.type='Identifier'][init.name='Date']", message: "Do not keep `Date` under another name: read the time through the app's clock (clock.mjs)" },
+        { selector: "AssignmentExpression[right.type='Identifier'][right.name='Date']", message: "Do not keep `Date` under another name: read the time through the app's clock (clock.mjs)" },
+        { selector: "MemberExpression[object.name='globalThis'][property.name='Date']", message: "Read the time through the app's clock (clock.mjs), not `globalThis.Date`" },
       ],
     },
   },
