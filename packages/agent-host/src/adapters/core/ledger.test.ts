@@ -457,21 +457,6 @@ describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => 
     await w.session.dispose()
   })
 
-  it('denies the gate requests open when a Stop comes, before the process hears it, and those asked after the close', async () => {
-    const w = world('agy')
-    await w.session.ready
-    w.session.send('one')
-    const gates = w.wire.io?.gates
-    const asked = gates?.wait('r1')
-    let openAtSignal: number | undefined
-    w.spawned[0]?.once('exit', () => (openAtSignal = gates?.size))
-    w.session.interrupt()
-    expect(await asked).toMatchObject({ decision: 'deny' })
-    expect(openAtSignal).toBe(0)
-    await w.session.dispose()
-    expect(await gates?.wait('r2')).toMatchObject({ decision: 'deny' })
-  })
-
   it('a new process that ends while it opens is a crash, and one that cannot open is stopped, not left running', async () => {
     for (const how of ['exits', 'throws'] as const) {
       const w = world('agy')

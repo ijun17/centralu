@@ -313,8 +313,8 @@ The Claude wire is the SDK: `startTurn` pushes to the SDK's input generator, `in
 | `turnEnded('failed', { error })` | `TurnEnding`: `complete`, `interrupted`, or `failed` with the `error` event and `inputError` (null: the input completes) | ACP's refusal is an error whose input completes (§2.11); Q7's change makes the endings one, and then `inputError` goes |
 | (none) | `events` on `end`: the tool's own end-of-turn events (usage, a limit's notice), emitted after the turn's open calls end and before the core's ending event, and only when the end is taken | keeps today's order of events exactly, and counts no cost for a turn the session no longer runs |
 | (none) | `turnOver(why?)` and `releaseCards()`: the core says when, the wire still holds its open calls and cards | the cards move into the core with the decision order (PR 8); until then the core calls `releaseCards` on a Stop, at a turn's end, on an exit and on the close, and `turnOver` at a turn's end, on an exit and on the close (`why`: "Centralu stopped this session while the call ran") |
-| `CoreIo.process`, `externalId(id)` | the same, one `CoreIo` per process, plus `gates` (`SessionProcess.gates`) | an id from a replaced process changes nothing (`noteExternalId(id, from)`) |
-| `interrupt()` | optional; a tool whose Stop ends its process has none, and the core signals it (`SessionProcess.interrupt`: the open gate requests are denied first) | `agy` has no Stop on its wire |
+| `CoreIo.process`, `externalId(id)` | the same, one `CoreIo` per process | an id from a replaced process changes nothing (`noteExternalId(id, from)`) |
+| `interrupt()` | optional; a tool whose Stop ends its process has none, and the core signals it (`SessionProcess.interrupt`) | `agy` has no Stop on its wire |
 | `close(how)` | `close({ turnRunning })`, then the core stops the process (`SessionProcess.close`) | ACP sends `session/cancel` first when closed mid-turn; `detach` is no ACP feature (no `SessionHandle.detach`) |
 | `autoGrant`, `answer`, `grant`, `steer`, `adopt`, `blocking` | not yet | the decision order is PR 8; `steer` and blocking turns are Codex's (PR 6); `adopt` is Codex's and Claude's |
 
@@ -337,8 +337,7 @@ What the ledger owns now, one copy for every tool on it:
   it), `exit` and a failed start (`error`) alike, once. In a turn or while opening it is `adapter_crashed` with
   `withStderrTail`'s message; idle, `session_live` asleep. ACP's `AcpConnection.onExit` no longer decides it: the
   connection only fails the requests it had open, and `close()` marks this side's own stop as expected.
-- **A Stop that ends the process** (`interruptEndsProcess`, `agy`): the process is marked as ending by our hand, the gate
-  requests are denied, then SIGINT. Its exit is the Stop's confirmation and ends the turn as `interrupted` if the tool did
+- **A Stop that ends the process** (`interruptEndsProcess`, `agy`): the process is marked as ending by our hand, then SIGINT. Its exit is the Stop's confirmation and ends the turn as `interrupted` if the tool did
   not say so first. The next input asks `launch` again with the conversation's id (`relaunch`, or `start` once the old
   process is gone), opens it (the session is `opening` again, so an exit then is a crash), and goes on; nothing starts
   until an input comes. A new process that cannot start or open is a crash, like an exit while opening: the inputs
@@ -524,7 +523,7 @@ removed `codex` read as a crash where it used to say it failed to start (found b
 `local-process.ts` now looks the program up as `sh` would and reports a missing one as not started (ENOENT), as without
 the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 127)" to "<label> failed to start".
 
-**What Antigravity needs of the seam** (#1654, measured on `agy` 1.4.7), in `SessionProcess` and `core/gate.ts`:
+**What Antigravity needs of the seam** (#1654, measured on `agy` 1.4.7), in `SessionProcess`:
 
 1. **`launch(resume)`** (`ToolLaunch`): asked again for every new process, with the conversation's id once known, since
    `agy` ends its process on every Stop and takes model and effort as flags. `relaunch()` stops the old process (4.)
@@ -532,9 +531,10 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
 2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
    later launch goes on with it. A late line from a process already replaced is ignored.
 3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`): built as a front-door route under a
-   gate-only key per session (§8.1), then removed with the hook path (#59). Only `GateAnswer` and `GateRequests` remain.
-4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
-   end `agy` while a gate hook waits.
+   gate-only key per session (§8.1), then removed with the hook path (#59). `GateAnswer` and `GateRequests`, the
+   last of it, were removed too (#1679).
+4. **A Stop denied every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
+   end `agy` while a gate hook waits. Removed with the hook path: nothing waits on a gate any more.
 
 **No change to the frozen interface is needed** for the core or for Claude, Codex and ACP on it. One later need to
 raise: `agy`'s interrupt is SIGINT (antigravity-adapter.md §1.5), and on Windows `OsChild.kill` ends a child whatever

@@ -89,7 +89,7 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
     // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does (read again behind it)
     if (!value && ask.seed) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
     if (value && !isFromTheFuture(value.at, t) && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
-    if (failedAt !== null && t - failedAt < o.failMs) return { value: standIn(), provisional: false }
+    if (failedAt !== null && !isFromTheFuture(failedAt, t) && t - failedAt < o.failMs) return { value: standIn(), provisional: false }
     const run = start()
     // The last answer, when it may stand in while the read goes on: returned at once, as provisional, unless the asker settles
     const held = value && (o.staleOk?.(value.v) ?? true) ? { v: value.v } : null

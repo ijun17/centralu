@@ -58,6 +58,8 @@ export type OriginPortsOptions = {
   /** Lets tests control the order. Defaults to a uniform random number within the range */
   pick?: (lo: number, hi: number) => number
   attempts?: number
+  /** Lets tests make a bind fail the way the OS does. Defaults to a loopback server */
+  listen?: (port: number, handler: RequestListener) => Promise<Server>
   log?: (line: string) => void
 }
 
@@ -129,7 +131,11 @@ function listenOn(port: number, handler: RequestListener): Promise<Server> {
   })
 }
 
+/** A bind that failed because the port is held (EADDRINUSE) or reserved by the OS (EACCES on Windows, e.g. Hyper-V or WSL ranges) */
+const portUnavailable = (e: unknown) => ['EADDRINUSE', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')
+
 export class OriginPorts {
+  private readonly listenOn: typeof listenOn
   private readonly range: readonly [number, number]
   private readonly pick: (lo: number, hi: number) => number
   private readonly attempts: number
@@ -142,6 +148,7 @@ export class OriginPorts {
     this.range = opts.range ?? ORIGIN_PORT_RANGE
     this.pick = opts.pick ?? ((lo, hi) => randomInt(lo, hi + 1))
     this.attempts = opts.attempts ?? 200
+    this.listenOn = opts.listen ?? listenOn
     this.log = opts.log ?? ((line) => console.error(line))
   }
 
@@ -182,11 +189,11 @@ export class OriginPorts {
     const own = this.book().assigned[key]
     if (own !== undefined) {
       try {
-        return { port: own, server: await listenOn(own, handler) }
+        return { port: own, server: await this.listenOn(own, handler) }
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e
+        if (!portUnavailable(e)) throw e
         this.log(
-          `[agent-host] view origin port ${own} for ${key} is taken by another program — ` +
+          `[agent-host] view origin port ${own} for ${key} is taken or reserved by another program — ` +
             `moving it to a new port; storage the view kept under the old origin is no longer visible`,
         )
         this.commit((book) => {
@@ -204,9 +211,9 @@ export class OriginPorts {
       if (Object.values(known.assigned).includes(port) || known.retired.includes(port)) continue
       let server: Server
       try {
-        server = await listenOn(port, handler)
+        server = await this.listenOn(port, handler)
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e
+        if (!portUnavailable(e)) throw e
         // A port currently held belongs to no one — it is only skipped for this attempt
         busy.add(port)
         continue

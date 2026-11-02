@@ -201,6 +201,8 @@ export function usageNotReportedTests(): void {
         document.addEventListener('animationstart', (e) => {
           const el = e.target as Element
           if (el.getAttribute('data-testid') !== 'usage-totals') return
+          // Only a fade that starts once the new value is on screen: the old totals' own mount fade proves nothing
+          if (!el.querySelector('[data-testid="usage-total-sessions"]')?.textContent?.endsWith('30')) return
           const a = el.getAnimations().find((x) => (x as CSSAnimation).animationName === e.animationName)
           w.__fades.push({ name: e.animationName, ms: Number(a?.effect?.getTiming().duration) })
         })

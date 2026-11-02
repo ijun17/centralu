@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSpawnSpec } from '../contract.js'
 import type { FrameRecorder } from '../frames/recorder.js'
 import { fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli } from '../fake-agent-cli.test-helpers.js'
-import { GateRequests, type GateAnswer } from './gate.js'
 import { SessionProcess, startToolProcess, stopToolProcess, type ToolLaunch } from './tool-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
@@ -160,65 +159,6 @@ describe("a session's process across its replacements (agy)", () => {
     await expect(sp.start()).rejects.toMatchObject({ code: 'tool_not_installed' })
   })
 
-  it('denies every open gate request before a Stop signals the process: agy does not act on SIGINT while a hook waits', async () => {
-    const { sp, procs } = session()
-    await sp.start()
-    const answers = [sp.gates.wait('call-1'), sp.gates.wait('call-2')]
-    let openAtSignal = -1
-    procs[0]!.kill = (signal) => ((openAtSignal = sp.gates.size), signal === 'SIGINT')
-    expect(sp.interrupt()).toBe(true)
-    expect(openAtSignal).toBe(0)
-    expect(await Promise.all(answers)).toEqual([
-      { decision: 'deny', reason: 'The turn was stopped.' },
-      { decision: 'deny', reason: 'The turn was stopped.' },
-    ])
-  })
-
-  it('denies every open gate request before it closes the process, and every one asked after', async () => {
-    const { sp, log } = session()
-    await sp.start()
-    const answer = sp.gates.wait('call-1').then((a) => (log.push('denied'), a))
-    await sp.close()
-    expect(await answer).toEqual({ decision: 'deny', reason: 'The session is closing.' })
-    expect(log.indexOf('denied')).toBeLessThan(log.indexOf('p1:eof'))
-    expect(sp.current).toBeNull()
-    expect(await sp.gates.wait('call-2')).toEqual({ decision: 'deny', reason: 'The session is closing.' })
-    await expect(sp.start()).rejects.toThrow(/closed/)
-  })
-
-  it('denies every open gate request when a Stop or a relaunch begins, before the process is signalled', async () => {
-    const { sp, log } = session()
-    await sp.start()
-    const stopped = sp.gates.wait('call-1').then((a) => (log.push('denied-stop'), a))
-    const done = sp.stop('The user stopped.')
-    expect(sp.gates.size).toBe(0)
-    expect(await stopped).toEqual({ decision: 'deny', reason: 'The user stopped.' })
-    await done
-    expect(log.indexOf('denied-stop')).toBeLessThan(log.indexOf('p1:eof'))
-    await sp.start()
-    const restarted = sp.gates.wait('call-2')
-    const relaunched = sp.relaunch()
-    expect(await restarted).toEqual({ decision: 'deny', reason: 'The session is restarting.' })
-    await relaunched
-  })
-
-  it('denies a gate request a process asks while it is being stopped, at once, and takes requests again once the next one runs', async () => {
-    const log: string[] = []
-    const procs: FakeProc[] = []
-    const sp = new SessionProcess('Antigravity', async () => ({ command: 'agy', args: [], env: {} }), { graceMs: 300, spawn: () => (procs.push(new FakeProc(log, `p${procs.length + 1}`, false)), procs.at(-1)!) }, null)
-    await sp.start()
-    const done = sp.stop()
-    // The tool ignores stdin's end and is still there for the grace: its hook asks now
-    await vi.waitFor(() => expect(log).toContain('p1:eof'))
-    expect(await sp.gates.wait('late')).toEqual({ decision: 'deny', reason: 'The turn was stopped.' })
-    expect(sp.gates.size).toBe(0)
-    await done
-    await sp.start()
-    void sp.gates.wait('next')
-    expect(sp.gates.size).toBe(1)
-    await sp.close()
-  })
-
   /** A session whose launch waits until `go()` (agy is looked for, its plugin root written) */
   function slowSession() {
     const log: string[] = []
@@ -280,25 +220,6 @@ describe("a session's process across its replacements (agy)", () => {
     sp.noteExternalId('conv-new', procs[1])
     sp.noteExternalId('conv-old', procs[0])
     expect(sp.externalId).toBe('conv-new')
-  })
-})
-
-describe('the open gate requests', () => {
-  it('give each its answer once', async () => {
-    const gates = new GateRequests()
-    const answer = gates.wait('a')
-    expect(gates.answer('a', { decision: 'allow' })).toBe(true)
-    expect(gates.answer('a', { decision: 'deny', reason: 'late' })).toBe(false)
-    expect(await answer).toEqual({ decision: 'allow' })
-  })
-
-  it('deny one asked again, so no hook is left waiting', async () => {
-    const gates = new GateRequests()
-    const first = gates.wait('a')
-    const second = gates.wait('a')
-    gates.answer('a', { decision: 'allow' })
-    const answers: GateAnswer[] = await Promise.all([first, second])
-    expect(answers.map((a) => a.decision)).toEqual(['deny', 'allow'])
   })
 })
 

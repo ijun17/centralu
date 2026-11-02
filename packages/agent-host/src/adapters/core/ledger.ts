@@ -94,7 +94,6 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   private ioFor(proc: AgentProcess): CoreIo {
     return {
       process: proc,
-      gates: this.process.gates,
       emit: (e) => this.emit(e),
       inputAccepted: (id) => this.receipts.accept(id),
       externalId: (id) => this.process.noteExternalId(id, proc),
@@ -239,8 +238,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
       turn.stopTimer.unref?.()
     }
     if (this.wire.turns.interruptEndsProcess) {
-      // Its exit is the Stop's confirmation (it may come at once, ending the turn), not a crash; the open gate requests are
-      // denied before the signal
+      // Its exit is the Stop's confirmation (it may come at once, ending the turn), not a crash
       this.expectedExits.add(turn.proc)
       this.process.interrupt()
     }
@@ -293,7 +291,6 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     const wasOpen = this.phase === 'ready'
     this.phase = 'closed'
     this.wire.releaseCards()
-    this.process.gates.close('The process ended.')
     this.turn = null
     if (turn?.stopTimer) clearTimeout(turn.stopTimer)
     this.dropQueue('were still queued when the agent exited')

@@ -4,7 +4,6 @@ import { lineSplitter } from '../../transport/json-lines.js'
 import type { AgentProcess, AgentSpawnSpec, ProcessSource } from '../contract.js'
 import { frameRecorder, type FrameRecorder } from '../frames/recorder.js'
 import { spawnLocalAgent } from '../local-process.js'
-import { GateRequests } from './gate.js'
 
 /**
  * The frame tap (docs/plans/session-core.md §6.1, #1654): the one place a tool's lines are recorded, for every tool, at its
@@ -155,8 +154,7 @@ export type ToolLaunch = (resume: { externalId: string } | null) => Promise<Agen
 /**
  * A session's process across its replacements (#1654 seam gaps 1, 2 and 4, measured on `agy` 1.4.7): the launch is asked
  * again for every new process, with the conversation's id once it is known, and that id may be learned after the process
- * started (`agy` says it only in `init`, after the first input: `noteExternalId`). A Stop answers every open gate request
- * `deny` before the process hears of it, since `agy` does not act on SIGINT while a gate hook waits.
+ * started (`agy` says it only in `init`, after the first input: `noteExternalId`).
  */
 export class SessionProcess {
   private proc: AgentProcess | null = null
@@ -164,7 +162,6 @@ export class SessionProcess {
   private closed = false
   /** Starts and stops run one at a time, in the order asked: a Stop asked while a start awaits the launch stops what it starts */
   private chain: Promise<unknown> = Promise.resolve()
-  readonly gates = new GateRequests()
 
   constructor(
     private readonly label: string,
@@ -208,32 +205,25 @@ export class SessionProcess {
   /** Ends the process (`stop`) and starts the next one on the same conversation: after a Stop, or a change of model or effort */
   relaunch(): Promise<AgentProcess> {
     return this.serial(async () => {
-      await this.stopNow('The session is restarting.')
+      await this.stopNow()
       return this.startNow()
     })
   }
 
-  /**
-   * A Stop by signal (`agy`: SIGINT, which ends its process). Every open gate request is answered `deny` first: a hook still
-   * waiting holds the tool where it does not act on the signal. False when there is no process to signal.
-   */
+  /** A Stop by signal (`agy`: SIGINT, which ends its process). False when there is no process to signal */
   interrupt(signal: NodeJS.Signals = 'SIGINT'): boolean {
-    this.gates.denyAll('The turn was stopped.')
     return this.current?.kill(signal) ?? false
   }
 
-  /** Denies every open gate request, then stops the process (stdin's end, the bound, the tree); a later start starts another */
-  stop(reason = 'The turn was stopped.'): Promise<void> {
-    // Held from now until the stop is done, also while it waits behind a start
-    const release = this.gates.hold(reason)
-    return this.serial(() => this.stopNow(reason)).finally(release)
+  /** Stops the process (stdin's end, the bound, the tree); a later start starts another */
+  stop(): Promise<void> {
+    return this.serial(() => this.stopNow())
   }
 
-  /** The session's end: what is open and what asks later is denied, the process is stopped, and nothing starts again */
+  /** The session's end: the process is stopped, and nothing starts again */
   close(): Promise<void> {
     this.closed = true
-    this.gates.close('The session is closing.')
-    return this.serial(() => this.stopNow('The session is closing.'))
+    return this.serial(() => this.stopNow())
   }
 
   private serial<T>(step: () => Promise<T>): Promise<T> {
@@ -249,23 +239,16 @@ export class SessionProcess {
     if (!spec) throw toolNotInstalled(this.label, this.how.install)
     // Closed while the launch was asked for: nothing is started that no one would stop
     if (this.closed) throw new Error(`${this.label}'s session is closed`)
-    // What the process before left asking has no process to answer to
-    this.gates.denyAll('The process was replaced.')
     const proc = startToolProcess(spec, this.how)
     this.proc = proc
     this.how.onStart?.(proc)
     return proc
   }
 
-  private async stopNow(reason: string): Promise<void> {
-    const release = this.gates.hold(reason)
-    try {
-      const proc = this.proc
-      this.proc = null
-      if (proc) await stopToolProcess(proc, { exited: ended(proc), ...(this.how.graceMs === undefined ? {} : { graceMs: this.how.graceMs }) })
-    } finally {
-      release()
-    }
+  private async stopNow(): Promise<void> {
+    const proc = this.proc
+    this.proc = null
+    if (proc) await stopToolProcess(proc, { exited: ended(proc), ...(this.how.graceMs === undefined ? {} : { graceMs: this.how.graceMs }) })
   }
 }
 

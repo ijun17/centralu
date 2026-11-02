@@ -288,14 +288,21 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const reached = str(snapshot.rateLimitReachedType) !== '' || snapshot.spendControlReached === true
       if (!reached) return []
 
+      /*
+       * `rateLimitReachedType` does not name a window (generated/v2/RateLimitReachedType.ts), so the window that is
+       * full says which one blocks. When both are, the later reset is when the session can run again. A spend or
+       * credit limit fills neither: the primary window describes it, as before.
+       */
       const primary = asObj(snapshot.primary)
-      const resetsAt = finite(primary.resetsAt)
+      const full = [primary, asObj(snapshot.secondary)].filter((w) => (finite(w.usedPercent) ?? 0) >= 100)
+      const window = full.reduce((a, b) => ((finite(b.resetsAt) ?? 0) > (finite(a.resetsAt) ?? 0) ? b : a), full[0] ?? primary)
+      const resetsAt = finite(window.resetsAt)
       return [
         {
           type: 'limit_reached',
           sessionId,
-          usedPercent: finite(primary.usedPercent),
-          windowMins: finite(primary.windowDurationMins),
+          usedPercent: finite(window.usedPercent),
+          windowMins: finite(window.windowDurationMins),
           resumeAt: resetsAt ? new Date(resetsAt * 1000).toISOString() : undefined,
         },
       ]
