@@ -6,7 +6,7 @@ import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { KILL_GRACE_MS } from './kill-tree.js'
-import { descendants } from './proc-table.js'
+import { ancestors, descendants } from './proc-table.js'
 import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
@@ -40,6 +40,13 @@ const exec = promisify(execFile)
  *     had no tty either. With only rules 1 through 3, **a process another app is actively using
  *     right now cannot be told apart from an ownerless orphan.** When this actually ran, that
  *     extension was hit with SIGTERM (143) and died.
+ *
+ *     **Init is whatever adopts an orphan on this machine** (#1882): under WSL a per-session `/init` helper, under a
+ *     user `systemd --user` that process, in a container its init. A leftover's parent is then alive, and the chain
+ *     above would read it as an owner. `orphanAdopter` asks the machine where an orphan of ours lands (a short-lived one
+ *     is made and its parent read), and that one process counts as init. Any other living parent, an ancestor of the
+ *     host included, is still an owner: it is the keeper or an agent holding its own children. What started the host (the keeper, a launcher) is
+ *     never a candidate, so the adopter taking it in does not make it one.
  *
  *     If everything in between on the chain is also a candidate (same folder, no terminal), those
  *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
@@ -114,14 +121,18 @@ export function pickStrays(
    * not even their parent, so the parent chain alone would call them ownerless.
    */
   held: readonly number[] = [],
+  /** The process the machine re-parents an orphan to (`orphanAdopter`), taken for init in rule 4 */
+  adopter: number | null = null,
 ): StrayProcess[] {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const ours = descendants(rows, [selfPid, ...held])
+  // Who started us (the keeper, a launcher) is not a leftover, whatever adopted it: it is no leftover of anyone's
+  const launchers = ancestors(rows, [selfPid, ...held])
 
   // What passed rules 1 through 3. Rule 4 (no owner) can only be judged once this set is known
   const candidates = new Map<number, string>()
   for (const r of rows) {
-    if (r.pid <= 1 || ours.has(r.pid)) continue
+    if (r.pid <= 1 || ours.has(r.pid) || launchers.has(r.pid)) continue
     if (!noTty(r.tty)) continue
     const cwd = cwdOf.get(r.pid)
     if (!cwd || !insideAny(cwd, roots)) continue
@@ -132,7 +143,7 @@ export function pickStrays(
   /**
    * Asks the parent chain **whether some app still holds this process.**
    *
-   * If only candidates lie between this and init (1), there is no owner — an orphan we are free
+   * If only candidates lie between this and init (1, or the adopter), there is no owner — an orphan we are free
    * to clean up. If a living process that is not a candidate sits somewhere in between, it belongs
    * to that app (VS Code's extension host sits in exactly that spot). If the chain leaves our own
    * account and the parent cannot be found, this is also treated as belonging to someone else —
@@ -143,7 +154,7 @@ export function pickStrays(
     let cur = byPid.get(pid)
     while (cur && !seen.has(cur.pid)) {
       seen.add(cur.pid)
-      if (cur.ppid <= 1) return true
+      if (cur.ppid <= 1 || cur.ppid === adopter) return true
       if (!candidates.has(cur.ppid)) return false
       cur = byPid.get(cur.ppid)
     }
@@ -208,6 +219,27 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
   return { rows, cwdOf }
 }
 
+/**
+ * Where this machine re-parents an orphan: a shell starts a background process and exits, and the process's parent is
+ * read. Null when it could not be found out, which leaves only pid 1 as init. The probe is one `sleep` that outlives the
+ * bounds below and is ended with the call.
+ */
+export async function orphanAdopter(run: Run = exec): Promise<number | null> {
+  let pid = 0
+  try {
+    const opts = { maxBuffer: 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true }
+    pid = Number((await run('/bin/sh', ['-c', 'sleep 60 </dev/null >/dev/null 2>&1 & echo $!'], opts)).stdout)
+    const ppid = Number((await run('ps', ['-o', 'ppid=', '-p', String(pid)], opts)).stdout)
+    return ppid > 1 ? ppid : null
+  } catch (e) {
+    unread('where an orphan lands', e)
+    return null
+  } finally {
+    // The probe's own pid, started a moment ago by this call
+    if (pid > 1) try { process.kill(pid) } catch { /* already gone */ }
+  }
+}
+
 /** The leftover processes currently alive (`scanProcesses`, then the four rules) */
 export async function findStrays(
   roots: readonly string[],
@@ -215,8 +247,8 @@ export async function findStrays(
   held: readonly number[] = [],
 ): Promise<StrayProcess[]> {
   if (!hasPs() || roots.length === 0) return []
-  const { rows, cwdOf } = await scanProcesses()
-  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held)
+  const [{ rows, cwdOf }, adopter] = await Promise.all([scanProcesses(), orphanAdopter()])
+  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held, adopter)
 }
 
 /**

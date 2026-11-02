@@ -4,8 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
-import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, resolveRoots, scanProcesses, stopStrays, type StrayStopDeps } from './strays.js'
-import { KILL_GRACE_MS } from './kill-tree.js'
+import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, scanProcesses, stopStrays } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { ownProcesses } from '../process.test-helpers.js'
 
@@ -112,6 +111,30 @@ describe('pickStrays', () => {
     expect(pickStrays(vscode, cwd, roots, 900).map((s) => s.pid)).toEqual([800])
   })
 
+  /**
+   * Under a subreaper the orphan's parent is alive: WSL's `/init` session helper, a user `systemd --user`, a container's
+   * init (#1882). The one process the machine adopts orphans to counts as init; any other living parent still owns what it
+   * holds, and what started the host is never offered (the keeper, a launcher).
+   */
+  it('an orphan adopted by the machine\'s subreaper is on the list; what a living parent holds is not, and nor is what started the host', () => {
+    const wsl = parsePsRows(
+      [
+        '    1     0 ?        systemd',
+        '   60     1 ?        /init', // the subreaper: orphans land here
+        '   30    60 ??       centralu-keeper', // what started the host, in our folder, no terminal; its app has quit, so /init holds it
+        '  900    30 ??       node host.mjs',
+        '  800    60 ??       node dev-server.js', // adopted by /init after its shell ended
+        '  700    60 ??       Code Helper (Plugin)', // a sibling app, also under /init
+        '  701   700 ??       claude --output-format stream-json',
+        '   40    30 ??       claude', // an agent that runs its own tools
+        '   41    40 ??       node mcp-server.js',
+      ].join('\n'),
+    )
+    const cwd = new Map([[800, '/work/proj'], [701, '/work/proj'], [900, '/work/proj'], [30, '/work/proj'], [40, '/work/proj'], [41, '/work/proj']])
+    expect(pickStrays(wsl, cwd, roots, 900, [], 60).map((s) => s.pid)).toEqual([800])
+    expect(pickStrays(wsl, cwd, roots, 900).map((s) => s.pid)).toEqual([])
+  })
+
   it('treats it as someone else\'s when the parent cannot be found in our own account — never fires when in doubt', () => {
     const rowsUnknownParent = parsePsRows('  400  399 ??       node something.js')
     expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900)).toEqual([])
@@ -191,8 +214,7 @@ describe('stopStrays', () => {
    * folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
    *
    * Where the orphan goes is the machine's business: init, or a subreaper (WSL's /init session helper, a user systemd, a
-   * container's init), which rule 4 reads as a living owner (#1701). So the scan is the real one and the orphan's parent is
-   * read as init, as it is on a plain Linux box; what is under test is the stop, not where this machine re-parents.
+   * container's init). The scan and the stop are the real ones, so the orphan is judged as the machine re-parented it (#1882).
    */
   it.skipIf(!hasPs())('a real leftover that ignores TERM is gone after the grace', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-stray-')))
@@ -206,16 +228,7 @@ describe('stopStrays', () => {
     const own = ownProcesses()
     try {
       await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
-      // Not this test's process: the host's descendants are not leftovers
-      const orphanOfInit: StrayStopDeps = {
-        find: async (roots, selfPid = process.pid, held = []) => {
-          const { rows, cwdOf } = await scanProcesses()
-          return pickStrays(rows.map((r) => (r.pid === pid ? { ...r, ppid: 1 } : r)), cwdOf, resolveRoots(roots), selfPid, held)
-        },
-        kill: (target, signal) => process.kill(target, signal),
-        graceMs: KILL_GRACE_MS,
-      }
-      expect(await stopStrays([pid], [dir], 999_999, [], orphanOfInit)).toEqual({ stopped: 1 })
+      expect(await stopStrays([pid], [dir], process.pid, [])).toEqual({ stopped: 1 })
       await vi.waitFor(() => expect(own.alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
     } finally {
       own.end([pid])

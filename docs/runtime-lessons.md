@@ -730,12 +730,13 @@ Platforms: macOS, Linux.
 Happened: a dev server an agent started had ppid 1 and its own group; the VS Code Claude extension was SIGTERMed by
 an early version (4a69b96f).
 Rule: a stray is offered only when its cwd is inside a project, it has no tty, it is not under the host or a keeper
-child, and its parent chain reaches init through other candidates; it is measured again right before the kill.
+child, it is not what started the host, and its parent chain reaches init (or the process this machine re-parents an orphan to, probed with a
+short-lived orphan: WSL's `/init`, a `systemd --user`) through other candidates; it is measured again right before the kill.
 Guard: `host/dev-services/strays.test.ts` "picks only someone else's process running with no terminal in our
 folder"; `host/dev-services/strays.test.ts` "a process a living app still holds is not on the list (VS Code
 extensions)"; `host/dev-services/strays.test.ts` "never offers a child the keeper holds for this host, or what runs
-under it". Measuring again before the kill is **UNGUARDED**; on a systemd desktop orphans go to the `systemd --user`
-subreaper, not to pid 1, and the finder misses them: **UNGUARDED** (#14 audit).
+under it"; `host/dev-services/strays.test.ts` "an orphan adopted by the machine's subreaper is on the list; what a living parent
+holds is not, and nor is what started the host" (WSL's `/init`, a `systemd --user`: #1882). Measuring again before the kill is **UNGUARDED**.
 Platforms: macOS, Linux.
 
 **KL7. An agent's helpers end with it.**
