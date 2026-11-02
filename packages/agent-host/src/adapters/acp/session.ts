@@ -13,7 +13,7 @@ import type { ToolStart } from '../core/tool-process.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
@@ -277,6 +277,9 @@ class AcpWire implements ToolWire {
         try {
           OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } catch (err) {
+          // Not the replay of a load any more: the list below is a call of its own
+          this.replaying = false
+          this.opening = null
           throw await this.goneOr(err, resume.externalId, init.agentCapabilities?.sessionCapabilities?.list !== undefined)
         } finally {
           this.replaying = false
@@ -305,7 +308,7 @@ class AcpWire implements ToolWire {
    * tool's missing conversation; otherwise the agent's own error stands
    */
   private async goneOr(err: unknown, id: string, canList: boolean): Promise<unknown> {
-    if (!(err instanceof RpcError) || err.code === AUTH_REQUIRED || !canList) return err
+    if (!(err instanceof RpcError) || !NOT_FOUND_CODES.includes(err.code) || !canList) return err
     try {
       let cursor: string | undefined
       for (let page = 0; page < 20; page++) {
@@ -314,7 +317,9 @@ class AcpWire implements ToolWire {
         if (!listed.nextCursor) return rpcError(`${this.label} has no record of this conversation`, 'conversation_gone')
         cursor = listed.nextCursor
       }
-    } catch {}
+    } catch {
+      // Not asked, or not answered: the agent's own error stands
+    }
     return err
   }
 

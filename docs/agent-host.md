@@ -2504,7 +2504,7 @@ must keep reading an older host's tags: the children outlive the build that spaw
   gets one more attach first, with a 15 s bound (a loaded machine or a keeper handoff can hold the first one past its
   5 s). If that fails too, an agent is ended, since its session starts a new CLI on the same conversation and two
   CLIs on one thread conflict (so is an agent whose session start refused it for any reason, `adoptKept`: no adapter, no
-  resume, a project gone, a failed re-attach; except while the host itself is leaving, which hands it on, #1720); a terminal or a command run is left running in the keeper for the next host.
+  resume, a project gone, a failed re-attach; except while the host itself is leaving: then it is not stopped here, #1720); a terminal or a command run is left running in the keeper for the next host.
 
 **What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
 `typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.

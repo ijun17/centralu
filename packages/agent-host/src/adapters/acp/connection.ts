@@ -28,6 +28,8 @@ export class RpcError extends Error {
 export const METHOD_NOT_FOUND = -32601
 /** ACP's code for "authenticate first" (measured on Cursor: `{code: -32000, message: "Authentication required"}`) */
 export const AUTH_REQUIRED = -32000
+/** The codes an agent refuses an unknown id with: JSON-RPC's invalid params (Cursor, measured) and ACP's resource not found */
+export const NOT_FOUND_CODES: readonly number[] = [-32602, -32002]
 
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void

@@ -975,7 +975,7 @@ export class SessionStarts {
       if (adopt) return { session: m, resumed: false, reason: (err as Error).message }
       // The tool said so itself (an ACP tool that does not list the conversation, #1676): no list to ask
       const gone =
-        (err as { code?: string }).code === 'conversation_gone' ||
+        (err instanceof Error && Reflect.get(err, 'code') === 'conversation_gone') ||
         (await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false))
       if (gone) {
         return { session: m, resumed: false, reason: externalMissingReason(this.host.toolLabel(m.tool), cwd) }
