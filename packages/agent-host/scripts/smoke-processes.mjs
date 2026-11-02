@@ -40,7 +40,7 @@ export function agentProcesses(all, isAgent) {
  * The agents of the hosts a smoke started, and never another on the machine (another Centralu install's agent, hours old,
  * is not a leftover of this run). Returns `pidsOf(hostPid)`: the agents among that host's descendants, read while it runs
  * (a killed host's children keep its pid as their parent's, so they stay in its tree), plus the ones seen before that
- * still run. `list` is `processes` unless a test gives rows.
+ * still run as that agent (a pid reused by another program is dropped). `list` is `processes` unless a test gives rows.
  */
 export function ownAgents(isAgent, list = processes) {
   const seen = new Set()
@@ -52,7 +52,8 @@ export function ownAgents(isAgent, list = processes) {
       for (const p of all) if (tree.has(p.ppid) && !tree.has(p.pid)) (tree.add(p.pid), (grew = true))
     }
     for (const p of agentProcesses(all, isAgent)) if (tree.has(p.pid)) seen.add(p.pid)
-    const alive = new Set(all.map((p) => p.pid))
+    // Alive is the pid with a row that still reads as the agent: a pid the OS gave to another process is not ours to name or kill
+    const alive = new Set(all.filter((p) => isAgent(p.cmd)).map((p) => p.pid))
     return [...seen].filter((pid) => alive.has(pid))
   }
 }

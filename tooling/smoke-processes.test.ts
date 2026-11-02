@@ -48,4 +48,12 @@ describe('the agents a smoke counts as its own (#1757)', () => {
     table = rows(other)
     expect(pidsOf(100)).toEqual([])
   })
+
+  it('drops an agent whose pid the OS has given to another program, so a cleanup never kills a stranger', () => {
+    let table = rows('  100     1 node main.ts', ' 4242   100 codex app-server')
+    const pidsOf = ownAgents(isAgent, () => table())
+    expect(pidsOf(100)).toEqual(['4242'])
+    table = rows(' 4242     1 C:\\Windows\\notepad.exe')
+    expect(pidsOf(100)).toEqual([])
+  })
 })

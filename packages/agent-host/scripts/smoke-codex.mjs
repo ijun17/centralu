@@ -4,7 +4,7 @@
  * S9 — approval request → allow → the file is actually created (checks whether this overrides the
  *   global approval_policy="never")
  * S10 — remembers the earlier context via thread/resume after the host restarts
- * S11 — zombie check: killing the host leaves no codex app-server of this run behind either (the ones another Centralu
+ * S11 — zombie check: stopping or killing a host leaves no codex app-server of this run behind either (the ones another Centralu
  *   install on the machine runs are not counted)
  *
  * Model: Codex's default model (do not use a top-tier model for verification — per the docs' model
@@ -15,7 +15,7 @@
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost } from './host-client.mjs'
+import { hostExit, openHost } from './host-client.mjs'
 import { ownAgents } from './smoke-processes.mjs'
 
 const DATA = mkdtempSync(join(tmpdir(), 'cc-codex-'))
@@ -71,9 +71,11 @@ const ctx = c1.events.find((e) => e.type === 'context_update' || e.type === 'usa
 check(!!ctx, 'token/context gauge event received', ctx?.type)
 
 // ── Second run: resume after restart (S10) ────────────────────────────────────────
+// Read while c1's host runs: the agents seen are kept across hosts, so S11 below also counts what this one leaves
+appServersOf(c1.host.pid)
 c1.ws.close()
 c1.host.kill('SIGTERM')
-await new Promise((r) => c1.host.once('exit', r))
+await hostExit(c1.host)
 
 const c2 = await open()
 const res = await c2.call('agents.resumeSession', { sessionId: session.id })
@@ -91,10 +93,10 @@ if (res.resumed) {
 appServersOf(c2.host.pid)
 c2.ws.close()
 c2.host.kill('SIGKILL')
-await new Promise((r) => c2.host.once('exit', r))
+await hostExit(c2.host)
 let leftover = []
 for (let i = 0; i < 20 && (leftover = appServersOf(c2.host.pid)).length; i++) await new Promise((r) => setTimeout(r, 500))
-check(leftover.length === 0, 'S11 killing the host leaves no codex app-server of this run behind', leftover.join(',') || 'none')
+check(leftover.length === 0, 'S11 stopping or killing a host leaves no codex app-server of this run behind', leftover.join(',') || 'none')
 for (const pid of leftover) {
   try {
     process.kill(Number(pid))

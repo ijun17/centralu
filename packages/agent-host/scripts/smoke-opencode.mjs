@@ -16,7 +16,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost } from './host-client.mjs'
+import { hostExit, openHost } from './host-client.mjs'
 import { ownAgents } from './smoke-processes.mjs'
 
 const DATA = mkdtempSync(join(tmpdir(), 'cc-opencode-data-'))
@@ -109,7 +109,7 @@ check(c1.events.some((e) => e.sessionId === session.id && e.type === 'context_up
 check(acpPidsOf(c1.host.pid).length === 1, 'O3 one agent process for the session')
 
 c1.host.kill('SIGTERM')
-await new Promise((r) => c1.host.once('exit', r))
+await hostExit(c1.host)
 check(acpPidsOf(c1.host.pid).length === 0, 'O4 a host that stops ends its agent process')
 
 const c2 = await open()
@@ -120,7 +120,7 @@ check(/heron/i.test(textOf(c2.events, session.id)), 'O4 the reopened conversatio
 
 acpPidsOf(c2.host.pid)
 c2.host.kill('SIGKILL')
-await new Promise((r) => c2.host.once('exit', r))
+await hostExit(c2.host)
 const left = []
 for (let i = 0; i < 20 && (left.length = 0, left.push(...acpPidsOf(c2.host.pid)), left.length); i++) await new Promise((r) => setTimeout(r, 500))
 check(left.length === 0, 'O5 killing the host leaves no agent process of this run behind', left.join(',') || 'none')

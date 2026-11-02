@@ -13,7 +13,7 @@ import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { openHost } from './host-client.mjs'
+import { hostExit, openHost } from './host-client.mjs'
 import { ownAgents } from './smoke-processes.mjs'
 
 const TOOL = 'opencode'
@@ -179,7 +179,7 @@ async function run(c) {
   const ended = await turnEnd
   acpPidsOf(host.pid)
   host.kill('SIGTERM')
-  await new Promise((r) => (host.exitCode !== null || host.signalCode !== null ? r() : host.once('exit', r)))
+  await hostExit(host)
   const left = acpPidsOf(host.pid)
   stop(left)
   model.server.close()

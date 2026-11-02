@@ -1609,16 +1609,44 @@ const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; 
 /**
  * Steps the queue until `ok` holds: each merge_queue read is one poll (FAST), so nothing is waited for by the clock. At most
  * `most` of them. A poll is a call that runs the guard or a batch, many processes of its own: under load one takes 30 s or
- * more, so a time limit across the polls ended a wait for a state that was on its way (#1571). A step that hangs ends in the
- * test's own limit.
+ * more, so a time limit across the polls ended a wait for a state that was on its way (#1571). The only limit in time is
+ * the test's own: a wait that is still going when little of it is left fails here, saying the state it last saw, instead of
+ * as a bare "Test timed out". A step that hangs inside a poll ends in the test's limit.
  */
-async function until(ok: (q: any) => boolean, what: string, most = 400) {
+async function pollUntil<T>(step: () => Promise<T>, ok: (q: T) => boolean, what: string, most = 400, testEnds = Infinity): Promise<T> {
   for (let n = 0; ; n++) {
-    const q = (await call('merge_queue', { all: true })).data
+    const q = await step()
     if (ok(q)) return q
-    if (n >= most) throw new Error(`not after ${n + 1} polls: ${what}: ${JSON.stringify(q)}`)
+    // `performance.now`, not `Date.now`: a clock a test fakes would end the wait early again
+    if (n >= most || performance.now() > testEnds - 10_000) throw new Error(`not after ${n + 1} polls: ${what}: ${JSON.stringify(q)}`)
   }
 }
+/** When the running test ends by its own limit, on `performance.now`'s clock */
+let testEnds = Infinity
+beforeEach(({ task }) => {
+  testEnds = task.timeout ? performance.now() + task.timeout : Infinity
+})
+const until = (ok: (q: any) => boolean, what: string, most?: number) => pollUntil(async () => (await call('merge_queue', { all: true })).data, ok, what, most, testEnds)
+describe('the wait for the queue (#1571)', () => {
+  it('goes on through polls that each take longer than any time limit it once had, and names the state it last saw when it is never reached', async () => {
+    // Every read of the clock is 90 s after the one before: a poll that runs the guard under load, many times over
+    let clock = 0
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => (clock += 90_000))
+    try {
+      let polls = 0
+      const step = async () => ({ n: ++polls })
+      expect(await pollUntil(step, (x) => x.n === 3, 'the third poll')).toEqual({ n: 3 })
+      await expect(pollUntil(step, () => false, 'a state never reached', 5)).rejects.toThrow('not after 6 polls: a state never reached: {"n":9}')
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it('fails with the state it saw, not as a bare timeout, when the test has little of its own limit left', async () => {
+    const step = async () => ({ n: 1 })
+    await expect(pollUntil(step, () => false, 'a slow state', 400, performance.now() + 5_000)).rejects.toThrow('not after 1 polls: a slow state: {"n":1}')
+  })
+})
 /** `n` more polls of the queue (each 100 ms later on its clock), for a test that checks nothing more happens */
 async function polls(n = 10) {
   for (let i = 0; i < n; i++) await call('merge_queue', { all: true })
@@ -4582,7 +4610,12 @@ describe("the main guard does not revert a commit for the runner's own failure (
   })
 })
 
-describe('the main guard with overlapping failures, and when it acts again (#1259 review)', { timeout: 180_000 * SLOW }, () => {
+/*
+ * The culprit test runs the guard through three hunts, each poll a burst of processes. Idle it takes 5 s; next to 24 to 48
+ * busy loops on 12 cores it took 76 to 176 s (#1571), so 180 s left no margin. The limit is 600 s, about 3.4 times the worst
+ * seen; the waits inside end on the poll count, and name their state, long before it.
+ */
+describe('the main guard with overlapping failures, and when it acts again (#1259 review)', { timeout: 600_000 * SLOW }, () => {
   it('finds a second culprit that landed after the first, probing its commit without the first, and never blames a known one or a revert again', async () => {
     const repo = mainRepo([
       { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },

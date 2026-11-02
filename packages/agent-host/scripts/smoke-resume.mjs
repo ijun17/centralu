@@ -12,7 +12,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost } from './host-client.mjs'
+import { hostExit, openHost } from './host-client.mjs'
 
 const DB = join(mkdtempSync(join(tmpdir(), 'cc-resume-')), 'store.db') // The store shared by both host runs
 const CWD = mkdtempSync(join(tmpdir(), 'cc-resume-cwd-'))
@@ -46,7 +46,7 @@ check(!!afterFirstTurn?.externalId, 'the resume identifier is saved after the fi
 // ── Shut down the host (simulating the user quitting and reopening the app) ─────────────────────────
 c1.ws.close()
 c1.host.kill('SIGTERM')
-await new Promise((r) => c1.host.once('exit', r))
+await hostExit(c1.host)
 log('host shut down — the process is gone, only the record remains')
 
 // ── Second host run: start again against the same store and resume ─────────────────

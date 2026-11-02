@@ -107,6 +107,9 @@ export function removeTemp(dir) {
   }
 }
 
+/** Resolves once the host process has ended: at once when it already has (an `exit` that came earlier is not emitted again) */
+export const hostExit = (host) => new Promise((r) => (host.exitCode !== null || host.signalCode !== null ? r() : host.once('exit', r)))
+
 /** A host started and connected to: the client, with the host's process as `host` and its `port`, and `stop` to end it; a host that does not greet is stopped */
 export async function openHost(opts = {}) {
   const started = await startHost(opts)
@@ -120,7 +123,7 @@ export async function openHost(opts = {}) {
       async stop() {
         client.ws.close()
         if (host.exitCode !== null || host.signalCode !== null) return
-        const exited = new Promise((r) => host.once('exit', r))
+        const exited = hostExit(host)
         host.kill()
         await exited
       },
