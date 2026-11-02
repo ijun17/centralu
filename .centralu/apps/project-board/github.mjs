@@ -384,6 +384,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   if (names.size) return { names: [...names], unresolved: [], source: `branch protection of ${base}` }
 
   const found = []
+  const ownJobs = new Map() // `file job` -> the names the base gives that job
   const unresolved = []
   const read = []
   let added = 0
@@ -401,11 +402,20 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
       const file = path.split('/').pop()
       if (ref === own) {
         found.push(...w.names)
+        for (const [id, ns] of Object.entries(w.jobs)) ownJobs.set(`${file} ${id}`, ns)
         unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
         read.push(file)
       } else {
-        const before = new Set(found)
-        for (const n of w.names) if (!before.has(n)) (found.push(n), added++)
+        // A job the head still has under the same id, with names it can work out, replaces the base's names
+        // for it (a renamed matrix value). A job it no longer has keeps its names: a head cannot make a check optional.
+        const swapped = new Set()
+        for (const [id, ns] of Object.entries(w.jobs)) {
+          const old = ownJobs.get(`${file} ${id}`)
+          if (!old) continue
+          for (const n of old) if (!ns.includes(n) && found.includes(n)) found.splice(found.indexOf(n), 1)
+          for (const n of ns) swapped.add(n)
+        }
+        for (const n of w.names) if (!found.includes(n)) (found.push(n), swapped.has(n) || added++)
         unresolved.push(...w.unresolved.map((j) => `${file} job ${j} (added by the pull request)`))
       }
     }

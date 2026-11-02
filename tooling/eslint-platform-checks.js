@@ -80,7 +80,8 @@ function constantString(node) {
  * The module specifier a node loads, as written, or null: a static import, `export … from`, `import()`, `require()`,
  * `process.getBuiltinModule()` and `import x = require()`, each with a constant string. The selection
  * (tooling/os-tests.ts) follows imports with this same function, so the two cannot disagree on what is loaded. A
- * computed specifier, or a `require` made by `createRequire` under another name, is not seen.
+ * computed specifier, or a `require` made by `createRequire` and kept under a name, is not seen (`createRequire(…)('fs')`
+ * called in place is).
  */
 export function loadedSpecifier(node) {
   switch (node.type) {
@@ -95,8 +96,10 @@ export function loadedSpecifier(node) {
       return constantString(node.expression)
     case 'CallExpression': {
       const c = node.callee
+      const made = c.type === 'CallExpression' && (c.callee.type === 'Identifier' ? c.callee.name : c.callee.property?.name) === 'createRequire'
       const loads =
         (c.type === 'Identifier' && c.name === 'require') ||
+        made ||
         (c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.object.name === 'process' && c.property.name === 'getBuiltinModule')
       return loads ? constantString(node.arguments[0]) : null
     }

@@ -345,10 +345,15 @@ if (process.argv[2] === 'chunks') {
   while ((n = fs.readSync(0, b, 0, 3, null)) > 0) process.stdout.write(b.subarray(0, n).toString() + '|')
 }
 if (process.argv[2] === 'stat') fs.fstatSync(0)
+if (process.argv[2] === 'path') process.stdout.write(fs.readFileSync('/dev/stdin', 'utf8'))
+if (process.argv[2] === 'pathStat') fs.statSync('/dev/stdin')
 `)
     expect(gh(['whole'], { input: 'é {"a":1}\n' }).stdout).toBe('é {"a":1}\n')
     expect(gh(['chunks'], { input: 'abcdefg' }).stdout).toBe('abc|def|g|')
     expect(gh(['whole'], {}).stdout).toBe('')
+    // /dev/stdin is the same input as fd 0, and no other use of it reaches the real one
+    expect(gh(['path'], { input: 'via path' }).stdout).toBe('via path')
+    expect(gh(['pathStat'], { input: 'x' }).stderr).toContain('fs.statSync on stdin is not given by the in-process fake gh')
     const stat = gh(['stat'], { input: 'x' })
     expect(stat.code).toBe(1)
     expect(stat.stderr).toContain('fs.fstatSync on stdin is not given by the in-process fake gh')
@@ -367,6 +372,8 @@ if (process.argv[2] === 'set') process.title = 'x'
       const r = gh([arg!], {})
       expect(r.code, arg).toBe(1)
       expect(r.stderr, arg).toContain(named)
+      // The fake's own error, not a TypeError from calling undefined (which names the member too)
+      expect(r.stderr, arg).toMatch(/is not given to a script in the in-process fake gh|cannot be set in the in-process fake gh/)
       expect(r.stdout, arg).toBe('')
     }
   })

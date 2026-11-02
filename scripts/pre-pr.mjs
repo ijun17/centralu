@@ -48,6 +48,7 @@
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isMain } from './is-main.mjs'
 import { tierOfChange, unjudged } from './tier.mjs'
@@ -143,14 +144,20 @@ export function canonical(path) {
 
 const tail = (text, lines = 25) => String(text ?? '').trim().split('\n').slice(-lines).join('\n')
 
-/** Runs a Node entry point of the worktree's own node_modules; answers { ok, out, timedOut }. `timeout` is in ms, 0 for none. */
-function nodeBin(worktree, bin, args, env = {}, timeout = 0) {
+/**
+ * Runs a Node entry point of the worktree's own node_modules; answers { ok, out, timedOut }. `timeout` is in ms, 0 for none.
+ * With a limit it runs under run-limited.mjs, which ends the entry point and everything it started at the limit (a plain
+ * kill leaves vitest's workers running, to eat the time of the phases after it).
+ */
+export function nodeBin(worktree, bin, args, env = {}, timeout = 0) {
   const dir = canonical(worktree)
+  const entry = [join(dir, 'node_modules', bin), ...args]
+  const [file, argv] = timeout ? [process.execPath, [fileURLToPath(new URL('./run-limited.mjs', import.meta.url)), String(timeout), process.execPath, ...entry]] : [process.execPath, entry]
   try {
-    const out = execFileSync(process.execPath, [join(dir, 'node_modules', bin), ...args], { cwd: dir, encoding: 'utf8', timeout, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+    const out = execFileSync(file, argv, { cwd: dir, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
     return { ok: true, out, timedOut: false }
   } catch (e) {
-    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message), timedOut: e.code === 'ETIMEDOUT' }
+    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message), timedOut: timeout > 0 && e.status === 124 }
   }
 }
 

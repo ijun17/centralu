@@ -23,7 +23,7 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+import { latestRuns, LEASE_MS, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -1636,6 +1636,15 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     // Shortened, it is back in CI: busy as any item in CI
     q.items[0].state = 'ci'
     expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
+  })
+
+  it("writes the lease on the system clock, which another process shares, not on the queue's stepped one (#1656)", async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
+    // 80 steps of 100 ms: a lease written on the stepped clock would end 8 s later than one written on the system's
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await polls(80)
+    const lease = JSON.parse(readFileSync(filesNamed(join(root, 'data'), 'merge-queue.lease.json')[0]!, 'utf8'))
+    expect(Math.abs(Date.parse(lease.until) - LEASE_MS - Date.now())).toBeLessThan(4_000)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {

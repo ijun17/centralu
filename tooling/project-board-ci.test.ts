@@ -631,6 +631,17 @@ describe('the project board app: ci_status', { timeout: 30_000 * SLOW }, () => {
     expect(status.text).toContain('plus 1 job the pull request adds')
   })
 
+  it("replaces a matrix job's old names with the head's, and keeps the names of a job the head deletes (#1729)", async () => {
+    const matrix = (rows: string) =>
+      ['jobs:', '  verify:', '    name: verify', '  content:', '    name: content verify (${{ matrix.runner }})', '    strategy:', '      matrix:', `        runner: [${rows}]`, ''].join('\n')
+    const reported = (...names: string[]) => [[ghRun('full tier', 'success', 10), ghRun('verify', 'success', 11), ...names.map((n, i) => ghRun(n, 'success', 20 + i))]]
+    runtime(ghState({ workflow: matrix('ubuntu-24.04, macos-14'), headWorkflow: matrix('ubuntu-24.04, macos-15'), checkRuns: reported('content verify (ubuntu-24.04)', 'content verify (macos-15)') }))
+    expect((await call('ci_status', { pr: 77 })).data.verdict).toBe('green')
+    // the head drops the job outright: its names stay required
+    runtime(ghState({ workflow: matrix('ubuntu-24.04, macos-14'), headWorkflow: ['jobs:', '  verify:', '    name: verify', ''].join('\n'), checkRuns: reported() }))
+    expect((await call('ci_status', { pr: 77 })).data.verdict).not.toBe('green')
+  })
+
   it('cannot make a check optional by removing its job in the pull request', async () => {
     const headWorkflow = ['jobs:', '  verify:', '    name: verify', ''].join('\n')
     runtime(ghState({ headWorkflow, checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('linux-x64', 'success', 13)]] }))
