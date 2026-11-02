@@ -597,8 +597,9 @@ export function foreignHolder(dataDir) {
  * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
  * start time and no `at` (its host found no `ps`) cannot be told apart, so it does not count. Windows has no `ps` and its
  * host records no start time (#1723), only `at`, when it took the folder: the process that wrote the lock was created by
- * then, and one given its number afterwards was created later. No slack: both times come from one clock, and the host
- * writes `at` well after its process was created. An `at` in the future (a clock set back since) proves nothing.
+ * then, and one given its number afterwards was created later. Both times come from one clock and the host writes `at`
+ * 17 ms or more after its process was created, so the slack is one clock tick, for the two readings of it. An `at` in the
+ * future (a clock set back since) proves nothing.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
   const holder = lockHolder(dataDir)
@@ -606,8 +607,11 @@ export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt
   if (holder.started) return startOf(holder.pid) === holder.started
   if (holder.at === undefined || holder.at > Date.now()) return false
   const created = createdAt(holder.pid)
-  return created !== null && created <= holder.at
+  return created !== null && created <= holder.at + CLOCK_TICK_MS
 }
+
+/** One tick of the Windows clock */
+const CLOCK_TICK_MS = 16
 
 /**
  * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`

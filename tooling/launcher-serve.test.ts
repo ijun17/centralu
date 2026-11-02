@@ -2344,9 +2344,10 @@ describe('the folder’s host on a system with no ps', () => {
     lock(d, { pid: process.pid, started: null, at, by: 'serve' })
     const noPs = () => null
     expect(lockHolderIsAlive(d, noPs, () => at - 5_000)).toBe(true)
-    expect(lockHolderIsAlive(d, noPs, () => at)).toBe(true)
-    // Created later, however little: the host that wrote the lock died and its number went to another process
-    expect(lockHolderIsAlive(d, noPs, () => at + 1)).toBe(false)
+    // Within a clock tick of it: the two readings of the clock
+    expect(lockHolderIsAlive(d, noPs, () => at + 16)).toBe(true)
+    // Created later: the host that wrote the lock died and its number went to another process
+    expect(lockHolderIsAlive(d, noPs, () => at + 17)).toBe(false)
     expect(lockHolderIsAlive(d, noPs, () => at + 1_000)).toBe(false)
     expect(lockHolderIsAlive(d, noPs, () => at + 60_000)).toBe(false)
     // A lock written in the future (a clock set back since) proves nothing, whenever the process was created
