@@ -446,6 +446,27 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(ghCalls().filter((c) => c.args[1] === 'ready')).toHaveLength(1)
   })
 
+  // #1673: the merge queue lands a queued pull request as itself, and never merges a draft it did not make: drafting it as a
+  // lower would stall it. It stays ready, and the answer says the new one needs a restack once it lands
+  it('leaves the pull request it is stacked on ready when the merge queue holds it', async () => {
+    patchState((s) => {
+      s.prs['5'] = pr(5, { headRefName: 'feat/low' })
+    })
+    const dir = join(root, 'data', 'app-data', 'p1', 'project-board')
+    mkdirSync(dir, { recursive: true })
+    const queued = { repo: 'ijun17/centralu', pr: 5, lowers: [], owner: 'lander', state: 'ci', queuedAt: new Date().toISOString(), reruns: {} }
+    writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items: [queued], events: [], batches: [], batchSeq: 0, batchOff: null }))
+    runtime()
+    const dry = await call('open_pr', { ...PR, base: 'feat/low', dryRun: true })
+    expect(dry.text).not.toContain('into a draft')
+    const r = await call('open_pr', { ...PR, base: 'feat/low' })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain('#5, which this one is stacked on, is in the merge queue, so it stays ready')
+    expect(r.text).toContain('rebase_stack')
+    expect(r.data.drafted).toBeUndefined()
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toEqual([])
+  })
+
   it('refuses a pull request with an empty Not exercised, a bad title or a heading the template lacks, sending nothing', async () => {
     runtime()
     const empty = await call('open_pr', { ...PR, notExercised: '  ' })

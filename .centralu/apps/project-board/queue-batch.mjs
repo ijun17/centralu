@@ -253,9 +253,14 @@ async function build(b, ctx) {
     for (const run of own.runs.filter(needless)) {
       // Not the driver any more: the next one builds this batch again from the start
       if (!renew()) return { yielded: true }
-      const entry = { pr: s.pr, run: run.id, suite: run.check_suite_id ?? null }
+      const entry = { pr: s.pr, run: run.id, attempt: run.run_attempt ?? 1, suite: run.check_suite_id ?? null }
       cancelled.push(entry)
-      save((fq, fb) => (fb.cancelled = [...(fb.cancelled ?? []), entry]))
+      save((fq, fb) => {
+        fb.cancelled = [...(fb.cancelled ?? []), entry]
+        // On the item too: back on its own CI, this cancelled run is the queue's doing, not its failure (#1527)
+        const it = findItem(fq, repo, s.pr)
+        if (it?.head === s.head) it.queueCancelled = [...(it.queueCancelled ?? []), { run: run.id, attempt: entry.attempt }]
+      })
       try {
         await cancelWorkflowRun(repo, run.id)
       } catch (e) {

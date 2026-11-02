@@ -182,6 +182,9 @@ class World {
   jobList: typeof RUN_220 | null = null
   /** A pull request's title when it is not the usual one (a person edited it) */
   titles = new Map<number, string>()
+  /** Pull requests GitHub says BLOCKED for (a rule the batch does not satisfy), and a fixed number of steps every run takes */
+  blocked = new Set<number>()
+  runSteps: number | null = null
   constructor(public rand: () => number) {}
 
   tree(a: string, b: string) {
@@ -218,7 +221,7 @@ class World {
       state: p.state,
       isDraft: false,
       mergeable: 'MERGEABLE',
-      mergeStateStatus: 'CLEAN',
+      mergeStateStatus: this.blocked.has(n) ? 'BLOCKED' : 'CLEAN',
       headRefOid: p.head,
       headRefName: `feat/b${n}`,
       baseRefName: 'main',
@@ -314,7 +317,7 @@ class World {
       suite: 5000 + this.runs.length,
       plan: this.plan(tier, attempt),
       age: 0,
-      duration: this.calm ? 1 : 1 + Math.floor(this.rand() * 3),
+      duration: this.runSteps ?? (this.calm ? 1 : 1 + Math.floor(this.rand() * 3)),
       lag: this.rand() < 0.5 ? 0 : 1,
       createdAt: this.iso(),
       status: 'in_progress',
@@ -393,7 +396,10 @@ class World {
   }
   cancel(runId: number) {
     const r = this.runs.find((x) => x.id === runId)
-    if (r && r.status !== 'completed') Object.assign(r, { status: 'completed', conclusion: 'cancelled' })
+    if (!r || r.status === 'completed') return
+    // As on GitHub: the checks still going end cancelled with it
+    Object.assign(r, { status: 'completed', conclusion: 'cancelled' })
+    for (const c of r.checks) if (c.status !== 'completed') Object.assign(c, { status: 'completed', conclusion: 'cancelled' })
   }
   readWorkflowChecks(sha: string, branch?: string) {
     const runs = this.runs.filter((r) => r.sha === sha && (!branch || r.branch === branch))
@@ -663,6 +669,35 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     expect(r.world.violations).toEqual([])
     expect((r.q.events as { text: string }[]).some((e) => /squash subject is over 72/.test(e.text))).toBe(true)
     expect(r.q.items.find((i: { pr: number }) => i.pr === 1)).toMatchObject({ state: 'merged' })
+  })
+
+  // #1527: a batch cancels a member's own run; the batch is green and stops before it (GitHub says BLOCKED), so it goes back to
+  // its own CI, whose run the queue reruns; the next batch, of it alone, cancels that rerun and stops too. A run the queue
+  // cancelled itself is not the pull request's failure: never "cancelled again", and the session hears why the batch stopped
+  it('reruns an own run its batch cancelled as often as batches cancel it, and says why the batch stopped before it', async () => {
+    const r = await simulate(11, {
+      steps: 0,
+      setup: (world, dir) => {
+        world.runSteps = 12
+        for (const n of [1, 2]) {
+          world.open(n)
+          world.pr(n).file = 'docs/guide.md'
+          updateQueue(dir, (q: unknown) => enqueue(q, { repo: R, pr: n, owner: 'me', at: world.iso() }, ref))
+        }
+        world.blocked.add(2)
+      },
+    })
+    const texts = (r.q.events as { text: string }[]).map((e) => e.text)
+    expect(texts.filter((t) => /cancelled again/.test(t))).toEqual([])
+    expect(r.world.landings.map((l) => l.n)).toEqual([1])
+    // Its own run was cancelled by both batches, and run again after each
+    const own = r.world.runs.find((x) => x.branch === 'feat/b2')!
+    expect(own.attempt).toBe(3)
+    const item = r.q.items.find((i: { pr: number }) => i.pr === 2)
+    expect(item).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    expect(item.reason.text).toMatch(/stopped before #2: GitHub says BLOCKED/)
+    // Each batch's line says why it stopped
+    expect(r.q.batches.map((b: { why?: string }) => b.why)).toEqual([expect.stringMatching(/BLOCKED/), expect.stringMatching(/BLOCKED/)])
   })
 
   // The cap: with something landing on main every tick, no batch can land, and each pull request is stopped again and again.

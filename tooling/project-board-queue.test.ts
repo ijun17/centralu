@@ -105,6 +105,24 @@ describe('what the merge queue decides for one poll', () => {
     expect(again.action).toBeUndefined()
   })
 
+  // #1527: a batch cancelled the run (at that attempt) when it was built; that is the queue's doing, not the pull request's failure
+  it('reruns a run the queue cancelled for a batch every time, without using up the rerun of the head', () => {
+    const cancelled = checksOf([check('verify', 'cancelled'), check('windows tests', 'success')])
+    const decide = (item: Record<string, unknown>, attempt: number, now = NOW) => decideCi({ item, pr: openPr(), checks: cancelled, runs: [run('cancelled', attempt)], defaultBranch: 'main', now, ref })
+    // Its own cancel at attempt 1 was rerun once; a batch then cancelled attempt 2
+    const spent = { cancelled: { run: 900, attempt: 1, at: new Date(NOW).toISOString() } }
+    const ours = decide(fresh({ reruns: spent, queueCancelled: [{ run: 900, attempt: 2 }] }), 2)
+    expect(ours).toMatchObject({ state: 'ci', action: { type: 'rerun', runId: 900, failedOnly: false, kind: 'queue' } })
+    expect(ours.event).toContain('cancelled by the merge queue for a batch')
+    expect(ours.patch.reruns.cancelled).toEqual(spent.cancelled)
+    // Cancelled by a batch again at attempt 3: rerun again
+    const twice = decide(fresh({ reruns: ours.patch.reruns, queueCancelled: [{ run: 900, attempt: 2 }, { run: 900, attempt: 3 }] }), 3, NOW + 600_000)
+    expect(twice).toMatchObject({ action: { type: 'rerun', kind: 'queue' } })
+    // A cancel the queue did not make (another attempt, another head) is counted as before
+    expect(decide(fresh({ reruns: spent, queueCancelled: [{ run: 900, attempt: 1 }] }), 2, NOW + 600_000)).toMatchObject({ state: 'attention', reason: { kind: 'cancelled' } })
+    expect(decide(fresh({ head: 'old', reruns: {}, queueCancelled: [{ run: 900, attempt: 2 }] }), 2)).toMatchObject({ action: { kind: 'cancelled' } })
+  })
+
   it('reruns failed jobs once per head only for an infrastructure failure; failing again needs attention, naming the job; a new head starts over', () => {
     const failing = checksOf([check('verify', 'success'), check('windows tests', 'failure', { jobId: '12' })])
     const timedOut = (attempt = 1, id = 900) => ({ [id]: { real: false, cause: 'timeout', job: { name: 'windows tests', id: '12' }, attempt } })
@@ -5474,6 +5492,8 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) }, ...more }))
       const q = await until((x) => stateOf(x) === 'attention', 'attention')
       expect(q.queue[0].reason.kind).toBe('draft')
+      // The queuing session is told, not left waiting on a draft it did not make (#1673)
+      expect(events().filter((e) => e.kind === 'attention' && e.notify).map((e) => e.text)).toEqual([expect.stringContaining('#77 is a draft, and the queue never merges a draft')])
       await morePolls()
       expect(writes()).toEqual([])
     })
