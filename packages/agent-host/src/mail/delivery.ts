@@ -1,7 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, parseAddress } from './address.js'
-import { HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE, HOUR_MS } from './rules.js'
+import { HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE, HOUR_MS, needsReceiver } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainOptions, DrainResult, MessageService } from './messages.js'
 
@@ -108,6 +108,8 @@ export class MailDelivery {
   private readonly timers = new Map<string, () => void>()
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
+  /** Until when a mailbox's wake waits for the host-wide cap, as last said in the log: the sweep tries it again meanwhile, and says nothing new */
+  private readonly capUntil = new Map<string, number>()
   /**
    * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A sleeping session is then woken only for mail that
    * needs it, among what came due before; the rest waits for its next turn. Null in a host that was running a moment ago
@@ -290,12 +292,9 @@ export class MailDelivery {
   private readonly skipUnlessPersonSince = (message: MailRow, row: RecipientRow): boolean =>
     message.sender !== PERSON || (this.cutoff !== null && row.dueAt <= this.cutoff)
 
-  /**
-   * What a host that was off a long while does not wake a sleeping session for (`cutoff`): what came due before and needs no one. The person's
-   * words, a task, a report, a message that needs a reply and an app's post the receiver must see are woken for
-   */
+  /** What a host that was off a long while does not wake a sleeping session for (`cutoff`): what came due before and needs no one */
   private readonly skipOld = (message: MailRow, row: RecipientRow): boolean =>
-    this.cutoff !== null && row.dueAt <= this.cutoff && message.sender !== PERSON && message.kind !== 'task' && message.kind !== 'report' && !message.needsReply && message.facts.needsOwner !== true
+    this.cutoff !== null && row.dueAt <= this.cutoff && !needsReceiver(message)
 
   /**
    * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `partyGone`, or the call
@@ -479,7 +478,7 @@ export class MailDelivery {
     delivered.at = deliveredAt
     this.records.transaction(() => {
       // Delivered in the turn this began, or quietly into the one running (§8.2): the rows name it, which the pair guard and a request's end read
-      this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.numberOf(sessionId) ?? null)
+      this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
       // Told of and held is not read: the person finds it in the Inbox, with Release, until they have seen it
       const heldIds = new Set(drained.quieted.map((q) => q.messageId))
       this.records.markRead(recipient, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
@@ -532,9 +531,10 @@ export class MailDelivery {
       facts: { hostCap: true },
       dedupeKey: `hostcap:${PERSON}:${Math.floor(now / HOUR_MS) * HOUR_MS}`,
     })
-    const oldest = this.records.oldestMailStartedSince(since, sessionId) ?? now
-    console.error(`[mail] ${recipient}: the host has had ${this.o.hostCap} mail-started turns this hour; its mail waits`)
-    return Math.max(1_000, oldest + HOUR_MS - now)
+    const until = (this.records.oldestMailStartedSince(since, sessionId) ?? now) + HOUR_MS
+    if (this.capUntil.get(recipient) !== until) console.error(`[mail] ${recipient}: the host has had ${this.o.hostCap} mail-started turns this hour; its mail waits`)
+    this.capUntil.set(recipient, until)
+    return Math.max(1_000, until - now)
   }
 
   /** What the receiver's guards say about its mail (§7.5): a pair whose mail ran away is held `loop`, a session over its budget is not woken */

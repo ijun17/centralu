@@ -9,6 +9,7 @@ import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
@@ -101,7 +102,7 @@ export type MailHooks = {
    * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
    */
-  handOver?(fromSessionId: string, toSessionId: string, which: 'all' | { senders: readonly string[] }): HandedOverMessage[]
+  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverMessage[]
   /** What `handOver` would give the successor of an original that goes, read only: the archive preview says it (#1574) */
   handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
   /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
@@ -904,7 +905,7 @@ export class SessionManager {
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   private mailHooks: MailHooks | null = null
 
-  /** The sessions the keeper handed over from the last host, which this one took over mid-run */
+  /** The sessions this host took over mid-run: the keeper's, and the turns an update cut and this host continues */
   private keptAtStart: ReadonlySet<string> = new Set()
 
   /**
@@ -913,8 +914,7 @@ export class SessionManager {
    */
   keptInTurn(sessionId: string): boolean {
     const m = this.meta.get(sessionId)
-    const goesOn = this.keptAtStart.has(sessionId) || this.continuedAfterUpdate.some((c) => c.sessionId === sessionId)
-    return goesOn && !!m && inTurn(m.state)
+    return this.keptAtStart.has(sessionId) && !!m && inTurn(m.state)
   }
 
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
@@ -2338,8 +2338,8 @@ export class SessionManager {
   }
 
   /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
-  orchestratorId(): string | undefined {
-    return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id
+  orchestratorId(): string | null {
+    return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
   }
 
   /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */

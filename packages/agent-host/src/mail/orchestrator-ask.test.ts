@@ -113,6 +113,18 @@ describe('the end of a request turn (§7.6, S12)', () => {
     )
   })
 
+  it('a turn that carried two requests of one asker settles both at its end: the second is not left owed', async () => {
+    const w = started()
+    const first = w.mail.send(A, { to: [ORC], text: 'rebase #12', needsReply: true })
+    const second = w.mail.send(A, { to: [ORC], text: 'and #13', needsReply: true })
+    await w.advance(2_000)
+    expect(w.to('orc')).toHaveLength(1)
+    w.endTurn('orc')
+    reportRecorder(w.service, w.store.mailbox, w.turns)('a', 'orc', { outcome: 'finished', body: 'done', then: 'review', delivery: 'wake' })
+    expect(w.row(first.message.id, ORC)!.settled).not.toBeNull()
+    expect(w.row(second.message.id, ORC)!.settled).not.toBeNull()
+  })
+
   it('a request moved from an old thread starts a request turn with its asker; its end settles nothing more and reports S12 to the asker', async () => {
     const w = hostWorld()
     const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })

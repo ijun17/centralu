@@ -2,7 +2,7 @@
  * Delivery to a receiver at rest, on the message tables (docs/plans/mailbox.md §8, §7.5, M3a): who is woken when, what is written before and after
  * the tool takes the input, what waits, the turn a wake begins, and the guards (the pair loop guard, the token guard, the host-wide cap).
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MailNotAtRest } from './delivery.js'
 import { deliveryWorld, settle } from './delivery.test-helpers.js'
 import { A, B, C, NOW, ORC, W, X } from './messages.test-helpers.js'
@@ -287,9 +287,8 @@ describe('the turn a wake begins (§8.2, D17)', () => {
 })
 
 describe('the pair loop guard (§7.5)', () => {
-  it('mail between two sessions that started more than 20 turns in an hour is held loop; the person’s word counts anew; Resume lets it go', async () => {
-    const w = started({ delivery: { minWakeGapMs: 0 } })
-    // Two sessions asking each other back, every answer a question again
+  /** Two sessions asking each other back, every answer a question again, until the 22nd round is held: its message */
+  const runAway = async (w: ReturnType<typeof started>) => {
     let last = w.send(A, { to: [B], text: 'round 0' }).message.id
     await w.advance(2_000)
     for (let i = 1; i < 21; i++) {
@@ -302,6 +301,24 @@ describe('the pair loop guard (§7.5)', () => {
     const held = w.send(B, { replyTo: last, text: 'round 21', needsReply: true })
     await w.advance(2_000)
     expect(w.rowOf(held.message.id, A).held).toBe('loop')
+    return held
+  }
+
+  it('the person’s word to either session counts the pair anew, to the sender as much as to the receiver', async () => {
+    const w = started({ delivery: { minWakeGapMs: 0 } })
+    await runAway(w)
+    w.send(PERSON, { to: [B], text: 'carry on' })
+    await w.advance(2_000)
+    w.endTurn('b')
+    const next = w.send(B, { to: [A], text: 'round 22', needsReply: true })
+    await w.advance(2_000)
+    expect(w.rowOf(next.message.id, A)).toMatchObject({ held: null })
+    expect(w.rowOf(next.message.id, A).deliveredAt).not.toBeNull()
+  })
+
+  it('mail between two sessions that started more than 20 turns in an hour is held loop; Centralu’s report is not; Resume lets it go', async () => {
+    const w = started({ delivery: { minWakeGapMs: 0 } })
+    const held = await runAway(w)
     // Centralu's report is never held by it
     const task = w.mail.task(B, A, { text: 'job', origin: 'agent_session', delivered: true })
     w.mail.report(task.id, { outcome: 'finished', body: 'done' })
@@ -356,6 +373,22 @@ describe('the host-wide cap (§7.5)', () => {
     w.send(PERSON, { to: [B], text: 'go on' })
     await settle()
     expect(w.rowOf(capped.message.id, B).deliveredAt).not.toBeNull()
+  })
+
+  it('a wake it defers waits until the hour has room, not tried again meanwhile, and then goes', async () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const w = started({ delivery: { hostCap: 12, hostShare: 4 } })
+    turnsOf(w, 'b', 12)
+    const capped = w.send(A, { to: [B], text: 'one more', needsReply: false })
+    const tries = vi.spyOn(w.mail, 'drain')
+    await w.advance(30 * 60_000)
+    expect(w.rowOf(capped.message.id, B).deliveredAt).toBeNull()
+    // Looked at by the sweep, not every second; said once
+    expect(tries.mock.calls.filter(([to]) => to === B).length).toBeLessThan(100)
+    expect(said.mock.calls.filter((c) => String(c[0]).includes('mail-started turns this hour'))).toHaveLength(1)
+    await w.advance(31 * 60_000)
+    expect(w.rowOf(capped.message.id, B).deliveredAt).not.toBeNull()
+    said.mockRestore()
   })
 
   it('a report goes through it', async () => {

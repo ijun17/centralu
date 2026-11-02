@@ -481,6 +481,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626 review)
     expect(sentTo(b, child)).toHaveLength(0)
     expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
+    // The mail turn of the cut turn is read back, not closed lost (mailbox §8.2 step 6, Q-M3a-3)
+    expect(b.mgr.keptInTurn(child)).toBe(true)
     await eventually(() => sentTo(b, child).length === 1)
     expect(sentTo(b, child)[0]).toContain('Centralu on this machine was updated while your turn was running')
     expect(sentTo(b, child)[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')

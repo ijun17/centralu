@@ -289,9 +289,17 @@ describe('covering (§10.3)', () => {
 })
 
 describe('guards and counts', () => {
-  it('pairTurnsSince counts turns both ways by address', () => {
+  it('pairTurnsSince counts turns both ways by address, only those a session’s message started', () => {
     const { box, send } = world()
-    const deliver = (from: string, recipient: string, turn: number, at: number) => box.markDelivered(recipient, [send({ sender: from }, recipient)], at, turn)
+    /** `from`'s message delivered into `recipient`'s turn `turn`, which the first one delivered into it started, or the person's message */
+    const deliver = (from: string, recipient: string, turn: number, at: number, starter: 'mail' | 'person' = 'mail') => {
+      const id = send({ sender: from }, recipient)
+      box.markDelivered(recipient, [id], at, turn)
+      const sessionId = recipient.slice(recipient.indexOf('/') + 1)
+      if (box.turnsOf(sessionId).some((t) => t.turnSeq === turn)) return
+      box.startTurn({ sessionId, turnSeq: turn, messageId: null, starterId: starter === 'person' ? send({ sender: 'person' }, recipient) : id, startedBy: 'mail', startedAt: at })
+    }
+    deliver(A, B, 6, NOW, 'person')
     deliver(B, A, 1, NOW)
     deliver(B, A, 1, NOW + 1)
     deliver(B, A, 2, NOW + 2)
@@ -400,7 +408,7 @@ describe('handoff and trash', () => {
     const { box, send } = world()
     const fromC = send({ sender: C, needsReply: true }, A)
     const fromOther = send({ sender: ORC, needsReply: true }, A)
-    expect(box.moveRows(A, B, { recipients: [C] })).toEqual([fromC])
+    expect(box.moveRows(A, B, { senders: [C] })).toEqual([fromC])
     expect(box.recipient(fromOther, A)).toBeDefined()
   })
 
@@ -629,7 +637,7 @@ describe('what the message service reads (M2)', () => {
     // Watched and unsettled, or unread; not what is read and needs nothing, not what is settled and read, and not mail from the heir itself
     expect(box.movable(B, ORC, 'all')).toEqual([watched, unreadNote, own])
     expect(box.movable(B, C, 'all')).toEqual([watched])
-    expect(box.movable(B, ORC, { recipients: [C] })).toEqual([unreadNote, own])
+    expect(box.movable(B, ORC, { senders: [C] })).toEqual([unreadNote, own])
     expect(box.recipient(watched, B)).toBeDefined()
     const preview = box.movable(B, ORC, 'all')
     expect(box.moveRows(B, ORC, 'all')).toEqual(preview)

@@ -98,8 +98,8 @@ export type RecipientRow = {
 export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }
 export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
   Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
-/** Which of the original's rows a handoff moves: all, or those of mail from the recipients of its tasks that move (§7.7) */
-export type HandOverScope = 'all' | { recipients: readonly string[] }
+/** Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) */
+export type HandOverScope = 'all' | { senders: readonly string[] }
 
 /** The stored message, and whether it was there already under the sender's `dedupeKey` */
 export type StoredMail = MailRow & { duplicate: boolean }
@@ -667,12 +667,17 @@ export class MailboxRecords {
     )
   }
 
-  /** Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5) */
+  /**
+   * Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5). Only turns a session's
+   * message started: one the person started, by their words or their message, counts toward no guard (D13, Q-M3a-12)
+   */
   pairTurnsSince(a: string, b: string, since: number): number {
     return this.count(
       `SELECT COUNT(DISTINCT r.recipient || ':' || r.turn_seq) AS n FROM mail_recipients r JOIN mail m ON m.id = r.message_id
         WHERE ((r.recipient = @a AND m.sender = @b) OR (r.recipient = @b AND m.sender = @a)) AND r.turn_seq IS NOT NULL
-          AND r.delivered_at >= @since`,
+          AND r.delivered_at >= @since
+          AND EXISTS (SELECT 1 FROM mail_turns t JOIN mail s ON s.id = t.starter_id
+                       WHERE r.recipient LIKE 'session:%/' || t.session_id AND t.turn_seq = r.turn_seq AND t.started_by = 'mail' AND s.sender LIKE 'session:%')`,
       { a, b, since },
     )
   }
@@ -771,7 +776,7 @@ export class MailboxRecords {
           WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
           ORDER BY m.created_at, m.id`,
       )
-      .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
+      .all({ from, to, senders: idList(scope === 'all' ? [] : scope.senders) })
       .map((r) => r.id)
   }
 
