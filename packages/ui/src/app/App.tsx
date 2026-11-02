@@ -243,7 +243,7 @@ export function App({
       */}
       <ErrorBoundary platform={platform}>
         {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
-        <div className="relative flex h-full flex-col border border-line bg-surface-floor text-ink">
+        <div className="relative flex h-full flex-col bg-surface-floor text-ink">
           <TopBar />
           {/*
             The shell's banner sits in the flow, below the top bar (#326). It used to be laid over
@@ -281,6 +281,12 @@ export function App({
           <KeptDraftCard />
           <Toast />
           <GlobalKeys />
+          {/*
+            The window's edge: the default hairline, drawn over the frame rather than around it (owner, 2026-11-02). A border
+            on the frame would push the top bar 1px down, off the centre of the native window controls, and shrink the
+            lanes; this takes no room and no pointer. No z-index, so every layer above the page stays above it.
+          */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 border border-line" data-testid="app-edge" />
         </div>
       </ErrorBoundary>
     </PlatformProvider>
