@@ -236,21 +236,14 @@ describe('the own Antigravity of the person (an app found, the connection not in
   const detect = (t: ReturnType<typeof tempData>, appPaths: string[]) =>
     antigravityProfile({ dataDir: t.dir, platform: 'linux', arch: 'x64', appPaths }).detect()
 
-  it('says so in the setup when one of the app paths is there, and installed stays false', async () => {
-    const t = tempData()
-    data.push(t)
-    const app = inRoot(t.home, 'antigravity-app')
-    folder(app)
-    const found = await detect(t, ['/no/such/antigravity', app])
-    expect(found).toMatchObject({ installed: false, loggedIn: false, setup: { state: 'not_installed', install: 'centralu', appFound: true } })
-  })
-
-  it('says nothing about it when no path is there, or once the connection is installed', async () => {
+  it('says so when one of the app paths is there (installed stays false), and says nothing with none, or once the connection is installed', async () => {
     const t = tempData()
     data.push(t)
     const app = inRoot(t.home, 'antigravity-app')
     expect((await detect(t, ['/no/such/antigravity'])).setup).not.toHaveProperty('appFound')
     folder(app)
+    const found = await detect(t, ['/no/such/antigravity', app])
+    expect(found).toMatchObject({ installed: false, loggedIn: false, setup: { state: 'not_installed', install: 'centralu', appFound: true } })
     fakeInstall(t.home)
     const installed = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version, appPaths: [app] }).current()
     expect(installed.state).toBe('signed_out')
