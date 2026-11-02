@@ -6,19 +6,20 @@
 // The program stays in this process's group (not detached), so whoever ends pre-pr's group (the board cancelling it) ends the
 // program and its workers too; at the limit the descendants are found and ended one by one instead.
 import { execFileSync, spawn } from 'node:child_process'
+import { constants } from 'node:os'
 import { join } from 'node:path'
 
 const [ms, file, ...args] = process.argv.slice(2)
 const child = spawn(file, args, { stdio: 'inherit' })
 
-/** Every process below `pid`, deepest first (POSIX: from the process table) */
+/** Every process below `pid` (POSIX: from the process table) */
 function descendants(pid) {
   const children = new Map()
   for (const line of execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).split('\n')) {
     const [p, pp] = line.trim().split(/\s+/).map(Number)
     if (p) children.set(pp, [...(children.get(pp) ?? []), p])
   }
-  const walk = (p) => (children.get(p) ?? []).flatMap((c) => [...walk(c), c])
+  const walk = (p) => (children.get(p) ?? []).flatMap((c) => [c, ...walk(c)])
   return walk(pid)
 }
 
@@ -30,13 +31,14 @@ const timer = setTimeout(() => {
     spawn(taskkill, ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => child.kill('SIGKILL'))
     return
   }
+  // The program first, so it starts no new worker while the ones it had are ended; then what the snapshot (taken before) found
   let found = []
   try {
     found = descendants(child.pid)
   } catch {
     // no ps: the program alone
   }
-  for (const pid of [...found, child.pid]) {
+  for (const pid of [child.pid, ...found]) {
     try {
       process.kill(pid, 'SIGKILL')
     } catch {
@@ -47,5 +49,5 @@ const timer = setTimeout(() => {
 child.once('error', () => process.exit(127))
 child.once('exit', (code, signal) => {
   clearTimeout(timer)
-  process.exit(limited ? 124 : (code ?? 128 + (signal ? ({ SIGINT: 2, SIGTERM: 15, SIGKILL: 9, SIGHUP: 1 })[signal] ?? 1 : 1)))
+  process.exit(limited ? 124 : (code ?? 128 + (constants.signals[signal] ?? 0)))
 })
