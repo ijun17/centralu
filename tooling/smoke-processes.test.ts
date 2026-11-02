@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HOST_WATCH } from '../packages/agent-host/src/adapters/local-process.js'
 // @ts-expect-error — plain .mjs beside the smokes, which run under plain node
-import { agentProcesses, parseProcesses } from '../packages/agent-host/scripts/smoke-processes.mjs'
+import { agentProcesses, ownAgents, parseProcesses } from '../packages/agent-host/scripts/smoke-processes.mjs'
 
 /**
  * `ps -A -o pid=,ppid=,args=` on macOS with one agent running under a host (#1565 Mac re-check, smoke O3): the host
@@ -26,5 +26,34 @@ describe('the agent processes a smoke counts', () => {
   it('counts two agents of one host as two', () => {
     const two = `${psOf('/usr/local/bin/opencode acp')}\n 5000   100 /usr/local/bin/opencode acp`
     expect(agentProcesses(parseProcesses(two), (cmd: string) => /opencode.*\bacp\b/.test(cmd)).map((p: { pid: string }) => p.pid)).toEqual(['4242', '5000'])
+  })
+})
+
+describe('the agents a smoke counts as its own (#1757)', () => {
+  const isAgent = (cmd: string) => /codex/i.test(cmd) && /app-server/.test(cmd)
+  const rows = (...lines: string[]) => () => parseProcesses(lines.join('\n'))
+  const other = ' 900     1 /Applications/Centralu codex app-server'
+
+  it('counts the agent of its own host, and not one another install started hours ago', () => {
+    const pidsOf = ownAgents(isAgent, rows('  100     1 node main.ts', ' 4242   100 codex app-server', other))
+    expect(pidsOf(100)).toEqual(['4242'])
+  })
+
+  it('keeps counting an agent after its host was killed and the agent was left with another parent, until it exits', () => {
+    let table = rows('  100     1 node main.ts', ' 4242   100 codex app-server', other)
+    const pidsOf = ownAgents(isAgent, () => table())
+    expect(pidsOf(100)).toEqual(['4242'])
+    table = rows(' 4242     1 codex app-server', other)
+    expect(pidsOf(100)).toEqual(['4242'])
+    table = rows(other)
+    expect(pidsOf(100)).toEqual([])
+  })
+
+  it('drops an agent whose pid the OS has given to another program, so a cleanup never kills a stranger', () => {
+    let table = rows('  100     1 node main.ts', ' 4242   100 codex app-server')
+    const pidsOf = ownAgents(isAgent, () => table())
+    expect(pidsOf(100)).toEqual(['4242'])
+    table = rows(' 4242     1 C:\\Windows\\notepad.exe')
+    expect(pidsOf(100)).toEqual([])
   })
 })

@@ -16,8 +16,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost } from './host-client.mjs'
-import { agentProcesses, processes } from './smoke-processes.mjs'
+import { hostExit, openHost } from './host-client.mjs'
+import { ownAgents } from './smoke-processes.mjs'
 
 const DATA = mkdtempSync(join(tmpdir(), 'cc-opencode-data-'))
 const DB = join(DATA, 'store.db')
@@ -76,23 +76,8 @@ function openCodeError() {
   return said ? `; OpenCode logged: ${said.slice(0, 200)}` : ''
 }
 
-/**
- * The `opencode acp` processes of this run still running: the descendants of a host it started, read while that host
- * runs (a killed host's children keep its pid as their parent's), and those seen before; its host watch is not one
- * (`agentProcesses`). Never another on the machine
- */
-const ours = new Set()
-function acpPidsOf(hostPid) {
-  const all = processes()
-  const tree = new Set([String(hostPid)])
-  for (let grew = true; grew; ) {
-    grew = false
-    for (const p of all) if (tree.has(p.ppid) && !tree.has(p.pid)) (tree.add(p.pid), (grew = true))
-  }
-  for (const p of agentProcesses(all, (cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))) if (tree.has(p.pid)) ours.add(p.pid)
-  const alive = new Set(all.map((p) => p.pid))
-  return [...ours].filter((pid) => alive.has(pid))
-}
+/** The `opencode acp` processes of this run still running (`ownAgents`); its host watch is not one */
+const acpPidsOf = ownAgents((cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))
 
 const c1 = await open()
 
@@ -124,7 +109,7 @@ check(c1.events.some((e) => e.sessionId === session.id && e.type === 'context_up
 check(acpPidsOf(c1.host.pid).length === 1, 'O3 one agent process for the session')
 
 c1.host.kill('SIGTERM')
-await new Promise((r) => c1.host.once('exit', r))
+await hostExit(c1.host)
 check(acpPidsOf(c1.host.pid).length === 0, 'O4 a host that stops ends its agent process')
 
 const c2 = await open()
@@ -135,7 +120,7 @@ check(/heron/i.test(textOf(c2.events, session.id)), 'O4 the reopened conversatio
 
 acpPidsOf(c2.host.pid)
 c2.host.kill('SIGKILL')
-await new Promise((r) => c2.host.once('exit', r))
+await hostExit(c2.host)
 const left = []
 for (let i = 0; i < 20 && (left.length = 0, left.push(...acpPidsOf(c2.host.pid)), left.length); i++) await new Promise((r) => setTimeout(r, 500))
 check(left.length === 0, 'O5 killing the host leaves no agent process of this run behind', left.join(',') || 'none')

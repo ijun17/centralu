@@ -4,19 +4,25 @@
  * S9 — approval request → allow → the file is actually created (checks whether this overrides the
  *   global approval_policy="never")
  * S10 — remembers the earlier context via thread/resume after the host restarts
- * S11 — zombie check: killing the host leaves no codex app-server behind either
+ * S11 — zombie check: stopping or killing a host leaves no codex app-server of this run behind either (the ones another Centralu
+ *   install on the machine runs are not counted)
  *
  * Model: Codex's default model (do not use a top-tier model for verification — per the docs' model
  * policy)
+ * Never touches the real data folder: the host runs with a temporary `CC_DATA_DIR` and `--db`.
  * Run with: node packages/agent-host/scripts/smoke-codex.mjs
  */
-import { execSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openHost } from './host-client.mjs'
+import { hostExit, openHost } from './host-client.mjs'
+import { ownAgents } from './smoke-processes.mjs'
 
-const DB = join(mkdtempSync(join(tmpdir(), 'cc-codex-')), 'store.db')
+const DATA = mkdtempSync(join(tmpdir(), 'cc-codex-'))
+const DB = join(DATA, 'store.db')
+const open = () => openHost({ db: DB, env: { CC_DATA_DIR: join(DATA, 'data') } })
+/** The `codex app-server` processes of this run still running (`ownAgents`) */
+const appServersOf = ownAgents((cmd) => /codex/i.test(cmd) && /app-server/.test(cmd))
 const CWD = mkdtempSync(join(tmpdir(), 'cc-codex-cwd-'))
 const log = (...a) => console.log('[codex]', ...a)
 
@@ -29,10 +35,10 @@ const check = (ok, label, extra = '') => {
 const textOf = (events) => events.filter((e) => e.type === 'message_delta').map((e) => e.text).join('')
 
 // ── First run: approval round trip (S9) ──────────────────────────────────────────────
-const c1 = await openHost({ db: DB })
+const c1 = await open()
 
 const detected = await c1.call('agents.detect', {})
-const codexInfo = detected.find((d) => d.tool === 'codex')
+const codexInfo = detected.find((d) => d.name === 'codex')
 check(codexInfo?.installed === true, 'Codex detected', codexInfo?.detail)
 
 const project = await c1.call('projects.add', { path: CWD })
@@ -40,8 +46,6 @@ const session = await c1.call('agents.createSession', {
   projectId: project.id, cwd: CWD, tool: 'codex', permissionPreset: 'safe',
   initialPrompt: 'Create a file named codex-ok.txt containing exactly: OK. Remember the codeword MELON. Then stop.',
 })
-check(!!session.externalId, 'thread id captured immediately on creation', session.externalId ?? 'none')
-
 const approval = await c1.next((e) => e.type === 'approval_request', 'approval request', 180000)
 check(true, 'S9 approval request received (session-level override of the global never)', approval.detail.kind)
 
@@ -50,6 +54,10 @@ await c1.call('agents.respondApproval', {
 })
 await c1.next((e) => e.type === 'turn_complete', 'turn complete', 180000)
 check(existsSync(join(CWD, 'codex-ok.txt')), 'S9 file actually created after approval')
+
+// A thread Codex started has no rollout until its first turn, so it names itself then (#524): the resume id is saved by now
+const written = (await c1.call('sessions.list', {})).find((s) => s.id === session.id)
+check(!!written?.externalId, 'thread id saved once the first turn has run', written?.externalId ?? 'none')
 
 // FR-18 is satisfied by naming the session from its first prompt. Codex's thread/name/updated is
 // a bonus, and does not arrive for a short session (measured). Checks whether a name actually got attached.
@@ -63,11 +71,13 @@ const ctx = c1.events.find((e) => e.type === 'context_update' || e.type === 'usa
 check(!!ctx, 'token/context gauge event received', ctx?.type)
 
 // ── Second run: resume after restart (S10) ────────────────────────────────────────
+// Read while c1's host runs: the agents seen are kept across hosts, so S11 below also counts what this one leaves
+appServersOf(c1.host.pid)
 c1.ws.close()
 c1.host.kill('SIGTERM')
-await new Promise((r) => c1.host.once('exit', r))
+await hostExit(c1.host)
 
-const c2 = await openHost({ db: DB })
+const c2 = await open()
 const res = await c2.call('agents.resumeSession', { sessionId: session.id })
 check(res.resumed === true, 'S10 resume succeeded', res.reason ?? '')
 
@@ -79,14 +89,21 @@ if (res.resumed) {
 }
 
 // ── Third run: zombie check (S11) ─────────────────────────────────────────────
+// The tree is read while the host runs: a killed host's children keep its pid as their parent's
+appServersOf(c2.host.pid)
 c2.ws.close()
 c2.host.kill('SIGKILL')
-await new Promise((r) => setTimeout(r, 3000))
-let leftover = ''
-try {
-  leftover = execSync('pgrep -f "codex app-server" || true', { encoding: 'utf8' }).trim()
-} catch { /* no pgrep */ }
-check(leftover === '', 'S11 killing the host leaves no codex app-server behind', leftover || 'none')
+await hostExit(c2.host)
+let leftover = []
+for (let i = 0; i < 20 && (leftover = appServersOf(c2.host.pid)).length; i++) await new Promise((r) => setTimeout(r, 500))
+check(leftover.length === 0, 'S11 stopping or killing a host leaves no codex app-server of this run behind', leftover.join(',') || 'none')
+for (const pid of leftover) {
+  try {
+    process.kill(Number(pid))
+  } catch {
+    /* already gone */
+  }
+}
 
 log(failures === 0 ? 'all passed' : `${failures} failed`)
 process.exit(failures === 0 ? 0 : 1)
