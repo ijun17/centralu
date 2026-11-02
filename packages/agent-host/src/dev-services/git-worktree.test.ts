@@ -349,8 +349,15 @@ describe('the base a new worktree forks from (#1484)', () => {
 
   it('a branch the remote does not have is not a failed remote: the next fetch is still made (#1488)', async () => {
     const { remoteTip } = withRemote()
+    const bare = join(root, 'origin.git')
     expect(await gitFetchBranch(repo, 'origin', 'no-such-branch')).toHaveProperty('why')
     expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual({ sha: remoteTip })
+    // An unreachable remote, on the other hand, is remembered
+    fixtureGit(repo, ['remote', 'set-url', 'origin', join(root, 'gone.git')])
+    const down = await gitFetchBranch(repo, 'origin', 'main')
+    expect(down).toHaveProperty('why')
+    fixtureGit(repo, ['remote', 'set-url', 'origin', bare])
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual(down)
   })
 
   it('a fetch that hangs is ended at its bound and the worktree forks from what is here', async () => {
