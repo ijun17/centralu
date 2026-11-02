@@ -103,4 +103,29 @@ describe('the move, for the sessions the old mail was for', () => {
     expect(bodies(w, 'b')).toContain(mid(10))
     expect(w.row(mid(10), B)?.held).toBe('released')
   })
+
+  it('a row the person released on the older build to an orchestrator since trashed is not held again once the next one takes it', async () => {
+    const w = hostWorld()
+    oldSession(w.store, 'orc0', { orchestrator: true, trashedAt: w.clock.t - 500 })
+    const old = at('orc0')
+    oldThread(w.store, { id: tid(8), owner: X, assignee: old, projectId: 'px', at: w.clock.t - 1_000 }, [
+      { id: mid(12), sender: X, kind: 'assign', body: 'released request', receipts: [{ recipient: old, held: 'released' }] },
+    ])
+    ready(w)
+    w.hooks.roleMoved?.('orc')
+    await w.advance(2_000)
+    expect(w.row(mid(12), at('orc'))?.held).toBe('released')
+    expect(w.store.mailbox.message(mid(12))?.facts.releasedTo).toEqual([at('orc')])
+    expect(w.row(mid(12), at('orc'))?.deliveredAt).not.toBeNull()
+  })
+
+  it('a row the person released on the older build keeps its release when a handoff gives it to the heir', async () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(9), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(13), sender: X, kind: 'note', body: 'released note', receipts: [{ recipient: A, held: 'released' }] }])
+    ready(w)
+    w.mail.handOver(A, B, 'all')
+    await w.advance(2_000)
+    expect(w.row(mid(13), B)?.held).toBe('released')
+    expect(bodies(w, 'b')).toContain(mid(13))
+  })
 })

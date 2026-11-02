@@ -774,6 +774,7 @@ export class MailboxRecords {
         )
         .run({ from, to, ids: idList(ids) })
       this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
+      for (const id of ids) this.carryRelease(id, from, to)
       return ids
     })
   }
@@ -812,9 +813,24 @@ export class MailboxRecords {
       for (const r of rows) {
         move.run(to, r.messageId, r.recipient)
         drop.run(r.messageId, r.recipient)
+        this.carryRelease(r.messageId, r.recipient, to)
       }
       return rows.map((r) => r.messageId)
     })
+  }
+
+  /**
+   * A row moved from `from` to `to` keeps an older build's person's release (`facts.releasedTo`, §6.3): released is never held again, whoever
+   * holds the row now
+   */
+  private carryRelease(messageId: string, from: string, to: string): void {
+    this.db
+      .prepare(
+        `UPDATE mail SET facts = json_set(facts, '$.releasedTo', (SELECT json_group_array(CASE WHEN value = @from THEN @to ELSE value END) FROM json_each(mail.facts, '$.releasedTo')))
+          WHERE id = @messageId AND json_valid(facts) AND json_type(facts, '$.releasedTo') = 'array'
+            AND EXISTS (SELECT 1 FROM json_each(mail.facts, '$.releasedTo') WHERE value = @from)`,
+      )
+      .run({ messageId, from, to })
   }
 
   /** The trash was emptied of `address`: its rows go, and each message left with no row. Returns the rows deleted */
