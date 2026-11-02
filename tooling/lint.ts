@@ -6,7 +6,8 @@
  *                              a line above what its file holds, or for a file that is gone, is only reported
  *   pnpm lint:tighten          the same, after moving a renamed file's lines to its new path (renames since the merge
  *                              base with CC_LINT_BASE, origin/main by default) and lowering the lines to what the files hold
- *   pnpm lint <paths>          only these files or folders, from the repository's root (tighten then leaves
+ *   pnpm lint <paths>          only these files or folders, from the repository's root (the type-assertion ceilings still count the
+ *                              whole repository; tighten leaves
  *                              other files' lines alone, and those of a file that failed to parse)
  *   --record-all               lists every finding: only for the change that turns a rule on (see
  *                              tooling/type-aware-lint.test.ts `TURNED_ON`); fails when other errors remain
@@ -20,7 +21,7 @@ import './lint-crash.js'
 import { ESLint } from 'eslint'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { totalmem } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getHeapStatistics, setFlagsFromString } from 'node:v8'
 import {
@@ -70,15 +71,17 @@ setFlagsFromString(`--max-old-space-size=${Math.max(lintHeapMb(totalmem()), Math
 const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
 // The guard pass: its own configuration, and no comment configures it. A file none of its rules reads is not a result.
-const guardAll = await new ESLint(guardOptions(ROOT)).lintFiles(paths.length > 0 ? paths : ['.'])
+// It reads the whole repository even for some paths: the ceilings below count every file of a package, and it is a run of seconds
+const guardAll = await new ESLint(guardOptions(ROOT)).lintFiles(['.'])
 for (const r of guardAll) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
 const disabled = disabledFindings(ROOT, results)
-// Counted over the whole run, and not shown: they are not findings (#1607). A run of some paths sees only some of the files.
+// Counted over the whole repository, and not shown: they are not findings (#1607)
 const assertions = assertionTotals(ROOT, guardAll)
 const archiveUsed = archiveUses(guardAll)
-const guardResults = guardAll.filter((r) => r.messages.length > 0)
+const named = (file: string) => paths.length === 0 || paths.some((p) => relative(ROOT, file).split(sep).join('/').startsWith(p.split(sep).join('/').replace(/^\.\//, '').replace(/\/$/, '')))
+const guardResults = guardAll.filter((r) => r.messages.length > 0 && named(r.filePath))
 const whole = paths.length === 0 && !recording
-const { over: assertionsOver, under: assertionsUnder } = whole ? overAndUnder(assertions, ASSERTIONS) : { over: [], under: [] }
+const { over: assertionsOver, under: assertionsUnder } = recording ? { over: [], under: [] } : overAndUnder(assertions, ASSERTIONS)
 const archiveStale = whole ? unusedArchiveEntries(archiveUsed) : []
 
 if (recording) {

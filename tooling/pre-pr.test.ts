@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeModulesDirs, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -31,8 +31,8 @@ type Report = { testResults: { name: string; assertionResults: { ancestorTitles:
  * `linkTo`: each worktree gets a real link (a junction on Windows) at src/node_modules to that folder,
  * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
  */
-function fakeRunners(opts: { orphans?: string[]; linkTo?: string } = {}) {
-  const calls = { prepare: [] as string[], tsc: [] as string[], vitest: [] as string[][], timeouts: [] as (number | undefined)[] }
+function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: boolean; linkTo?: string } = {}) {
+  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], timeouts: [] as (number | undefined)[] }
   return {
     calls,
     runners: {
@@ -47,8 +47,18 @@ function fakeRunners(opts: { orphans?: string[]; linkTo?: string } = {}) {
         return existsSync(join(dir, 'BROKEN')) ? { ok: false, out: 'src/a.ts(1,1): error TS2322: broken' } : { ok: true, out: '' }
       },
       depcruise: () => ({
-        summary: { violations: [...(opts.orphans ?? []).map((from) => ({ rule: { name: 'no-orphans' }, from })), { rule: { name: 'not-to-unresolvable' }, from: 'src/x.ts' }] },
+        summary: {
+          violations: [
+            ...(opts.orphans ?? []).map((from) => ({ rule: { name: 'no-orphans', severity: 'warn' }, from })),
+            ...(opts.cycle ? [{ rule: { name: 'no-circular', severity: 'error' }, from: 'src/a.mjs', to: 'src/b.mjs', cycle: [{ name: 'src/b.mjs' }, { name: 'src/a.mjs' }] }] : []),
+            { rule: { name: 'not-to-unresolvable', severity: 'warn' }, from: 'src/x.ts' },
+          ],
+        },
       }),
+      lint: (_dir: string, files: string[]) => {
+        calls.lint.push(files)
+        return opts.lintFails ? { ok: false, out: 'src/b.mjs\n  1:1  error  Unsafe type assertion  @typescript-eslint/no-unsafe-type-assertion' } : { ok: true, out: '' }
+      },
       vitest: (dir: string, files: string[], o?: { timeoutMs?: number }): Report => {
         calls.timeouts.push(o?.timeoutMs)
         calls.vitest.push(files)
@@ -101,6 +111,15 @@ describe('what pre-pr reads', () => {
       { sha: 'c2', names: ['origin/part-2', 'part-2'] },
       { sha: 'c3', names: ['HEAD'] },
     ])
+  })
+
+  it('reads the errors dependency-cruiser gives other than orphans, once each', () => {
+    const v = (name: string, severity: string, from: string, extra = {}) => ({ rule: { name, severity }, from, ...extra })
+    expect(depErrorsOf({ summary: { violations: [v('no-orphans', 'error', 'o.ts'), v('x', 'warn', 'w.ts'), v('core-no-io', 'error', 'a.ts', { to: 'node:fs' }), v('core-no-io', 'error', 'a.ts', { to: 'node:fs' }), v('no-circular', 'error', 'a.ts', { cycle: [{ name: 'b.ts' }, { name: 'a.ts' }] })] } })).toEqual([
+      'a.ts -> b.ts -> a.ts breaks no-circular (tooling/dependency-cruiser.cjs)',
+      'a.ts -> node:fs breaks core-no-io (tooling/dependency-cruiser.cjs)',
+    ])
+    expect(depErrorsOf({})).toEqual([])
   })
 
   it('reads orphans at any severity, and nothing else', () => {
@@ -292,8 +311,8 @@ describe('pre-pr on a stack of two pull requests', () => {
     git(repo, 'add', '-A')
     git(repo, 'commit', '-q', '-m', message)
   }
-  const run = (over: Record<string, unknown> = {}, orphans?: string[]) => {
-    const fake = fakeRunners({ orphans })
+  const run = (over: Record<string, unknown> = {}, orphans?: string[], more: { cycle?: boolean; lintFails?: boolean } = {}) => {
+    const fake = fakeRunners({ orphans, ...more })
     const result = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: fake.runners, ...over })
     return { ...result, calls: fake.calls }
   }
@@ -341,10 +360,10 @@ describe('pre-pr on a stack of two pull requests', () => {
     const r = run({ limitMs: 59_000 })
     expect(r.calls.tsc).toEqual([])
     expect(r.calls.vitest).toEqual([])
-    expect(r.findings.map((f: { check: string; message: string }) => [f.check, /: not run: out of time/.test(f.message)])).toEqual([['tsc', true], ['tsc', true], ['revert', true]])
+    expect(r.findings.map((f: { check: string; message: string }) => [f.check, /: not run: out of time/.test(f.message)])).toEqual([['tsc', true], ['tsc', true], ['lint', true], ['revert', true]])
     expect(r.ok).toBe(false)
     // An exempted check is left out, not reported as not run
-    expect(run({ limitMs: 59_000, exempt: { tsc: 'x', revert: 'x' } }).ok).toBe(true)
+    expect(run({ limitMs: 59_000, exempt: { tsc: 'x', lint: 'x', revert: 'x' } }).ok).toBe(true)
   })
 
   it('gives each phase what is left of the total', () => {
@@ -473,6 +492,29 @@ describe('pre-pr on a stack of two pull requests', () => {
     ])
   })
 
+  it('refuses a dependency error that is not an orphan (a cycle), naming its path', () => {
+    const r = run({}, undefined, { cycle: true })
+    expect(r.findings.filter((f: { check: string }) => f.check === 'deps').map((f: { message: string }) => f.message)).toEqual([
+      'src/a.mjs -> src/b.mjs -> src/a.mjs breaks no-circular (tooling/dependency-cruiser.cjs)',
+    ])
+    expect(run({ exempt: { deps: 'a cycle the next PR removes' } }, undefined, { cycle: true }).findings.some((f: { check: string }) => f.check === 'deps')).toBe(false)
+  })
+
+  it('lints the files the branch changed, none it deleted or that are not code, and refuses what lint refuses', () => {
+    write('docs/c.md', 'c\n')
+    rmSync(join(repo, 'src', 'a.test.mjs'))
+    commit('a doc, and a test that goes')
+    const ok = run()
+    expect(ok.calls.lint).toEqual([['src/a.mjs', 'src/b.mjs', 'src/b.test.mjs']])
+    const r = run({}, undefined, { lintFails: true })
+    expect(r.findings.filter((f: { check: string }) => f.check === 'lint').map((f: { message: string }) => f.message)).toEqual([
+      'pnpm lint fails on the changed files:\nsrc/b.mjs\n  1:1  error  Unsafe type assertion  @typescript-eslint/no-unsafe-type-assertion',
+    ])
+    const t = run({ exempt: { lint: 'lints in the next PR' } }, undefined, { lintFails: true })
+    expect(t.calls.lint).toEqual([])
+    expect(t.findings.some((f: { check: string }) => f.check === 'lint')).toBe(false)
+  })
+
   it('warns, without refusing, when the head does not contain main, naming the files a merge would conflict on', () => {
     expect(run().warnings).toEqual([])
     git(repo, 'checkout', '-q', 'main')
@@ -494,7 +536,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(t.calls.tsc).toEqual([])
     expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert', 'revert'])
     expect(() => run({ exempt: { revert: '  ' } })).toThrow('An exemption from revert needs its reason.')
-    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are tsc, orphans, store-step, guards, revert.')
+    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are tsc, orphans, deps, lint, store-step, guards, revert.')
   })
 
   it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {

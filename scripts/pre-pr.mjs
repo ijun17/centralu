@@ -10,6 +10,9 @@
 //             between main and the head, and the head. A lower pull request must build on its own,
 //             since it lands on its own.
 //   orphans   dependency-cruiser's `no-orphans` rule as an error (in `pnpm verify` it only warns).
+//   deps      every other dependency-cruiser rule at error severity, as `pnpm depcruise` fails on them (a cycle, a layer rule).
+//   lint      `pnpm lint` on the files the branch changed: CI's run (type-aware rules, allowlists, the packages' type-assertion
+//             ceilings) over fewer files. A finding in an untouched file is left to CI.
 //   store-step  a store step number this branch adds (a new `to: N,` under the migrations folder) that main
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
@@ -84,6 +87,20 @@ export function stackHeads({ commits, refs, head }) {
 export function orphansOf(cruise) {
   return [...new Set((cruise?.summary?.violations ?? []).filter((v) => v?.rule?.name === 'no-orphans').map((v) => v.from))].sort()
 }
+
+/** dependency-cruiser's JSON: the error-severity violations other than no-orphans, one sentence each. */
+export function depErrorsOf(cruise) {
+  const lines = (cruise?.summary?.violations ?? [])
+    .filter((v) => v?.rule?.severity === 'error' && v.rule.name !== 'no-orphans')
+    .map((v) => {
+      const path = v.cycle?.length ? [v.from, ...v.cycle.map((c) => c.name ?? c)].join(' -> ') : `${v.from}${v.to ? ` -> ${v.to}` : ''}`
+      return `${path} breaks ${v.rule.name} (tooling/dependency-cruiser.cjs)`
+    })
+  return [...new Set(lines)].sort()
+}
+
+/** A file `pnpm lint` reads: what ESLint's configuration covers, by extension. */
+export const isLintable = (path) => /\.[cm]?[jt]sx?$/.test(path)
 
 /** vitest's JSON reporter: every test as `{ file, name, status }`, the file relative to `root` with `/`. */
 export function vitestTests(report, root) {
@@ -278,6 +295,10 @@ export const realRunners = {
     const start = r.out.indexOf('{')
     return JSON.parse(r.out.slice(start))
   },
+  /** `pnpm lint <files>` (tooling/lint.ts); with no files, the whole repository. */
+  lint(dir, files, { timeoutMs = 0 } = {}) {
+    return nodeBin(dir, 'tsx/dist/cli.mjs', ['tooling/lint.ts', ...files], {}, timeoutMs)
+  },
   vitest(dir, files, { timeoutMs = 0 } = {}) {
     const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
     const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
@@ -295,7 +316,7 @@ export const realRunners = {
 // --- Worktrees, and taking them away again ---------------------------------------------------------
 
 /** The checks a pull request can be exempted from, each with a reason. `main` is only ever a warning. */
-export const CHECKS = ['tsc', 'orphans', 'store-step', 'guards', 'revert']
+export const CHECKS = ['tsc', 'orphans', 'deps', 'lint', 'store-step', 'guards', 'revert']
 
 // --- Store step numbers (#1203) ----------------------------------------------------------------------
 
@@ -758,12 +779,34 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       else if (!r.ok) findings.push({ check: 'tsc', message: `tsc fails at ${label}; each pull request of a stack lands on its own and must build:\n${tail(r.out)}` })
     }
 
+    // Against where the head left the base, not the base's tip: what the base gained since is not this pull request's
+    const fork = git(root, ['merge-base', at.base, at.head]).trim()
+    const changed = git(root, ['diff', '--name-status', '--no-renames', '-z', fork, at.head])
+      .split('\0')
+      .filter(Boolean)
+      .reduce((acc, part, i, all) => (i % 2 === 0 ? [...acc, { status: part[0], path: all[i + 1] }] : acc), [])
+
     check()
-    if (!skip('orphans')) {
-      log('dependency-cruiser, orphans as errors')
-      for (const file of orphansOf(runners.depcruise(top))) {
-        findings.push({ check: 'orphans', message: `${file} is imported by nothing (no-orphans): delete it, import it, or list it in tooling/dependency-cruiser.cjs with why.` })
+    if (!skip('orphans') || !skip('deps')) {
+      log('dependency-cruiser')
+      const cruise = runners.depcruise(top)
+      if (!skip('orphans')) {
+        for (const file of orphansOf(cruise)) {
+          findings.push({ check: 'orphans', message: `${file} is imported by nothing (no-orphans): delete it, import it, or list it in tooling/dependency-cruiser.cjs with why.` })
+        }
       }
+      if (!skip('deps')) for (const message of depErrorsOf(cruise)) findings.push({ check: 'deps', message })
+    }
+
+    check()
+    const lintFiles = changed.filter((c) => c.status !== 'D' && isLintable(c.path)).map((c) => c.path)
+    if (!skip('lint') && lintFiles.length && !outOfTime('lint', 'pnpm lint')) {
+      // A command line has a limit (Windows': 32k): a change this wide is linted whole
+      const files = lintFiles.join(' ').length > 20000 ? [] : lintFiles
+      log(`pnpm lint on ${files.length || 'all'} file(s)`)
+      const r = runners.lint(top, files, { timeoutMs: left() })
+      if (r.timedOut) notRun('lint', 'pnpm lint', 'out of time (stopped at the limit)')
+      else if (!r.ok) findings.push({ check: 'lint', message: `pnpm lint fails on the changed files:\n${tail(r.out, 40)}` })
     }
 
     // store-step: the numbers this branch (the whole stack) adds over where it forked from main
@@ -783,12 +826,6 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
     }
 
     // revert: the changed tests, at the head, with everything else the pull request changed put back.
-    // Against where the head left the base, not the base's tip: what the base gained since is not this pull request's
-    const fork = git(root, ['merge-base', at.base, at.head]).trim()
-    const changed = git(root, ['diff', '--name-status', '--no-renames', '-z', fork, at.head])
-      .split('\0')
-      .filter(Boolean)
-      .reduce((acc, part, i, all) => (i % 2 === 0 ? [...acc, { status: part[0], path: all[i + 1] }] : acc), [])
     const tests = changed.filter((c) => c.status !== 'D' && isVitestFile(c.path))
     if (skip('revert')) {
       // nothing: the exemption and its reason are in the answer

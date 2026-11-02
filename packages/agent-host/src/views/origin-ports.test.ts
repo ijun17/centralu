@@ -28,9 +28,9 @@ function diskStore(): PortBookStore & { raw: string | null } {
   }
 }
 
-// Below the normal Linux/macOS/Windows ephemeral ranges and the production origin range.
+// Below the normal Linux/macOS/Windows ephemeral ranges and the production origin range, and outside tooling/free-port.ts's (12000-16999).
 // listen(0) elsewhere must not claim a candidate between its probe and the test's bind.
-const CANDIDATE_RANGE = [10000, 19999] as const
+const CANDIDATE_RANGE = [10000, 11999] as const
 
 /** Probe distinct candidates, holding them until the whole set has been collected. */
 async function freePorts(n: number): Promise<number[]> {

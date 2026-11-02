@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { vector } from './key-pairing-vector.mjs'
 import { SLOW } from './test-timing.js'
+import { freePort } from './free-port.js'
 import { HostServer } from '../packages/agent-host/src/transport/server.js'
 import { readCredentialFile } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { hostProof } from '../packages/agent-host/src/transport/host-proof.js'
@@ -300,16 +301,6 @@ function previousParseServeState(raw: string) {
 describe('what --pair-key reports for the host on the port', () => {
   const { WebSocketServer } = createRequire(join(ROOT, 'packages/agent-host/package.json'))('ws') as {
     WebSocketServer: new (o: { port: number; host: string }) => { on(e: string, f: (...a: any[]) => void): void; once(e: string, f: () => void): void; close(f: () => void): void }
-  }
-
-  async function freePort(): Promise<number> {
-    return await new Promise((resolve) => {
-      const s = createServer()
-      s.listen(0, '127.0.0.1', () => {
-        const { port } = s.address() as { port: number }
-        s.close(() => resolve(port))
-      })
-    })
   }
 
   /** A folder whose recorded port is free, and a hub's key */

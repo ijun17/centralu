@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_PORT, dataDir, keeperSocketPath, readHostDoor, run, servePort, type Launch } from '../scripts/dev-live.mjs'
 import { SLOW } from './test-timing.js'
+import { freePort } from './free-port.js'
 
 // The keeper is a unix socket: there is none on Windows, and a fake one cannot be made there (listen EACCES).
 const unixIt = it.skipIf(process.platform === 'win32')
@@ -183,14 +184,6 @@ describe('dev:live: the command', () => {
     expect(r.errs.join('\n')).not.toContain(TOKEN)
   })
 })
-
-async function freePort(): Promise<number> {
-  const probe = net.createServer()
-  await new Promise<void>((ok) => probe.listen(0, '127.0.0.1', ok))
-  const port = (probe.address() as net.AddressInfo).port
-  await new Promise<void>((ok) => probe.close(() => ok()))
-  return port
-}
 
 /**
  * The real launch path, in a child process that plays the command: a driver imports `launchVite` and

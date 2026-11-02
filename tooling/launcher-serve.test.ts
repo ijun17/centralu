@@ -80,6 +80,7 @@ import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } from '../packaging/npm/centralu/bin/serve-files.mjs'
 import { SLOW } from './test-timing.js'
+import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 
 /**
@@ -715,18 +716,6 @@ describe('the launcher for non-interactive SSH shells', () => {
     expect(cmd).toContain('"C:\\Program Files\\nodejs\\node.exe" "C:\\npm\\centralu.mjs" %*')
   })
 })
-
-/** A port nobody is listening on right now */
-async function freePort(): Promise<number> {
-  return await new Promise((resolve, reject) => {
-    const s = createServer()
-    s.once('error', reject)
-    s.listen(0, '127.0.0.1', () => {
-      const { port } = s.address() as { port: number }
-      s.close(() => resolve(port))
-    })
-  })
-}
 
 function cliEnv(dataDir: string): NodeJS.ProcessEnv {
   // No scheduled task from a test: on a Windows machine with a desktop, --detach would start the host through one (#1224)
