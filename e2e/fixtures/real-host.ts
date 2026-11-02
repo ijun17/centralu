@@ -101,7 +101,7 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
     env: {
       ...process.env,
       CC_DATA_DIR: join(ws.dir, 'data'),
-      HOME: ws.home,
+      ...homeEnv(ws.home),
       CC_HOST_ALLOWED_ORIGINS: RECOVERY_UI_ORIGIN,
       CI: '1',
       ...run.env,
@@ -158,6 +158,13 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
  * A mark has no such gap: after the host is gone only a marked process can start another one.
  * Unix only: these specs do not run on Windows.
  */
+/**
+ * A host's home folder, for the variables a process reads it from: `HOME`, and on Windows `USERPROFILE`, which is where Node's
+ * `os.homedir()` looks. With only `HOME` set, a host there read the person's own `~/.ssh/config`, and Settings → Machines
+ * offered its hosts instead of the form a machine is typed into (#1839).
+ */
+export const homeEnv = (home: string): Record<string, string> => ({ HOME: home, USERPROFILE: home })
+
 const HOST_MARK = 'CENTRALU_E2E_HOST_RUN'
 
 /**

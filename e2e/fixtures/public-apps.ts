@@ -111,7 +111,8 @@ async function fetchPackage(app: PublicApp): Promise<string> {
   mkdirSync(staging)
   try {
     writeFileSync(join(staging, 'package.tgz'), tgz)
-    execFileSync('tar', ['-xzf', join(staging, 'package.tgz'), '-C', staging])
+    // A relative name, from inside the folder: GNU tar (Git for Windows puts it first on PATH) reads `C:` in a path as a host
+    execFileSync('tar', ['-xzf', 'package.tgz'], { cwd: staging })
     rmSync(join(staging, 'package.tgz'))
     const { version } = JSON.parse(readFileSync(join(staging, 'package', 'package.json'), 'utf8')) as {
       version: string
