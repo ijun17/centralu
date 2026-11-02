@@ -1,6 +1,6 @@
 import { RpcMethods, parseTolerant } from '@cc/protocol'
 import type { RemoteViews } from '../views/view-host.js'
-import type { RpcHandler } from './router.js'
+import { MachineUnreachableError, type RpcHandler } from './router.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -22,6 +22,8 @@ export function linkedViews(call: RpcHandler): RemoteViews {
         if (err instanceof Error && err.message.startsWith('Unknown method: apps.viewDocument')) {
           throw rpcError('This app view is on a machine whose Centralu cannot show its views here yet. Update Centralu there to open it.')
         }
+        // A view is the person's, in their window (#1143): a machine down is said as the window says it, though the call has no window's context
+        if (err instanceof MachineUnreachableError) throw new MachineUnreachableError(err.machine, true)
         throw err
       }
       /*

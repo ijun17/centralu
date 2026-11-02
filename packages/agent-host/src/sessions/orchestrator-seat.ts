@@ -1,5 +1,6 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
+import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -338,6 +339,9 @@ export function orchestratorToolsFor(
       const local = matched.flatMap((m) => all.filter((p) => m.machineId === null && p.id === m.id))
       const remote = matched.flatMap((m) => (there?.projects ?? []).filter((p) => m.machineId !== null && p.id === m.id))
       const missing = there && !matched.length ? awayFor(wanted, there.away, there.machines.map((m) => m.machineId)) : []
+      // Named with its machine, which is down: refused as ask_project refuses it
+      const [down] = missing
+      if (down && missing.length === 1 && (wanted.includes('/') || wanted.startsWith(`${down.machineId}.`))) return { ok: false, error: awayRefusal(down.machine, down.why, `"${wanted}" cannot be created there`) }
       if (missing.length) {
         return { ok: false, error: `No such project: ${wanted}. Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` }
       }
@@ -352,7 +356,7 @@ export function orchestratorToolsFor(
       }
       // Found only from the mirror: refused now, rather than a create sent over a link that did not answer a list
       const away = remote[0]?.away
-      if (away) return { ok: false, error: `${remote[0]!.name} [${remote[0]!.id}] is on ${remote[0]!.machine}, which ${awayPhrase(away)}. Try again once its link is back.` }
+      if (away) return { ok: false, error: `${remote[0]!.name} [${remote[0]!.id}] is on ${remote[0]!.machine}, which ${awayPhrase(away)}. ${tryAgainAfter(away)}` }
       /*
        * The new session never runs with more than this seat's own permissions, and its first message is this seat's,
        * not the person's (#838). It used to be `normal` whatever the seat ran under and stored as if the person had

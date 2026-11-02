@@ -57,6 +57,8 @@ export type RpcContext = {
    * a right. Absent for the token and the plain limited credential
    */
   session?: string
+  /** The person's own window made the call (#1143): a socket in with a full credential that shows the person's cards (`SHOWS_HOST_REQUESTS`). A hub, a bridge or the limited credential never does */
+  window?: true
 }
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
@@ -874,7 +876,7 @@ export class HostServer {
       try {
         // A limited call a conditional right let through with no card says so (#1508): the handler holds it to that, rather than judging again
         const covered = limited && conditionalRight(method)
-        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label, ...(covered ? { covered: true } : {}), ...(session ? { session } : {}) })
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label, ...(covered ? { covered: true } : {}), ...(session ? { session } : {}), ...(this.showing.has(ws) ? { window: true as const } : {}) })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import { awayPhrase, NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
+import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
+import { awayRefusal } from '../links/machine-reach.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
@@ -1405,19 +1406,15 @@ export class RemoteAgents {
     // Only this machine is waited for if it is down (#1532): a lookup does not wait on the others
     const all = await reader.projects({ machineId: machine.id })
     const away = all.away.find((a) => a.machineId === machine.id)
-    if (away) {
-      // Nothing here connects it (#1341): the sentence names the person, who can; no retry on its own is promised
-      if (away.why === NOT_CONNECTED) return { error: `${machine.name} ${awayPhrase(NOT_CONNECTED)}, so nothing was started there. Try again once it is connected.` }
-      // Said once: `why` already starts with "not reachable right now" when a call tried to connect it (#1532)
-      const cannot = away.why.startsWith(`${NOT_REACHABLE};`) ? `is ${away.why}` : `cannot be reached (${away.why})`
-      return { error: `${machine.name} ${cannot}, so nothing was started there. Try again once its link is back.` }
-    }
+    // One the person disconnected names the person, who can connect it (#1341); `why` says what a call's attempt to connect it met (#1532)
+    if (away) return { error: awayRefusal(machine.name, away.why, 'nothing was started there') }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))
     // Asked and not reached: the link went away after the list was read. That is the machine away, not a machine without the checkout
     const unreached = read.map(({ r }) => (!r.ok && (r.error.includes(NOT_REACHABLE) || r.error.includes(NOT_CONNECTED_PHRASE)) ? r.error : null))
     if (read.length > 0 && unreached.every((e) => e !== null)) {
-      return { error: `${machine.name} cannot be reached (${NOT_REACHABLE}), so nothing was started there. Try again once its link is back.` }
+      // One the person disconnected meanwhile says so, as above
+      return { error: awayRefusal(machine.name, unreached.every((e) => e?.includes(NOT_CONNECTED_PHRASE)) ? NOT_CONNECTED : NOT_REACHABLE, 'nothing was started there') }
     }
     const same = read.filter(({ r }) => r.ok && r.origin && gitRemoteKey(r.origin) === key).map(({ p }) => p)
     const chosen = same.length === 1 ? same[0] : same.filter((p) => p.name === project.name).length === 1 ? same.find((p) => p.name === project.name) : undefined
