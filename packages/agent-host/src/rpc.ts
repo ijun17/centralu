@@ -677,8 +677,20 @@ export function createRpcHandler(
       }
       // Its name before it goes, for the notice the senders of its held mail get once it is gone (§7.4)
       const name = mail?.projectName(projectId)
-      await mgr.deleteProject(projectId)
-      if (name !== undefined) mail?.projectDeleted(projectId, name)
+      const gone = () => {
+        try {
+          mgr.cwdOfProject(projectId)
+          return false
+        } catch {
+          return true
+        }
+      }
+      try {
+        await mgr.deleteProject(projectId)
+      } finally {
+        // Also after a deletion that failed part way, once the project is gone: its held mail must not wait for a trust that cannot come
+        if (name !== undefined && gone()) mail?.projectDeleted(projectId, name)
+      }
       if (cwd !== null) {
         terminals?.closeCwd(cwd)
         commands?.stopCwd(cwd)

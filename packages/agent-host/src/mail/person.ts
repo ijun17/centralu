@@ -81,8 +81,9 @@ export class MailPerson {
 
   /** A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it */
   thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
-    const root = this.rootOf(threadId)
-    if (root === null) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    // An old thread's id opens the newest chain moved from it
+    const root = this.rootsOf(threadId)[0]
+    if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
     const all = this.shown(root)
     let page: Shown[]
     if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
@@ -109,21 +110,37 @@ export class MailPerson {
   }
 
   /**
-   * The person writes in a chain: an answer to the newest message in it sent to them by someone else (to its sender), else a word more to the ones the person's
-   * own newest message went to. A question waits for an answer (D3); an answer or a note does not
+   * The person writes in a chain (every chain an old thread's id names): an answer to the newest question to them that waits for their answer, else to
+   * the newest message sent to them, to its sender; else a word more to the ones the person's own newest message went to. A sender that is gone, and a
+   * message hidden from the person, are passed over. A question waits for an answer (D3); an answer or a note does not
    */
   reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note'): MailThreadView {
-    const root = this.rootOf(threadId)
-    const chain = root === null ? [] : this.shown(root).map((s) => s.m)
+    const chain = this.rootsOf(threadId)
+      .flatMap((root) => this.shown(root).map((s) => s.m))
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     // Only what was sent to the person is theirs to answer: a message held for them to act on is not
-    const theirs = chain.findLast((m) => m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu' && this.records.recipient(m.id, PERSON) !== undefined)
-    const mine = chain.findLast((m) => m.sender === PERSON)
+    const toPerson = chain.filter((m) => {
+      const row = this.records.recipient(m.id, PERSON)
+      return m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu' && row !== undefined && !hiddenFromPerson(row) && this.here(m.sender)
+    })
+    const open = toPerson.findLast((m) => {
+      const row = this.records.recipient(m.id, PERSON)
+      return m.needsReply && row !== undefined && row.answerId === null && (row.settled === null || row.settled === 'legacy')
+    })
+    const theirs = open ?? toPerson.at(-1)
+    const mine = chain.findLast((m) => m.sender === PERSON && this.records.recipients(m.id).some((r) => this.here(r.recipient)))
     const target = theirs ?? mine
-    if (root === null || !target) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
-    const to = target === theirs ? [target.sender] : this.records.recipients(target.id).map((r) => r.recipient)
+    if (!target) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
+    const to = target === theirs ? [target.sender] : this.records.recipients(target.id).flatMap((r) => (this.here(r.recipient) ? [r.recipient] : []))
     const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question' })
-    const at = this.shown(root).find((s) => s.m.id === sent.message.id)?.seq ?? 1
-    return this.thread(root, { after: at - 1 })
+    const at = this.shown(target.rootId).find((s) => s.m.id === sent.message.id)?.seq ?? 1
+    return this.thread(target.rootId, { after: at - 1 })
+  }
+
+  /** Whether mail to `address` can still reach it: a session this host keeps (trashed or deleted ones are gone), or any other party */
+  private here(address: string): boolean {
+    const party = parseAddress(address)
+    return party?.kind !== 'session' || this.host.session(party.sessionId) !== undefined
   }
 
   /**
@@ -131,15 +148,20 @@ export class MailPerson {
    * withdrawn: what the person sent is still delivered, and a task the person gave is still reported
    */
   close(threadId: string): MailThreadRow {
-    const root = this.rootOf(threadId)
-    if (root === null) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
-    const ids = this.shown(root).map((s) => s.m.id)
-    this.records.closeFor(PERSON, ids, Date.now())
-    for (const id of ids) {
-      const m = this.records.message(id)
-      if (m?.sender === PERSON && m.needsReply) for (const r of this.records.recipients(id)) this.records.settle(id, r.recipient, 'done', Date.now())
+    const roots = this.rootsOf(threadId)
+    const root = roots[0]
+    if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    // Every chain an old thread's id names: the window showed them as one thread
+    for (const r of roots) {
+      const ids = this.shown(r).map((s) => s.m.id)
+      this.records.closeFor(PERSON, ids, Date.now())
+      for (const id of ids) {
+        const m = this.records.message(id)
+        if (m?.sender === PERSON && m.needsReply) for (const row of this.records.recipients(id)) this.records.settle(id, row.recipient, 'done', Date.now())
+      }
+      // The window that has the chain open reads it again
+      this.service.announce(r)
     }
-    this.service.announce()
     return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
   }
 
@@ -155,12 +177,15 @@ export class MailPerson {
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): { changed: number } {
     if (action === 'dismiss') return { changed: this.service.dismissHeld(recipient, messageIds, PERSON_HOLDS) }
     const projects = new Set(messageIds.flatMap((id) => (this.records.recipient(id, recipient)?.held === 'policy' ? (this.records.message(id)?.senderProject ?? []) : [])))
-    // A project trusted since (its trust's release did not reach these rows): what it holds goes now, in order
-    for (const p of projects) if (!this.host.untrusted(p)) this.trusted(p)
-    const changed = this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget'])
+    // Refused whole before anything changes: a Release that let some rows go and refused the rest would leave the window guessing which
     const still = [...projects].find((p) => this.host.untrusted(p))
     if (still !== undefined) throw refuse('untrusted_project', `${this.host.projectLabel(still)} is not trusted: what its sessions send out of it waits until you trust the project, and then goes in order.`)
-    return { changed }
+    // A project trusted since (its trust's release did not reach these rows): what it holds goes now, in order
+    const policy = messageIds.filter((id) => this.records.recipient(id, recipient)?.held === 'policy')
+    for (const p of projects) this.trusted(p)
+    // What the trust let go counts as released here too
+    const letGo = policy.filter((id) => this.records.recipient(id, recipient)?.held !== 'policy').length
+    return { changed: letGo + this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget']) }
   }
 
   /** Resume on a session's paused mail, or on a chain's (an old thread's id names the chains moved from it) */
@@ -199,12 +224,7 @@ export class MailPerson {
 
   // ── Chains ──
 
-  /** The chain an id names: a message's root, or the newest chain moved from an old thread; null when neither is kept */
-  private rootOf(id: string): string | null {
-    return this.records.message(id)?.rootId ?? this.records.movedFrom(id)[0] ?? null
-  }
-
-  /** Every chain an id names: a message's root, or each chain moved from an old thread */
+  /** Every chain an id names: a message's root, or each chain moved from an old thread, newest first */
   private rootsOf(id: string): string[] {
     const m = this.records.message(id)
     return m ? [m.rootId] : this.records.movedFrom(id)

@@ -330,14 +330,19 @@ export class MailboxRecords {
   }
 
   /**
-   * The last `limit` messages of a root in the order they were stored, each with its row number in `mail`: a number that
-   * stays the message's own while others of the chain come and go, what the person's window pages by (§12)
+   * The last `limit` messages of a root in the order they were stored, each with its number in `mail_numbers` (given here to those that have none
+   * yet, in the order stored): a number that is the message's own for good and never given to another, what the person's window pages by (§12)
    */
   numbered(rootId: string, limit: number): { m: MailRow; n: number }[] {
-    return this.db
-      .prepare<[string, number], MailSql & { n: number }>(`SELECT * FROM (SELECT rowid AS n, * FROM mail WHERE root_id = ? ORDER BY rowid DESC LIMIT ?) ORDER BY n`)
-      .all(rootId, limit)
-      .map((r) => ({ m: this.toMail(r), n: r.n }))
+    return this.transaction(() => {
+      this.db.prepare(`INSERT OR IGNORE INTO mail_numbers (message_id) SELECT id FROM mail WHERE root_id = ? ORDER BY rowid`).run(rootId)
+      return this.db
+        .prepare<[string, number], MailSql & { n: number }>(
+          `SELECT * FROM (SELECT k.n AS n, m.* FROM mail m JOIN mail_numbers k ON k.message_id = m.id WHERE m.root_id = ? ORDER BY k.n DESC LIMIT ?) ORDER BY n`,
+        )
+        .all(rootId, limit)
+        .map((r) => ({ m: this.toMail(r), n: r.n }))
+    })
   }
 
   /**
@@ -865,12 +870,13 @@ export class MailboxRecords {
       .run({ messageId, from, to })
   }
 
-  /** The trash was emptied of `address`: its rows go, and each message left with no row. Returns the rows deleted */
+  /** The trash was emptied of `address`: its rows go, and each message left with no row but the person's own. Returns the rows deleted */
   purgeParty(address: string): number {
     return this.transaction(() => {
       const ids = this.db.prepare<[string], { id: string }>(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ?`).all(address).map((r) => r.id)
       const n = this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ?`).run(address).changes
-      this.dropOrphans(ids)
+      // The person's own words stay in their window, sent to nobody kept (§12)
+      this.dropOrphans(ids, { keepPerson: true })
       return n
     })
   }
@@ -1058,8 +1064,13 @@ export class MailboxRecords {
   }
 
   /** Deletes those of `ids` no row names any more */
-  private dropOrphans(ids: readonly string[]): void {
-    this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)`).run(idList(ids))
+  private dropOrphans(ids: readonly string[], opts: { keepPerson?: boolean } = {}): void {
+    this.db
+      .prepare(
+        `DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)
+           AND (? = 0 OR sender <> 'person')`,
+      )
+      .run(idList(ids), opts.keepPerson ? 1 : 0)
   }
 }
 

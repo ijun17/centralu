@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 66, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 67, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -228,6 +228,10 @@ erDiagram
     TEXT facts
     TEXT dedupe_key
     INTEGER created_at
+  }
+  mail_numbers {
+    INTEGER n PK
+    TEXT message_id
   }
   mail_participants {
     TEXT thread_id PK
@@ -761,6 +765,15 @@ Added in v61.
 Indexes:
 
 - `mail_messages_dedupe`: `sender`, `dedupe_key`
+
+### `mail_numbers`
+
+Added in v67.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `n` | INTEGER | yes |  | PK | v67 |
+| `message_id` | TEXT | no |  |  | v67 |
 
 ### `mail_participants`
 

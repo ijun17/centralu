@@ -424,8 +424,9 @@ Where it is stored:
 - `mail_recipients`: one recipient's row for a message in `mail`: the delivery fields a receipt has, the turn the
   delivery started, whether and how it was settled (`answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy`), its
   reminders, and when it was released and its sender told.
+- `mail_numbers`: the number the person's window gives each message of a chain, given once and never again (v67).
 
-An older build serving the same store during a swap never names these tables (steps v61 and v65 only add), and a session deleted for good
+An older build serving the same store during a swap never names these tables (steps v61, v65 and v67 only add), and a session deleted for good
 from the session archive takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
 and 180 days, read notices after 14) is `MessageService.sweep`, which the host runs with the delivery's 60 s sweep ([plans/mailbox.md](plans/mailbox.md) §6.4). The heartbeat the delivery keeps
 to tell how long the host was off is the setting `mail.heartbeat`.

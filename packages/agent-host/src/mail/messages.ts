@@ -604,8 +604,8 @@ export class MessageService {
   }
 
   /** Something the Inbox shows changed that is no message (the question about sleeping sessions): the listeners hear an empty change for the person */
-  announce(): void {
-    this.listeners.emit({ messageId: '', rootId: '', recipients: [PERSON] })
+  announce(rootId = ''): void {
+    this.listeners.emit({ messageId: '', rootId, recipients: [PERSON] })
   }
 
   /**

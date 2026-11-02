@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 66,
+  "version": 67,
   "deferred": [
    3,
    11,
@@ -13,7 +13,7 @@
   ],
   "minReader": 0
  },
- "userVersion": 66,
+ "userVersion": 67,
  "master": [
   {
    "type": "index",
@@ -281,6 +281,12 @@
   },
   {
    "type": "index",
+   "name": "sqlite_autoindex_mail_numbers_1",
+   "tbl_name": "mail_numbers",
+   "sql": null
+  },
+  {
+   "type": "index",
    "name": "sqlite_autoindex_mail_participants_1",
    "tbl_name": "mail_participants",
    "sql": null
@@ -500,6 +506,12 @@
    "name": "mail_messages",
    "tbl_name": "mail_messages",
    "sql": "CREATE TABLE mail_messages (\n              id          TEXT PRIMARY KEY,\n              thread_id   TEXT NOT NULL,\n              seq         INTEGER NOT NULL,\n              home_seq    INTEGER,\n              sender      TEXT NOT NULL,\n              kind        TEXT NOT NULL,\n              urgent      INTEGER NOT NULL DEFAULT 0,\n              needs_owner INTEGER NOT NULL DEFAULT 0,\n              wake        TEXT,\n              reply_to    TEXT,\n              body        TEXT NOT NULL,\n              facts       TEXT NOT NULL DEFAULT '{}',\n              dedupe_key  TEXT,\n              created_at  INTEGER NOT NULL,\n              UNIQUE (thread_id, seq),\n              UNIQUE (thread_id, sender, dedupe_key)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_numbers",
+   "tbl_name": "mail_numbers",
+   "sql": "CREATE TABLE mail_numbers (n INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL UNIQUE)"
   },
   {
    "type": "table",

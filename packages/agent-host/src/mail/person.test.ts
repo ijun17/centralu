@@ -3,7 +3,7 @@
  * M3a-host left wrong until the person's side moved (the M3a section's list), each from an older build's store moved at ready where it applies.
  */
 import type Database from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
@@ -27,7 +27,8 @@ function ready(w: ReturnType<typeof hostWorld>) {
   w.afterReady()
   stops.push(w.stop)
   const person = new MailPerson(w.service, w.store.mailbox, w.delivery, {
-    session: (id) => ({ name: id, state: 'idle' }),
+    // A session named `gone` is no longer kept (trashed or deleted)
+    session: (id) => (id === 'gone' ? undefined : { name: id, state: 'idle' }),
     legacyChain: (threadId) => w.store.legacyChain(threadId, undefined, 100),
     projectLabel: (projectId) => w.reach.projectLabel(projectId),
     untrusted: (projectId) => w.reach.untrusted(projectId),
@@ -225,7 +226,7 @@ describe('held mail the window lets go or drops, more cases', () => {
     oldThread(w.store, { id: tid(10), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', receipts: [{ recipient: B, held: 'policy' }] }])
     const r = ready(w)
     w.store.projects.setProjectTrusted('px', true)
-    expect(() => r.person.held('release', B, [mid(10)])).not.toThrow()
+    expect(r.person.held('release', B, [mid(10)])).toEqual({ changed: 1 })
     await r.advance(2_000)
     expect(bodies(w, 'b')).toContain(mid(10))
   })
@@ -239,5 +240,142 @@ describe('held mail the window lets go or drops, more cases', () => {
     r.person.projectDeleted('px', name)
     expect(w.store.mailbox.message(mid(11))).toBeUndefined()
     expect(w.store.mailbox.feedOf(X, { limit: 5 }).map((m) => m.body).join('\n')).toContain('Pex')
+  })
+})
+
+describe('whom the person’s reply goes to (Q-M3a-25)', () => {
+  const sentOf = (w: ReturnType<typeof hostWorld>, view: { messages: { id: string }[] }) => {
+    const id = view.messages.at(-1)?.id ?? ''
+    return { message: w.store.mailbox.message(id), to: w.store.mailbox.recipients(id).map((r) => r.recipient) }
+  }
+
+  it('answers the newest question that waits for the person, not a note sent after it', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?' }).message
+    w.clock.t += 10
+    w.mail.send(A, { to: [PERSON], text: 'fyi, I am waiting', replyTo: q.id, needsReply: false })
+    const sent = sentOf(w, w.person.reply(q.id, 'main', 'answer'))
+    expect(sent.message?.replyTo).toBe(q.id)
+    expect(w.row(q.id, PERSON)?.settled).toBe('answered')
+  })
+
+  it('a question to the person and another session: that session writing in the chain does not take the answer', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON, B], text: 'Which branch?' }).message
+    w.clock.t += 10
+    w.mail.send(B, { to: [PERSON, A], text: 'I would say dev', replyTo: q.id, needsReply: false })
+    const sent = sentOf(w, w.person.reply(q.id, 'main', 'answer'))
+    expect(sent.to).toEqual([A])
+  })
+
+  it('passes over a sender that is gone and a message hidden from the person', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(20), owner: A, at: t }, [
+      { id: mid(20), sender: A, kind: 'note', body: 'from alpha', receipts: [{ recipient: PERSON }] },
+      { id: mid(21), sender: at('gone'), kind: 'note', body: 'from a session since trashed', replyTo: mid(20), receipts: [{ recipient: PERSON }] },
+    ])
+    oldThread(w.store, { id: tid(21), owner: A, at: t }, [
+      { id: mid(22), sender: A, kind: 'note', body: 'shown', receipts: [{ recipient: PERSON }] },
+      { id: mid(23), sender: A, kind: 'note', body: 'held for its depth', replyTo: mid(22), receipts: [{ recipient: PERSON, held: 'loop' }] },
+    ])
+    const r = ready(w)
+    expect(sentOf(w, r.person.reply(mid(20), 'seen', 'note'))).toMatchObject({ message: { replyTo: mid(20) }, to: [A] })
+    expect(sentOf(w, r.person.reply(mid(22), 'seen', 'note'))).toMatchObject({ message: { replyTo: mid(22) }, to: [A] })
+  })
+})
+
+describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () => {
+  it('Mark done ends the wait of the person’s own question without withdrawing it: it is still delivered', async () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const mine = w.mail.send(PERSON, { to: [A], text: 'Ready?' }).message
+    w.person.close(mine.id)
+    expect(w.row(mine.id, A)?.settled).toBe('done')
+    await w.advance(2_000)
+    expect(bodies(w, 'a')).toContain(mine.id)
+  })
+
+  it('Mark done refreshes the chain in every window', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?' }).message
+    const heard: string[] = []
+    w.service.onChange((c) => heard.push(c.rootId))
+    w.person.close(q.id)
+    expect(heard).toContain(q.rootId)
+  })
+
+  it('an old thread’s id opens the newest chain moved from it, and Mark done on it closes every one', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(22), owner: A, at: t }, [
+      { id: mid(24), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
+      { id: mid(25), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    ])
+    const r = ready(w)
+    expect(r.person.thread(tid(22), { tail: 100 }).thread.id).toBe(mid(25))
+    r.person.close(tid(22))
+    expect([w.row(mid(24), PERSON)?.settled, w.row(mid(25), PERSON)?.settled]).toEqual(['done', 'done'])
+  })
+
+  it('Dismiss of a held answer opens its question again (D8)', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [X], text: 'Is Pex ready?' }).message
+    w.clock.t += 10
+    const answer = w.mail.send(X, { to: [A], text: 'Yes', replyTo: q.id }).message
+    expect(w.row(q.id, X)?.answerId).toBe(answer.id)
+    w.person.held('dismiss', A, [answer.id])
+    expect(w.row(q.id, X)?.answerId).toBeNull()
+  })
+
+  it('Release over rows of a trusted and an untrusted project is refused whole, before any goes', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'budget', receipts: [{ recipient: B, held: 'budget' }] }])
+    oldThread(w.store, { id: tid(24), owner: X, projectId: 'px', at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', receipts: [{ recipient: B, held: 'policy' }] }])
+    const r = ready(w)
+    expect(refusedFor(() => r.person.held('release', B, [mid(26), mid(27)]))).toBe('untrusted_project')
+    expect(w.row(mid(26), B)?.held).toBe('budget')
+  })
+
+  it('Resume on a chain counts each of its pairs anew', () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(25), owner: A, at: w.clock.t - 1_000 }, [{ id: mid(28), sender: A, kind: 'note', body: 'loop', receipts: [{ recipient: B, held: 'loop' }] }])
+    const r = ready(w)
+    const pair = vi.spyOn(r.turns, 'resumePair')
+    r.person.resume({ threadId: mid(28) })
+    expect(pair).toHaveBeenCalledWith(B, A)
+  })
+})
+
+describe('the window’s numbers and the purge', () => {
+  it('a number is never given twice: after the chain’s newest message is purged, the next one is still read after the last', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'first' }).message
+    w.clock.t += 10
+    // Held for its recipient's budget: the person reads it, to let it go
+    const held = w.mail.send(A, { to: [B], text: 'held for beta', replyTo: q.id }).message
+    w.store.mailbox.hold(B, [held.id], 'budget')
+    const seen = w.person.thread(q.id, { tail: 100 }).messages
+    expect(seen.map((m) => m.id)).toEqual([q.id, held.id])
+    // Beta purged: the held message goes, and the next message is stored where it was
+    w.store.mailbox.purgeParty(B)
+    expect(w.store.mailbox.message(held.id)).toBeUndefined()
+    w.clock.t += 10
+    const third = w.mail.send(A, { to: [PERSON], text: 'third', replyTo: q.id }).message
+    expect(w.person.thread(q.id, { after: seen.at(-1)?.seq ?? 0 }).messages.map((m) => m.id)).toEqual([third.id])
+  })
+
+  it('purging the only recipient of the person’s own message keeps the message', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const mine = w.mail.send(PERSON, { to: [B], text: 'for beta only', needsReply: false }).message
+    w.store.mailbox.purgeParty(B)
+    expect(w.store.mailbox.message(mine.id)).toBeDefined()
   })
 })
