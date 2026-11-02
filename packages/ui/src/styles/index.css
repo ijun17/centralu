@@ -729,6 +729,27 @@
     background-clip: content-box;
     border-radius: var(--scrollbar-radius);
   }
+  /*
+   * The conversation's top and bottom edges fade where more of it lies beyond (#1706, owner 2026-11-03): the floor's own
+   * colour over the rows, strength set from the scroll position (useEdgeFade). Opacity only, so reduced motion changes nothing.
+   */
+  .cc-edge-fade-top,
+  .cc-edge-fade-bottom {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .cc-edge-fade-top {
+    top: 0;
+    background: linear-gradient(to bottom, var(--color-surface-floor), transparent);
+  }
+  .cc-edge-fade-bottom {
+    bottom: 0;
+    background: linear-gradient(to top, var(--color-surface-floor), transparent);
+  }
   /* A scroller whose bar is drawn over its content by OverlayScrollbar: its own bar takes no width */
   .cc-scroll-overlay::-webkit-scrollbar {
     width: 0;
