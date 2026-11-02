@@ -71,7 +71,7 @@ import {
   type WebSocketRoute,
 } from '@playwright/test'
 import { screenshotPng, seedHeavyStore, type SeedSummary, type StoreProfile } from './fixtures/heavy-store.js'
-import { freePort } from './fixtures/real-host.js'
+import { freePort, homeEnv } from './fixtures/real-host.js'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
@@ -646,7 +646,7 @@ async function startHost(
     ],
     {
       cwd: root,
-      env: { ...process.env, CC_DATA_DIR: dataDir, HOME: home, CC_HOST_ALLOWED_ORIGINS: origin, CI: '1' },
+      env: { ...process.env, CC_DATA_DIR: dataDir, ...homeEnv(home), CC_HOST_ALLOWED_ORIGINS: origin, CI: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )

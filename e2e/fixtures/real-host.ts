@@ -139,6 +139,13 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
   }
 }
 
+/**
+ * A host's home folder, for the variables a process reads it from: `HOME`, and on Windows `USERPROFILE`, which is where Node's
+ * `os.homedir()` looks. With only `HOME` set, a host there read the person's own `~/.ssh/config`, and Settings → Machines
+ * offered its hosts instead of the form a machine is typed into (#1839).
+ */
+export const homeEnv = (home: string): Record<string, string> => ({ HOME: home, USERPROFILE: home })
+
 /*
  * What the host started is waited for too, not only the host (#368). Its probes (`claude --version`,
  * then `claude auth status`, which the window asks for through `agents.detect` on load) are not
@@ -156,15 +163,8 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
  * on no list (a detect followed by a kill 150-450 ms later left those files behind in 2 of 27
  * runs). Once the host has exited its probes belong to init, so no later walk finds them either.
  * A mark has no such gap: after the host is gone only a marked process can start another one.
- * Unix only: these specs do not run on Windows.
+ * Unix only: `marked` finds no process on Windows, so there `gone()` returns at once and nothing waits for the probes.
  */
-/**
- * A host's home folder, for the variables a process reads it from: `HOME`, and on Windows `USERPROFILE`, which is where Node's
- * `os.homedir()` looks. With only `HOME` set, a host there read the person's own `~/.ssh/config`, and Settings → Machines
- * offered its hosts instead of the form a machine is typed into (#1839).
- */
-export const homeEnv = (home: string): Record<string, string> => ({ HOME: home, USERPROFILE: home })
-
 const HOST_MARK = 'CENTRALU_E2E_HOST_RUN'
 
 /**
