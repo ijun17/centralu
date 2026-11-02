@@ -29,7 +29,7 @@ describe('v62 usage tables', () => {
       raw.close()
 
       const s = new Store(file)
-      expect(s.schemaVersion).toBe(64)
+      expect(s.schemaVersion).toBe(65)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       s.usage.addBuckets([bucket()])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
@@ -61,7 +61,7 @@ describe('v63 rebuild tokens (#1492)', () => {
 
       const s = new Store(file)
       open.push(s)
-      expect(s.schemaVersion).toBe(64)
+      expect(s.schemaVersion).toBe(65)
       expect(s.usage.buckets(0, 2 * 3_600_000)).toMatchObject([{ sessionId: 's1', requests: 3, rebuilds: 1, rebuildTokens: 0 }])
       s.close()
       // The previous build names its columns and has none of this one: its insert takes the default
@@ -148,7 +148,7 @@ describe('v64 the last totals of a tool that reports no limits (#1623)', () => {
 
       const s = new Store(file)
       open.push(s)
-      expect(s.schemaVersion).toBe(64)
+      expect(s.schemaVersion).toBe(65)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
       expect(s.usage.localTotals('opencode')).toBeNull()

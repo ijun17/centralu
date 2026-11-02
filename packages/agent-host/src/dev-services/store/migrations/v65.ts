@@ -1,0 +1,103 @@
+import { MigrationRange, type MigrationStep } from './context.js'
+
+/** The migration step v65. The rule it follows is written above `migrationSteps` in `index.ts` */
+export class StepsV65 extends MigrationRange {
+  steps(): MigrationStep[] {
+    return [
+      {
+        to: 65,
+        breaksOlderReaders: false,
+        /**
+         * Mail without threads (docs/plans/mailbox.md §6.1, #1684): messages addressed to parties, and each recipient's
+         * progress with one.
+         *
+         *   mail             one message: its sender, kind, body, the message it answers (`reply_to`) and the first of
+         *                    that chain (`root_id`, computed once when stored), the message that started the sender's turn
+         *                    (`cause_id`) and how many hops led to it (`depth`), and `facts`, which only Centralu writes.
+         *                    `dedupe_key` is unique per sender: Centralu's "once per change" (§6.5). `legacy_thread` names
+         *                    the v61 thread a message was moved from (§6.3)
+         *   mail_recipients  one recipient's progress with one message: the delivery fields a v61 receipt had, the turn
+         *                    the delivery started or joined, whether and how it was settled (answered, done, withdrawn,
+         *                    reported, gone, legacy), its reminders, and when it was released and its sender told (§5.3)
+         *
+         * `mail_turns` gains the turn's work message (`message_id`), the message that started it (`starter_id`, so a
+         * restart keeps a turn's cause) and how it ended (`ended_how`). `sessions.mail_args` is the mail tool schema a
+         * session's process was spawned with (NULL reads as 1).
+         *
+         * No foreign keys and no CHECK on a word, as v61 (`v58.ts`): addresses name parties on other hosts, and an older
+         * or newer build must be able to write a word the other does not know.
+         *
+         * **Expand only (#292's rule).** Two new tables, three nullable columns and indexes. An older build serving the
+         * same store during a swap never names the new tables: it keeps writing the v61 tables, and names its columns in
+         * every read and insert of `mail_turns` and `sessions`. Nothing reads the new tables in this build yet (slice M1).
+         * The columns are added only when missing (`PRAGMA table_info`), as `v62.ts` does.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS mail (
+              id             TEXT PRIMARY KEY,
+              sender         TEXT NOT NULL,
+              sender_project TEXT,
+              kind           TEXT NOT NULL,
+              needs_reply    INTEGER NOT NULL DEFAULT 0,
+              reply_to       TEXT,
+              root_id        TEXT NOT NULL,
+              cause_id       TEXT,
+              depth          INTEGER NOT NULL DEFAULT 0,
+              urgent         INTEGER NOT NULL DEFAULT 0,
+              body           TEXT NOT NULL,
+              facts          TEXT NOT NULL DEFAULT '{}',
+              dedupe_key     TEXT,
+              origin         TEXT,
+              legacy_thread  TEXT,
+              created_at     INTEGER NOT NULL,
+              UNIQUE (sender, dedupe_key)
+            );
+            CREATE INDEX IF NOT EXISTS mail_root   ON mail(root_id, created_at);
+            CREATE INDEX IF NOT EXISTS mail_reply  ON mail(reply_to) WHERE reply_to IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS mail_cause  ON mail(cause_id) WHERE cause_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS mail_sender ON mail(sender, created_at);
+            CREATE INDEX IF NOT EXISTS mail_legacy ON mail(legacy_thread) WHERE legacy_thread IS NOT NULL;
+            CREATE TABLE IF NOT EXISTS mail_recipients (
+              message_id        TEXT NOT NULL,
+              recipient         TEXT NOT NULL,
+              recipient_project TEXT,
+              via               TEXT,
+              due_at            INTEGER NOT NULL,
+              attempt_at        INTEGER,
+              delivered_at      INTEGER,
+              read_at           INTEGER,
+              held              TEXT,
+              attempts          INTEGER NOT NULL DEFAULT 0,
+              last_error        TEXT,
+              turn_seq          INTEGER,
+              settled           TEXT,
+              settled_at        INTEGER,
+              answer_id         TEXT,
+              reminded          INTEGER NOT NULL DEFAULT 0,
+              reminded_at       INTEGER,
+              released_at       INTEGER,
+              released_why      TEXT,
+              told_at           INTEGER,
+              PRIMARY KEY (message_id, recipient)
+            );
+            CREATE INDEX IF NOT EXISTS mail_recipients_by      ON mail_recipients(recipient, delivered_at);
+            CREATE INDEX IF NOT EXISTS mail_recipients_pending ON mail_recipients(recipient, due_at) WHERE delivered_at IS NULL;
+            CREATE INDEX IF NOT EXISTS mail_recipients_open    ON mail_recipients(recipient) WHERE settled IS NULL;
+            CREATE INDEX IF NOT EXISTS mail_recipients_untold  ON mail_recipients(released_at) WHERE released_at IS NOT NULL AND told_at IS NULL;
+          `)
+          this.addColumn('mail_turns', 'message_id', 'TEXT')
+          this.addColumn('mail_turns', 'starter_id', 'TEXT')
+          this.addColumn('mail_turns', 'ended_how', 'TEXT')
+          this.addColumn('sessions', 'mail_args', 'INTEGER')
+        },
+      },
+    ]
+  }
+
+  /** Adds a column the table lacks. A table that does not exist (a test's partial schema) is left alone */
+  private addColumn(table: string, column: string, type: string): void {
+    const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(${table})`).all()
+    if (cols.length > 0 && !cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
+}

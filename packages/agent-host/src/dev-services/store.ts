@@ -10,6 +10,7 @@ import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords } from './store/linked-machines.js'
 import { MailRecords } from './store/mail.js'
+import { MailboxRecords } from './store/mailbox.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords } from './store/messages.js'
 import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
@@ -75,6 +76,8 @@ export class Store extends MigrationRunner {
   readonly children: ChildOwnershipRecords
   /** The mailbox's threads, messages and receipts (#1347, v61) */
   readonly mail: MailRecords
+  /** Mail without threads: messages and each recipient's row (#1684, v65). Read by nothing yet (docs/plans/mailbox.md M1) */
+  readonly mailbox: MailboxRecords
   readonly machines: LinkedMachineRecords
   /** Limit readings and tokens per hour, kept for the usage history (docs/agent-host.md §6.2) */
   readonly usage: UsageRecords
@@ -101,6 +104,7 @@ export class Store extends MigrationRunner {
     this.keptRuns = new KeptRuns(this.db)
     this.children = new ChildOwnershipRecords(this.db)
     this.mail = new MailRecords(this.db)
+    this.mailbox = new MailboxRecords(this.db)
     this.machines = new LinkedMachineRecords(this.db, this.settings)
     this.adoption = new UserAppAdoptionRecords(this.db, this.settings)
     this.usage = new UsageRecords(this.db)

@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3'
 import { z } from 'zod'
 import { JsonObject, readJson, readJsonList } from './json.js'
 import { sweepMail, type MailSweepResult, type MailSweepLimits } from './mail-retention.js'
+import { RECIPIENT_HOLDS } from './mailbox.js'
+import { updateRecipientRows } from './rows.js'
 
 /*
  * The mailbox's rows (#1347, docs/plans/mailbox.md §4.1, store step v61): threads that are tasks, who is in them, what
@@ -172,7 +174,7 @@ type ParticipantSql = { thread_id: string; address: string; role: string; joined
 
 type BlockerSql = { thread_id: string; n: number; kind: string; ref: string | null; text: string; resolved_at: number | null }
 
-type MessageSql = {
+export type MessageSql = {
   id: string
   thread_id: string
   seq: number
@@ -258,7 +260,7 @@ const toBlocker = (r: BlockerSql): BlockerRow => ({
   resolvedAt: r.resolved_at,
 })
 
-const toMessage = (r: MessageSql): MessageRow => ({
+export const toMessage = (r: MessageSql): MessageRow => ({
   id: r.id,
   threadId: r.thread_id,
   seq: r.seq,
@@ -470,7 +472,7 @@ export class MailRecords {
       .prepare(
         `UPDATE OR IGNORE mail_receipts
             SET recipient = @to, delivered_at = NULL, attempt_at = NULL, attempts = 0, last_error = NULL,
-                held = CASE WHEN held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') THEN NULL ELSE held END
+                held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
           WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
             AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId AND sender <> @to)`,
       )
@@ -834,9 +836,7 @@ export class MailRecords {
 
   /** `UPDATE mail_receipts SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <messageIds>`: `setArgs` fill the `?` of `set`; returns the rows changed */
   private updateReceipts(set: string, setArgs: readonly (string | number | null)[], recipient: string, messageIds: readonly string[], also?: string): number {
-    return this.db
-      .prepare(`UPDATE mail_receipts SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(...setArgs, recipient, JSON.stringify(messageIds)).changes
+    return updateRecipientRows(this.db, 'mail_receipts', set, setArgs, recipient, messageIds, also)
   }
 
   /** Marks `recipient`'s receipts for exactly these messages read (not handled), keeping an earlier read time */
@@ -1002,7 +1002,7 @@ export class MailRecords {
       [to, to, dueAt],
       recipient,
       messageIds,
-      `held IN ('uncertain', 'failed', 'loop', 'budget', 'policy')`,
+      `held IN ${RECIPIENT_HOLDS}`,
     )
   }
 
