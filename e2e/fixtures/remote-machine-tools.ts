@@ -73,8 +73,8 @@ export function remoteMachineToolsTests(): void {
       })
 
       /*
-       * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected is left out,
-       * not drawn as "away"; Settings → Machines still lists it with its state
+       * A machine that is not connected is left out, not drawn as "away" (owner, 2026-10-18); Settings → Machines still
+       * lists it with its state. A connected one stays even with no tool installed (owner, 2026-10-27, below)
        */
       await test.step('a machine that is away is left out, and is never asked', async () => {
         await expect(page.getByTestId('usage-machine-box')).toBeVisible()
@@ -186,7 +186,7 @@ export function remoteMachineToolsTests(): void {
       await expect.poll(() => usageCalls(page, null)).toBeGreaterThan(before)
     })
 
-    test('a machine with no usable agent is left out, and this computer with none keeps its mark beside the machines', async ({ page }) => {
+    test('a connected machine with no agent installed keeps its name alone, and this computer with none keeps its mark beside the machines', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
@@ -201,11 +201,12 @@ export function remoteMachineToolsTests(): void {
         }
       })
       await link(page, { name: 'Box', sshTarget: 'me@box' })
-      // Asked, and nothing there can run: no group, no "No agent" words (owner, 2026-10-18)
+      // Asked, and nothing is installed there: the machine stays as its name alone, no donut, no "No agent" words (owner, 2026-10-27)
       await expect.poll(() => page.evaluate(() => (window as unknown as MockWindow).__mock.asked.includes('box'))).toBe(true)
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
       await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
-      await expect(page.getByTestId('usage-machine-box')).toHaveCount(0)
+      await expect(page.getByTestId('usage-machine-box')).toBeVisible()
+      await expect(page.getByTestId('usage-machine-box')).toHaveText('Box')
+      await expect(page.getByTestId('usage-machine-box').locator('[data-testid^="usage-donut-"]')).toHaveCount(0)
       await expect(page.getByTestId('usage-machine-no-agent-box')).toHaveCount(0)
 
       await page.evaluate(() => {
