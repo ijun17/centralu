@@ -20,7 +20,7 @@ import { describe, runServe, serveFolder } from './serve-run.mjs'
  * does not inherit this environment: it gets the account's default one. Everything else it needs
  * (the token, the port) is in the data folder. Never a secret.
  */
-export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM']
+export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CENTRALU_KEEPER']
 
 /**
  * `start` is how the launcher was started and why (`through WMI: <reason>`), which it writes into its first serve.log

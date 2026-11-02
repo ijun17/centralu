@@ -119,7 +119,7 @@ describe("the launcher's variables (ST16)", () => {
       keeperSource: 'content',
       frontDoor: 'ws://127.0.0.1:4100',
       startedByServe: true,
-      startedBy: 'keeper',
+      startedBy: 'serve',
       serveFrom: null,
       token: 'secret',
       tokenOnStdin: true,

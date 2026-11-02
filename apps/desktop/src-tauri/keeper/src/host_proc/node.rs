@@ -189,7 +189,19 @@ static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// inherits the user's PATH from the registry, which is where the Node installer, nvm-windows,
 /// Volta and Scoop put themselves. So PATH is searched first, then the places those installers use.
 pub fn resolve_node() -> Result<String, String> {
+    if let Some(told) = NODE_TOLD.get() {
+        return Ok(told.clone());
+    }
     remember_found(&NODE, || pick_node(probe_first(), fallback_node_paths()))
+}
+
+/// The Node a headless keeper was told to run its hosts with (`--node`, remote-keeper.md §8): the one that runs the
+/// launcher that started it, already past the floor, not looked for again on a PATH a remote's session may not share.
+static NODE_TOLD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Makes `resolve_node` answer `path`. Once per process; a second call changes nothing.
+pub fn use_node(path: String) {
+    let _ = NODE_TOLD.set(path);
 }
 
 /// The first `<dir>\<name>` that exists, over the absolute entries of PATH only: a relative entry

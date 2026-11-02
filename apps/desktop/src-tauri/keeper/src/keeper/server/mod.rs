@@ -8,7 +8,7 @@
 //! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and a credential (the token for a Centralu window, the limited credential for any other process, #1405, `view.rights`), build source, the last swap |
 //! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?,"relaunched":bool}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. `relaunched`: this window is the one an announced relaunch started |
 //! | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is relaunching itself to apply an update (#352): for up to `n` s (default 60, at most 300) no window attached does not stop the keeper, whatever background mode says |
-//! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
+//! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits. A headless keeper (`--headless`, `headless.rs`) takes `ifIdle` and `forUpdate` too and has its host decide: `{"ok":false,"busy":true,..}` when `ifIdle` and something runs, nothing stopped |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
 //! | `{"op":"upgrade","exe":path,"source":BuildSource}` | a window's only (#1405): `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 //! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
@@ -36,6 +36,7 @@
 //! attach, detach, relaunch; `push.rs`, each window's writer. `switch.rs`: build switches, keeper handoffs and moves to verified
 //! content.
 
+mod headless;
 mod host;
 mod push;
 mod start;
@@ -267,6 +268,11 @@ pub(super) struct Keeper {
     /// Requests being answered right now (an attach counts until it is registered). A freeze
     /// waits for them, so no answer is half written when the socket changes hands.
     pub(super) requests: AtomicUsize,
+    /// Started by `centralu serve` with no window (`--headless`, `headless.rs`): it takes `serve`'s port and token, lives
+    /// until it is stopped, and hands the token to no one.
+    pub(super) headless: bool,
+    /// Where the host's answer to a headless `stop` goes (`headless::stop`): one stop is asked at a time.
+    pub(super) stop_reply: Mutex<Option<std::sync::mpsc::Sender<Value>>>,
 }
 
 /// Runs a keeper that is fully set up: the idle rule and the control socket, until it exits.
@@ -348,6 +354,10 @@ impl Keeper {
      * before anything is judged.
      */
     pub(super) fn window_exes(&self) -> Vec<PathBuf> {
+        // A headless keeper has no window, and an executable nearby (or a test hook) is not one
+        if self.headless {
+            return Vec::new();
+        }
         let mut bundles: Vec<String> = self.info.build.iter().filter_map(|b| b.bundle_path.clone()).collect();
         if let Ok(st) = self.state.lock() {
             bundles.extend(st.source.iter().chain(std::iter::once(&st.desired)).filter_map(|b| b.bundle_path.clone()));
@@ -446,6 +456,11 @@ impl Keeper {
 
     /// Stops the host and ends the keeper. Idempotent.
     fn shutdown(self: &Arc<Self>, reason: &str) {
+        self.shutdown_after(reason, Ending::Asked)
+    }
+
+    /// `shutdown`, for how the host stands (`Ending`).
+    fn shutdown_after(self: &Arc<Self>, reason: &str, ending: Ending) {
         // A keeper that has handed over owns nothing any more: stopping now would stop the next
         // keeper's host and children.
         if self.handed_over.load(Ordering::SeqCst) {
@@ -465,13 +480,32 @@ impl Keeper {
         // A stop, unlike a host restart, ends the agents, terminals and commands. The host stops
         // them first, the way it always did; whatever it could not (a host that hung or had
         // already died) the keeper ends itself once the host is gone.
-        self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
+        match ending {
+            Ending::Asked => {
+                self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
+            }
+            Ending::HostLeaving => self.wait_for_host_to_leave(),
+            Ending::HostGone => {}
+        }
         self.sup.shutdown();
         self.children.stop_all(children::STOP_GRACE);
         let _ = fs::remove_file(self.data.join("keeper.json"));
         log(&format!("stopped (pid {})", self.info.pid));
-        std::process::exit(0);
+        std::process::exit(if ending == Ending::HostGone { 1 } else { 0 });
     }
+}
+
+/// How the host stands when the keeper ends.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Ending {
+    /// Running: it is asked to stop its children, the way it always did.
+    Asked,
+    /// It said yes to a stop and is leaving by itself (a headless `stop`, `headless.rs`): waited for, not asked again, which
+    /// would mark a stop the person's `serve --stop` makes on its own.
+    HostLeaving,
+    /// It gave up (the supervisor's five failures) and nothing is left to ask: a headless keeper ends with exit 1 rather than
+    /// sit without a host, which `serve --detach` would take for a running one.
+    HostGone,
 }
 
 pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
@@ -498,6 +532,7 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
                     since_busy: now.duration_since(st.last_busy),
                     relaunching,
                     relaunch_expired,
+                    headless: k.headless,
                 },
                 k.idle,
             )
@@ -551,6 +586,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             Some(list) => reply(&mut stream, &json!({ "ok": true, "children": list })),
             None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
         },
+        "stop" if k.headless => headless::stop(&k, stream, &req),
         "stop" => {
             reply(&mut stream, &json!({ "ok": true }));
             drop(stream);

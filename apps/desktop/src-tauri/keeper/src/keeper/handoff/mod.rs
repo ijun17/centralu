@@ -718,6 +718,8 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         handed_over: AtomicBool::new(false),
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
+        headless: false,
+        stop_reply: Mutex::new(None),
     });
     // The child socket answers this keeper's hosts and no other process (#538)
     super::server::answer_hosts(&keeper);

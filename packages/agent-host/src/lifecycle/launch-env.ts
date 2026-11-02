@@ -98,7 +98,9 @@ export function takeLaunchEnv(env: Record<string, string | undefined> = process.
     keeperSource: env.CC_HOST_SOURCE,
     frontDoor: env.CC_FRONT_DOOR,
     startedByServe: env.CC_SERVE === '1',
-    startedBy: env.CC_KEEPER === '1' ? 'keeper' : env.CC_SERVE === '1' ? 'serve' : env.CC_STARTED_BY === 'app' ? 'app' : null,
+    // `serve` first: a keeper `centralu serve` started (headless, remote-keeper.md §8) hands its hosts `CC_SERVE` on, and
+    // host.lock must still say `serve`, which is what `serve --stop` and the sign-in hand-over trust (serve-files.mjs)
+    startedBy: env.CC_SERVE === '1' ? 'serve' : env.CC_KEEPER === '1' ? 'keeper' : env.CC_STARTED_BY === 'app' ? 'app' : null,
     serveFrom: env.CC_SERVE === '1' ? parseServeFrom(env.CC_SERVE_FROM) : null,
     token: env.CC_HOST_TOKEN,
     tokenOnStdin: env.CC_HOST_TOKEN_ON_STDIN === '1',

@@ -16,6 +16,27 @@ use std::process::Command;
 
 pub use super::this_unix::{code_signature_display, exe_of_pid, peer_pid, peer_uid};
 
+static STOP_SIGNALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn note_stop_signal(_: libc::c_int) {
+    STOP_SIGNALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Has SIGINT, SIGTERM and SIGHUP only note that they came (`stop_signalled`), so a headless keeper stops in order
+/// instead of dying on them with its agents and terminals orphaned: the launcher that started it passes on the signal
+/// its own terminal or service manager sent (`centralu serve`, `runServe`).
+pub fn catch_stop_signals() {
+    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        // SAFETY: the handler only stores into an atomic, which is async-signal-safe.
+        unsafe { libc::signal(sig, note_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    }
+}
+
+/// Whether a signal `catch_stop_signals` took has come.
+pub fn stop_signalled() -> bool {
+    STOP_SIGNALLED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Every descriptor above stderr this process has open, except those in `keep`: what it inherited,
 /// when it is asked before it opens anything of its own. `/dev/fd` lists them on macOS and Linux
 /// (there a link to `/proc/self/fd`); the listing's own descriptor is gone once it is read.

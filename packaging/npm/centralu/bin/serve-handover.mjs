@@ -7,6 +7,7 @@ import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, loc
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
+import { keeperPidOf, askKeeperToStop } from './serve-keeper.mjs'
 import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
 
 /**
@@ -49,17 +50,23 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   // Only a host `serve` started is ever signalled, whoever answered with this folder's token
   const mayKill = startedByServe(dataDir)
   const launcher = readServePid(dataDir)
-  // serve.pid is only believed when it names the host that holds the folder now
-  const launcherPid = mayKill && launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
+  // A keeper `serve` started (remote-keeper.md §8) holds the host: it, not the host, takes the request to stop
+  const keeperPid = keeperPidOf(dataDir, launcher)
+  // serve.pid is only believed when it names the host that holds the folder now, or the keeper that holds keeper.lock
+  const launcherPid = mayKill && launcher && (keeperPid !== null || (hostPid && launcher.hostPid === hostPid)) ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, ifIdle, forUpdate })
+  const who = keeperPid !== null ? 'keeper' : 'host'
+  let asked =
+    keeperPid !== null
+      ? await askKeeperToStop(dataDir, { ifIdle, forUpdate })
+      : await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, ifIdle, forUpdate })
   if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, ...own, protocolVersion: asked.protocolVersion, ifIdle, forUpdate })
   // `ifIdle` and it has work running (#1224): it was left as it is
   if (asked.busy) return { ok: false, wasRunning: true, busy: true, message: asked.message }
   let how = 'asked'
   let stopped = asked.ok && (await waitUntil(down, timeoutMs))
-  let note = asked.ok ? null : `the host did not take the request to stop (${asked.message})`
+  let note = asked.ok ? null : `the ${who} did not take the request to stop (${asked.message})`
   if (!stopped) {
     const target = platform !== 'win32' && launcherPid ? launcherPid : mayKill ? hostPid : null
     if (hostPid && !mayKill) note = `${note ? `${note}; ` : ''}the lock names pid ${hostPid}, which centralu serve did not start, so it was not signalled`

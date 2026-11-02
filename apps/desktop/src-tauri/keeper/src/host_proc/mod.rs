@@ -53,7 +53,7 @@ use crate::os;
 pub use hand::Gate;
 #[cfg(unix)]
 pub use handover::{ForeignAdopt, HostFreeze, HostOut, LineGate, NextLine};
-pub use node::resolve_node;
+pub use node::{resolve_node, use_node};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostInfo {
@@ -593,6 +593,15 @@ impl Supervisor {
         let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
         stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
+    }
+
+    /// Says the host is going for good and is not to be started again when it exits, without touching it:
+    /// for a host that was asked to stop itself (a headless keeper's `stop`, which the host answers and then
+    /// carries out), so its exit is not taken for a crash.
+    pub fn mark_stopping(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.shutting_down = true;
+        }
     }
 
     /// Stops the host for good. Kills it **as a whole group** — no zombies left behind.

@@ -42,8 +42,21 @@ impl StatusSink for KeeperSink {
         };
         k.write_state_file();
         match status {
-            HostStatus::Ready(info) => log(&format!("host ready on port {} behind {} (pid {:?})", info.port, k.door.url(), k.sup.pid())),
-            HostStatus::Failed { message } => log(&format!("host gave up: {message}")),
+            HostStatus::Ready(info) => {
+                log(&format!("host ready on port {} behind {} (pid {:?})", info.port, k.door.url(), k.sup.pid()));
+                // What `centralu serve` waits for, on the keeper's stdout: the door's port, no token (headless.rs)
+                if k.headless {
+                    println!("{}", headless::ready_line(k.door.port(), k.sup.pid()));
+                }
+            }
+            HostStatus::Failed { message } => {
+                log(&format!("host gave up: {message}"));
+                // A headless keeper without a host is no use to anyone, and would hold the folder against the next start
+                if k.headless {
+                    let k = k.clone();
+                    thread::spawn(move || k.shutdown_after("the host gave up", Ending::HostGone));
+                }
+            }
             HostStatus::Restarting { attempt } => log(&format!("host restarting (attempt {attempt})")),
             HostStatus::Starting => {}
         }
@@ -68,6 +81,13 @@ impl StatusSink for KeeperSink {
     /// The host's activity report, `{"activity":{"busy":bool}}` on its stdout — the one thing
     /// the keeper reads from the host besides the ready line. It feeds the idle rule.
     fn json_line(&self, line: &Value) -> bool {
+        // A headless stop's answer from the host (`headless::stop`)
+        if let Some(answer) = line.get("stopAnswer") {
+            if let Some(tx) = self.0.stop_reply.lock().ok().and_then(|mut slot| slot.take()) {
+                let _ = tx.send(answer.clone());
+            }
+            return true;
+        }
         // The swap's two reports (#280 step 3, swap-control.ts): what a swap costs with this host,
         // and what a draining host finished or cut
         if let Some(keeps) = line.pointer("/swap/keepsAgents").and_then(Value::as_bool) {

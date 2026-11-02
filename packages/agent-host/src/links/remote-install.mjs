@@ -19,6 +19,9 @@ import { pathToFileURL } from 'node:url'
 
 const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 
+/** The keeper's file beside `host/` in a Linux host-only package (remote-keeper.md §7); a dev build takes the release's (`devBuild`) */
+const KEEPER_FILE = 'centralu-keeper'
+
 class Refusal extends Error {
   constructor(code, detail = '') {
     super(`${code} ${detail}`.trim())
@@ -565,7 +568,14 @@ export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(
       })
       writeFileSync(join(l.root, 'dev-build.log'), `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? `\n${r.error.message}\n` : ''}`)
       if (r.status !== 0 || !existsSync(join(hostPkg, 'host', 'main.mjs'))) throw new Refusal('dev_build', lastSaid(r.stderr, r.error?.message, r.stdout) || `exit ${r.status}`)
-      writeFileSync(join(hostPkg, 'package.json'), JSON.stringify({ name: `@centralu/host-${target}`, version, files: ['host'] }, null, 2) + '\n')
+      // The keeper of the release this is built on, when it has one: a dev build bundles the host only (remote-keeper.md §8)
+      const keeperFile = join(l.versions, current.version, 'node_modules', '@centralu', `host-${target}`, KEEPER_FILE)
+      const keeper = existsSync(keeperFile)
+      if (keeper) {
+        cpSync(keeperFile, join(hostPkg, KEEPER_FILE))
+        chmodSync(join(hostPkg, KEEPER_FILE), 0o755)
+      }
+      writeFileSync(join(hostPkg, 'package.json'), JSON.stringify({ name: `@centralu/host-${target}`, version, files: keeper ? ['host', KEEPER_FILE] : ['host'] }, null, 2) + '\n')
       const shimDir = join(partial, 'node_modules', 'centralu')
       cpSync(join(repo, 'packaging', 'npm', 'centralu', 'bin'), join(shimDir, 'bin'), { recursive: true })
       // The platform packages it names are npm's to fetch; here the host sits beside it, as a hub's install puts it

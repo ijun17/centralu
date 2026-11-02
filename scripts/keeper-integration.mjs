@@ -42,6 +42,15 @@
  *   - the drain answers a slow call the host serves itself with a retryable error once the bound
  *     (shortened to 1.5 s here) has passed, and the swap reports what it cut.
  *
+ * Step 3 of docs/plans/remote-keeper.md (`keeper-integration-headless.mjs`), the keeper `centralu serve` starts on a Linux remote
+ * with no window:
+ *   - started with serve's port, Node and host folder and its key on stdin, it serves on that port with that key, says when it
+ *     is ready with no token, and host.lock says serve started the host;
+ *   - nothing is a window to it, and nothing ends it for the lack of one;
+ *   - stop { ifIdle } with a terminal open is refused, naming what runs, and nothing stops; with nothing running the keeper and the
+ *     host stop through the host's own shutdown; stop { forUpdate } tells the host it is for an update; SIGTERM and the
+ *     launcher's pipe closing stop them in order too.
+ *
  * It needs no model and no network, and CI runs all of it (the `keeper` job in
  * `.github/workflows/build.yml`).
  *
@@ -59,6 +68,7 @@ import { BIN, buildKeeper, cleanup, countFailure, failures, HOST_SRC, log } from
 import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, scenarioKeeperDies, scenarioStop } from './keeper-integration-lifecycle.mjs'
 import { scenarioFromACopy, scenarioRelaunch } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
+import { scenarioHeadless, scenarioHeadlessStopForUpdate } from './keeper-integration-headless.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
@@ -81,6 +91,8 @@ async function main() {
     swap: scenarioSwap,
     drain: scenarioDrainCutsSlowCall,
     'from-a-copy': scenarioFromACopy,
+    // Linux only: `serve` starts a headless keeper nowhere else (remote-keeper.md §8)
+    ...(process.platform === 'linux' ? { headless: scenarioHeadless, 'headless-stop': scenarioHeadlessStopForUpdate } : {}),
   }
   const at = process.argv.indexOf('--only')
   const only = at >= 0 ? process.argv[at + 1].split(',') : Object.keys(scenarios)

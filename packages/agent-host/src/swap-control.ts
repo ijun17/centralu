@@ -19,6 +19,7 @@ import { sleep } from './timing.js'
  * | (host started with `--standby`)       | `{"standby":{pid,schema}}` once its own checks pass        |
  * | `{"op":"activate"}`                   | the ordinary ready line once it serves                    |
  * | `{"op":"drain","timeoutMs":N}`        | `{"drained":{waitedFor,cut,ms,keptAgents}}`, then it exits |
+ * | `{"op":"stop","ifIdle","forUpdate"}`  | `{"stopAnswer":{ok,busy?,calls?}}`, then it stops (a headless keeper's only, `lifecycle/keeper-stop.ts`) |
  *
  * The keeper parses nothing else the host says and the host parses nothing else the keeper sends:
  * neither side learns the other's protocol (#280, "the keeper does not parse any protocol").
@@ -76,7 +77,7 @@ export function viewPort(frontDoor: string | undefined, port: number | undefined
 /** The longest control line accepted. The real ones are tens of bytes */
 const MAX_LINE = 64 * 1024
 
-export type ControlMessage = { op: string; timeoutMs?: number }
+export type ControlMessage = { op: string; timeoutMs?: number; ifIdle?: unknown; forUpdate?: unknown }
 
 /**
  * Control lines on the host's stdin. One handler per op; `next(op)` waits for one. The stream

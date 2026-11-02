@@ -61,6 +61,7 @@ import { HostRequests } from './host-requests.js'
 import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
 import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-credentials-file.js'
 import { realOs } from './os/real.js'
+import { answerKeeperStop } from './lifecycle/keeper-stop.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -748,6 +749,11 @@ const usedCredentials = new UsedCredentials()
 /** And the file that keeps them across a restart of this host, beside `serve.json` (#1712); read back here, before any hello */
 const usedCredentialsFile = launch.serveState ? new UsedCredentialsFile(usedCredentialsPath(launch.serveState, realOs()), usedCredentials, realOs()) : null
 usedCredentialsFile?.load()
+/*
+ * `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts). The RPC takes it
+ * on a host `centralu serve` runs itself; under a headless keeper the keeper asks for it on the control channel (below).
+ */
+const stopGate = launch.startedByServe ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
@@ -777,8 +783,7 @@ const router: Router = new Router({
     heldPids: held?.heldPids,
     machines: links,
     stopHost: launch.startedByServe && !launch.underKeeper ? (o) => stopFromRequest(o) : undefined,
-    // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
-    stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
+    stopGate: launch.underKeeper ? undefined : stopGate,
     // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
     handover: (h) => {
       handover = h
@@ -793,6 +798,10 @@ const router: Router = new Router({
   machines: () => links.all(),
   order: storeProjectOrder(store),
 })
+// A headless keeper's `stop` (`centralu serve --stop`, the sign-in hand-over): the host decides and stops as `host.stop` does
+if (control && stopGate) {
+  control.on('stop', (m) => answerKeeperStop(m, { gate: stopGate, stop: stopFromRequest, write: (line) => void writeSync(1, `${line}\n`) }))
+}
 /*
  * Whether this host runs with administrator rights (#702), for every hello: asked once, while the rest starts, and
  * awaited before the server listens (a few tens of milliseconds for `whoami` on Windows, bounded), so the first hello

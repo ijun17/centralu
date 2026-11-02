@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import Module from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -127,6 +127,33 @@ describe('remote-install.mjs: a dev build from a commit (#1036)', () => {
     expect(readdirSync(s.r()).filter((n) => n.startsWith('.'))).toEqual([])
     // The next one is the next number
     expect(build(s).installed.version).toBe(`${BASE}.local.2`)
+  })
+
+  // remote-keeper.md §8: a dev build bundles the host only, so on Linux it takes the keeper of the release it is built on
+  it('takes the keeper of the release it is cut from, and a dev build over a dev build takes the same one', () => {
+    const s = setup()
+    const hostPkg = (v: string) => s.r('versions', v, 'node_modules', '@centralu', 'host-linux-x64')
+    mkdirSync(hostPkg(BASE), { recursive: true })
+    writeFileSync(join(hostPkg(BASE), 'centralu-keeper'), 'the release keeper')
+    chmodSync(join(hostPkg(BASE), 'centralu-keeper'), 0o755)
+    const first = `${BASE}.local.1`
+    build(s)
+    expect(readFileSync(join(hostPkg(first), 'centralu-keeper'), 'utf8')).toBe('the release keeper')
+    if (process.platform !== 'win32') expect(statSync(join(hostPkg(first), 'centralu-keeper')).mode & 0o111).toBe(0o111)
+    expect(JSON.parse(readFileSync(join(hostPkg(first), 'package.json'), 'utf8')).files).toEqual(['host', 'centralu-keeper'])
+    // Switched to: the next dev build is cut from that one, and carries the keeper on
+    writeFileSync(s.r('current'), `${first} ${NODE}
+`)
+    build(s)
+    expect(readFileSync(join(hostPkg(`${BASE}.local.2`), 'centralu-keeper'), 'utf8')).toBe('the release keeper')
+  })
+
+  it('has no keeper when the release it is cut from has none, and says so in the package it writes', () => {
+    const s = setup()
+    build(s)
+    const pkg = s.r('versions', `${BASE}.local.1`, 'node_modules', '@centralu', 'host-linux-x64')
+    expect(existsSync(join(pkg, 'centralu-keeper'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')).files).toEqual(['host'])
   })
 
   it('refuses before building: another commit checked out, uncommitted changes, another protocol, a Node below the floor', () => {

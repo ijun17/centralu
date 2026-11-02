@@ -122,6 +122,11 @@ fn the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target() {
 
 /// A keeper with nothing running, for tests of what it does with its windows.
 fn test_keeper(data: &Path) -> Arc<Keeper> {
+    test_keeper_with(data, false)
+}
+
+/// `test_keeper`, headless or not (`headless.rs`).
+fn test_keeper_with(data: &Path, headless: bool) -> Arc<Keeper> {
     let sock = data.join("keeper.sock");
     let _ = fs::remove_file(&sock);
     Arc::new(Keeper {
@@ -143,6 +148,8 @@ fn test_keeper(data: &Path) -> Arc<Keeper> {
         handed_over: AtomicBool::new(false),
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
+        headless,
+        stop_reply: Mutex::new(None),
     })
 }
 
@@ -531,5 +538,151 @@ fn only_the_accepted_window_executable_gets_the_token() {
     let v = status_of(&renamed);
     assert_eq!(v["view"]["status"]["token"], json!(limited::limited_token(DOOR_TOKEN)), "{v}");
     assert_eq!(v["view"]["rights"], json!("limited"));
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// remote-keeper.md §8: `centralu serve` starts the keeper with its own port, Node and host folder; the key is on stdin.
+#[test]
+fn reads_the_options_serve_passes_a_headless_keeper() {
+    let args: Vec<String> = ["centralu-keeper", "--headless", "--data-dir", "/d", "--port", "4242", "--node", "/n/bin/node", "--host-source", "/d/remote/v/host", "--app-version", "0.2.0"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let o = parse_args(&args);
+    assert!(o.headless);
+    assert_eq!((o.port, o.node.as_deref()), (Some(4242), Some("/n/bin/node")));
+    let plain = parse_args(&["centralu-keeper".to_string(), "--data-dir".to_string(), "/d".to_string()]);
+    assert!(!plain.headless && plain.port.is_none() && plain.node.is_none(), "a window's keeper is not headless");
+}
+
+/// The line `serve` writes on the keeper's stdin is the one it writes on a host's: `{"key"}`, or `{"token"}` as a keeper
+/// hands a host. Nothing else is a token.
+#[test]
+fn the_token_line_serve_writes_is_the_key_or_a_token_and_nothing_else() {
+    assert_eq!(headless::token_of_line("{\"key\":\"k1\"}\n"), Ok("k1".to_string()));
+    assert_eq!(headless::token_of_line("{\"token\":\"t1\"}"), Ok("t1".to_string()));
+    assert!(headless::token_of_line("{\"key\":\" \"}").is_err());
+    assert!(headless::token_of_line("{}").is_err());
+    assert!(headless::token_of_line("not json").is_err());
+    assert!(headless::token_of_line("").is_err());
+}
+
+/// A headless keeper serves on the port it was given with the token it was given, so the hub's cached token, `--connection`
+/// and the ssh forward do not move. Without them (a window's keeper) the door picks a free port and a fresh token.
+#[test]
+fn a_headless_keepers_door_takes_the_port_and_token_serve_gave_it() {
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let door = headless::open_door(Some(free), Some("serve-key".into())).unwrap();
+    assert_eq!((door.port(), door.token()), (free, "serve-key"));
+    assert!(std::net::TcpStream::connect(("127.0.0.1", free)).is_ok(), "nothing listens on the port it was given");
+    let own = headless::open_door(None, None).unwrap();
+    assert_ne!(own.port(), 0);
+    assert_eq!(own.token().len(), 32, "a fresh token");
+    assert_ne!(own.token(), "serve-key");
+}
+
+/// stdout is the key's way in, not out: the ready line names the door's port and the host, never a token.
+#[test]
+fn the_ready_line_names_the_port_and_the_host_and_no_token() {
+    let line = headless::ready_line(4242, Some(77));
+    let v: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v, json!({ "ready": true, "port": 4242, "hostPid": 77 }));
+}
+
+/// No peer of a headless keeper is a window, so none is handed the token or may switch it, whatever executable it runs.
+#[test]
+fn nothing_is_a_window_to_a_headless_keeper() {
+    let data = PathBuf::from(format!("/tmp/cck-hl-win-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = test_keeper_with(&data, true);
+    assert!(k.window_exes().is_empty(), "{:?}", k.window_exes());
+    assert!(!test_keeper_with(&data, false).window_exes().is_empty(), "a window's keeper accepts the window beside it");
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// A host that answers a control line on its stdin: it writes the line to `$F`, then says `answer` on stdout. Ready first.
+fn answering_host(file: &Path, answer: &str) -> Launcher {
+    let script = format!(
+        "echo '{{\"ready\":true,\"port\":4321,\"token\":\"{DOOR_TOKEN}\"}}'; while read l; do echo \"$l\" > \"$F\"; echo '{answer}'; done; sleep 30"
+    );
+    let file = file.to_string_lossy().to_string();
+    Arc::new(move || Ok(host_proc::HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), script.clone()], env: vec![("F".into(), file.clone())], token: None }))
+}
+
+fn headless_with_host(data: &Path, answer: &str) -> (Arc<Keeper>, PathBuf) {
+    let k = test_keeper_with(data, true);
+    let seen = data.join("control-line");
+    k.sup.start(sink(&k), answering_host(&seen, answer));
+    let end = Instant::now() + Duration::from_secs(10);
+    while !matches!(k.state.lock().unwrap().status, HostStatus::Ready(_)) && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    (k, seen)
+}
+
+fn stop_reply(k: &Arc<Keeper>, req: Value) -> Value {
+    let (a, b) = UnixStream::pair().unwrap();
+    let mut b = b;
+    super::headless::stop(k, a, &req);
+    b.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut line = String::new();
+    use std::io::BufRead;
+    BufReader::new(&mut b).read_line(&mut line).unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+/**
+ * `stop { ifIdle }` on a headless keeper: the host decides. While it says something runs (a turn, a terminal) the answer is
+ * `busy`, with what runs, and nothing is stopped: the keeper and its host go on. The host got the control line with both
+ * flags as asked.
+ */
+#[test]
+fn a_headless_stop_if_idle_is_refused_while_the_host_says_it_is_busy() {
+    let data = PathBuf::from(format!("/tmp/cck-hl-busy-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let (k, seen) = headless_with_host(&data, r#"{"stopAnswer":{"ok":false,"busy":{"working":1},"calls":0}}"#);
+    let host = k.sup.pid().expect("the host runs");
+    let v = stop_reply(&k, json!({ "op": "stop", "ifIdle": true, "forUpdate": true }));
+    assert_eq!(v["ok"], json!(false), "{v}");
+    assert_eq!(v["busy"], json!(true));
+    assert_eq!(v["activity"], json!({ "working": 1 }));
+    assert_eq!(k.sup.pid(), Some(host), "the host was left running");
+    assert!(!k.state.lock().unwrap().stopping, "the keeper was left running");
+    let line: Value = serde_json::from_str(fs::read_to_string(&seen).unwrap().trim()).unwrap();
+    assert_eq!(line, json!({ "op": "stop", "ifIdle": true, "forUpdate": true }));
+    k.sup.shutdown();
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// A host that says nothing (an older build, one that hung) cannot say it is idle, so `ifIdle` stops nothing.
+#[test]
+fn a_headless_stop_if_idle_stops_nothing_when_the_host_does_not_answer() {
+    let data = PathBuf::from(format!("/tmp/cck-hl-mute-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    // An answer the sink does not know: the line is the host's, not a stop's
+    let (k, _) = headless_with_host(&data, r#"{"activity":{"busy":false}}"#);
+    let v = stop_reply(&k, json!({ "op": "stop", "ifIdle": true }));
+    assert_eq!(v["ok"], json!(false), "{v}");
+    assert!(v["error"].as_str().unwrap_or("").contains("did not answer"), "{v}");
+    assert!(k.sup.pid().is_some() && !k.state.lock().unwrap().stopping);
+    k.sup.shutdown();
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// One stop is asked at a time: a second while the first waits for the host is told so, and the first is not disturbed.
+#[test]
+fn a_second_stop_while_one_is_being_asked_is_refused() {
+    let data = PathBuf::from(format!("/tmp/cck-hl-twice-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = test_keeper_with(&data, true);
+    let (tx, _rx) = std::sync::mpsc::channel();
+    *k.stop_reply.lock().unwrap() = Some(tx);
+    let v = stop_reply(&k, json!({ "op": "stop" }));
+    assert_eq!(v["ok"], json!(false), "{v}");
+    assert!(k.stop_reply.lock().unwrap().is_some(), "the first stop's slot was taken from it");
     let _ = fs::remove_dir_all(&data);
 }

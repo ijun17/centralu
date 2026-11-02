@@ -535,7 +535,7 @@ function keepPrivate(file, platform) {
 export function readServePid(dataDir) {
   try {
     const v = JSON.parse(readFileSync(join(dataDir, SERVE_PID_FILE), 'utf8'))
-    return Number.isInteger(v?.pid) && v.pid > 0 ? { pid: v.pid, hostPid: Number.isInteger(v.hostPid) ? v.hostPid : null, port: v.port ?? null } : null
+    return Number.isInteger(v?.pid) && v.pid > 0 ? { pid: v.pid, hostPid: Number.isInteger(v.hostPid) ? v.hostPid : null, keeperPid: Number.isInteger(v.keeperPid) ? v.keeperPid : null, port: v.port ?? null } : null
   } catch {
     return null
   }

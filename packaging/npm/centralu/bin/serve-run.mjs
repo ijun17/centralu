@@ -1,16 +1,17 @@
 /** `centralu serve` in the foreground, `--connection` and `--rotate-token` */
 import { spawn } from 'node:child_process'
-import { writeFileSync, writeSync } from 'node:fs'
+import { openSync, writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readServePid, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, readyHostPid, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
 import { hostLinkPublicKey } from './serve-keys.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 import { moveIntoSignIn } from './serve-handover.mjs'
+import { keeperExe, keeperCommand, keeperInfo } from './serve-keeper.mjs'
 
 /**
  * The data folder a command that may start or describe a host works in: its state, created on first use, and the
@@ -41,6 +42,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
   const hostRunning = heldHere(probe, dataDir, undefined, state.port != null)
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
+  const keeper = hostRunning ? await keeperInfo(dataDir, readServePid(dataDir)) : null
   return {
     port,
     ...(paired ? { token: paired.token, credential: paired.id } : {}),
@@ -61,6 +63,8 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
     hostRunning,
     install: installInfo(dataDir, env),
     autostart: autostartInfo(dataDir, process.platform, env),
+    // The keeper `serve` started, when one runs (remote-keeper.md §8; additive)
+    ...(keeper ? { keeper } : {}),
     ...(stopped ? { stopped } : {}),
   }
 }
@@ -167,13 +171,19 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
     say(`127.0.0.1:${chosen.from} is in use by ${who}; starting on ${port} instead (kept for the next start)`)
   }
 
-  const plan = hostCommand(execPath, entry, { port, dataDir, platform })
   /*
-   * The host gets the key on stdin and the path of serve.json, whose full credentials it checks at each hello (#1405);
-   * nothing it gets opens it whole
+   * On Linux with `centralu-keeper` beside the host's folder, the headless keeper starts the host and holds its agents,
+   * terminals and commands (remote-keeper.md §8, `serve-keeper.mjs`); this launcher stays its parent, as it is the host's.
+   * Otherwise, and with `CENTRALU_KEEPER=off`, the host as before.
+   */
+  const keeper = keeperExe(entry, { platform, env })
+  const plan = keeper ? keeperCommand(keeper, entry, { port, dataDir, version, execPath }) : hostCommand(execPath, entry, { port, dataDir, platform })
+  /*
+   * The host (or the keeper, which gives each host its own the same) gets the key on stdin and the path of serve.json,
+   * whose full credentials it checks at each hello (#1405); nothing it gets opens it whole
    */
   const child = spawn(plan.command, plan.args, {
-    stdio: ['pipe', 'pipe', logFd === null ? 'inherit' : 'pipe'],
+    stdio: ['pipe', 'pipe', logFd === null && !keeper ? 'inherit' : 'pipe'],
     env: hostEnv(env, {
       dataDir,
       version,
@@ -188,28 +198,35 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   child.stdin.write(keyLine(state.key))
 
   let ready = false
-  if (logFd !== null) {
+  if (keeper) {
+    // The keeper's own log is `<data>/keeper.log`, as on the Mac; until its host is ready what it says also goes where the
+    // host's would (the terminal, or serve.log for `--detach` to quote)
+    const keeperLog = openKeeperLog(dataDir)
+    child.stderr.on('data', (b) => {
+      keeperLog(b)
+      if (logFd === null) process.stderr.write(b)
+      else if (!ready) writeLog(logFd, b)
+    })
+  } else if (logFd !== null) {
     // Read to the end in any case: a pipe nobody drains stops the host once its buffer is full
     child.stderr.on('data', (b) => {
-      if (ready) return
-      try {
-        writeSync(logFd, b)
-      } catch {
-        // the log is a convenience
-      }
+      if (!ready) writeLog(logFd, b)
     })
   }
-  if (child.pid) {
+  // The launcher's file: `hostPid` is the host's, or the keeper's host once it says so (`keeperPid` is the keeper's)
+  const recordPids = (hostPid) => {
     try {
-      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid: child.pid, port })}\n`)
+      writeFileSync(join(dataDir, SERVE_PID_FILE), `${JSON.stringify({ pid: process.pid, hostPid, ...(keeper ? { keeperPid: child.pid } : {}), port })}\n`)
     } catch (e) {
       say(`could not write ${SERVE_PID_FILE}: ${e.message}`)
     }
   }
+  if (child.pid) recordPids(keeper ? null : child.pid)
   createInterface({ input: child.stdout }).on('line', (line) => {
     const p = readyPort(line)
     if (p === null || ready) return
     ready = true
+    if (keeper) recordPids(readyHostPid(line))
     try {
       recordServePort(dataDir, p, platform)
     } catch (e) {
@@ -282,4 +299,26 @@ export function revokeCredential({ env, home, id, write = (line) => process.stdo
   }
   say(`withdrew ${id}. A running host refuses its next hello with it and closes a connection already open with it within a second.`)
   return 0
+}
+
+/** Writes to serve.log's descriptor; the log is a convenience, so a failure is not one */
+function writeLog(fd, b) {
+  try {
+    writeSync(fd, b)
+  } catch {
+    // nowhere to say it
+  }
+}
+
+/** Appends to `<data>/keeper.log`, which a keeper started by a window writes too; a log that cannot be opened is skipped */
+function openKeeperLog(dataDir) {
+  let fd = null
+  try {
+    fd = openSync(join(dataDir, 'keeper.log'), 'a', 0o600)
+  } catch {
+    // no keeper.log: its lines still reach the terminal or serve.log
+  }
+  return (b) => {
+    if (fd !== null) writeLog(fd, b)
+  }
 }

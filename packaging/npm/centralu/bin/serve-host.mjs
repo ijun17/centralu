@@ -35,7 +35,7 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, stopped, hostKey, keyId }) {
+export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, keeper, detach, stopped, hostKey, keyId }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub up to 0.1.0-beta.45's adds `--from <its name>`
    * to `--detach` only when the line says so, since an older serve answers an option it does not know with an error. `window`: the
@@ -68,6 +68,8 @@ export function connectionLine({ port, token, credential, limited, others, versi
     hostRunning,
     ...(install ? { install } : {}),
     ...(autostart ? { autostart } : {}),
+    // The headless keeper serve started and holds the host with, `{ pid, build }` (remote-keeper.md §8); absent without one
+    ...(keeper ? { keeper } : {}),
     ...(detach ? { detach } : {}),
     // The running host proves it holds the token before the hub sends it (#838): every host from 0.1.0-beta.45 on does
     proof: true,
@@ -187,6 +189,16 @@ export function readyPort(line) {
   try {
     const v = JSON.parse(line)
     return v?.ready === true && Number.isInteger(v.port) ? v.port : null
+  } catch {
+    return null
+  }
+}
+
+/** The host's pid from a headless keeper's ready line (`{"ready":true,"port":..,"hostPid":..}`), null when it names none */
+export function readyHostPid(line) {
+  try {
+    const v = JSON.parse(line)
+    return Number.isInteger(v?.hostPid) ? v.hostPid : null
   } catch {
     return null
   }

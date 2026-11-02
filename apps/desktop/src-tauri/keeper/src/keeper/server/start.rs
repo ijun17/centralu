@@ -13,6 +13,11 @@ pub struct Options {
     /// Started by another keeper to take over from it (#280 step 4): the handoff channel's
     /// descriptor, inherited from that keeper.
     pub take_over_fd: Option<i32>,
+    /// Started by `centralu serve` with no window (`headless.rs`, remote-keeper.md §8): `--port` and the token on stdin are
+    /// `serve`'s own, `--node` the Node that runs it.
+    pub headless: bool,
+    pub port: Option<u16>,
+    pub node: Option<String>,
 }
 
 pub fn parse_args(args: &[String]) -> Options {
@@ -25,6 +30,9 @@ pub fn parse_args(args: &[String]) -> Options {
             "--bundle-path" => o.bundle_path = it.next().cloned(),
             "--app-version" => o.app_version = it.next().cloned(),
             "--take-over-fd" => o.take_over_fd = it.next().and_then(|s| s.parse().ok()),
+            "--headless" => o.headless = true,
+            "--port" => o.port = it.next().and_then(|s| s.parse().ok()),
+            "--node" => o.node = it.next().cloned(),
             // Ignored, like anything unknown. `--keeper` among them: every start passed it until
             // #461, and shell v1, whose bytes are pinned, still does.
             _ => {}
@@ -82,6 +90,21 @@ pub fn run(args: &[String]) -> i32 {
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {
         return handoff::take(opts, fd);
+    }
+    // Started by `centralu serve`: the key is the first line on stdin, and the Node is the launcher's own
+    let handed = if opts.headless {
+        match headless::read_token() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                log(&format!("not starting: {e}"));
+                return EXIT_USAGE;
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(node) = &opts.node {
+        host_proc::use_node(node.clone());
     }
     // Before anything creates the folder: the host leaves a legacy folder alone once the new one
     // exists, so creating it first would strand the person's data (data-dir.ts).
@@ -150,7 +173,7 @@ pub fn run(args: &[String]) -> i32 {
     let desired = own_build(&opts);
     let settings = source::load_settings(&data);
     // The front door: one port and one token for this keeper's whole life (front_door.rs)
-    let door = match front_door::new_token().and_then(|t| FrontDoor::open(0, t)) {
+    let door = match headless::open_door(opts.port, handed) {
         Ok(d) => d,
         Err(e) => {
             log(&format!("cannot open the front door: {e}"));
@@ -177,6 +200,8 @@ pub fn run(args: &[String]) -> i32 {
         handed_over: AtomicBool::new(false),
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
+        headless: opts.headless,
+        stop_reply: Mutex::new(None),
     });
     // The child socket answers this keeper's hosts and no other process (#538)
     answer_hosts(&keeper);
@@ -191,6 +216,9 @@ pub fn run(args: &[String]) -> i32 {
     ));
     log_origin(&keeper.origin);
 
+    if keeper.headless {
+        headless::watch(&keeper);
+    }
     keeper.sup.start(sink(&keeper), launcher(&keeper));
     serve(keeper)
 }

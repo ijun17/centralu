@@ -1252,7 +1252,7 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
 
-      - name: keeper (start, attach, background, relaunch, stop, swap, drain, from a copy out of the AppImage)
+      - name: keeper (start, attach, background, relaunch, stop, swap, drain, from a copy out of the AppImage, headless)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: node scripts/keeper-integration.mjs --no-build
 

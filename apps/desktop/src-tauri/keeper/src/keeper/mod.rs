@@ -270,11 +270,15 @@ pub struct IdleInput {
     /// The app announced a relaunch and the grace ran out with no window back. Only changes the
     /// reason given, so the log says why a keeper stopped a minute after its window closed.
     pub relaunch_expired: bool,
+    /// A headless keeper (`centralu serve` started it, remote-keeper.md §8): no window is expected, so
+    /// nothing here ever ends it. It lives until it is stopped, its launcher goes or the machine does.
+    pub headless: bool,
 }
 
 /**
  * Whether a keeper with no window should end itself now, and why.
  *
+ * - A headless keeper: never. It has no window to wait for and no background mode to turn off.
  * - A window attached: never.
  * - A relaunch announced (#352) and its grace still running: not yet, whatever the mode. The app
  *   is replacing its own window to apply an update, and the new window will attach in a moment.
@@ -290,7 +294,7 @@ pub struct IdleInput {
  *   takes. That is the point of background mode.
  */
 pub fn idle_decision(i: IdleInput, idle: Duration) -> Option<&'static str> {
-    if i.stopping || i.attached > 0 || i.relaunching {
+    if i.headless || i.stopping || i.attached > 0 || i.relaunching {
         return None;
     }
     if !i.ever_attached {
@@ -365,6 +369,7 @@ mod tests {
             since_busy: Duration::from_secs(minutes * 60),
             relaunching: false,
             relaunch_expired: false,
+            headless: false,
         }
     }
 
@@ -462,6 +467,22 @@ mod tests {
         assert_eq!(relaunch_grace(Some(0)), Duration::from_secs(1));
         assert_eq!(relaunch_grace(Some(10)), Duration::from_secs(10));
         assert_eq!(relaunch_grace(Some(86_400)), MAX_RELAUNCH_GRACE);
+    }
+
+    /// remote-keeper.md §8: a headless keeper has no window and no attach grace, so every rule that ends a
+    /// keeper for the lack of one must leave it alone, however long it has been quiet.
+    #[test]
+    fn a_headless_keeper_with_no_window_is_never_idle() {
+        let mut i = quiet(600);
+        i.headless = true;
+        assert_eq!(idle_decision(i, DEFAULT_IDLE), None, "quiet for ten hours, background on");
+        i.background = false;
+        assert_eq!(idle_decision(i, DEFAULT_IDLE), None, "background off");
+        i.ever_attached = false;
+        i.since_start = STARTUP_GRACE * 10;
+        assert_eq!(idle_decision(i, DEFAULT_IDLE), None, "no window ever attached");
+        i.relaunch_expired = true;
+        assert_eq!(idle_decision(i, DEFAULT_IDLE), None, "a relaunch nobody came back from");
     }
 
     #[test]
