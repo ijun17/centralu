@@ -8,7 +8,7 @@ import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
 import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog } from './serve-files.mjs'
-import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
+import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslCommandLine } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
 import { stopServedHost } from './serve-handover.mjs'
@@ -72,11 +72,7 @@ export async function startDetached({ how, execPath, args, env, cwd }) {
   let commandLine
   try {
     if (how === 'wmi') commandLine = [execPath, ...args].map(windowsArg).join(' ')
-    else {
-      const distro = wslDistro(env.WSL_DISTRO_NAME ?? '')
-      const user = wslUser(userInfo().username)
-      commandLine = ['wsl.exe', '-d', distro, '-u', user, '--cd', cwd, '--exec', execPath, ...args].map(windowsArg).join(' ')
-    }
+    else commandLine = wslCommandLine({ distro: env.WSL_DISTRO_NAME ?? '', user: userInfo().username, cwd, execPath, args })
   } catch (e) {
     return { ok: false, blocked: false, message: e.message }
   }

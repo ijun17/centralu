@@ -28,6 +28,7 @@ import {
   runStop,
   SERVE_PID_FILE,
   windowsArg,
+  wslCommandLine,
   wmiScript,
   ensureServeState,
   hostCommand,
@@ -65,6 +66,7 @@ import {
   runWindow,
   serveFrom,
   processStartTime,
+  processCreatedAt,
   SERVE_STOPPED_FILE,
   markStopped,
   readStopped,
@@ -1301,6 +1303,14 @@ describe('--detach and --stop arguments', () => {
     // A distro whose Windows interop is off cannot reach WMI; setsid is all there is
     expect(detachHow('linux', { WSL_DISTRO_NAME: 'Ubuntu' }, () => false)).toBe('setsid')
   })
+
+  // wsl.exe reads its options from the line and takes a quote round the distro or the user as part of the name (#1716)
+  it('writes the wsl.exe line with its options, the distro and the user bare, and what it runs quoted', () => {
+    const line = wslCommandLine({ distro: 'Ubuntu-24.04', user: 'me', cwd: '/home/me/a b', execPath: '/usr/bin/node', args: ['/x/centralu.mjs', 'serve', '--port', '1'] })
+    expect(line).toBe('wsl.exe -d Ubuntu-24.04 -u me --cd "/home/me/a b" --exec "/usr/bin/node" "/x/centralu.mjs" "serve" "--port" "1"')
+    expect(() => wslCommandLine({ distro: 'a b', user: 'me', cwd: '/', execPath: '/n', args: [] })).toThrow(/not a WSL distro name/)
+    expect(() => wslCommandLine({ distro: 'Ubuntu', user: 'me; x', cwd: '/', execPath: '/n', args: [] })).toThrow(/cannot name the user/)
+  })
 })
 
 describe('starting through WMI', () => {
@@ -1946,6 +1956,9 @@ async function cli(dataDir: string, args: string[], extra: NodeJS.ProcessEnv = {
 }
 
 
+/** How `--detach` starts here: inside WSL with Windows interop it is a WMI-created `wsl.exe`, which these tests run for real (#1716) */
+const HOW = detachHow(process.platform, process.env) as 'setsid' | 'wsl' | 'wmi'
+
 describe('centralu serve --detach and --stop, end to end (a host from source, a temporary data folder)', () => {
   // What a test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
   let own = ownProcesses()
@@ -1973,7 +1986,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         const port = await freePort()
         const started = await cli(d, ['--detach', '--port', String(port)])
         expect(started.code).toBe(0)
-        expect(started.line).toMatchObject({ v: 1, port, hostRunning: true, detach: { ok: true, how: POSIX ? 'setsid' : 'wmi', already: false } })
+        expect(started.line).toMatchObject({ v: 1, port, hostRunning: true, detach: { ok: true, how: HOW, already: false } })
         const pids = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
         expect(alive(pids.pid) && alive(pids.hostPid)).toBe(true)
 
@@ -1992,7 +2005,13 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         // serve.log has the launcher's start, and not the token
         const serveLog = readFileSync(join(d, 'serve.log'), 'utf8')
         // How it was started, and on Windows why not in the sign-in (#1223)
-        expect(serveLog).toMatch(POSIX ? /started in the background through setsid \(pid \d+/ : /started in the background through WMI: the sign-in task is turned off \(CENTRALU_SIGNIN_TASK=off\) \(pid \d+/)
+        expect(serveLog).toMatch(
+          {
+            setsid: /started in the background through setsid \(pid \d+/,
+            wsl: /started in the background through a WMI-created wsl\.exe \(pid \d+/,
+            wmi: /started in the background through WMI: the sign-in task is turned off \(CENTRALU_SIGNIN_TASK=off\) \(pid \d+/,
+          }[HOW],
+        )
         expect(serveLog).not.toContain(String(started.line.token))
 
         expect((await cli(d, ['--stop'])).line).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
@@ -2218,7 +2237,7 @@ describe('asking the host on the port without handing the token to anyone else (
    * What stays stoppable (#838): a host that cannot prove the key (still on the key it had before --rotate-token) which
    * serve started, as its lock says.
    */
-  it.skipIf(!POSIX)('a host that cannot prove the key is stopped by signal when its lock says serve started it', async () => {
+  it('a host that cannot prove the key is stopped by signal when its lock says serve started it', async () => {
     const s = await squatter()
     const d = tempDir()
     const holder = lockHolderProcess(d, 'serve')
@@ -2226,7 +2245,7 @@ describe('asking the host on the port without handing the token to anyone else (
       ensureServeState(d)
       recordServePort(d, s.port)
       const stopped = await cli(d, ['--stop'])
-      expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: 'signal' })
+      expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: POSIX ? 'signal' : 'ended' })
       await holder.exited
       expect(holder.alive()).toBe(false)
     } finally {
@@ -2234,7 +2253,8 @@ describe('asking the host on the port without handing the token to anyone else (
     }
   }, 90_000 * SLOW)
 
-  it.skipIf(!POSIX)('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
+  // On Windows no signal reaches the launcher, so the host is ended and the launcher goes with it (#1723)
+  it('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()
     const run = serve(d, ['--port', String(await freePort())])
     await run.until(/listening on 127\.0\.0\.1:\d+/)
@@ -2242,8 +2262,8 @@ describe('asking the host on the port without handing the token to anyone else (
     // Prints no JSON line: not `cli`
     expect(spawnSync(process.execPath, [CLI, 'serve', '--rotate-token'], { cwd: ROOT, env: cliEnv(d) }).status).toBe(0)
     const stopped = await cli(d, ['--stop'])
-    expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: 'signal' })
-    expect(await run.exited).toBe(0)
+    expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: POSIX ? 'signal' : 'ended' })
+    await run.exited
     expect(() => process.kill(hostPid, 0)).toThrow()
   }, 120_000 * SLOW)
 
@@ -2305,9 +2325,61 @@ describe('the pid host.lock names', () => {
       writeFileSync(join(d, 'host.lock'), JSON.stringify(v))
       return lockHolder(d)
     }
-    expect(at({ pid: 4242, started: null, by: 'app', at: 1 })).toEqual({ pid: 4242, started: null, by: 'app' })
+    expect(at({ pid: 4242, started: null, by: 'app', at: 1 })).toEqual({ pid: 4242, started: null, at: 1, by: 'app' })
     expect(at({ pid: 4242, started: null, by: 'serve', from: { hub: 'Mac' } })).toEqual({ pid: 4242, started: null, by: 'serve' })
     expect(at({ pid: 4242, started: null, by: 'robot' })).toEqual({ pid: 4242, started: null })
+  })
+})
+
+/*
+ * Windows has no `ps`, and its host records no start time, only `at`: the process that wrote the lock was created by then
+ * (#1723). Before, `--stop` after `--rotate-token` found no host held the folder and left it listening.
+ */
+describe('the folder’s host on a system with no ps', () => {
+  const lock = (d: string, v: unknown) => writeFileSync(join(d, 'host.lock'), JSON.stringify(v))
+  const at = 1_000_000
+
+  it('is the live process created by the time the lock was written, and not one given its number later', () => {
+    const d = tempDir()
+    lock(d, { pid: process.pid, started: null, at, by: 'serve' })
+    const noPs = () => null
+    expect(lockHolderIsAlive(d, noPs, () => at - 5_000)).toBe(true)
+    // Within a clock tick of it: the two readings of the clock
+    expect(lockHolderIsAlive(d, noPs, () => at + 16)).toBe(true)
+    // Created later: the host that wrote the lock died and its number went to another process
+    expect(lockHolderIsAlive(d, noPs, () => at + 17)).toBe(false)
+    expect(lockHolderIsAlive(d, noPs, () => at + 1_000)).toBe(false)
+    expect(lockHolderIsAlive(d, noPs, () => at + 60_000)).toBe(false)
+    // A lock written in the future (a clock set back since) proves nothing, whenever the process was created
+    for (const future of [Date.now() + 3_600_000, 1e20]) {
+      lock(d, { pid: process.pid, started: null, at: future, by: 'serve' })
+      expect(lockHolderIsAlive(d, noPs, () => 0)).toBe(false)
+    }
+    lock(d, { pid: process.pid, started: null, at, by: 'serve' })
+    // Cannot be told when it was created, or when the lock was written
+    expect(lockHolderIsAlive(d, noPs, () => null)).toBe(false)
+    lock(d, { pid: process.pid, started: null, by: 'serve' })
+    expect(lockHolderIsAlive(d, noPs, () => 0)).toBe(false)
+    // Not alive at all
+    lock(d, { pid: 2 ** 22 + 12345, started: null, at, by: 'serve' })
+    expect(lockHolderIsAlive(d, noPs, () => at - 5_000)).toBe(false)
+  })
+
+  it.skipIf(POSIX)('reads when a process of its own was created, within the lock the host wrote for it', () => {
+    const created = processCreatedAt(process.pid)
+    expect(created).toBeGreaterThan(0)
+    expect(Math.abs(created! - (Date.now() - process.uptime() * 1000))).toBeLessThan(5_000)
+    const d = tempDir()
+    lock(d, { pid: process.pid, started: null, at: Date.now(), by: 'serve' })
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    // A stale lock naming this live process, written before it was created: not its host, so `--stop` leaves it alone
+    lock(d, { pid: process.pid, started: null, at: created! - 1_000, by: 'serve' })
+    expect(lockHolderIsAlive(d)).toBe(false)
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+  })
+
+  it.skipIf(!POSIX)('knows nothing of a creation time where ps tells the start', () => {
+    expect(processCreatedAt(process.pid)).toBeNull()
   })
 })
 

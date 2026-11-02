@@ -384,10 +384,10 @@ async function systemdAutostart(action, { dataDir, env, home, name, run, user })
   return { ...base, on: true, linger, ...(linger === true ? {} : { message: lingerMessage(user) }) }
 }
 
-async function taskAutostart(action, { dataDir, env, home, name, run, user, platform, interop }) {
+async function taskAutostart(action, { dataDir, env, home, name, run, user, platform, interop, mounts }) {
   const legacy = legacyTaskName({ dataDir, home, env, platform })
   const detach = detachHow(platform, env, interop)
-  const ps = windowsPowershell(detach, env)
+  const ps = windowsPowershell(detach, env, mounts)
   const base = { ok: true, how: 'task', linger: null }
   if (!ps) return { ...base, ok: false, on: false, message: 'Windows PowerShell is not reachable from this WSL distro' }
   const ask = (script) => askPowershell(ps, script, env, parseTaskAnswer, run)
@@ -456,8 +456,8 @@ export async function startInSignIn({ dataDir, env, home, platform = process.pla
  * hub asks (the link started it), and the entry is for the next boot.
  *
  * stdout: one line, `{ v: 1, autostart: { ok, on, how, linger, message? } }`; `how` null where this
- * machine offers nothing (`autostartHow`). `run` (a command runner) and `how` are parameters so
- * tests never reach the real systemd or Task Scheduler.
+ * machine offers nothing (`autostartHow`). `run` (a command runner), `how` and `mounts` (what /proc/mounts says, where WSL finds
+ * the Windows drive) are parameters so tests never reach the real systemd or Task Scheduler, nor depend on the drives of the machine.
  */
 export async function runAutostart({
   env,
@@ -467,6 +467,7 @@ export async function runAutostart({
   platform = process.platform,
   interop = wslInterop,
   how = autostartHow(platform, env, { interop }),
+  mounts = undefined,
   run = runCaptured,
   user = userInfo().username,
   write = (line) => process.stdout.write(line),
@@ -481,7 +482,7 @@ export async function runAutostart({
   }
   try {
     const name = autostartName(how, { dataDir, home, env, platform, user })
-    const opts = { dataDir, env, home, name, run, user, platform, interop }
+    const opts = { dataDir, env, home, name, run, user, platform, interop, mounts }
     return report(how === 'systemd' ? await systemdAutostart(action, opts) : await taskAutostart(action, opts))
   } catch (e) {
     return report({ ok: false, on: readAutostartMark(dataDir)?.how === how, how, linger: null, message: e?.message ?? String(e) })

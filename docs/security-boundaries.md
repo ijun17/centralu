@@ -1660,9 +1660,10 @@ A host started with `centralu serve` on another machine is reached by the app th
   port with the token, and another account there can hold that port while the host is down. They send `prove` first
   and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
   Something on the port that does not prove is not this folder's host unless the folder's `host.lock` names a live
-  process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`) and that `serve` started: a host still
+  process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`; on Windows, which has no `ps`, one created
+  by the `at` the lock records, read from PowerShell, #1723) and that `serve` started: a host still
   on its old key after `--rotate-token`, which then counts as running and is stopped by its pid. A lock a dead host
-  left, whose pid another process now has, or one without a start time (Windows, which has no `ps`), does not count, so
+  left, whose pid another process now has, or one that gives no start time and no `at`, does not count, so
   `--stop` never signals a stranger.
 - **A linked machine updated without a restart** runs an older host than the one installed: its line says `proof`
   (from the installed build), the host refuses the `prove`, and the link says so ("runs an older Centralu host than
