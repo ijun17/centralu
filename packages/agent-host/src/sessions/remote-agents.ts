@@ -220,6 +220,8 @@ export class RemoteAgents {
   private readonly deferred = new Set<string>()
   /** Children in a turn there, as their machine's events last said (`trackBusy`); unknown, and so cleared, when the link drops */
   private readonly busy = new Set<string>()
+  /** Children whose turn ended with its report owed since the instruction last sent was taken there (`messageTaken`): that end is reported */
+  private readonly endOwed = new Set<string>()
   /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
   private readonly lastSeq = new Map<string, number>()
 
@@ -633,7 +635,15 @@ export class RemoteAgents {
             return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
           }
           // Taken while the turn was still the caller's, it is part of that turn; otherwise the gate has closed on it
-          return this.gateNow(rec).live ? this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId)) : this.wentElsewhere(rec)
+          if (this.gateNow(rec).live) return this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId))
+          /*
+           * Unless its record came and left the turn the caller's (`messageTaken`), and that turn has ended since: its end
+           * was read before this answer (both in one read of a loaded link), reported if it was still owed then (not
+           * dropped by the caller's own stop meanwhile)
+           */
+          const came = !(this.notesSent.get(rec.sessionId) ?? []).includes(framed)
+          if (!came || this.whoseOf(rec) !== 'caller') return this.wentElsewhere(rec)
+          return this.working(rec, this.reportArmed(rec) || this.endOwed.has(rec.sessionId))
         }
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }
@@ -920,6 +930,7 @@ export class RemoteAgents {
       if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return this.noteRow(sessionId, e.seq)
     }
     if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
+      this.endOwed.delete(sessionId)
       const at = own.indexOf(rec.sent ?? '')
       if (at >= 0) this.notesSent.set(sessionId, own.filter((_, i) => i !== at))
       // A note into the caller's own running turn stays in it, unless the tool runs it after that turn (`carried`)
@@ -952,7 +963,11 @@ export class RemoteAgents {
     if (step?.step === 'busy') {
       this.busy.add(sessionId)
       this.turnOpens(rec, e)
-    } else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') this.busy.delete(sessionId)
+    } else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') {
+      this.busy.delete(sessionId)
+      // Read before the linked reports are, which send and drop it now
+      if (this.reportArmed(rec)) this.endOwed.add(sessionId)
+    }
   }
 
   /** A message of the caller's was stored on the machine as row `seq`: if the tool runs a turn for it after another's, that turn names it (`given`) */
@@ -1357,6 +1372,7 @@ export class RemoteAgents {
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)
+    this.endOwed.delete(sessionId)
     this.lastSeq.delete(sessionId)
     for (const key of [...this.toldCards]) if (key.startsWith(`${sessionId}\0`)) this.toldCards.delete(key)
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
