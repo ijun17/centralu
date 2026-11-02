@@ -103,14 +103,20 @@ describe('OriginPorts', () => {
       expect((await serve(ports, 'k')).port).toBe(P2)
     })
 
-    it('moves a key whose recorded port is reserved later to a new port', async () => {
+    it('serves a key whose recorded port is reserved elsewhere for this run and keeps the record, so the next start uses it again', async () => {
       const disk = diskStore()
       disk.save({ assigned: { k: P1 }, retired: [] })
-      const ports = new OriginPorts(disk, {
-        range: [P1, P2], pick: sequence([P2]), log: noop, listen: listenWithReserved([P1]),
-      })
-      expect((await serve(ports, 'k')).port).toBe(P2)
-      expect(ports.book()).toEqual({ assigned: { k: P2 }, retired: [P1] })
+      const lines: string[] = []
+      const first = await serve(
+        new OriginPorts(disk, { range: [P1, P2], pick: sequence([P2]), log: (l) => lines.push(l), listen: listenWithReserved([P1]) }),
+        'k',
+      )
+      expect(first.port).toBe(P2)
+      expect(disk.load()).toEqual({ assigned: { k: P1 }, retired: [] })
+      expect(lines).toHaveLength(1)
+      await stop(first.server)
+      // The reservation is gone at the next start: the recorded port is used
+      expect((await serve(new OriginPorts(disk, { range: [P1, P2], pick: sequence([P2]), log: noop, listen: listenWithReserved([]) }), 'k')).port).toBe(P1)
     })
   })
 

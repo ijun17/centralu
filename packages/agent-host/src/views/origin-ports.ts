@@ -187,19 +187,27 @@ export class OriginPorts {
    */
   async serve(key: string, handler: RequestListener): Promise<{ port: number; server: Server }> {
     const own = this.book().assigned[key]
+    /** Set when the recorded port is reserved by the OS: this run uses another port and the record stays */
+    let reserved = false
     if (own !== undefined) {
       try {
         return { port: own, server: await this.listenOn(own, handler) }
       } catch (e) {
         if (!portUnavailable(e)) throw e
-        this.log(
-          `[agent-host] view origin port ${own} for ${key} is taken or reserved by another program — ` +
-            `moving it to a new port; storage the view kept under the old origin is no longer visible`,
-        )
-        this.commit((book) => {
-          if (book.assigned[key] === own) delete book.assigned[key]
-          if (!book.retired.includes(own)) book.retired.push(own)
-        })
+        if ((e as NodeJS.ErrnoException).code === 'EACCES') {
+          // An excluded range changes from one boot to the next: the record stays, and the next start tries this port again
+          reserved = true
+          this.log(`[agent-host] view origin port ${own} for ${key} is reserved by the OS — using another port for this run, the record is kept`)
+        } else {
+          this.log(
+            `[agent-host] view origin port ${own} for ${key} is taken by another program — ` +
+              `moving it to a new port; storage the view kept under the old origin is no longer visible`,
+          )
+          this.commit((book) => {
+            if (book.assigned[key] === own) delete book.assigned[key]
+            if (!book.retired.includes(own)) book.retired.push(own)
+          })
+        }
       }
     }
     const busy = new Set<number>()
@@ -218,6 +226,7 @@ export class OriginPorts {
         busy.add(port)
         continue
       }
+      if (reserved) return { port, server }
       let claimed = false
       let displaced: number | undefined
       try {
