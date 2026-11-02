@@ -1,4 +1,5 @@
 import { existsSync, lstatSync } from 'node:fs'
+import { wireSegments } from '@cc/protocol'
 import { join } from 'node:path'
 import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
@@ -314,7 +315,7 @@ export async function gitWorktreeRemove(
   const held = list.find((w) => w !== entry && pathKey(w.path).startsWith(`${key}/`))
   if (held) throw new Error(`${path} holds ${held.path}, which git lists as a checkout; nothing was removed`)
   const inRoot = worktreeRoot === undefined ? null : `${pathKey(worktreeRoot)}/`
-  const leftover = inRoot !== null && key.startsWith(inRoot) && key.slice(inRoot.length).split('/').length === 2
+  const leftover = inRoot !== null && key.startsWith(inRoot) && wireSegments(key.slice(inRoot.length)).length === 2
   if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
     throw new Error(`${path} is not a worktree of ${repoCwd}`)
   }
