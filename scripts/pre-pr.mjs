@@ -9,7 +9,7 @@
 //   tsc       `tsc --noEmit` at every pull request head of the stack, oldest first: each branch tip
 //             between main and the head, and the head. A lower pull request must build on its own,
 //             since it lands on its own.
-//   orphans   dependency-cruiser's `no-orphans` rule as an error (in `pnpm verify` it only warns).
+//   orphans   dependency-cruiser's `no-orphans` rule as an error, as `pnpm verify` has it.
 //   deps      every other dependency-cruiser rule at error severity, as `pnpm depcruise` fails on them (a cycle, a layer rule).
 //   lint      `pnpm lint` on the files the branch changed: CI's run (type-aware rules, allowlists, the packages' type-assertion
 //             ceilings) over fewer files. A finding in an untouched file is left to CI.

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import Module from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -58,7 +59,8 @@ function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: st
     'packaging/npm/centralu/bin/centralu.mjs': fakeServe('', { fromPackage: true, installInfo: INSTALL_INFO }),
     'packaging/npm/centralu/bin/serve.mjs': SERVE_SHIM,
     // Installed dependencies, which git ignores
-    'packages/agent-host/node_modules/esbuild/package.json': '{}',
+    'packages/agent-host/node_modules/esbuild/package.json': '{"main":"index.js"}',
+    'packages/agent-host/node_modules/esbuild/index.js': '',
   }
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true })
@@ -155,7 +157,23 @@ describe('remote-install.mjs: a dev build from a commit (#1036)', () => {
     rmSync(root, { recursive: true, force: true })
     const bare = setup()
     rmSync(join(bare.repo, 'packages', 'agent-host', 'node_modules'), { recursive: true })
-    expect(refusal(() => build(bare))).toMatch(/^dev_deps /)
+    // The runner's own NODE_PATH (pnpm's, under vitest) would find the workspace's esbuild; the machine being built for has none
+    // (`_initPaths` is Node's own re-read of NODE_PATH, which the types leave out)
+    const modules = Module as unknown as { _initPaths(): void }
+    const nodePath = process.env.NODE_PATH
+    delete process.env.NODE_PATH
+    modules._initPaths()
+    try {
+      expect(refusal(() => build(bare))).toMatch(/^dev_deps /)
+    } finally {
+      if (nodePath !== undefined) process.env.NODE_PATH = nodePath
+      modules._initPaths()
+    }
+    // A hoisted install keeps esbuild at the root, where the bundler finds it too (#1700)
+    mkdirSync(join(bare.repo, 'node_modules', 'esbuild'), { recursive: true })
+    writeFileSync(join(bare.repo, 'node_modules', 'esbuild', 'package.json'), '{"main":"index.js"}')
+    writeFileSync(join(bare.repo, 'node_modules', 'esbuild', 'index.js'), '')
+    expect(() => build(bare)).not.toThrow()
   })
 
   it('cuts a working copy on the tag scheme from the newest release tag reachable from its HEAD (#1501)', () => {
