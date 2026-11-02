@@ -25,3 +25,13 @@ export function descendants(rows: readonly ParentRow[], roots: readonly number[]
   }
   return seen
 }
+
+/** Every parent reached by following ppid up from the roots, a parent missing from the table included. Each pid once, however the links loop */
+export function ancestors(rows: readonly ParentRow[], roots: readonly number[]): Set<number> {
+  const parentOf = new Map(rows.map((r) => [r.pid, r.ppid]))
+  const seen = new Set<number>()
+  for (const root of roots) {
+    for (let pid = parentOf.get(root); pid !== undefined && !seen.has(pid); pid = parentOf.get(pid)) seen.add(pid)
+  }
+  return seen
+}

@@ -6,7 +6,7 @@ import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { KILL_GRACE_MS } from './kill-tree.js'
-import { descendants } from './proc-table.js'
+import { ancestors, descendants } from './proc-table.js'
 import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
@@ -40,6 +40,15 @@ const exec = promisify(execFile)
  *     had no tty either. With only rules 1 through 3, **a process another app is actively using
  *     right now cannot be told apart from an ownerless orphan.** When this actually ran, that
  *     extension was hit with SIGTERM (143) and died.
+ *
+ *     **WSL's `/init` counts as init** (#1882). There an orphan is adopted by a per-session `/init` helper, not by pid 1,
+ *     so a leftover's parent is alive and the chain above would read it as an owner. `orphanAdopter` asks the machine where
+ *     an orphan of ours lands (a short-lived one is made and its parent read); that process counts as init only when its
+ *     command is exactly `/init`. Every other living parent is still an owner: the keeper or an agent holding its own
+ *     children, and `systemd --user`, which also adopts an editor that detached itself (`code .` from a terminal in the
+ *     project: cwd in the project, no terminal, parent `systemd --user`), and would be offered as a leftover. A systemd
+ *     desktop's own leftovers are therefore still missed, by choice. What started the host (the keeper, a launcher) is
+ *     never a candidate.
  *
  *     If everything in between on the chain is also a candidate (same folder, no terminal), those
  *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
@@ -114,14 +123,18 @@ export function pickStrays(
    * not even their parent, so the parent chain alone would call them ownerless.
    */
   held: readonly number[] = [],
+  /** WSL's `/init` helper, where it adopts an orphan of ours (`orphanAdopter`), taken for init in rule 4 */
+  adopter: number | null = null,
 ): StrayProcess[] {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const ours = descendants(rows, [selfPid, ...held])
+  // Who started us (the keeper, a launcher) is not a leftover, whatever adopted it: it is no leftover of anyone's
+  const launchers = ancestors(rows, [selfPid, ...held])
 
   // What passed rules 1 through 3. Rule 4 (no owner) can only be judged once this set is known
   const candidates = new Map<number, string>()
   for (const r of rows) {
-    if (r.pid <= 1 || ours.has(r.pid)) continue
+    if (r.pid <= 1 || ours.has(r.pid) || launchers.has(r.pid)) continue
     if (!noTty(r.tty)) continue
     const cwd = cwdOf.get(r.pid)
     if (!cwd || !insideAny(cwd, roots)) continue
@@ -132,7 +145,7 @@ export function pickStrays(
   /**
    * Asks the parent chain **whether some app still holds this process.**
    *
-   * If only candidates lie between this and init (1), there is no owner — an orphan we are free
+   * If only candidates lie between this and init (1, or the adopter), there is no owner — an orphan we are free
    * to clean up. If a living process that is not a candidate sits somewhere in between, it belongs
    * to that app (VS Code's extension host sits in exactly that spot). If the chain leaves our own
    * account and the parent cannot be found, this is also treated as belonging to someone else —
@@ -143,7 +156,7 @@ export function pickStrays(
     let cur = byPid.get(pid)
     while (cur && !seen.has(cur.pid)) {
       seen.add(cur.pid)
-      if (cur.ppid <= 1) return true
+      if (cur.ppid <= 1 || cur.ppid === adopter) return true
       if (!candidates.has(cur.ppid)) return false
       cur = byPid.get(cur.ppid)
     }
@@ -208,6 +221,31 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
   return { rows, cwdOf }
 }
 
+/**
+ * WSL's `/init` helper when it is where this machine re-parents an orphan, else null (#1882). A shell starts a background
+ * process and exits, and the process's parent is read; it is returned only when its command is exactly `/init`. Another
+ * adopter, `systemd --user` above all, is not taken for init: it also holds an editor that detached itself, which is no
+ * leftover. A container's init is left out too, as no command line names one exactly. The probe is one `sleep` that
+ * outlives the bounds below and is ended with the call (`end`).
+ */
+export async function orphanAdopter(run: Run = exec, end: (pid: number) => void = (pid) => process.kill(pid)): Promise<number | null> {
+  let pid = 0
+  try {
+    const opts = { maxBuffer: 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true }
+    pid = Number((await run('/bin/sh', ['-c', 'sleep 60 </dev/null >/dev/null 2>&1 & echo $!'], opts)).stdout)
+    const ppid = Number((await run('ps', ['-o', 'ppid=', '-p', String(pid)], opts)).stdout)
+    if (!(ppid > 1)) return null
+    const command = (await run('ps', ['-o', 'command=', '-p', String(ppid)], opts)).stdout.trim()
+    return command === '/init' ? ppid : null
+  } catch (e) {
+    unread('where an orphan lands', e)
+    return null
+  } finally {
+    // The probe's own pid, started a moment ago by this call
+    if (pid > 1) try { end(pid) } catch { /* already gone */ }
+  }
+}
+
 /** The leftover processes currently alive (`scanProcesses`, then the four rules) */
 export async function findStrays(
   roots: readonly string[],
@@ -215,8 +253,8 @@ export async function findStrays(
   held: readonly number[] = [],
 ): Promise<StrayProcess[]> {
   if (!hasPs() || roots.length === 0) return []
-  const { rows, cwdOf } = await scanProcesses()
-  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held)
+  const [{ rows, cwdOf }, adopter] = await Promise.all([scanProcesses(), orphanAdopter()])
+  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held, adopter)
 }
 
 /**
