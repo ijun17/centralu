@@ -336,7 +336,7 @@ export class WorktreeSessions {
       // Even if the copy stopped partway through, whatever links did cross over are still checked — a
       // half-finished tree can still have a window in it.
       // If nothing at all crossed over, there is nothing to check (any other kind of failure is still thrown)
-      const landed = await dropEscapingLinks(worktree.path, dst).catch((err: NodeJS.ErrnoException) => {
+      const landed = await dropEscapingLinks(worktree.path, dst, projectCwd).catch((err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') return []
         throw err
       })

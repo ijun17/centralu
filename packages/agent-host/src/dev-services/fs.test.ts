@@ -605,6 +605,18 @@ describe('links left in a copied tree', () => {
     expect(lstatSync(join(root, 'inside-later')).isSymbolicLink()).toBe(true)
   })
 
+  it('leads a link into the folder the tree was copied from to the same place in the copy, as macOS\'s clone keeps it as written (#1708)', async () => {
+    const project = outsideDir()
+    mkdirSync(join(project, 'pkg'))
+    mkdirSync(join(root, 'pkg'))
+    linkDir(join(project, 'pkg'), join(root, 'dep'))
+    linkDir(outsideDir(), join(root, 'away'))
+
+    expect(await dropEscapingLinks(root, root, project)).toEqual(['away'])
+    expect(realpathSync.native(join(root, 'dep'))).toBe(realpathSync.native(join(root, 'pkg')))
+    expect(() => lstatSync(join(root, 'away'))).toThrow()
+  })
+
   it('never walks into a link — never gets caught in a cycle', async () => {
     mkdirSync(join(root, 'a'))
     linkDir(join(root, 'a'), join(root, 'a', 'self'))

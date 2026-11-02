@@ -831,7 +831,8 @@ configured setup command. With an unchanged root lockfile (`pnpm-lock.yaml`, `pa
 project checkout, including workspace packages whose `package.json` is unchanged. Existing folders and links
 are left alone. The existing APFS clone / ordinary-copy fallback gives the child independent files: a symlink
 to the project's dependencies would let it change the original checkout. Internal dependency links stay;
-links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
+links escaping the new worktree are removed after all package copies finish, except a link into the project, which is made
+again leading to the same place in the worktree (on Linux and Windows by the copy, after macOS's APFS clone by `dropEscapingLinks`, #1708). No install or lifecycle script
 runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
 or cannot be copied, the configured setup command or the child must install them; creation still continues.
 What provisioning could not do (a copy skipped or refused, a link dropped, dependencies or the setup command
