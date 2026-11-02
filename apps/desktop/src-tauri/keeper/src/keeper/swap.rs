@@ -478,7 +478,7 @@ pub(crate) mod tests {
             launches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(host_proc::HostLaunch {
                 program: "/bin/sh".into(),
-                args: vec!["-c".into(), r#"trap '' TERM; echo '{"ready":true,"port":1,"token":"t"}'; while :; do sleep 0.05; done"#.into()],
+                args: vec!["-c".into(), r#"trap '' TERM; echo '{"ready":true,"port":1,"token":"t"}'; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done"#.into()],
                 env: vec![],
                 token: None,
             })

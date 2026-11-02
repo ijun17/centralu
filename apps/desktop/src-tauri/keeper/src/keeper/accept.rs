@@ -168,6 +168,9 @@ pub(crate) mod few_descriptors {
             // SAFETY: socket(2) returns a new descriptor that nothing else owns, or -1, which the assert refuses.
             let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM, 0) };
             assert!(fd >= 0, "open a spare socket: {}", std::io::Error::last_os_error());
+            // Not inherited by the children the test starts (SOCK_CLOEXEC is not on every platform)
+            // SAFETY: a plain call on the descriptor just made.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, 0, "close the spare socket on exec");
             // SAFETY: just made, owned by no one else.
             Spare(unsafe { OwnedFd::from_raw_fd(fd) })
         }
