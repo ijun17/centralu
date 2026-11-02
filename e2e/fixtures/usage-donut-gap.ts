@@ -35,7 +35,7 @@ export function usageDonutGapTests(): void {
     const linked = await gaps(there)
     test.info().annotations.push({ type: 'gaps', description: `this computer ${JSON.stringify(own)}; linked machine ${JSON.stringify(linked)}` })
     expect(own.rings.length).toBeGreaterThan(0)
-    expect(own.rings).toEqual(linked.rings.slice(0, own.rings.length).map((g) => g))
+    expect(own.rings).toEqual(linked.rings.slice(0, own.rings.length))
     expect(Math.min(...own.circles, ...linked.circles)).toBeGreaterThan(0)
   })
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolSetup, ToolSetupState } from '@cc/protocol'
 import { InstallFailure } from './failure.js'
 import { AGY_RELEASE } from './release.js'
-import { ownerGone, ownerTag, browserFolder } from './agent-files.js'
+import { agyAppFinder, ownerGone, ownerTag, browserFolder } from './agent-files.js'
 import { AgySetup } from './setup.js'
 import { endHosts, exists, fakeInstall, fakeKeychainSignIn, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, tokenPath, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
@@ -233,19 +233,21 @@ describe('the setup line against its model', () => {
 })
 
 describe('the own Antigravity of the person (an app found, the connection not installed)', () => {
-  const detect = (t: ReturnType<typeof tempData>, appPaths: string[]) =>
-    antigravityProfile({ dataDir: t.dir, platform: 'linux', arch: 'x64', appPaths }).detect()
+  const finder = (...there: string[]) => agyAppFinder('linux', { PATH: '/opt/bin:/usr/local/bin' }, '/home/me', (p) => there.includes(p))
+  const detect = (t: ReturnType<typeof tempData>, appFound: () => boolean) =>
+    antigravityProfile({ dataDir: t.dir, platform: 'linux', arch: 'x64', appFound }).detect()
 
-  it('says so when one of the app paths is there (installed stays false), and says nothing with none, or once the connection is installed', async () => {
+  it('says so when its app folder or a command on the PATH is there (installed stays false), and says nothing with none, or once the connection is installed', async () => {
     const t = tempData()
     data.push(t)
-    const app = inRoot(t.home, 'antigravity-app')
-    expect((await detect(t, ['/no/such/antigravity'])).setup).not.toHaveProperty('appFound')
-    folder(app)
-    const found = await detect(t, ['/no/such/antigravity', app])
+    expect((await detect(t, finder())).setup).not.toHaveProperty('appFound')
+    const found = await detect(t, finder('/usr/share/antigravity'))
     expect(found).toMatchObject({ installed: false, loggedIn: false, setup: { state: 'not_installed', install: 'centralu', appFound: true } })
+    // Google's installers take a --dir: the command is found on the PATH, not at a known place
+    expect((await detect(t, finder('/opt/bin/agy'))).setup).toMatchObject({ appFound: true })
+    expect((await detect(t, finder('/usr/local/bin/antigravity'))).setup).toMatchObject({ appFound: true })
     fakeInstall(t.home)
-    const installed = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version, appPaths: [app] }).current()
+    const installed = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version, appFound: finder('/usr/share/antigravity') }).current()
     expect(installed.state).toBe('signed_out')
     expect(installed).not.toHaveProperty('appFound')
   })

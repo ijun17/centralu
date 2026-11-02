@@ -112,6 +112,8 @@ export function toolSetupTests(): void {
       await page.getByTestId('tool-blocked-install').click()
       expect(await calls(page)).toEqual(['install:antigravity'])
       await expect(line).toHaveAttribute('data-setup', 'installing')
+      // As the host does, an install in progress no longer carries the flag
+      expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.detected.find((t: any) => t.name === 'antigravity').setup.appFound)).toBeUndefined()
     })
 
     test('on a linked machine the sentence names that machine', async ({ page }) => {

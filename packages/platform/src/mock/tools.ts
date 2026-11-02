@@ -100,7 +100,7 @@ export class ToolsMock {
   readonly agents: Pick<AgentPort, 'models' | 'commands' | 'capabilities' | 'detect' | 'installTool' | 'cancelInstallTool' | 'signInTool' | 'cancelSignInTool'> = {
     installTool: async (tool: ToolName, machine?: MachineRef) => {
       this.setupCalls.push({ action: 'install', tool, machine })
-      return this.setSetup(tool, { ...this.setupOf(tool, machine), state: 'installing', failure: undefined, progress: { received: 0, total: 100 } }, machine)
+      return this.setSetup(tool, { ...this.setupOf(tool, machine), state: 'installing', failure: undefined, appFound: undefined, progress: { received: 0, total: 100 } }, machine)
     },
     cancelInstallTool: async (tool: ToolName, machine?: MachineRef) => {
       this.setupCalls.push({ action: 'cancelInstall', tool, machine })

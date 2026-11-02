@@ -1,7 +1,7 @@
 import { createListeners } from '@cc/common'
 import { errorMessage, type ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
-import { anyExists, hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
+import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import type { AgyArchive } from './release.js'
 import { runSignIn, type SignInDeps, type SignInResult } from './sign-in.js'
@@ -28,8 +28,8 @@ export type AgySetupDeps = {
   /** This machine's archive, or null where Google ships no build */
   archive: AgyArchive | null
   version: string
-  /** The person's own Antigravity (app or `agy`): any of these paths there says it is on this machine (`ToolSetup.appFound`) */
-  appPaths?: readonly string[]
+  /** Whether the person's own Antigravity (app or `agy`) is on this machine (`ToolSetup.appFound`; `agyAppFinder`) */
+  appFound?: () => boolean
   installIo?: InstallIo
   signIn?: SignInDeps
   /** Replaced by a test that models the agent's sign-in */
@@ -65,7 +65,7 @@ export class AgySetup implements ToolSetupControl {
   }
 
   private appFound(): boolean {
-    return anyExists(this.deps.appPaths ?? [])
+    return this.deps.appFound?.() ?? false
   }
 
   signedIn(): boolean {
