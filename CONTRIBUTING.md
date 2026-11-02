@@ -380,7 +380,10 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 
 - `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
   so it must build on its own;
-- dependency-cruiser's orphans as errors (`pnpm verify` only warns);
+- dependency-cruiser's orphans as errors (`pnpm verify` only warns), and every other rule it fails `pnpm depcruise` on (`deps`: a
+  cycle, a layer rule);
+- `pnpm lint` on the files your branch changed (`lint`), with the type-aware rules and allowlists CI uses. A finding in a file you
+  did not touch is left to CI;
 - a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
   that main already has or another open pull request adds (#1203): two parallel changes picking the
   same number each pass CI alone and clash when the second lands. It reads the open pull requests
@@ -405,7 +408,7 @@ It also prints the change's **risk tier** ([below](#review-before-you-say-done))
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
 checks a branch other than the one checked out. When one check's finding stands for a reason (a
 test that cannot fail without the change, and why), leave that check out with the reason:
-`--exempt revert="<why>"` (or `tsc`, `orphans`, `store-step`, `guards`). The board's `open_pr` runs it on the pushed branch
+`--exempt revert="<why>"` (or `tsc`, `orphans`, `deps`, `lint`, `store-step`, `guards`). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
 worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not

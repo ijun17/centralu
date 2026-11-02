@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SLOW } from './test-timing.js'
+import { freePort } from './free-port.js'
 import reportServerDeaths, { deathLines, readDeaths } from '../e2e/web-server-report.js'
 
 /*
@@ -26,14 +26,6 @@ afterEach(async () => {
   for (const u of urls.splice(0)) await fetch(`${u}/die`).catch(() => {})
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
-
-async function freePort(): Promise<number> {
-  const s = createServer()
-  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r))
-  const port = (s.address() as { port: number }).port
-  await new Promise<void>((r) => s.close(() => r()))
-  return port
-}
 
 /** A server that answers with its life number, and exits with 134 (an abort's code) when asked for /die */
 function standIn(dir: string): string {

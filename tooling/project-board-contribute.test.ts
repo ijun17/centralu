@@ -818,7 +818,7 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     const args = prePrCalls()[0]!.args
     const ns = spaceOf(args)
     expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--limit', '1680', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
-    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans or dependency errors, lint on the changed files, no new test passes without the change.`)
   })
 
   it('writes the tier pre-pr answers into Verified and labels the pull request with it (#1259)', async () => {
@@ -922,7 +922,7 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'revert=The new test guards a Windows path this branch only documents.'])
     expect(r.data.warnings).toEqual(['[main] feat/tools does not contain main: 1 commit(s) behind.'])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(
-      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 1 head(s), no orphans.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
+      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 1 head(s), no orphans or dependency errors, lint on the changed files.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
     )
   })
 
