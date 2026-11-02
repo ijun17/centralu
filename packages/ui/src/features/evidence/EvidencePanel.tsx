@@ -99,7 +99,7 @@ export function EvidencePanel() {
    */
   return (
     <aside
-      className={`relative flex h-full shrink-0 flex-col overflow-hidden border-l border-line bg-surface-side ${
+      className={`relative flex h-full min-w-0 shrink flex-col overflow-hidden border-l border-line bg-surface-side ${
         resizing ? '' : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={{ width: open ? width : RAIL_W }}

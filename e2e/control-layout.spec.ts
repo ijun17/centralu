@@ -21,6 +21,29 @@ test('The layout does not break even in a narrow window (L4-4)', async ({ page }
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
+/**
+ * The side panels give way before the session does (#1561): at 480 px the sidebar and the evidence panel used to keep
+ * their stored widths and left the session 0 px. 900 and 1280 px keep the layout they always had.
+ */
+for (const [width, session] of [
+  [480, 300],
+  [900, 320],
+  [1280, 700],
+] as const) {
+  test(`At ${width} px wide the session pane is ${width === 480 ? 'still usable' : 'laid out as before'} (#1561)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 700 })
+    await setup(page, { projects: ['/tmp/alpha'] })
+    await newSession(page, 'alpha', 'task')
+    const pane = (await page.getByTestId('session-view').boundingBox())!.width
+    if (width === 480) expect(pane).toBeGreaterThanOrEqual(session)
+    else expect(Math.round(pane)).toBe(session)
+    await page.getByTestId('prompt-input').fill('still typing')
+    await expect(page.getByTestId('prompt-input')).toHaveValue('still typing')
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+    expect(overflow).toBe(false)
+  })
+}
+
 test('Window drag regions and blocked overscroll (M2.5 window issue)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')

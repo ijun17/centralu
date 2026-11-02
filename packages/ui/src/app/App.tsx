@@ -10,7 +10,7 @@ import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import { applyTheme, cacheChoice, pickTheme, resolveChoice } from './theme.js'
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
-import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
+import { CENTER_FLOOR, projectScreenOf, screenExists, usableThemeFiles, useStore, useTextZoom } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
 import { dialogOpen } from '../store/layers.js'
 import { useCounts, computeInbox, currentWaitingId } from '../store/selectors.js'
@@ -318,6 +318,7 @@ function Body() {
   // Hooks come before any early return — placing one after the intro branch below would change
   // the hook count between renders
   const view = useStore((s) => s.view)
+  const zoom = useTextZoom()
   // The focus lane with a project picked and no session is that project's screen (#203)
   const projectScreen = useStore(projectScreenOf)
   const ready = useStore((s) => s.workspaceReady)
@@ -404,7 +405,7 @@ function Body() {
         Then widening the panel pushes the layout past the window edge and the whole screen
         scrolls horizontally (the real cause of a bug found in dogfooding).
       */}
-      <div className="cc-fade relative flex min-h-0 min-w-0 flex-1">
+      <div className="cc-fade relative flex min-h-0 min-w-0 flex-1" style={{ minWidth: CENTER_FLOOR / zoom }}>
         {view === 'orchestrator' ? (
           <OrchestratorView />
         ) : view === 'grid' ? (

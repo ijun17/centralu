@@ -59,8 +59,8 @@ export function Sidebar() {
       sibling, spanning the aside's full height, so a scroll never moves it and the list's scrollbar never covers it.
     */
     <aside
-      className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-line bg-surface-side"
-      style={{ width, ...SIDEBAR_VARS }}
+      className="relative flex h-full shrink flex-col overflow-hidden border-r border-line bg-surface-side"
+      style={{ width, minWidth: SIDEBAR_MIN / zoom, ...SIDEBAR_VARS }}
       data-testid="sidebar"
     >
       <ResizeHandle
