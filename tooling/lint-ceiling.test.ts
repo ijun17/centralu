@@ -14,9 +14,11 @@ describe('pnpm lint <paths>', () => {
     const file = join(ROOT, 'packages', 'protocol', 'src', `zz-ceiling-probe-${process.pid}.ts`)
     writeFileSync(file, 'export const probe = 1 as number\n')
     try {
-      const r = await promisify(execFile)(process.execPath, ['--import', 'tsx', 'tooling/lint.ts', relative(ROOT, file).split(sep).join('/')], { cwd: ROOT }).then(
-        () => ({ code: 0, out: '' }),
-        (e: { code?: number; stdout?: string; stderr?: string }) => ({ code: e.code, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }),
+      // A timeout under the test's own, so the child is gone and the probe removed before vitest gives up on the test
+      const args = ['--import', 'tsx', 'tooling/lint.ts', relative(ROOT, file).split(sep).join('/')]
+      const r = await promisify(execFile)(process.execPath, args, { cwd: ROOT, timeout: 100_000 * SLOW }).then(
+        (o) => ({ code: 0, out: `${o.stdout}${o.stderr}` }),
+        (e: { code?: number | string | null; stdout?: string; stderr?: string }) => ({ code: e.code, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }),
       )
       expect(r.out).toContain('packages/protocol: 1, ceiling 0 type assertions')
       expect(r.code).toBe(1)
