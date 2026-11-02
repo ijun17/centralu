@@ -1,5 +1,6 @@
 import { errorMessage } from '@cc/protocol'
 import { sleepSync } from '../timing.js'
+import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
  * The turns an update of this machine cut (#1618, docs/agent-host.md §4.8 "Continuing the turns an update cut"). A linked
@@ -17,6 +18,10 @@ import { sleepSync } from '../timing.js'
  * with no row of their own.) So a list left behind (a file a virus scanner held when it was to be removed, a rollback to a
  * host from before this, which never reads it) names a turn long over and continues nothing: a later stop of the person's
  * that cuts a new turn there is told as a quit's, as it always was.
+ *
+ * **What else the stop ended** (#1902) rides in the same list: `stopped`, per session, the background tasks its process held and
+ * the cards that waited for the person (`update-stopped.ts`), under the same mark. The next host tells the agent in a note,
+ * and wakes a session at rest for it. An older host reads `turns` only and leaves the rest.
  *
  * **A list that cannot be read at the start** is tried again a few times when it is held (`EBUSY`, a virus scanner that
  * opened the file just written; `READ_TRIES`), each failure said. One still unreadable stays where it is for a later start,
@@ -37,6 +42,9 @@ const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
 /** A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done */
 export type CutTurn = { id: string; seq: number }
+
+/** What one stop lists: the turns it cut, and what else it ended in sessions (#1902) */
+export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[] }
 
 /** The data folder, as the hosts reach the lists in it: their names, each one's text (null once gone), a new one, a removal */
 export type UpdateResumeFolder = {
@@ -71,7 +79,7 @@ function readHeld(folder: UpdateResumeFolder, name: string, wait: (ms: number) =
 }
 
 /** The turns a list's text names; `torn` when it is not JSON (a host killed while it wrote), `other` for another format */
-export function parseUpdateResume(text: string): CutTurn[] | 'torn' | 'other' {
+export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
   let o: unknown
   try {
     o = JSON.parse(text)
@@ -85,7 +93,9 @@ export function parseUpdateResume(text: string): CutTurn[] | 'torn' | 'other' {
     if (typeof t !== 'object' || t === null || !('id' in t) || !('seq' in t)) continue
     if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) turns.push({ id: t.id, seq: t.seq })
   }
-  return turns.slice(0, MAX_TURNS)
+  const listedStopped: unknown[] = 'stopped' in o && Array.isArray(o.stopped) ? o.stopped : []
+  const stopped = listedStopped.map(readStopped).filter((x): x is Stopped => x !== null && ID.test(x.id))
+  return { turns: turns.slice(0, MAX_TURNS), stopped: stopped.slice(0, MAX_TURNS) }
 }
 
 /**
@@ -93,11 +103,12 @@ export function parseUpdateResume(text: string): CutTurn[] | 'torn' | 'other' {
  * list that cannot be written is said in the log with the folder's own error, and those turns end as a stop's always did:
  * the next start marks them stopped, with their Continue, and tells whoever waits on them
  */
-export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTurn[]): void {
+export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTurn[], ended: readonly Stopped[] = []): void {
   const turns = cut.filter((t) => ID.test(t.id)).slice(0, MAX_TURNS)
-  if (!turns.length) return
+  const stopped = ended.filter((x) => ID.test(x.id)).slice(0, MAX_TURNS)
+  if (!turns.length && !stopped.length) return
   try {
-    folder.add(`${JSON.stringify({ v: 1, turns })}\n`)
+    folder.add(`${JSON.stringify({ v: 1, turns, stopped })}\n`)
   } catch (err) {
     console.error(`[agent-host] the turns this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
   }
@@ -109,7 +120,7 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
  */
 export class UpdateResumeLists {
   /** Each list's name and the turns it names, as read at the start */
-  private readonly lists = new Map<string, CutTurn[]>()
+  private readonly lists = new Map<string, UpdateStop>()
   private readonly dealt = new Set<string>()
 
   /**
@@ -150,12 +161,21 @@ export class UpdateResumeLists {
 
   /** The sessions the lists name */
   ids(): Set<string> {
-    return new Set([...this.lists.values()].flat().map((t) => t.id))
+    return new Set([...this.lists.values()].flatMap((l) => [...l.turns, ...l.stopped]).map((t) => t.id))
   }
 
   /** Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then */
   cut(id: string, lastSeq: number): boolean {
-    return [...this.lists.values()].some((turns) => turns.some((t) => t.id === id && t.seq === lastSeq))
+    return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq))
+  }
+
+  /** What a stop ended in this session besides a turn (#1902), when its conversation still ends where it did then: the same mark */
+  stoppedOf(id: string, lastSeq: number): Stopped | null {
+    for (const l of this.lists.values()) {
+      const x = l.stopped.find((s) => s.id === id && s.seq === lastSeq)
+      if (x) return x
+    }
+    return null
   }
 
   /**
@@ -165,8 +185,9 @@ export class UpdateResumeLists {
    */
   done(id: string): void {
     this.dealt.add(id)
-    for (const [name, turns] of this.lists) {
-      if (!turns.some((t) => t.id === id) || !turns.every((t) => this.dealt.has(t.id))) continue
+    for (const [name, l] of this.lists) {
+      const named = [...l.turns, ...l.stopped]
+      if (!named.some((t) => t.id === id) || !named.every((t) => this.dealt.has(t.id))) continue
       this.lists.delete(name)
       this.removeList(name)
     }

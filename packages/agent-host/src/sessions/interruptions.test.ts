@@ -841,6 +841,120 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   })
 })
 
+describe("what an update's stop ends besides a turn (#1902)", () => {
+  const sentTo = (h: ReturnType<typeof host>, id: string) => h.claude.handles.get(id)?.sent ?? []
+  const lines = (id: string) => store.messages.loadMessages(id, 50).map((m) => JSON.stringify(m.payload))
+  const stopForUpdate = async (h: ReturnType<typeof host>) => {
+    h.mgr.stopForUpdate()
+    await h.mgr.disposeAll()
+  }
+  /** A session that started a dev server in the background with a Bash call and ended its turn, the server still running */
+  async function withDevServer(h: ReturnType<typeof host>) {
+    const project = await h.mgr.addProject(root)
+    const id = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    await h.mgr.send(id, 'start the dev server')
+    const handle = h.claude.handles.get(id)!
+    handle.emit({ type: 'tool_call', sessionId: id, callId: 'call-1', summary: { tool: 'Bash', title: 'npm run dev', paths: [] }, input: { command: 'npm run dev -- --port 4000', run_in_background: true } })
+    handle.emit({ type: 'background_tasks', sessionId: id, live: [{ id: 't1', kind: 'shell', description: 'Dev server', parentCallId: 'call-1', status: 'running' }] })
+    handle.answer('started')
+    return { id, handle }
+  }
+
+  it('a session whose turn had ended is told which background task the update stopped, with its command, and only once', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id } = await withDevServer(a)
+    expect(info(a, id)).toMatchObject({ state: 'waiting_input' })
+    await stopForUpdate(a)
+    // Listed with the command of the call that started it, though no turn was cut
+    expect(f.turns()).toEqual([])
+    expect(f.ids()).toEqual([id])
+
+    const b = host({ updateResume: f })
+    await eventually(() => sentTo(b, id).length === 1)
+    const note = sentTo(b, id)[0]!
+    expect(note).toContain('Centralu on this machine was updated. Your turn had ended')
+    expect(note).toContain('- shell command: "npm run dev -- --port 4000" (Dev server)')
+    expect(note).toContain('Decide which you still need')
+    // A continue of the update, not a turn the person's message or mail began: no user row, no Continue sentence, one line
+    expect(note).not.toContain('Continue where you stopped')
+    expect(store.messages.loadMessages(id, 50).filter((m) => m.role === 'user')).toHaveLength(1)
+    expect(lines(id).filter((l) => l.includes('Centralu was updated, which stopped background work of this session'))).toHaveLength(1)
+    await eventually(() => f.files.size === 0)
+    // Not again: the list is gone
+    const c = host({ updateResume: f })
+    await startNoticesRan()
+    expect(c.claude.handles.has(id)).toBe(false)
+  })
+
+  it('a session whose conversation moved on after the stop (the person wrote first) is not woken for a list that names the old end; its neighbour is', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const moved = await withDevServer(a)
+    const same = await withDevServer(a)
+    await stopForUpdate(a)
+    store.messages.appendMessages([{ sessionId: moved.id, seq: store.messages.nextSeq(moved.id), role: 'user', kind: 'text', payload: { text: 'hello again' }, ts: Date.now() }])
+    const b = host({ updateResume: f })
+    await eventually(() => sentTo(b, same.id).length === 1)
+    await startNoticesRan()
+    expect(b.claude.handles.has(moved.id)).toBe(false)
+    await eventually(() => f.files.size === 0)
+  })
+
+  it('lists only a session holding something, and only for an update: an empty one and a quit list nothing', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const project = await a.mgr.addProject(root)
+    const empty = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const busy = (await withDevServer(a)).id
+    await stopForUpdate(a)
+    expect(f.ids()).toEqual([busy])
+    expect(f.ids()).not.toContain(empty)
+    const quit = memoryUpdateFolder()
+    const b = host({ updateResume: quit })
+    await withDevServer(b)
+    await b.mgr.disposeAll()
+    expect(quit.files.size).toBe(0)
+  })
+
+  it("a question the update closed reaches the agent as the update's, with the question, and a cut turn keeps its Continue", async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id, handle } = await withDevServer(a)
+    await a.mgr.send(id, 'now ask me something')
+    handle.emit({ type: 'question_request', sessionId: id, requestId: 'q1', questions: [{ question: 'What should I eat for lunch?', header: '', options: [{ label: 'Sushi', description: '' }], multiSelect: false }] })
+    expect(info(a, id)).toMatchObject({ state: 'waiting_approval' })
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    await eventually(() => sentTo(b, id).length === 1)
+    const note = sentTo(b, id)[0]!
+    expect(note).toContain('Continue where you stopped. Check what already happened before repeating a step.')
+    expect(note).toContain('The update closed a question before the person answered. The person did not refuse it')
+    expect(note).toContain('- "What should I eat for lunch?"')
+    expect(note).toContain('"npm run dev -- --port 4000"')
+    // The line is the cut turn's: one Continue
+    expect(lines(id).filter((l) => l.includes('Centralu continued it on the new version'))).toHaveLength(1)
+    await eventually(() => f.files.size === 0)
+  })
+
+  it('an approval the update closed is told the same way, and a session at rest holding none of this hears nothing', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id, handle } = await withDevServer(a)
+    await a.mgr.send(id, 'delete the build folder')
+    handle.emit({ type: 'approval_request', sessionId: id, requestId: 'r1', detail: { kind: 'command', command: 'rm -rf build', cwd: root } })
+    // The tool withdraws its card as the process goes, and that is a row of the conversation: the mark is read after it
+    handle.dispose = async () => handle.emit({ type: 'approval_resolved', sessionId: id, requestId: 'r1', decision: 'deny' })
+    await stopForUpdate(a)
+    const rows = store.messages.nextSeq(id) - 1
+    expect(f.turns()).toEqual([{ id, seq: rows }])
+    expect(JSON.parse([...f.files.values()][0]!).stopped[0].seq).toBe(rows)
+    const b = host({ updateResume: f })
+    await eventually(() => sentTo(b, id).length === 1)
+    expect(sentTo(b, id)[0]).toContain('The update closed the permission card of your pending tool call. The person did not refuse it')
+  })
+})
+
 describe('the session a report names', () => {
   it('is named as read_session lists it, whichever way the turn ended', async () => {
     const a = host()

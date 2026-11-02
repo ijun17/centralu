@@ -1838,7 +1838,7 @@ Windows 패키지를 실패시킨다.
 그쪽에서 돌던 턴을 끊는다. 그 업데이트가 띄운 호스트가 각 턴을 사람의 Continue처럼 한 번 이어 간다.
 - **어느 턴.** 정의는 하나이고, 멈추는 호스트가 멈추는 순간에 기록한다: 세션들을 놓을 때 턴 중인 세션들(idle.ts의 `cutTurns`: working, 또는 승인·질문
   대기, `turnCut`). 마지막 호출을 받은 뒤, 프로세스들이 끝나는 바로 그 단계에서 읽는다(`SessionManager.disposeAll`). 그래서 허브가 무엇이 도는지 읽은 뒤
-  시작한 턴도 들어가고, 호스트가 멈추기 전에 받은 사람의 Stop은 그 세션을 뺀다. 백그라운드 작업만 있는 세션은 턴이 아니므로 이어 가지 않는다.
+  시작한 턴도 들어가고, 호스트가 멈추기 전에 받은 사람의 Stop은 그 세션을 뺀다. 백그라운드 작업만 있는 세션은 턴이 아니므로 이어 가지 않지만, 무엇이 멈췄는지는 알린다(아래 "멈춤이 더 끝낸 것").
 - **업데이트라고 알린다.** 그 폴더에서 호스트가 다시 시작하는 허브의 모든 멈춤(업데이트, 확인 실패 뒤 되돌리기, 롤백. 제거는 아니다)은
   `CENTRALU_STOP_FOR=update`로 `serve --stop`을 돌리고(`stopCommand`, `stopRemoteHost`), 런처는 이를 `host.stop { forUpdate: true }`(추가 필드)로 넘긴다.
   프로세스들이 끝나고 마지막 출력이 기록되면, 호스트는 그 턴들을 자기만의 목록 `<data>/update-resume.<uuid>.json`(`{ v: 1, turns: [{ id, seq }] }`,
@@ -1865,6 +1865,11 @@ Windows 패키지를 실패시킨다.
   그사이 기기를 읽는 허브가 끝난 턴으로 읽지 않고, 메모는 한 번 들어간다. 창은 프로세스 없이 턴 중인 세션을 깨우지 않는다: 기기가 스스로 잇고,
   "<기기> is back, resuming N sessions"는 창이 깨우는 것만 센다. 대화에는 "Centralu was updated during this turn, which stopped it; Centralu continued it
   on the new version."이 남는다.
+- **멈춤이 더 끝낸 것**(#1902). 멈추는 호스트는 턴과 같은 단계에서 살아 있는 세션마다 `stopped: [{ id, seq, tasks, approvals, questions }]`도 목록에 쓴다
+  (`stoppedAtUpdate`, lifecycle/update-stopped.ts): 돌던 백그라운드 작업(종류, 설명, 그것을 시작한 도구 호출의 명령), 기다리던 승인, 열려 있던 질문의 글.
+  턴과 같은 표시(`seq`)가 적용된다. 다음 호스트가 Centralu의 메모(`updateNote`)로 에이전트에게 알린다: 끊긴 턴에는 #1618의 Continue 문장 뒤에 덧붙이고,
+  턴이 끝나 있던 세션은 그 메모만을 위해 깨운다(`deliverMail`, 메일함의 배달이 아니므로 메일이 시작한 턴이 아니다. mailbox.md §8.2). 카드를 닫을 때의 거절 문구는
+  모델에 닿지 않으므로(CLI가 스스로 결과를 쓴다) 메모가 카드의 유일한 통로다. 무엇을 다시 시작할지는 에이전트가 정하고, Centralu는 아무것도 다시 돌리지 않는다.
 - **멈춤은 빚을 지킨다.** 종료하는 호스트의 실패한 위임 대기는 더는 자식의 보고나 턴을 정산하지 않는다(`DelegationFlow`, `closing`): 저장소에 남은
   표시로 다음 시작이 그 턴을 멈춘 것으로 알릴지(종료) 이어 갈지(업데이트) 정한다. 사람이 맡긴 작업은 받은편지함에 "stopped" 보고가 가지 않고,
   보고는 이어 간 턴의 끝 하나다.

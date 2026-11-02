@@ -6,12 +6,13 @@ export function memoryUpdateFolder(): UpdateResumeFolder & {
   readonly files: Map<string, string>
   /** The turns all the lists name, in the order written; null when there is no list */
   turns(): CutTurn[] | null
-  /** The sessions they name, once each */
+  /** The sessions they name (turns and what else the stop ended), once each */
   ids(): string[] | null
 } {
   const files = new Map<string, string>()
   let made = 0
-  const turns = () => (files.size ? [...files.values()].flatMap((t) => { const p = parseUpdateResume(t); return Array.isArray(p) ? p : [] }) : null)
+  const parsed = () => [...files.values()].flatMap((t) => { const p = parseUpdateResume(t); return typeof p === 'object' ? [p] : [] })
+  const turns = () => (files.size ? parsed().flatMap((p) => p.turns) : null)
   return {
     files,
     names: () => [...files.keys()],
@@ -24,8 +25,7 @@ export function memoryUpdateFolder(): UpdateResumeFolder & {
     },
     turns,
     ids: () => {
-      const t = turns()
-      return t === null ? null : [...new Set(t.map((x) => x.id))]
+      return files.size ? [...new Set(parsed().flatMap((p) => [...p.turns, ...p.stopped]).map((x) => x.id))] : null
     },
   }
 }

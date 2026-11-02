@@ -219,3 +219,24 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     s.close()
   })
 })
+
+describe('the call a background task came from (#1902)', () => {
+  it('is read whole by its id, from the row that holds exactly that id', () => {
+    const s = seeded()
+    const row = (seq: number, callId: string, input: unknown): StoredMessage => ({
+      sessionId: 's1',
+      seq,
+      role: 'system',
+      kind: 'tool_call',
+      payload: { type: 'tool_call', sessionId: 's1', callId, summary: { tool: 'Bash', title: 't', paths: [] }, input },
+      ts: seq,
+    })
+    s.messages.appendMessages([row(1, 'call-1', { command: 'one' }), row(2, 'call-10', { command: 'ten' }), row(3, 'call-2', undefined)])
+    expect(s.messages.toolCallInput('s1', 'call-1')).toEqual({ command: 'one' })
+    expect(s.messages.toolCallInput('s1', 'call-10')).toEqual({ command: 'ten' })
+    expect(s.messages.toolCallInput('s1', 'call-2')).toBeUndefined()
+    expect(s.messages.toolCallInput('s1', 'missing')).toBeUndefined()
+    expect(s.messages.toolCallInput('other', 'call-1')).toBeUndefined()
+    s.close()
+  })
+})

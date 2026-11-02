@@ -3594,12 +3594,12 @@ the person's Continue would.
   its sessions go (`cutTurns` in idle.ts: working, or waiting on an approval or a question, `turnCut`), read in the same
   step as their processes end and after it took its last call (`SessionManager.disposeAll`). So a turn that began after
   the hub read what runs is listed too, and a person's Stop the host took before it stopped leaves its session out.
-  Background work alone is not a turn and is not continued.
+  Background work alone is not a turn and is not continued, but it is told (below, "What else the stop ended").
 - **Told it is an update.** Every stop of the hub's after which a host starts again in that folder (the update's, the
   put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
   (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
   the processes are down and their last output written, the host writes those turns as a list of its own,
-  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq }] }`, lifecycle/update-resume.ts), each with the last
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq }], stopped: [...] }`, lifecycle/update-resume.ts), each with the last
   row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
   nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
   folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
@@ -3639,10 +3639,30 @@ the person's Continue would.
   turn (`DelegationFlow`, `closing`): the next start decides, from the marks the store kept, whether the turn is told as
   stopped (a quit) or continued (an update). Work the person owns gets no "stopped" report in their Inbox; its one report
   is the continued turn's end.
+- **What else the stop ended** (#1902). Measured on real hosts, an update used to lose three things without a word to the
+  agent: a background task of a session whose turn had ended (a dev server, a watcher; the store's record of it was
+  overwritten with an empty list at the next start), a question card (the CLI wrote "The user doesn't want to proceed…
+  [Request interrupted by user for tool use]" for it, and the agent asked why the person interrupted instead of asking
+  again) and an approval card (the same text). The stop now lists, per live session and in the same step as the turns,
+  `stopped: [{ id, seq, tasks, approvals, questions }]` (`stoppedAtUpdate`, lifecycle/update-stopped.ts): each running task
+  (a timer too; ambient housekeeping is not work) with its kind, description and the command of the tool call that started
+  it (`parentCallId`, read whole from the stored call: `MessageRecords.toolCallInput`), whether an approval waits, and the text
+  of each open question. The same mark as the turns applies: the next host acts on an entry only while the conversation
+  still ends at `seq`. The note is Centralu's (`updateNote`): for a cut turn it is the Continue sentence of #1618 followed by
+  a paragraph per thing the stop ended (the tasks to restart or drop, the card the person did not refuse); a session at
+  rest whose tasks the stop ended is **woken for the note alone** and told only that. Both go in through `deliverMail`, the
+  one door of #1618: the wake of a session at rest is a continue of the update, not a turn a message or mail started
+  (mailbox.md §8.2: the mailbox's delivery and `MailTurns.begin` are not involved), so a turn it starts has no starter and
+  counts nothing against a sender's budget. A session the person already woke takes the note into their turn (quiet). The
+  agent decides what to restart: nothing is rerun by Centralu. The deny text a closed card is released with
+  (`Session closed`) does not reach the model (measured: the CLI writes its own result for a tool call whose process
+  ended), so the note is the one channel for the card, and it is the same for every tool; an older host reads `turns` only
+  and ignores `stopped`. Codex's child agents are tasks of kind `agent` with a description and no command; an ACP tool
+  reports no tasks, but its open cards are told the same way.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that
-  work with its process and is not continued: nothing was in a turn to continue. One whose tool cannot take it up again
+  work with its process and is not continued as a turn, but its agent is told (above). One whose tool cannot take it up again
   ends as a kept process that could not be re-attached does (`turnLostInSwap`): `quit`, and its report or its requester
   told it stopped.
 - **Its caller.** A requester on the same machine hears once "The assigned work's turn was cut short by an update of

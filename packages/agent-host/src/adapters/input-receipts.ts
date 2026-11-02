@@ -34,18 +34,19 @@ export function isCentraluInputId(id: unknown): boolean {
  * What a session whose turn a linked hub's update cut is sent when the next host continues it (#1618): the same Continue
  * the person's button sends, after why. It goes in through Centralu's channel, never as the person's message.
  */
+export const UPDATE_NOTE_HEAD = '[Centralu] Centralu on this machine was updated'
 export const UPDATE_CONTINUE_TEXT =
-  '[Centralu] Centralu on this machine was updated while your turn was running, which stopped the turn before it finished. ' +
+  `${UPDATE_NOTE_HEAD} while your turn was running, which stopped the turn before it finished. ` +
   'Continue where you stopped. Check what already happened before repeating a step.'
 
 /**
- * Whether a line read back is Centralu's own Continue note, by its exact text: Centralu's own words, which the person does
- * not type. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
+ * Whether a line read back is Centralu's own note after an update (#1618, #1902), by the words it begins with: Centralu's own, which the
+ * person does not type. The note can go on with what else the update stopped (`updateNote`), so it is not matched whole. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
  * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
  * catch-up anchors after it and never stores it as the person's message (#1626 review).
  */
 export function isUpdateContinueNote(text: string): boolean {
-  return text.trim() === UPDATE_CONTINUE_TEXT
+  return text.trim().startsWith(UPDATE_NOTE_HEAD)
 }
 
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
