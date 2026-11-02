@@ -2230,6 +2230,7 @@ export class SessionManager {
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
       // Whose a linked child's turn is decides whether its report goes (#1038 review)
       reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
+      keepsOverLoss: (sessionId) => self.delegationFlow.remote.keepsOverLoss(sessionId),
       skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

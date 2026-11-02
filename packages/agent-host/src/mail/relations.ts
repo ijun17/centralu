@@ -40,6 +40,12 @@ export type RelationsHost = {
   inThread(threadId: string, address: string): boolean
 }
 
+/**
+ * Why mail to or from a session that `host.session` does not find is refused (#1567), naming the id looked up: no session is called a role
+ * word such as "parent", and the answer for an id that was never here must not read as one of a session that was and is not running
+ */
+const goneSentence = (id: string): string => `that session (${id}) is gone: it is not a session of this host, or it is in the session archive or deleted`
+
 export function mailRelations(host: RelationsHost): MailPolicy {
   return {
     isOrchestrator(address) {
@@ -75,7 +81,7 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (!f || !t) return 'that is not an address'
       if (t.kind === 'centralu') return 'Centralu only sends'
       // A session that is gone takes no new mail (§7.1), also in a thread it was in
-      if (t.kind === 'session' && !host.session(t.sessionId)) return 'that session is gone: it is in the session archive or deleted'
+      if (t.kind === 'session' && !host.session(t.sessionId)) return goneSentence(t.sessionId)
       // A session writing to the orchestrator, in a thread it is in or not, needs an orchestrator that can put each step of a request to the person: a request
       // opened while it ran on one tool must not wake it after it was changed to another (§9.7)
       // (only the session's own requests: a worker's reply in a thread the orchestrator opened for it is no request)
@@ -91,7 +97,7 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (f.kind === 'app') return host.appCalledBy?.(from, t.sessionId) ? null : 'an app writes to a session that called it'
       const sender = host.session(f.sessionId)
       const receiver = host.session(t.sessionId)
-      if (!sender || !receiver) return 'that session is gone: it is in the session archive or deleted'
+      if (!sender || !receiver) return goneSentence(sender ? t.sessionId : f.sessionId)
       if (sender.kind === 'orchestrator') return null
       // Any session of this host may ask the orchestrator (§9.7); the limits of asking are the service's (`MailService.open`) and the delivery's
       if (receiver.kind === 'orchestrator') return null

@@ -222,6 +222,12 @@ export class RemoteAgents {
   private readonly busy = new Set<string>()
   /** Children whose turn ended with its report owed since the instruction last sent was taken there (`messageTaken`): that end is reported */
   private readonly endOwed = new Set<string>()
+  /**
+   * Children whose report stayed owed over a person's message seen on their machine (#1386, `messageTaken`): the report is the work's turns',
+   * and the linked report tells which turn is whose (`LinkedReport.turn`), as it does for a send_to_session. In memory only: a
+   * restart, or a link that dropped, leaves a turn the hub did not see start, so what was owed ends then (`tellDropped`)
+   */
+  private readonly personHeld = new Set<string>()
   /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
   private readonly lastSeq = new Map<string, number>()
 
@@ -248,6 +254,12 @@ export class RemoteAgents {
       this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
       if (!r.owed.paused) this.toldDown.set(r.sessionId, false)
     }
+  }
+
+  /** A report paused over the child's background work stays owed when its link drops, and is settled once the link is back (`LinkedReportsHost.keepsOverLoss`, #1523) */
+  keepsOverLoss(sessionId: string): boolean {
+    const rec = this.of(sessionId)
+    return !!rec && this.reportArmed(rec)
   }
 
   /** The hub's record of a child on a linked machine, by its qualified id */
@@ -329,7 +341,8 @@ export class RemoteAgents {
     const rec = this.of(sessionId)
     if (!rec) return 'deliver'
     const g = this.gateNow(rec)
-    if (g.owned) return 'deliver'
+    // The linked report has read a turn of the person's as theirs before it asks (`LinkedReports.observe`): what reaches the gate is the work's
+    if (g.owned || this.personHeld.has(sessionId)) return 'deliver'
     if (g.whose === 'other') return 'withhold'
     this.deferred.add(sessionId)
     void this.settleDeferred(rec)
@@ -655,6 +668,7 @@ export class RemoteAgents {
         this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
         this.notesSent.delete(rec.sessionId)
         this.whose.set(rec.sessionId, 'unknown')
+        this.personHeld.delete(rec.sessionId)
         this.pending.add(rec.sessionId)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
         const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
@@ -802,12 +816,13 @@ export class RemoteAgents {
    * something of it ends that: a call waiting on it returns the fact (`taken`), and a report owed is dropped and the
    * caller told, unless its own send's answer says it (`pending`)
    */
-  private setWhose(rec: RemoteAgent, whose: Whose, why?: string): void {
+  private setWhose(rec: RemoteAgent, whose: Whose, why?: string, keep = false): void {
     const was = this.whoseOf(rec)
     // What made a turn another's is told with it (`messageTaken` sets it after), never kept past it
     if (was !== 'other' || whose !== 'other') this.otherBy.delete(rec.sessionId)
     this.whose.set(rec.sessionId, whose)
     if (whose !== 'caller') this.setGiven(rec.sessionId, [])
+    if (!keep) this.personHeld.delete(rec.sessionId)
     const kept = whose === 'unknown' ? undefined : whose
     const stored = this.of(rec.sessionId)
     if (stored && kept && stored.whose !== kept) this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, whose: kept } : r)))
@@ -817,9 +832,20 @@ export class RemoteAgents {
       this.dropWait(rec.sessionId)
       wait.end({ step: 'taken' })
     }
+    // A person's message does not close the report (#1377): the linked report reads whose each turn is, and the person's is reported to nobody.
+    // A call that was waiting took the report down: it is put back with what the message made of the turn it saw
+    if (keep && wait && this.host.meta.has(rec.callerId)) {
+      this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: wait.busy, ...(wait.busy ? { turn: { by: 'work', wrote: true } } : { next: { by: 'person' } }) })
+    }
     if (!this.reportArmed(rec)) return
+    if (keep) return void this.personHeld.add(rec.sessionId)
     this.host.children.dropLinkedReport(rec.sessionId)
     if (wait || this.pending.has(rec.sessionId)) return
+    this.tellDropped(rec, why)
+  }
+
+  /** The caller is told that what it gave the child is not followed from here any more, and nothing of the turn that is not its own is its to read */
+  private tellDropped(rec: RemoteAgent, why?: string): void {
     const what = `${why ?? 'took a turn there that you did not give it (the person on that machine, most likely)'}. ` +
       'What you gave it is not followed from here, and nothing of that turn is yours to read: agent_session status gives only its state.'
     void this.host.tellSession(
@@ -941,7 +967,8 @@ export class RemoteAgents {
       this.noteRow(sessionId, e.seq)
       return
     }
-    this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)')
+    // The person's own message (it names no sender) leaves the report owed (#1386); another session's or an app's is not theirs to leave it for
+    this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)', !e.from && !e.fromApp)
     this.otherBy.set(sessionId, this.fromHubHere(rec, e.from) ? 'session' : 'person')
   }
 
@@ -1197,8 +1224,8 @@ export class RemoteAgents {
    * A machine's link that is no longer connected: what happens there now is unseen, so whose each child's turn is is not
    * known until the machine is read again (`verify`), and whether it is in a turn neither. A call waiting on a child
    * there returns now, and the session that started a child still owed a report is told once that it cannot be followed
-   * until the link is back. A report paused over the child's background work is the linked reports' to send
-   * (`LinkedReports.linkChanged`).
+   * until the link is back. A report paused over the child's background work is kept as well (`keepsOverLoss`): the machine is read when
+   * it is back, and a report whose work had already ended is the linked reports' to send now (`LinkedReports.linkChanged`).
    */
   private linkChanged(machine: unknown): void {
     const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown; operation?: { kind?: unknown } | null } | null
@@ -1222,6 +1249,11 @@ export class RemoteAgents {
     const name = typeof m.name === 'string' && m.name ? m.name : m.id
     for (const rec of this.records()) {
       if (rec.machineId !== m.id) continue
+      // Turns started while the link is down are unseen: what stayed owed over a person's message ends here, as an unseen turn of theirs does (`verify`)
+      if (this.personHeld.delete(rec.sessionId) && this.reportArmed(rec)) {
+        this.host.children.dropLinkedReport(rec.sessionId)
+        this.tellDropped(rec)
+      }
       if (this.whoseOf(rec) === 'caller') this.whose.set(rec.sessionId, 'unknown')
       this.busy.delete(rec.sessionId)
       const wait = this.waits.get(rec.sessionId)
@@ -1234,7 +1266,9 @@ export class RemoteAgents {
       }
       const report = this.host.children.linkedReports.get(rec.sessionId)
       const told = this.toldDown.get(rec.sessionId)
-      if (!report || report.orchestratorId !== rec.callerId || report.paused || (told !== undefined && (told || !alone))) continue
+      // A report paused on work that has ended is settled by the linked reports now (`LinkedReports.linkChanged`); on work still going it is kept, and the caller told
+      const settling = !!report?.paused && !report.busy && this.host.linkedTasksRunning(rec.sessionId).length === 0
+      if (!report || report.orchestratorId !== rec.callerId || settling || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
       /*
        * This hub's own update or rollback of the machine holds the link (#1618): its stop ends this turn, and the host it starts
@@ -1373,6 +1407,7 @@ export class RemoteAgents {
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)
     this.endOwed.delete(sessionId)
+    this.personHeld.delete(sessionId)
     this.lastSeq.delete(sessionId)
     for (const key of [...this.toldCards]) if (key.startsWith(`${sessionId}\0`)) this.toldCards.delete(key)
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)

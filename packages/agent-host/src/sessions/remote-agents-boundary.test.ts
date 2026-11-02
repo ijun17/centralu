@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import type { ChildRunResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
-import { ChildOwnership } from './child-ownership.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
 
@@ -89,7 +89,10 @@ class Machine {
   selfTurnEnds(): void {
     if (this.turn === 'self') this.end('SELF-ANSWER')
   }
+  /** What the machine lists of the session's background work, as `sessions.list` does for every session */
+  live: unknown[] = []
   backgroundWork(live: unknown[]): void {
+    this.live = live
     this.out({ type: 'background_tasks', sessionId: CHILD, live } as LinkedEvent)
   }
 
@@ -127,7 +130,7 @@ class Machine {
       origin: async () => ({ ok: true, origin: 'git@github.com:me/app.git' }),
       interrupt: async () => ({ ok: true }),
       deleteSession: async () => ({ ok: true }),
-      backgroundTasks: async () => [],
+      backgroundTasks: async () => (this.reachable ? [{ sessionId: CHILD, tasks: this.live }] : null),
     } as unknown as LinkedSessions
   }
 }
@@ -160,6 +163,7 @@ class Hub {
       deliverReport: async (_to: string, sessionId: string, _name: string, _project: string, preview: string, ending: unknown, work: unknown) =>
         void this.delivered.push(JSON.stringify({ sessionId, preview, ending, work })),
       reportGate: (id: string) => this.agents.reportGate(id),
+      keepsOverLoss: (id: string) => this.agents.keepsOverLoss(id),
     } as unknown as LinkedReportsHost)
     this.agents = new RemoteAgents({
       children: this.children,
@@ -247,6 +251,7 @@ async function started(): Promise<void> {
  * The ways the person's turn comes about. Each leaves the child in a turn of the person's, which has asked a question
  * there; `hub.mark()` is set before anything of the person's happens, so what reached the caller since is checked
  */
+const PAUSED_SCENARIO = "the person's turn while the caller's report waits on its background work"
 const SCENARIOS: Record<string, () => Promise<void>> = {
   "the person's turn while the child is idle": async () => {
     await started()
@@ -256,7 +261,7 @@ const SCENARIOS: Record<string, () => Promise<void>> = {
     machine.personSays()
     machine.personAsks()
   },
-  "the person's turn while the caller's report waits on its background work": async () => {
+  [PAUSED_SCENARIO]: async () => {
     await started()
     machine.backgroundWork([{ id: 't1', description: 'build', status: 'running' }])
     machine.callerTurnEnds()
@@ -413,8 +418,8 @@ describe("nothing of the person's turn on the child's machine reaches the caller
     // No card of it was answered, and no report of it went
     expect(machine.answered).toEqual([])
     expect(seen.delivered).toEqual([])
-    // Nothing is owed of a turn that is not the caller's (a send after the person's turn ended starts the caller's own)
-    if (machine.turn !== 'hub') expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    // Nothing is owed of a turn that is not the caller's (a send after the person's turn ended starts the caller's own); the work's paused report stays owed for its own next turn (#1386)
+    if (machine.turn !== 'hub') expect(hub.children.linkedReports.has(CHILD)).toBe(scenario === PAUSED_SCENARIO)
     // The caller's text went into the person's turn only where the scenario races it in, never by a path asked here
     if (entry !== 'send, at rest') expect(machine.fromHub.length).toBe(hubSends)
   })
@@ -534,6 +539,11 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it there') })
     expect(notes()).toHaveLength(1)
     expect(machine.fromHub.filter((t) => t.includes('a second note'))).toHaveLength(0)
+    // The person's message does not close the report (#1386): this turn is still the work's, and its end is reported
+    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
     expect(hub.children.linkedReports.has(CHILD)).toBe(false)
   })
 
@@ -608,5 +618,192 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
     expect(JSON.stringify(r)).not.toContain('the person may be using it')
     expect(notes()).toHaveLength(0)
+  })
+})
+
+/*
+ * #1523: a child that paused on its own background work, whose machine's link dropped, loses nothing: the report stays owed,
+ * and the end it missed is reported once the link is back
+ */
+describe('a child paused on its background work when the link drops (#1523)', () => {
+  const build = { id: 't1', description: 'build', status: 'running' }
+
+  async function pausedThenDown(): Promise<void> {
+    await started()
+    machine.backgroundWork([build])
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    linkDown()
+    await flush()
+  }
+  async function pausedThenUp(): Promise<void> {
+    await started()
+    machine.backgroundWork([build])
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+  }
+  /** The work ends and its follow-up turn runs to its end while the link is down: the hub sees none of it */
+  function endsWhileDown(): void {
+    machine.backgroundWork([])
+    machine.selfStarts()
+    machine.selfTurnEnds()
+  }
+
+  it('reports the end it missed once the link is back, once', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await pausedThenDown()
+      endsWhileDown()
+      await linkUp()
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      expect(hub.delivered).toHaveLength(2)
+      expect(hub.delivered[1]).toContain('SELF-ANSWER')
+      expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      expect(hub.delivered).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('follows a child that is still working when the link is back, and reports its end', async () => {
+    await pausedThenDown()
+    await linkUp()
+    expect(hub.children.linkedReports.get(CHILD)?.paused).toBeTruthy()
+    machine.backgroundWork([])
+    machine.selfStarts()
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
+  it("reports a follow-up turn it saw begin and lost the link in: its end, seen or not, is reported once the link is back", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await pausedThenUp()
+      machine.backgroundWork([])
+      machine.selfStarts()
+      await flush()
+      linkDown()
+      machine.selfTurnEnds()
+      await linkUp()
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      expect(hub.delivered).toHaveLength(2)
+      expect(hub.told.filter((t) => t.includes('The link to Box dropped'))).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('tells the caller once that it cannot be followed until the link is back, and not that its end is lost', async () => {
+    await pausedThenDown()
+    expect(hub.told.filter((t) => t.includes('The link to Box dropped'))).toHaveLength(1)
+    expect(hub.delivered.join(' ')).not.toContain('linkLost')
+    expect(hub.delivered).toHaveLength(1)
+  })
+})
+
+/*
+ * #1386, the table of #1377 for a child on a linked machine: a person's message never closes the report. Their turn at rest is
+ * theirs and not reported; their message into the work's turn is noted and the turn stays the work's; the work's next turn
+ * (the tool ending its background work, the caller's instruction) is reported
+ */
+describe("a person's message on the child's machine does not close the report (#1386)", () => {
+  const build = { id: 't1', description: 'build', status: 'running' }
+
+  it("keeps a paused report over the person's turn at rest: their turn is not reported, the work's next turn is", async () => {
+    await started()
+    machine.backgroundWork([build])
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    machine.personSays()
+    machine.personTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    expect(hub.children.linkedReports.get(CHILD)?.paused).toBeTruthy()
+    expect(hub.told.join(' ')).not.toContain('you did not give it')
+    machine.backgroundWork([])
+    machine.selfStarts()
+    await flush()
+    // The work's own turn again: the caller reads it as it reads the turn it gave
+    expect(await hub.act('status')).toMatchObject({ ok: true, state: 'working' })
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
+    expect(hub.delivered[1]).toContain('SELF-ANSWER')
+    expect(hub.delivered.join(' ')).not.toContain(PERSON.words)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
+  it("keeps the report when the person writes into the work's own running turn, and reports that turn's end", async () => {
+    await started()
+    machine.personSays()
+    await flush()
+    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.told.join(' ')).not.toContain('you did not give it')
+    // Not the caller's to add to while the person is in it
+    expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
+  /** The caller's turn paused on its work, the person spoke at rest there, and the tool's own follow-up turn is running */
+  async function heldFollowUp(): Promise<void> {
+    await started()
+    machine.backgroundWork([build])
+    machine.callerTurnEnds()
+    await flush()
+    machine.personSays()
+    machine.personTurnEnds()
+    machine.backgroundWork([])
+    machine.selfStarts()
+    await flush()
+  }
+
+  it("does not hand the caller the work's follow-up turn after the person spoke, and still reports it: a wait and a note leave the report owed", async () => {
+    await heldFollowUp()
+    expect(await hub.act('wait')).toMatchObject({ ok: true, state: 'working' })
+    expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false })
+    expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(0)
+    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
+    expect(hub.delivered.join(' ')).not.toContain(PERSON.words)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
+  it("keeps the report when the person writes into the work's turn while a call waits on it", async () => {
+    await started()
+    const waiting = hub.act('wait')
+    await flush()
+    machine.personSays()
+    expect(await waiting).toMatchObject({ ok: true, state: 'working' })
+    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
+  it("ends what it left owed when the link drops, as their turn there is unseen: the caller is told once", async () => {
+    await started()
+    machine.personSays()
+    await flush()
+    expect(hub.children.linkedReports.has(CHILD)).toBe(true)
+    linkDown()
+    await flush()
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    expect(hub.told.filter((t) => t.includes('did not give it'))).toHaveLength(1)
+    machine.callerTurnEnds()
+    await linkUp()
+    expect(hub.delivered).toEqual([])
+    expect(hub.told.filter((t) => t.includes('did not give it'))).toHaveLength(1)
   })
 })
