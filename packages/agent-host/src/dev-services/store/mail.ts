@@ -172,7 +172,7 @@ type ParticipantSql = { thread_id: string; address: string; role: string; joined
 
 type BlockerSql = { thread_id: string; n: number; kind: string; ref: string | null; text: string; resolved_at: number | null }
 
-type MessageSql = {
+export type MessageSql = {
   id: string
   thread_id: string
   seq: number
@@ -258,7 +258,7 @@ const toBlocker = (r: BlockerSql): BlockerRow => ({
   resolvedAt: r.resolved_at,
 })
 
-const toMessage = (r: MessageSql): MessageRow => ({
+export const toMessage = (r: MessageSql): MessageRow => ({
   id: r.id,
   threadId: r.thread_id,
   seq: r.seq,

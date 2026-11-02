@@ -410,9 +410,18 @@ Where it is stored:
 - `mail_blockers`: what stands in a thread's way.
 - `mail_messages`: the posts, with Centralu's `facts` and the key that keeps a change from being posted twice.
 - `mail_receipts`: each recipient's progress with each message.
-- `mail_turns`: the thread each turn of a session belonged to.
+- `mail_turns`: the thread each turn of a session belonged to. Since v65 also `message_id`, the turn's work message, and
+  `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how`; nothing writes
+  them yet.
+- `mail`: mail without threads (v65, [plans/mailbox.md](plans/mailbox.md) §6.1, #1684): one message, its sender, kind
+  (`message`, `task`, `report`, `notice`), whether it needs a reply, the message it answers and the first of that chain,
+  the message that started the sender's turn and how many hops led to it, and Centralu's `facts`. `legacy_thread` names
+  the thread a message was moved from. Read by nothing yet: the host moves to it in a later slice.
+- `mail_recipients`: one recipient's row for a message in `mail`: the delivery fields a receipt has, the turn the
+  delivery started, whether and how it was settled (`answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy`), its
+  reminders, and when it was released and its sender told.
 
-An older build serving the same store during a swap never names these tables (step v61 only adds), and a session deleted for good
+An older build serving the same store during a swap never names these tables (steps v61 and v65 only add), and a session deleted for good
 from the session archive takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
 and 180 days, read notices after 14) is `MailService.sweep`, which the host runs with the delivery's 60 s sweep ([plans/mailbox.md](plans/mailbox.md) §4.4). The heartbeat the delivery keeps
 to tell how long the host was off is the setting `mail.heartbeat`, written only on a host that has threads.

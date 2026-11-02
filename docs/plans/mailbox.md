@@ -818,9 +818,10 @@ run today (`main.ts:947-961` on `12f5dad86`), and before both. Its comment holds
 replaced is gone. A host that fails before its ready line falls back to the older build with the receipts untouched,
 so the move never runs during startup. In one transaction:
 
-1. Read every `mail_receipts` row that is pending: `delivered_at IS NULL`, or `read_at IS NULL AND handled_at IS
-   NULL` on a `question` or `assign` (an old message that waited for its reader), with `created_at` within retention
-   (180 days). Joined to its message and thread.
+1. Read every `mail_receipts` row that is pending: `handled_at IS NULL`, not `held = 'dismissed'` (the person said
+   never), and either `delivered_at IS NULL`, or `read_at IS NULL` on a `question` or `assign` (an old message that
+   waited for its reader), with `created_at` within retention (180 days). Joined to its message and thread. (M1: a
+   handled receipt is done in the v61 build, delivered or not, so it is not moved.)
 2. For each such message, `INSERT OR IGNORE INTO mail` with the mapping below, and its receipt into
    `mail_recipients` with `settled = 'legacy'` (never awaited or reminded, D26).
 3. Set `handled_at = now` on each old receipt read in step 1, and `delivered_at = now` where it was null, so an older
@@ -838,7 +839,8 @@ tables, so nothing in them is pending a second time, and what is not pending sta
   `report` stays `report`; `notice` and `event` become `notice`;
 - `reply_to = m.reply_to` when that message is in `mail` (moved earlier), else null; `root_id` = `reply_to`'s root, or
   `m.id`. The old chain stays readable through `legacy_thread` (below);
-- `facts = m.facts + { legacyKind: m.kind }`, plus `quiet: true` when today's `wakes(senderClass(m.sender), m)`
+- `facts = m.facts` read key by key (`factsFrom`: a key that is not its §5.4 shape is left out; a v61 `waitingOn`,
+  the list of threads still going, becomes its count) `+ { legacyKind: m.kind }`, plus `quiet: true` when today's `wakes(senderClass(m.sender), m)`
   (`rules.ts:131`) is false, plus `needsOwner: true` when `m.needs_owner = 1`;
 - `dedupe_key = NULL`; `origin = t.origin` on the thread's first message, else `mail`; `legacy_thread = t.id`;
   `cause_id` null, `depth` 0.
@@ -1884,7 +1886,8 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
   `migrations/index.ts` after the last step.
 - `packages/agent-host/src/dev-services/store/mailbox.ts`: the types and `MailboxRecords` (below).
 - `packages/agent-host/src/dev-services/store/mailbox-adopt.ts`: `movePendingThreadMail(db, now): { messages: number;
-  recipients: number }` (§6.3) and `legacyChain(db, threadId, before, limit)`.
+  recipients: number }` (§6.3) and `legacyChain(db, threadId, before, limit)`. Free functions over a connection (they
+  import `mailbox.ts`, so `MailboxRecords` cannot call them without a cycle); M3a gives `main.ts` the call.
 - Tests: `store-mailbox.test.ts`, `store-mailbox-adopt.test.ts`.
 
 **Changes**
@@ -1941,7 +1944,9 @@ export type HandOverScope = 'all' | { recipients: readonly string[] }   // today
 ```
 
 A stored kind this build does not know reads as `notice`, and a stored `settled` word it does not know reads as
-`legacy`. A `facts` that fails to parse reads as `{}` and is logged once.
+`legacy`; a `released_why` it does not know reads as null. A `facts` that is not a JSON object reads as `{}`; a known
+key whose value is not its shape is left out alone (`factsFrom`, docs/stored-shapes.md rule 3). Either is logged once
+per store.
 
 **`MailboxRecords`.** It mirrors today's receipt methods in `store/mail.ts:806-1030` on the new tables, with the same
 semantics. Every method that changes rows runs in one transaction.
@@ -1949,13 +1954,18 @@ semantics. Every method that changes rows runs in one transaction.
 - Writing: `insert(mail: NewMail, recipients: NewRecipient[]): MailRow`. The root is `rootId` when given, else
   `replyTo`'s stored root, else the message's own id. With `replyTo` not stored and no `rootId`, it throws
   `MailTargetMissing` (the tool refuses first, S9 `unknown_message`; only a forwarded message passes `rootId`). A
-  duplicate `(sender, dedupeKey)` returns the stored row with `duplicate: true` instead of throwing.
+  duplicate `(sender, dedupeKey)` returns the stored row with `duplicate: true` instead of throwing (the return type is
+  `StoredMail = MailRow & { duplicate: boolean }`).
 - Reading: `message(id)`, `recipients(id)`, `recipient(id, address)`, `chain(id, limit)` (ancestors, nearest first),
   `byRoot(rootId, { before?, limit })`, `feedOf(address, { before?, limit })` (to or from the address, newest first),
   `reportsOn(taskId)` (Centralu's reports replying to it, oldest first), `newestTask(sender, recipient)` (unsettled).
-- Delivery: `pendingFor(recipient, now, again)`, `dueRecipients(now)`, `nextDue(recipient, now)`,
+- Delivery (rows `withdrawn` or `gone` are never pending, so drain's skip of them, §8.2 step 1, is the store's):
+  `pendingFor(recipient, now, again)`, `dueRecipients()` (waiting mail due or not, as `recipientsWithMail` today;
+  `nextDue` says when), `nextDue(recipient, now)`,
   `hasDue(recipient, now)`, `markAttempt`, `markDelivered(recipient, ids, at, turnSeq | null)`, `hold`,
-  `markRead(recipient, ids, at)`, `release`, `dismiss`, `failedTry`, `takeBack`, `interrupted()`,
+  `markRead(recipient, ids, at)`, `release`, `dismiss`, `failedTry`, `takeBack`, `interrupted()`, and today's
+  `undeliver`, `markUncertain`, `markMaybeRepeated` and `attemptsOf` (M2's `reconcileInterrupted` and
+  `deliveryFailedLate` need them),
   `heldRows()`, `heldPolicy()` (every `policy` row with its message's `sender_project`), `deleteHeld(rows)` (§7.4
   Dismiss).
 - Settling and waiting: `settle(messageId, recipient | 'all', how, at, answerId?)`, `answerHeld(messageId,
@@ -1980,7 +1990,10 @@ semantics. Every method that changes rows runs in one transaction.
   - `followUpsTo(recipient, since)`: notices with `facts.reminder` or `facts.unanswered`, with `delivered_at`;
   - `releasedUntold(sender)`: needsReply rows of the sender's messages with `released_at` set and `told_at` null;
   - `refusedRecords(projectId)`: the `refused` notices of that project, by caller (§7.4).
-- Handoff and trash: `moveRows(from, to, scope: HandOverScope)` (the heir's existing row wins; §7.7),
+- Handoff and trash: `moveRows(from, to, scope: HandOverScope)` (`from`'s unsettled rows that are watched or unread,
+  as today's `moveUnreadReceipts` moves every unread receipt, so a child's unread report reaches the heir; with
+  `{ recipients }`, only those of mail from these recipients; the heir's existing row wins, and a row of the heir's own
+  message stays with `from`; §7.7),
   `moveRole(from, to)` (resets delivery fields, §7.7), `purgeParty(address)`.
 - Retention: `sweep(limits)`.
 

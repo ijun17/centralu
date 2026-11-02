@@ -1,0 +1,824 @@
+import type Database from 'better-sqlite3'
+import { z } from 'zod'
+import { isObj } from '../../json-value.js'
+import { parseAddress } from '../../mail/address.js'
+import { parseJson } from './json.js'
+
+/*
+ * Mail without threads (#1684, docs/plans/mailbox.md §5, §6, store step v65): messages addressed to parties, and each
+ * recipient's progress with one. This file holds the queries and the shapes they hand out; the rules (who may write,
+ * what is held, what a reply settles) are the message service's (slice M2). Nothing outside `store/` reads these
+ * tables before slice M3a.
+ *
+ * **A word this build does not know reads as a default** (docs/stored-shapes.md): a kind as `notice`, a `settled` word as
+ * `legacy`, a release reason as null. A `facts` key that does not read is left out, and a `facts` that is not an object
+ * reads as `{}` (`factsFrom`).
+ */
+
+export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
+export type MailKind = (typeof MAIL_KINDS)[number]
+export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
+export type Settled = (typeof SETTLED)[number]
+export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone'] as const
+export type ReleaseWhy = (typeof RELEASE_WHY)[number]
+
+/** What only Centralu writes about a message (§5.4). Every key optional; a key a newer build added is kept */
+export const MailFacts = z.looseObject({
+  outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']).optional(),
+  about: z.object({ session: z.string() }).optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  paused: z.number().optional(),
+  waitingOn: z.number().optional(),
+  personNote: z.boolean().optional(),
+  answer: z.string().optional(),
+  quiet: z.boolean().optional(),
+  needsOwner: z.boolean().optional(),
+  covers: z.array(z.string()).optional(),
+  clarifies: z.string().optional(),
+  hostCap: z.boolean().optional(),
+  answerHeld: z.object({ question: z.string(), answer: z.string() }).optional(),
+  refused: z.object({ tool: z.string(), target: z.string(), firstLine: z.string(), projectId: z.string() }).optional(),
+  trusted: z.object({ project: z.string(), refused: z.array(z.string()) }).optional(),
+  reminder: z.union([z.literal(1), z.literal(2)]).optional(),
+  of: z.array(z.string()).max(10).optional(),
+  unanswered: z.array(z.object({ id: z.string(), recipient: z.string(), why: z.enum(RELEASE_WHY) })).optional(),
+  asker: z.string().optional(),
+  handedOver: z.boolean().optional(),
+  legacyKind: z.string().optional(),
+  chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
+})
+export type MailFacts = z.infer<typeof MailFacts>
+
+export type MailRow = {
+  id: string
+  sender: string
+  senderProject: string | null
+  kind: MailKind
+  needsReply: boolean
+  replyTo: string | null
+  rootId: string
+  causeId: string | null
+  depth: number
+  urgent: boolean
+  body: string
+  facts: MailFacts
+  dedupeKey: string | null
+  origin: string | null
+  legacyThread: string | null
+  createdAt: number
+}
+
+export type RecipientRow = {
+  messageId: string
+  recipient: string
+  recipientProject: string | null
+  via: string | null
+  dueAt: number
+  attemptAt: number | null
+  deliveredAt: number | null
+  readAt: number | null
+  held: string | null
+  attempts: number
+  lastError: string | null
+  turnSeq: number | null
+  settled: Settled | null
+  settledAt: number | null
+  answerId: string | null
+  reminded: number
+  remindedAt: number | null
+  releasedAt: number | null
+  releasedWhy: ReleaseWhy | null
+  toldAt: number | null
+}
+
+/** `rootId` only for mail from another machine, whose host computed it (§14) */
+export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }
+export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
+  Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
+/** Which of the original's rows a handoff moves: all, or those of mail from the recipients of its tasks that move (§7.7) */
+export type HandOverScope = 'all' | { recipients: readonly string[] }
+
+/** The stored message, and whether it was there already under the sender's `dedupeKey` */
+export type StoredMail = MailRow & { duplicate: boolean }
+/** A row and its message: what a delivery re-reads at drain time (§8.2) */
+export type PendingRow = { row: RecipientRow; message: MailRow }
+/** One row by its key */
+export type RowKey = { messageId: string; recipient: string }
+
+/** The reply target is not stored and no root was given: a reply's root cannot be computed (S9 `unknown_message`) */
+export class MailTargetMissing extends Error {
+  constructor(readonly replyTo: string) {
+    super(`The message ${replyTo} is not stored`)
+    this.name = 'MailTargetMissing'
+  }
+}
+
+export type MailboxSweepLimits = {
+  /** A message something still waits on (§6.4) is kept at most this long */
+  waitingMs: number
+  /** Any other message goes this long after it was sent */
+  settledMs: number
+  /** A notice read by every recipient goes this long after it was sent */
+  readNoticeMs: number
+  /** Messages per delete, so a sweep never holds the store for long */
+  batch: number
+}
+
+const DAY = 24 * 60 * 60 * 1000
+export const MAILBOX_RETENTION: MailboxSweepLimits = { waitingMs: 180 * DAY, settledMs: 30 * DAY, readNoticeMs: 14 * DAY, batch: 500 }
+
+type MailSql = {
+  id: string
+  sender: string
+  sender_project: string | null
+  kind: string
+  needs_reply: number
+  reply_to: string | null
+  root_id: string
+  cause_id: string | null
+  depth: number
+  urgent: number
+  body: string
+  facts: string
+  dedupe_key: string | null
+  origin: string | null
+  legacy_thread: string | null
+  created_at: number
+}
+
+type RecipientSql = {
+  message_id: string
+  recipient: string
+  recipient_project: string | null
+  via: string | null
+  due_at: number
+  attempt_at: number | null
+  delivered_at: number | null
+  read_at: number | null
+  held: string | null
+  attempts: number
+  last_error: string | null
+  turn_seq: number | null
+  settled: string | null
+  settled_at: number | null
+  answer_id: string | null
+  reminded: number
+  reminded_at: number | null
+  released_at: number | null
+  released_why: string | null
+  told_at: number | null
+}
+
+/** A row watched for an answer: of a needsReply message or a task (§4). `m` is the message, `r` the row */
+const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
+/** A row that may be delivered: not read, not held (or let go by the person), and not withdrawn or gone (§8.2 step 1) */
+const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone')`
+/** Held for a reason the person acts on */
+const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
+/** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
+const RECIPIENT_HOLDS = `('uncertain', 'failed', 'loop', 'budget', 'policy')`
+
+/** The ids as one JSON parameter, read with `json_each` */
+const idList = (ids: readonly string[]): string => JSON.stringify(ids)
+
+export class MailboxRecords {
+  /** Whether a `facts` that did not read was logged: once per store, so a run of bad rows does not flood the log */
+  private factsWarned = false
+
+  constructor(private readonly db: Database.Database) {}
+
+  /** One unit of work. `immediate`, so a read then write cannot interleave with another writer */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn).immediate()
+  }
+
+  // ── Writing ──
+
+  /**
+   * Stores a message and a row for each recipient. The root is `rootId` when given, else the reply target's stored root,
+   * else the message's own id. A duplicate `(sender, dedupeKey)` returns the stored message with `duplicate: true` and
+   * writes nothing
+   */
+  insert(mail: NewMail, recipients: readonly NewRecipient[]): StoredMail {
+    return this.transaction(() => {
+      if (mail.dedupeKey !== null) {
+        const stored = this.db.prepare<[string, string], MailSql>(`SELECT * FROM mail WHERE sender = ? AND dedupe_key = ?`).get(mail.sender, mail.dedupeKey)
+        if (stored) return { ...this.toMail(stored), duplicate: true }
+      }
+      let rootId = mail.rootId ?? mail.id
+      if (mail.rootId === undefined && mail.replyTo !== null) {
+        const target = this.db.prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE id = ?`).get(mail.replyTo)
+        if (!target) throw new MailTargetMissing(mail.replyTo)
+        rootId = target.root_id
+      }
+      this.db
+        .prepare(
+          `INSERT INTO mail (id, sender, sender_project, kind, needs_reply, reply_to, root_id, cause_id, depth, urgent, body, facts, dedupe_key, origin, legacy_thread, created_at)
+           VALUES (@id, @sender, @senderProject, @kind, @needsReply, @replyTo, @rootId, @causeId, @depth, @urgent, @body, @facts, @dedupeKey, @origin, @legacyThread, @createdAt)`,
+        )
+        .run({
+          id: mail.id,
+          sender: mail.sender,
+          senderProject: mail.senderProject,
+          kind: mail.kind,
+          needsReply: mail.needsReply ? 1 : 0,
+          replyTo: mail.replyTo,
+          rootId,
+          causeId: mail.causeId,
+          depth: mail.depth,
+          urgent: mail.urgent ? 1 : 0,
+          body: mail.body,
+          facts: JSON.stringify(mail.facts),
+          dedupeKey: mail.dedupeKey,
+          origin: mail.origin,
+          legacyThread: mail.legacyThread,
+          createdAt: mail.createdAt,
+        })
+      const row = this.db.prepare(
+        `INSERT INTO mail_recipients (message_id, recipient, recipient_project, via, due_at, delivered_at, read_at, held)
+         VALUES (@messageId, @recipient, @recipientProject, @via, @dueAt, @deliveredAt, @readAt, @held)`,
+      )
+      for (const r of recipients) {
+        row.run({ messageId: mail.id, recipient: r.recipient, dueAt: r.dueAt, recipientProject: r.recipientProject ?? null, via: r.via ?? null, deliveredAt: r.deliveredAt ?? null, readAt: r.readAt ?? null, held: r.held ?? null })
+      }
+      return { ...mail, rootId, duplicate: false }
+    })
+  }
+
+  // ── Reading ──
+
+  message(id: string): MailRow | undefined {
+    const row = this.db.prepare<[string], MailSql>(`SELECT * FROM mail WHERE id = ?`).get(id)
+    return row && this.toMail(row)
+  }
+
+  recipients(messageId: string): RecipientRow[] {
+    return this.rows(`r.message_id = ? ORDER BY r.recipient`, messageId)
+  }
+
+  recipient(messageId: string, address: string): RecipientRow | undefined {
+    return this.rows(`r.message_id = ? AND r.recipient = ?`, messageId, address)[0]
+  }
+
+  /** The messages `id` answers, nearest first, at most `limit`: its reply target, that one's, and so on up to the root */
+  chain(id: string, limit: number): MailRow[] {
+    return this.db
+      .prepare<[string, number], MailSql>(
+        `WITH RECURSIVE up(id, n) AS (
+           SELECT reply_to, 1 FROM mail WHERE id = ? AND reply_to IS NOT NULL
+           UNION ALL SELECT m.reply_to, up.n + 1 FROM mail m JOIN up ON m.id = up.id WHERE m.reply_to IS NOT NULL
+         )
+         SELECT m.* FROM up JOIN mail m ON m.id = up.id ORDER BY up.n LIMIT ?`,
+      )
+      .all(id, limit)
+      .map((r) => this.toMail(r))
+  }
+
+  /** The last `limit` messages of a root, or the last before the message `before`, oldest first */
+  byRoot(rootId: string, opts: { before?: string; limit: number }): MailRow[] {
+    return this.page(`m.root_id = @key`, rootId, opts).reverse()
+  }
+
+  /** Messages to or from `address`, newest first, `limit` of them, before the message `before` when given */
+  feedOf(address: string, opts: { before?: string; limit: number }): MailRow[] {
+    return this.page(`(m.sender = @key OR EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @key))`, address, opts)
+  }
+
+  /** Centralu's reports on a task (replying to it), oldest first */
+  reportsOn(taskId: string): MailRow[] {
+    return this.messages(`m.reply_to = ? AND m.kind = 'report' AND m.sender = 'centralu' ORDER BY m.created_at, m.id`, taskId)
+  }
+
+  /** The newest task from `sender` whose row to `recipient` is not settled */
+  newestTask(sender: string, recipient: string): MailRow | undefined {
+    return this.messages(
+      `m.sender = ? AND m.kind = 'task' AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ? AND r.settled IS NULL)
+       ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
+      sender,
+      recipient,
+    )[0]
+  }
+
+  // ── Delivery ──
+
+  /**
+   * What `recipient` may be delivered, with its message, oldest first: rows waiting and due by `now`, not delivered yet
+   * (or, with `again`, delivered and still unread: a wake that points at what has not been read)
+   */
+  pendingFor(recipient: string, now: number, again = false): PendingRow[] {
+    return this.withMessages(
+      this.rows(`r.recipient = ? AND ${WAITING} AND r.due_at <= ? AND (r.delivered_at IS NULL OR ? = 1) ORDER BY m.created_at, m.id`, recipient, now, again ? 1 : 0),
+    )
+  }
+
+  /**
+   * The recipients with mail waiting to be delivered, due or not: whom the delivery sweep looks at. `nextDue` says when
+   * one not due yet is
+   */
+  dueRecipients(): string[] {
+    return this.db
+      .prepare<[], { recipient: string }>(`SELECT DISTINCT r.recipient FROM mail_recipients r WHERE r.delivered_at IS NULL AND ${WAITING}`)
+      .all()
+      .map((r) => r.recipient)
+  }
+
+  /** When the first of `recipient`'s waiting mail not due by `after` becomes due, or null */
+  nextDue(recipient: string, after: number): number | null {
+    const row = this.db
+      .prepare<[string, number], { due: number | null }>(`SELECT MIN(r.due_at) AS due FROM mail_recipients r WHERE r.recipient = ? AND r.due_at > ? AND r.delivered_at IS NULL AND ${WAITING}`)
+      .get(recipient, after)
+    return row?.due ?? null
+  }
+
+  hasDue(recipient: string, now: number): boolean {
+    return !!this.db
+      .prepare<[string, number], { one: number }>(`SELECT 1 AS one FROM mail_recipients r WHERE r.recipient = ? AND r.due_at <= ? AND r.delivered_at IS NULL AND ${WAITING} LIMIT 1`)
+      .get(recipient, now)
+  }
+
+  /** Committed before a delivery is tried: a host that dies before `markDelivered` leaves a delivery that may have gone */
+  markAttempt(recipient: string, ids: readonly string[], at: number): void {
+    this.update('attempt_at = ?, attempts = attempts + 1', [at], recipient, ids)
+  }
+
+  /** The tool took them, in the turn `turnSeq` started or joined (null: delivered quietly outside a turn) */
+  markDelivered(recipient: string, ids: readonly string[], at: number, turnSeq: number | null): void {
+    this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
+  }
+
+  /** Sets why mail waits for the person (`policy`, `loop`, `budget`, `failed`, `uncertain`), or clears it with null */
+  hold(recipient: string, ids: readonly string[], why: string | null): void {
+    this.update('held = ?', [why], recipient, ids)
+  }
+
+  /** Read, keeping an earlier read time */
+  markRead(recipient: string, ids: readonly string[], at: number): number {
+    return this.update('read_at = COALESCE(read_at, ?)', [at], recipient, ids)
+  }
+
+  /**
+   * The person's Resend: held mail goes at `dueAt`. Mail held from waking a session (`policy`, `budget`) goes as the mail
+   * it is and is not held again (`released`); `uncertain`, `failed` and `loop` are cleared
+   */
+  release(recipient: string, ids: readonly string[], dueAt: number): number {
+    return this.update(
+      `delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
+       held = CASE WHEN held IN ('policy', 'budget') THEN 'released' ELSE NULL END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?`,
+      [dueAt],
+      recipient,
+      ids,
+      `held IN ${RECIPIENT_HOLDS}`,
+    )
+  }
+
+  /** The person's Dismiss of `uncertain` or `failed` mail: never delivered, held against no one */
+  dismiss(recipient: string, ids: readonly string[]): number {
+    return this.update(`held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0`, [], recipient, ids, `held IN ${RECIPIENT_HOLDS}`)
+  }
+
+  /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox */
+  failedTry(recipient: string, ids: readonly string[], error: string, retryAt: number): void {
+    this.update('attempt_at = NULL, last_error = ?, due_at = ?', [error, retryAt], recipient, ids)
+  }
+
+  /** A try not made after all: the attempt is taken back and counts for nothing */
+  takeBack(recipient: string, ids: readonly string[]): void {
+    this.update('attempt_at = NULL, attempts = MAX(attempts - 1, 0)', [], recipient, ids, 'delivered_at IS NULL')
+  }
+
+  /** How many times the most-tried of these was attempted */
+  attemptsOf(recipient: string, ids: readonly string[]): number {
+    const row = this.db
+      .prepare<[string, string], { n: number | null }>(`SELECT MAX(attempts) AS n FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .get(recipient, idList(ids))
+    return row?.n ?? 0
+  }
+
+  /**
+   * A delivery the tool failed late: the rows that delivery marked delivered at `deliveredAt` are unread and undelivered
+   * again, unless held since. Returns the ids put back
+   */
+  undeliver(recipient: string, ids: readonly string[], deliveredAt: number): string[] {
+    const where = `recipient = ? AND delivered_at = ? AND (held IS NULL OR held = 'released') AND message_id IN (SELECT value FROM json_each(?))`
+    const args: [string, number, string] = [recipient, deliveredAt, idList(ids)]
+    const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_recipients WHERE ${where}`).all(...args).map((r) => r.message_id)
+    this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL WHERE ${where}`).run(...args)
+    return put
+  }
+
+  /** A delivery that may have gone and may not: held until the person says */
+  markUncertain(recipient: string, ids: readonly string[]): void {
+    this.update(`held = 'uncertain', attempt_at = NULL`, [], recipient, ids)
+  }
+
+  /** A delivery that may have gone, of mail that starts no work: tried again, its next frame saying it may be a repeat */
+  markMaybeRepeated(recipient: string, ids: readonly string[], dueAt: number): void {
+    this.update(`attempt_at = NULL, last_error = 'maybe_repeated', due_at = ?`, [dueAt], recipient, ids)
+  }
+
+  /** Deliveries tried and not known to have gone: what a host that starts finds a previous one left */
+  interrupted(): RecipientRow[] {
+    return this.rows(`r.attempt_at IS NOT NULL AND r.delivered_at IS NULL AND ${WAITING}`)
+  }
+
+  /** The rows held for the person to act on, the earliest due first */
+  heldRows(): RecipientRow[] {
+    return this.rows(`${HELD} AND r.read_at IS NULL ORDER BY r.due_at, r.message_id, r.recipient`)
+  }
+
+  /** Every row held `policy`, with its message's `sender_project`: what the person's trust or Dismiss acts on (§7.4) */
+  heldPolicy(): { row: RecipientRow; senderProject: string | null }[] {
+    return this.withMessages(this.rows(`r.held = 'policy' ORDER BY m.created_at, m.id, r.recipient`)).map((p) => ({ row: p.row, senderProject: p.message.senderProject }))
+  }
+
+  /** The person's Dismiss of a project's held mail (§7.4): these `policy` rows go, and each message left with no row. Returns the rows deleted */
+  deleteHeld(rows: readonly RowKey[]): number {
+    return this.transaction(() => {
+      const del = this.db.prepare(`DELETE FROM mail_recipients WHERE message_id = ? AND recipient = ? AND held = 'policy'`)
+      let n = 0
+      for (const r of rows) n += del.run(r.messageId, r.recipient).changes
+      this.dropOrphans(rows.map((r) => r.messageId))
+      return n
+    })
+  }
+
+  // ── Settling and waiting ──
+
+  /** Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). Returns how many */
+  settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
+    return this.db
+      .prepare(
+        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
+          WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient) AND settled IS NULL
+            AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,
+      )
+      .run({ messageId, recipient, how, at, answerId: answerId ?? null }).changes
+  }
+
+  /** The recipient's answer is held for the person: the row keeps it and stays open (D8) */
+  answerHeld(messageId: string, recipient: string, answerId: string): void {
+    this.db.prepare(`UPDATE mail_recipients SET answer_id = ? WHERE message_id = ? AND recipient = ? AND settled IS NULL`).run(answerId, messageId, recipient)
+  }
+
+  /** A held answer was dismissed: the rows it was to settle are open again. Returns how many */
+  answerDropped(answerId: string): number {
+    return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND settled IS NULL`).run(answerId).changes
+  }
+
+  /** The watched rows to `recipient` not settled */
+  watchedTo(recipient: string): RecipientRow[] {
+    return this.rows(`r.recipient = ? AND r.settled IS NULL AND ${WATCHED} ORDER BY m.created_at, m.id`, recipient)
+  }
+
+  /** The watched rows of `sender`'s messages not settled */
+  watchedFrom(sender: string): RecipientRow[] {
+    return this.rows(`m.sender = ? AND r.settled IS NULL AND ${WATCHED} ORDER BY m.created_at, m.id, r.recipient`, sender)
+  }
+
+  /** Centralu stops watching a row for its recipient, once: a row already released is left alone. Returns whether it was released now */
+  markReleased(messageId: string, recipient: string, at: number, why: ReleaseWhy): boolean {
+    return (
+      this.db
+        .prepare(`UPDATE mail_recipients SET released_at = ?, released_why = ? WHERE message_id = ? AND recipient = ? AND released_at IS NULL`)
+        .run(at, why, messageId, recipient).changes > 0
+    )
+  }
+
+  /** The sender was told of these released rows */
+  markTold(rows: readonly RowKey[], at: number): void {
+    const told = this.db.prepare(`UPDATE mail_recipients SET told_at = ? WHERE message_id = ? AND recipient = ? AND told_at IS NULL`)
+    this.transaction(() => {
+      for (const r of rows) told.run(at, r.messageId, r.recipient)
+    })
+  }
+
+  // ── Cover (§10.3) ──
+
+  /**
+   * A row that spares `r` a reminder: of a watched message or task its recipient sent after `r` was delivered, whose cause
+   * is null or the starter of the turn `r` was delivered in, not settled, held or released; for a task, only while
+   * `owes(sender, recipient)`. Null when there is none
+   */
+  covering(r: RecipientRow, owes: (owner: string, child: string) => boolean): RecipientRow | null {
+    if (r.deliveredAt === null) return null
+    const party = parseAddress(r.recipient)
+    const starter =
+      r.turnSeq !== null && party?.kind === 'session'
+        ? (this.db.prepare<[string, number], { s: string | null }>(`SELECT starter_id AS s FROM mail_turns WHERE session_id = ? AND turn_seq = ?`).get(party.sessionId, r.turnSeq)?.s ?? null)
+        : null
+    const rows = this.withMessages(
+      this.rows(
+        `m.sender = ? AND m.created_at > ? AND (m.cause_id IS NULL OR m.cause_id = ?) AND ${WATCHED}
+           AND r.settled IS NULL AND r.released_at IS NULL AND (r.held IS NULL OR r.held = 'released')
+         ORDER BY m.created_at, m.id, r.recipient`,
+        r.recipient,
+        r.deliveredAt,
+        starter,
+      ),
+    )
+    return rows.find((x) => x.message.kind !== 'task' || owes(x.message.sender, x.row.recipient))?.row ?? null
+  }
+
+  // ── Guards and counts ──
+
+  /** Messages from `sender` with a row to `recipient` that answer nothing, since `since` (the pair rate, §7.5) */
+  newSince(sender: string, recipient: string, since: number): number {
+    return this.count(
+      `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+        WHERE m.sender = ? AND r.recipient = ? AND m.reply_to IS NULL AND m.created_at >= ?`,
+      sender,
+      recipient,
+      since,
+    )
+  }
+
+  /** Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5) */
+  pairTurnsSince(a: string, b: string, since: number): number {
+    return this.count(
+      `SELECT COUNT(DISTINCT r.recipient || ':' || r.turn_seq) AS n FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+        WHERE ((r.recipient = @a AND m.sender = @b) OR (r.recipient = @b AND m.sender = @a)) AND r.turn_seq IS NOT NULL
+          AND r.delivered_at >= @since`,
+      { a, b, since },
+    )
+  }
+
+  /** Whether `sender` sent `recipient` this very text since `since` (the repeat guard, §7.5) */
+  sameBody(sender: string, recipient: string, body: string, since: number): boolean {
+    return (
+      this.count(
+        `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+          WHERE m.sender = ? AND r.recipient = ? AND m.body = ? AND m.created_at >= ?`,
+        sender,
+        recipient,
+        body,
+        since,
+      ) > 0
+    )
+  }
+
+  /**
+   * Requests from `senders` to the orchestrator since `since` (§7.6): their messages and tasks with a row to it, leaving
+   * out a reply to a needsReply message or a task the orchestrator sent that sender, and a clarification (`facts.clarifies`)
+   */
+  requestsSince(senders: readonly string[], orchestrator: string, since: number): number {
+    return this.count(
+      `SELECT COUNT(*) AS n FROM mail m
+        WHERE m.sender IN (SELECT value FROM json_each(@senders)) AND m.kind IN ('message', 'task') AND m.created_at >= @since
+          AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @orchestrator)
+          AND NOT (json_valid(m.facts) AND json_type(m.facts, '$.clarifies') IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM mail t JOIN mail_recipients tr ON tr.message_id = t.id AND tr.recipient = m.sender
+                           WHERE t.id = m.reply_to AND t.sender = @orchestrator AND (t.needs_reply = 1 OR t.kind = 'task'))`,
+      { senders: idList(senders), orchestrator, since },
+    )
+  }
+
+  /** Centralu's follow-ups to `recipient` (reminders and unanswered notices): those undelivered, and those delivered since `since` (D24) */
+  followUpsTo(recipient: string, since: number): RecipientRow[] {
+    return this.rows(
+      `r.recipient = ? AND m.kind = 'notice' AND m.sender = 'centralu'
+         AND json_valid(m.facts) AND (json_type(m.facts, '$.reminder') IS NOT NULL OR json_type(m.facts, '$.unanswered') IS NOT NULL)
+         AND (r.delivered_at IS NULL OR r.delivered_at >= ?)
+       ORDER BY m.created_at, m.id`,
+      recipient,
+      since,
+    )
+  }
+
+  /** The rows of `sender`'s needsReply messages released and not yet told (D25) */
+  releasedUntold(sender: string): RecipientRow[] {
+    return this.rows(`m.sender = ? AND m.needs_reply = 1 AND r.released_at IS NOT NULL AND r.told_at IS NULL ORDER BY m.created_at, m.id, r.recipient`, sender)
+  }
+
+  /** The records of delegations refused for `projectId` (§7.4), each with the caller it went to, oldest first */
+  refusedRecords(projectId: string): PendingRow[] {
+    return this.withMessages(
+      this.rows(
+        `m.sender = 'centralu' AND m.kind = 'notice' AND json_valid(m.facts) AND json_extract(m.facts, '$.refused.projectId') = ?
+         ORDER BY r.recipient, m.created_at, m.id`,
+        projectId,
+      ),
+    )
+  }
+
+  // ── Handoff and trash (§7.7) ──
+
+  /**
+   * A handoff: `from`'s rows not settled that are watched or unread go to `to`, in `scope`. A row not read is delivered
+   * afresh, with the holds about `from`'s delivery let go. When `to` already has a row for the message, or sent it, `to`'s
+   * side stays as it is: `from`'s row is deleted, or (for `to`'s own message) left. Returns the ids of the messages moved
+   */
+  moveRows(from: string, to: string, scope: HandOverScope): string[] {
+    return this.transaction(() => {
+      const inScope = scope === 'all' ? '1' : `m.sender IN (SELECT value FROM json_each(@senders))`
+      const ids = this.db
+        .prepare<{ from: string; to: string; senders: string }, { id: string }>(
+          `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+            WHERE r.recipient = @from AND r.settled IS NULL AND (${WATCHED} OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
+            ORDER BY m.created_at, m.id`,
+        )
+        .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
+        .map((r) => r.id)
+      this.db
+        .prepare(
+          `UPDATE OR IGNORE mail_recipients SET recipient = @to, turn_seq = NULL,
+             delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END,
+             attempt_at = CASE WHEN read_at IS NULL THEN NULL ELSE attempt_at END,
+             attempts = CASE WHEN read_at IS NULL THEN 0 ELSE attempts END,
+             last_error = CASE WHEN read_at IS NULL THEN NULL ELSE last_error END,
+             held = CASE WHEN read_at IS NULL AND held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
+           WHERE recipient = @from AND message_id IN (SELECT value FROM json_each(@ids))`,
+        )
+        .run({ from, to, ids: idList(ids) })
+      this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
+      return ids
+    })
+  }
+
+  /**
+   * The orchestrator's role moved (§7.7): rows sent to the role (`via = 'orchestrator'`) that are watched and not settled,
+   * or not delivered, go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the message ids moved
+   */
+  moveRole(from: string, to: string): string[] {
+    return this.transaction(() => {
+      const ids = this.rows(
+        `r.recipient = ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING})) ORDER BY m.created_at, m.id`,
+        from,
+      ).map((r) => r.messageId)
+      this.db
+        .prepare(
+          `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
+             held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
+           WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`,
+        )
+        .run(to, from, idList(ids))
+      this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
+      return ids
+    })
+  }
+
+  /** The trash was emptied of `address`: its rows go, and each message left with no row. Returns the rows deleted */
+  purgeParty(address: string): number {
+    return this.transaction(() => {
+      const ids = this.db.prepare<[string], { id: string }>(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ?`).all(address).map((r) => r.id)
+      const n = this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ?`).run(address).changes
+      this.dropOrphans(ids)
+      return n
+    })
+  }
+
+  // ── Retention (§6.4) ──
+
+  /**
+   * Plain batched deletes, one transaction each. A message something waits on (a watched row open, a row undelivered, a
+   * row held) is kept up to `waitingMs`; any other goes after `settledMs`, and a notice every recipient read after `readNoticeMs`
+   */
+  sweep(now: number, limits: Partial<MailboxSweepLimits> = {}): { messages: number } {
+    const l = { ...MAILBOX_RETENTION, ...limits }
+    const waits = `EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND (
+        (r.settled IS NULL AND r.released_at IS NULL AND ${WATCHED})
+        OR (r.delivered_at IS NULL AND ${WAITING})
+        OR (${HELD})))`
+    const unread = `EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.read_at IS NULL)`
+    const pick = this.db.prepare<{ waiting: number; settled: number; notice: number; batch: number }, { id: string }>(
+      `SELECT m.id FROM mail m
+        WHERE m.created_at <= @waiting
+           OR (m.created_at <= @settled AND NOT ${waits})
+           OR (m.kind = 'notice' AND m.created_at <= @notice AND NOT ${waits} AND NOT ${unread})
+        ORDER BY m.created_at LIMIT @batch`,
+    )
+    let messages = 0
+    for (;;) {
+      const n = this.transaction(() => {
+        const ids = idList(pick.all({ waiting: now - l.waitingMs, settled: now - l.settledMs, notice: now - l.readNoticeMs, batch: l.batch }).map((r) => r.id))
+        this.db.prepare(`DELETE FROM mail_recipients WHERE message_id IN (SELECT value FROM json_each(?))`).run(ids)
+        return this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?))`).run(ids).changes
+      })
+      messages += n
+      if (n === 0) return { messages }
+    }
+  }
+
+  // ── Rows ──
+
+  private toMail(r: MailSql): MailRow {
+    return {
+      id: r.id,
+      sender: r.sender,
+      senderProject: r.sender_project,
+      kind: MAIL_KINDS.find((k) => k === r.kind) ?? 'notice',
+      needsReply: r.needs_reply === 1,
+      replyTo: r.reply_to,
+      rootId: r.root_id,
+      causeId: r.cause_id,
+      depth: r.depth,
+      urgent: r.urgent === 1,
+      body: r.body,
+      facts: this.readFacts(r.id, r.facts),
+      dedupeKey: r.dedupe_key,
+      origin: r.origin,
+      legacyThread: r.legacy_thread,
+      createdAt: r.created_at,
+    }
+  }
+
+  /** `facts` as stored, read by `factsFrom`; what does not read is said once per store, naming the message */
+  private readFacts(id: string, raw: string): MailFacts {
+    const value = parseJson(raw)
+    const facts = factsFrom(value)
+    if (!this.factsWarned && (!isObj(value) || Object.keys(facts).length < Object.keys(value).length)) {
+      this.factsWarned = true
+      console.warn(`[mail] the facts of message ${id} do not read whole; what does not read is left out: ${raw.slice(0, 120)}`)
+    }
+    return facts
+  }
+
+  /** Rows with `where` over `r` (the row) and `m` (its message), `args` filling its `?` or `@names` */
+  private rows(where: string, ...args: unknown[]): RecipientRow[] {
+    return this.db
+      .prepare<unknown[], RecipientSql>(`SELECT r.* FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE ${where}`)
+      .all(...args)
+      .map(toRecipient)
+  }
+
+  private messages(where: string, ...args: unknown[]): MailRow[] {
+    return this.db
+      .prepare<unknown[], MailSql>(`SELECT m.* FROM mail m WHERE ${where}`)
+      .all(...args)
+      .map((r) => this.toMail(r))
+  }
+
+  /** Each row with its message; a row whose message is gone is left out */
+  private withMessages(rows: readonly RecipientRow[]): PendingRow[] {
+    return rows.flatMap((row) => {
+      const message = this.message(row.messageId)
+      return message ? [{ row, message }] : []
+    })
+  }
+
+  /** Newest first, before the message `before` when given (by time, then id) */
+  private page(where: string, key: string, opts: { before?: string; limit: number }): MailRow[] {
+    const anchor = opts.before === undefined ? undefined : this.message(opts.before)
+    return this.messages(
+      `${where} AND (@at IS NULL OR m.created_at < @at OR (m.created_at = @at AND m.id < @id)) ORDER BY m.created_at DESC, m.id DESC LIMIT @limit`,
+      { key, at: anchor?.createdAt ?? null, id: anchor?.id ?? '', limit: opts.limit },
+    )
+  }
+
+  /** `UPDATE ... SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <ids>`; returns the rows changed */
+  private update(set: string, setArgs: readonly (string | number | null)[], recipient: string, ids: readonly string[], also?: string): number {
+    return this.db
+      .prepare(`UPDATE mail_recipients SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(...setArgs, recipient, idList(ids)).changes
+  }
+
+  private count(sql: string, ...args: unknown[]): number {
+    return this.db.prepare<unknown[], { n: number }>(sql).get(...args)?.n ?? 0
+  }
+
+  /** Deletes those of `ids` no row names any more */
+  private dropOrphans(ids: readonly string[]): void {
+    this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)`).run(idList(ids))
+  }
+}
+
+function toRecipient(r: RecipientSql): RecipientRow {
+  return {
+    messageId: r.message_id,
+    recipient: r.recipient,
+    recipientProject: r.recipient_project,
+    via: r.via,
+    dueAt: r.due_at,
+    attemptAt: r.attempt_at,
+    deliveredAt: r.delivered_at,
+    readAt: r.read_at,
+    held: r.held,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    turnSeq: r.turn_seq,
+    settled: r.settled === null ? null : (SETTLED.find((s) => s === r.settled) ?? 'legacy'),
+    settledAt: r.settled_at,
+    answerId: r.answer_id,
+    reminded: r.reminded,
+    remindedAt: r.reminded_at,
+    releasedAt: r.released_at,
+    releasedWhy: RELEASE_WHY.find((w) => w === r.released_why) ?? null,
+    toldAt: r.told_at,
+  }
+}
+
+/**
+ * Facts as stored, read key by key (docs/stored-shapes.md rule 3): a value that is not a JSON object reads as `{}`, and a
+ * known key whose value is not the shape §5.4 gives is left out, alone; a key a newer build added is kept. A v61
+ * `waitingOn` (the thread ids still going, §6.3) reads as their count
+ */
+export function factsFrom(raw: unknown): MailFacts {
+  if (!isObj(raw)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const v = key === 'waitingOn' && Array.isArray(value) ? value.length : value
+    const shape = (MailFacts.shape as Record<string, z.ZodType | undefined>)[key]
+    if (!shape || shape.safeParse(v).success) out[key] = v
+  }
+  return MailFacts.parse(out)
+}

@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 64, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 65, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -187,6 +187,24 @@ erDiagram
     TEXT info
     INTEGER position
   }
+  mail {
+    TEXT id PK
+    TEXT sender
+    TEXT sender_project
+    TEXT kind
+    INTEGER needs_reply
+    TEXT reply_to
+    TEXT root_id
+    TEXT cause_id
+    INTEGER depth
+    INTEGER urgent
+    TEXT body
+    TEXT facts
+    TEXT dedupe_key
+    TEXT origin
+    TEXT legacy_thread
+    INTEGER created_at
+  }
   mail_blockers {
     TEXT thread_id PK
     INTEGER n PK
@@ -231,6 +249,28 @@ erDiagram
     INTEGER attempts
     TEXT last_error
   }
+  mail_recipients {
+    TEXT message_id PK
+    TEXT recipient PK
+    TEXT recipient_project
+    TEXT via
+    INTEGER due_at
+    INTEGER attempt_at
+    INTEGER delivered_at
+    INTEGER read_at
+    TEXT held
+    INTEGER attempts
+    TEXT last_error
+    INTEGER turn_seq
+    TEXT settled
+    INTEGER settled_at
+    TEXT answer_id
+    INTEGER reminded
+    INTEGER reminded_at
+    INTEGER released_at
+    TEXT released_why
+    INTEGER told_at
+  }
   mail_threads {
     TEXT id PK
     TEXT home
@@ -261,6 +301,9 @@ erDiagram
     INTEGER started_at
     INTEGER ended_at
     TEXT outcome
+    TEXT message_id
+    TEXT starter_id
+    TEXT ended_how
   }
   messages {
     TEXT session_id PK, FK
@@ -345,6 +388,7 @@ erDiagram
     TEXT asked_by_session_id
     TEXT forked_from_session_id
     TEXT interruption
+    INTEGER mail_args
   }
   subagent_messages {
     TEXT session_id PK, FK
@@ -649,6 +693,37 @@ Added in v46.
 | `info` | TEXT | no |  |  | v46 |
 | `position` | INTEGER | no | `0` |  | v46 |
 
+### `mail`
+
+Added in v65.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v65 |
+| `sender` | TEXT | no |  |  | v65 |
+| `sender_project` | TEXT | yes |  |  | v65 |
+| `kind` | TEXT | no |  |  | v65 |
+| `needs_reply` | INTEGER | no | `0` |  | v65 |
+| `reply_to` | TEXT | yes |  |  | v65 |
+| `root_id` | TEXT | no |  |  | v65 |
+| `cause_id` | TEXT | yes |  |  | v65 |
+| `depth` | INTEGER | no | `0` |  | v65 |
+| `urgent` | INTEGER | no | `0` |  | v65 |
+| `body` | TEXT | no |  |  | v65 |
+| `facts` | TEXT | no | `'{}'` |  | v65 |
+| `dedupe_key` | TEXT | yes |  |  | v65 |
+| `origin` | TEXT | yes |  |  | v65 |
+| `legacy_thread` | TEXT | yes |  |  | v65 |
+| `created_at` | INTEGER | no |  |  | v65 |
+
+Indexes:
+
+- `mail_cause`: `cause_id`
+- `mail_legacy`: `legacy_thread`
+- `mail_reply`: `reply_to`
+- `mail_root`: `root_id`, `created_at`
+- `mail_sender`: `sender`, `created_at`
+
 ### `mail_blockers`
 
 Added in v61.
@@ -725,6 +800,39 @@ Indexes:
 
 - `mail_receipts_pending`: `recipient`, `due_at`
 
+### `mail_recipients`
+
+Added in v65.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `message_id` | TEXT | no |  | PK 1 | v65 |
+| `recipient` | TEXT | no |  | PK 2 | v65 |
+| `recipient_project` | TEXT | yes |  |  | v65 |
+| `via` | TEXT | yes |  |  | v65 |
+| `due_at` | INTEGER | no |  |  | v65 |
+| `attempt_at` | INTEGER | yes |  |  | v65 |
+| `delivered_at` | INTEGER | yes |  |  | v65 |
+| `read_at` | INTEGER | yes |  |  | v65 |
+| `held` | TEXT | yes |  |  | v65 |
+| `attempts` | INTEGER | no | `0` |  | v65 |
+| `last_error` | TEXT | yes |  |  | v65 |
+| `turn_seq` | INTEGER | yes |  |  | v65 |
+| `settled` | TEXT | yes |  |  | v65 |
+| `settled_at` | INTEGER | yes |  |  | v65 |
+| `answer_id` | TEXT | yes |  |  | v65 |
+| `reminded` | INTEGER | no | `0` |  | v65 |
+| `reminded_at` | INTEGER | yes |  |  | v65 |
+| `released_at` | INTEGER | yes |  |  | v65 |
+| `released_why` | TEXT | yes |  |  | v65 |
+| `told_at` | INTEGER | yes |  |  | v65 |
+
+Indexes:
+
+- `mail_recipients_open`: `recipient`
+- `mail_recipients_pending`: `recipient`, `due_at`
+- `mail_recipients_untold`: `released_at`
+
 ### `mail_threads`
 
 Added in v61.
@@ -769,6 +877,9 @@ Added in v61.
 | `started_at` | INTEGER | no |  |  | v61 |
 | `ended_at` | INTEGER | yes |  |  | v61 |
 | `outcome` | TEXT | yes |  |  | v61 |
+| `message_id` | TEXT | yes |  |  | v65 |
+| `starter_id` | TEXT | yes |  |  | v65 |
+| `ended_how` | TEXT | yes |  |  | v65 |
 
 Indexes:
 
@@ -892,6 +1003,7 @@ Added in schema.sql.
 | `asked_by_session_id` | TEXT | yes |  |  | v45 |
 | `forked_from_session_id` | TEXT | yes |  |  | v52 |
 | `interruption` | TEXT | yes |  |  | v53 |
+| `mail_args` | INTEGER | yes |  |  | v65 |
 
 Indexes:
 

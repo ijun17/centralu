@@ -1,0 +1,440 @@
+/**
+ * `MailboxRecords`, the v65 tables' queries (docs/plans/mailbox.md §5, §6, M1). Nothing reads them yet; these tests
+ * hold the semantics the message service (M2) is built on.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type Database from 'better-sqlite3'
+import { Store } from './store.js'
+import { MailTargetMissing, type MailboxRecords, type NewMail, type NewRecipient } from './store/mailbox.js'
+
+const NOW = 1_800_000_000_000
+const DAY = 24 * 60 * 60 * 1000
+const A = 'session:h1/a'
+const B = 'session:h1/b'
+const C = 'session:h1/c'
+const ORC = 'session:h1/orc'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+let n = 0
+function mail(over: Partial<NewMail> & { sender: string }): NewMail {
+  n += 1
+  return {
+    id: `h1.m_${String(n).padStart(4, '0')}`,
+    senderProject: null,
+    kind: 'message',
+    needsReply: false,
+    replyTo: null,
+    causeId: null,
+    depth: 0,
+    urgent: false,
+    body: `body ${n}`,
+    facts: {},
+    dedupeKey: null,
+    origin: 'mail',
+    legacyThread: null,
+    createdAt: NOW + n,
+    ...over,
+  }
+}
+function must<T>(x: T | undefined): T {
+  if (x === undefined) throw new Error('missing')
+  return x
+}
+const to = (recipient: string, over: Partial<NewRecipient> = {}): NewRecipient => ({ recipient, dueAt: NOW, ...over })
+
+function world(): { store: Store; box: MailboxRecords; send: (over: Partial<NewMail> & { sender: string }, ...recipients: (string | NewRecipient)[]) => string; db: Database.Database } {
+  const store = new Store()
+  const box = store.mailbox
+  const send = (over: Partial<NewMail> & { sender: string }, ...recipients: (string | NewRecipient)[]) =>
+    box.insert(
+      mail(over),
+      recipients.map((r) => (typeof r === 'string' ? to(r) : r)),
+    ).id
+  return { store, box, send, db: (store as unknown as { db: Database.Database }).db }
+}
+
+describe('writing and the chain', () => {
+  it('the root is the reply target’s root', () => {
+    const { box, send } = world()
+    const first = send({ sender: A, needsReply: true }, B)
+    const second = send({ sender: B, replyTo: first }, A)
+    const third = send({ sender: A, replyTo: second }, B)
+    expect([first, second, third].map((id) => box.message(id)?.rootId)).toEqual([first, first, first])
+    expect(() => box.insert(mail({ sender: A, replyTo: 'h1.m_missing' }), [to(B)])).toThrow(MailTargetMissing)
+    const forwarded = box.insert(mail({ sender: A, replyTo: 'h2.m_elsewhere', rootId: 'h2.m_root' }), [to(B)])
+    expect(box.message(forwarded.id)).toMatchObject({ replyTo: 'h2.m_elsewhere', rootId: 'h2.m_root' })
+  })
+
+  it('chain walks back and stops at the root', () => {
+    const { box, send } = world()
+    const ids = [send({ sender: A }, B)]
+    for (let i = 1; i < 12; i++) ids.push(send({ sender: i % 2 ? B : A, replyTo: ids[i - 1] }, i % 2 ? A : B))
+    const last = ids.at(-1) ?? ''
+    expect(box.chain(last, 9).map((m) => m.id)).toEqual(ids.slice(2, 11).reverse())
+    expect(box.chain(ids[2] ?? '', 9).map((m) => m.id)).toEqual([ids[1], ids[0]])
+    expect(box.chain(ids[0] ?? '', 9)).toEqual([])
+  })
+
+  it('in any reply tree, each root is the first message of the chain, and the chain reaches it', () => {
+    // Seeded random trees: a failing seed can be run again
+    for (let seed = 1; seed <= 25; seed++) {
+      let s = seed
+      const random = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648)
+      const { box, send } = world()
+      const ids: string[] = []
+      for (let i = 0; i < 30; i++) {
+        const target = ids.length > 0 && random() < 0.7 ? ids[Math.floor(random() * ids.length)] : null
+        ids.push(send({ sender: random() < 0.5 ? A : B, replyTo: target }, random() < 0.5 ? A : C))
+      }
+      for (const id of ids) {
+        const chain = box.chain(id, 100)
+        const top = chain.at(-1) ?? box.message(id)
+        expect(top?.replyTo, `seed ${seed}`).toBeNull()
+        expect(box.message(id)?.rootId, `seed ${seed}`).toBe(top?.id)
+        expect(new Set(chain.map((m) => m.rootId)), `seed ${seed}`).toEqual(new Set(chain.length ? [top?.id] : []))
+      }
+    }
+  })
+
+  it('dedupe is unique per sender and a repeat returns the stored row', () => {
+    const { box } = world()
+    const first = box.insert(mail({ sender: 'centralu', dedupeKey: 'report:x:1', body: 'first' }), [to(A)])
+    const other = box.insert(mail({ sender: A, dedupeKey: 'report:x:1', body: 'other sender' }), [to(B)])
+    const again = box.insert(mail({ sender: 'centralu', dedupeKey: 'report:x:1', body: 'second' }), [to(C)])
+    expect(first.duplicate).toBe(false)
+    expect(other).toMatchObject({ duplicate: false, body: 'other sender' })
+    expect(again).toMatchObject({ duplicate: true, id: first.id, body: 'first' })
+    expect(box.recipients(first.id).map((r) => r.recipient)).toEqual([A])
+    // No key: never a duplicate
+    expect(box.insert(mail({ sender: A }), [to(B)]).duplicate).toBe(false)
+    expect(box.insert(mail({ sender: A }), [to(B)]).duplicate).toBe(false)
+  })
+
+  it('reads a kind, a settled word or a release reason it does not know as a default, and facts that do not read as empty, key by key, logged once', () => {
+    const { box, send, db } = world()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const a = send({ sender: A }, B)
+    const b = send({ sender: A }, B)
+    db.prepare(`UPDATE mail SET kind = 'proposal', facts = '{"outcome":"exploded","quiet":true}' WHERE id = ?`).run(a)
+    db.prepare(`UPDATE mail SET facts = 'not json' WHERE id = ?`).run(b)
+    db.prepare(`UPDATE mail_recipients SET settled = 'archived', released_why = 'bored', released_at = 1 WHERE message_id = ?`).run(a)
+    expect(box.message(a)).toMatchObject({ kind: 'notice', facts: { quiet: true } })
+    expect(box.message(a)?.facts.outcome).toBeUndefined()
+    expect(box.message(b)?.facts).toEqual({})
+    expect(box.message(b)?.facts).toEqual({})
+    expect(box.recipient(a, B)).toMatchObject({ settled: 'legacy', releasedWhy: null })
+    expect(warn).toHaveBeenCalledTimes(1)
+    // A key a newer build added is kept
+    db.prepare(`UPDATE mail SET facts = '{"quiet":true,"newer":{"x":1}}' WHERE id = ?`).run(b)
+    expect(box.message(b)?.facts).toEqual({ quiet: true, newer: { x: 1 } })
+  })
+})
+
+describe('reading', () => {
+  it('byRoot pages oldest first; feedOf lists to and from an address newest first; reportsOn and newestTask', () => {
+    const { box, send } = world()
+    const root = send({ sender: A }, B)
+    const r1 = send({ sender: B, replyTo: root }, A)
+    const r2 = send({ sender: A, replyTo: r1 }, B)
+    const other = send({ sender: C }, B)
+    expect(box.byRoot(root, { limit: 2 }).map((m) => m.id)).toEqual([r1, r2])
+    expect(box.byRoot(root, { before: r1, limit: 5 }).map((m) => m.id)).toEqual([root])
+    expect(box.feedOf(A, { limit: 10 }).map((m) => m.id)).toEqual([r2, r1, root])
+    expect(box.feedOf(B, { limit: 2, before: other }).map((m) => m.id)).toEqual([r2, r1])
+
+    const task1 = send({ sender: A, kind: 'task' }, B)
+    const task2 = send({ sender: A, kind: 'task' }, B)
+    const rep1 = send({ sender: 'centralu', kind: 'report', replyTo: task1, facts: { outcome: 'paused' } }, A)
+    const rep2 = send({ sender: 'centralu', kind: 'report', replyTo: task1, facts: { outcome: 'finished' } }, A)
+    send({ sender: B, replyTo: task1 }, A)
+    expect(box.reportsOn(task1).map((m) => m.id)).toEqual([rep1, rep2])
+    expect(box.newestTask(A, B)?.id).toBe(task2)
+    box.settle(task2, B, 'reported', NOW)
+    expect(box.newestTask(A, B)?.id).toBe(task1)
+    expect(box.newestTask(B, A)).toBeUndefined()
+  })
+})
+
+describe('delivery', () => {
+  it('pendingFor lists what may be delivered, oldest first; due, held, read, withdrawn and gone rows are not', () => {
+    const { box, send } = world()
+    const ids = [send({ sender: A }, B), send({ sender: A }, to(B, { dueAt: NOW + 1000 })), send({ sender: A }, to(B, { held: 'policy' })), send({ sender: A }, B), send({ sender: A, needsReply: true }, B), send({ sender: A, needsReply: true }, B)]
+    box.markRead(B, [ids[3] ?? ''], NOW)
+    box.settle(ids[4] ?? '', B, 'withdrawn', NOW)
+    box.settle(ids[5] ?? '', B, 'gone', NOW)
+    expect(box.pendingFor(B, NOW).map((p) => p.message.id)).toEqual([ids[0]])
+    expect(box.pendingFor(B, NOW + 1000).map((p) => p.message.id)).toEqual([ids[0], ids[1]])
+    expect(box.dueRecipients()).toEqual([B])
+    expect(box.hasDue(B, NOW)).toBe(true)
+    expect(box.nextDue(B, NOW)).toBe(NOW + 1000)
+
+    box.markAttempt(B, [ids[0] ?? ''], NOW)
+    expect(box.interrupted().map((r) => r.messageId)).toEqual([ids[0]])
+    box.markDelivered(B, [ids[0] ?? ''], NOW, 7)
+    expect(box.recipient(ids[0] ?? '', B)).toMatchObject({ deliveredAt: NOW, turnSeq: 7, attempts: 1 })
+    expect(box.pendingFor(B, NOW).map((p) => p.message.id)).toEqual([])
+    expect(box.pendingFor(B, NOW, true).map((p) => p.message.id)).toEqual([ids[0]])
+    expect(box.undeliver(B, [ids[0] ?? ''], NOW)).toEqual([ids[0]])
+    expect(box.recipient(ids[0] ?? '', B)).toMatchObject({ deliveredAt: null, turnSeq: null })
+  })
+
+  it('the person’s release lets a policy hold go as released and clears the others; dismiss holds against no one', () => {
+    const { box, send } = world()
+    const pol = send({ sender: A }, to(B, { held: 'policy' }))
+    const unsure = send({ sender: A }, B)
+    box.markUncertain(B, [unsure])
+    const failed = send({ sender: A }, B)
+    box.hold(B, [failed], 'failed')
+    expect(box.heldRows().map((r) => r.messageId)).toEqual([pol, unsure, failed])
+    expect(box.heldPolicy()).toEqual([{ row: expect.objectContaining({ messageId: pol }), senderProject: null }])
+    expect(box.release(B, [pol, unsure], NOW + 5)).toBe(2)
+    expect(box.recipient(pol, B)).toMatchObject({ held: 'released', dueAt: NOW + 5 })
+    expect(box.recipient(unsure, B)?.held).toBeNull()
+    expect(box.dismiss(B, [failed])).toBe(1)
+    expect(box.recipient(failed, B)?.held).toBe('dismissed')
+    expect(box.heldRows()).toEqual([])
+    box.failedTry(B, [unsure], 'busy', NOW + 9)
+    expect(box.recipient(unsure, B)).toMatchObject({ lastError: 'busy', dueAt: NOW + 9 })
+    box.markAttempt(B, [unsure], NOW)
+    box.takeBack(B, [unsure])
+    expect(box.recipient(unsure, B)).toMatchObject({ attemptAt: null, attempts: 0 })
+  })
+
+  it('deleteHeld drops policy rows and a message left with none', () => {
+    const { box, send } = world()
+    const both = send({ sender: A }, to(B, { held: 'policy' }), to(C, { held: 'policy' }))
+    const one = send({ sender: A }, to(B, { held: 'policy' }), C)
+    expect(box.deleteHeld([{ messageId: both, recipient: B }, { messageId: both, recipient: C }, { messageId: one, recipient: B }, { messageId: one, recipient: C }])).toBe(3)
+    expect(box.message(both)).toBeUndefined()
+    expect(box.recipients(one).map((r) => r.recipient)).toEqual([C])
+  })
+})
+
+describe('settling and waiting', () => {
+  it('only needsReply messages and tasks are watched and settled; a held answer keeps the row open until dropped', () => {
+    const { box, send } = world()
+    const plain = send({ sender: A }, B)
+    const ask = send({ sender: A, needsReply: true }, B, C)
+    const task = send({ sender: A, kind: 'task' }, C)
+    expect(box.settle(plain, B, 'done', NOW)).toBe(0)
+    expect(box.watchedFrom(A).map((r) => `${r.messageId}>${r.recipient}`)).toEqual([`${ask}>${B}`, `${ask}>${C}`, `${task}>${C}`])
+    expect(box.watchedTo(C).map((r) => r.messageId)).toEqual([ask, task])
+
+    box.answerHeld(ask, B, 'h1.m_answer')
+    expect(box.recipient(ask, B)).toMatchObject({ settled: null, answerId: 'h1.m_answer' })
+    expect(box.answerDropped('h1.m_answer')).toBe(1)
+    expect(box.recipient(ask, B)?.answerId).toBeNull()
+    expect(box.settle(ask, B, 'answered', NOW, 'h1.m_answer2')).toBe(1)
+    expect(box.settle(ask, B, 'done', NOW)).toBe(0)
+    expect(box.recipient(ask, B)).toMatchObject({ settled: 'answered', settledAt: NOW, answerId: 'h1.m_answer2' })
+    expect(box.settle(ask, 'all', 'withdrawn', NOW)).toBe(1)
+    expect(box.watchedFrom(A).map((r) => r.messageId)).toEqual([task])
+  })
+
+  it('markReleased writes once, and releasedUntold lists a row until markTold', () => {
+    const { box, send } = world()
+    const ask = send({ sender: A, needsReply: true }, B, C)
+    expect(box.markReleased(ask, B, NOW, 'waited')).toBe(true)
+    expect(box.markReleased(ask, B, NOW + 1, 'reminders')).toBe(false)
+    expect(box.recipient(ask, B)).toMatchObject({ releasedAt: NOW, releasedWhy: 'waited' })
+    expect(box.releasedUntold(A).map((r) => r.recipient)).toEqual([B])
+    box.markTold([{ messageId: ask, recipient: B }], NOW + 2)
+    expect(box.releasedUntold(A)).toEqual([])
+    expect(box.recipient(ask, B)?.toldAt).toBe(NOW + 2)
+  })
+})
+
+describe('covering (§10.3)', () => {
+  it('finds a watched row sent after the row was delivered with the delivery turn’s starter or no cause as its cause, and not one sent before, with another cause, settled, held or released', () => {
+    const { box, send, db } = world()
+    db.prepare(`INSERT INTO mail_turns (session_id, turn_seq, started_by, started_at, starter_id) VALUES ('b', 3, 'mail', ?, 'h1.m_start')`).run(NOW)
+    const before = send({ sender: B, needsReply: true, createdAt: NOW - 10 }, C)
+    const r = send({ sender: A, needsReply: true, createdAt: NOW }, B)
+    box.markDelivered(B, [r], NOW, 3)
+    const row = () => must(box.recipient(r, B))
+    const owes = () => true
+    expect(before).toBeTruthy()
+    const other = send({ sender: B, needsReply: true, causeId: 'h1.m_other', createdAt: NOW + 1 }, C)
+    const plain = send({ sender: B, causeId: 'h1.m_start', createdAt: NOW + 2 }, C)
+    const held = send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 3 }, to(C, { held: 'policy' }))
+    expect([other, plain, held]).toHaveLength(3)
+    expect(box.covering(row(), owes)).toBeNull()
+
+    const started = send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 4 }, C)
+    expect(box.covering(row(), owes)?.messageId).toBe(started)
+    box.settle(started, C, 'answered', NOW + 5)
+    expect(box.covering(row(), owes)).toBeNull()
+    const own = send({ sender: B, needsReply: true, createdAt: NOW + 6 }, C)
+    expect(box.covering(row(), owes)?.messageId).toBe(own)
+    box.markReleased(own, C, NOW + 7, 'waited')
+    expect(box.covering(row(), owes)).toBeNull()
+
+    // A task covers only while it is owed
+    const task = send({ sender: B, kind: 'task', causeId: 'h1.m_start', createdAt: NOW + 8 }, C)
+    expect(box.covering(row(), () => false)).toBeNull()
+    expect(box.covering(row(), (owner, child) => owner === B && child === C)?.messageId).toBe(task)
+
+    // A row delivered outside a turn is covered by a send with no cause only
+    const quiet = send({ sender: A, needsReply: true, createdAt: NOW + 9 }, B)
+    box.markDelivered(B, [quiet], NOW + 9, null)
+    box.settle(task, C, 'reported', NOW + 10)
+    send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 11 }, C)
+    expect(box.covering(must(box.recipient(quiet, B)), owes)).toBeNull()
+    const free = send({ sender: B, needsReply: true, createdAt: NOW + 12 }, C)
+    expect(box.covering(must(box.recipient(quiet, B)), owes)?.messageId).toBe(free)
+  })
+})
+
+describe('guards and counts', () => {
+  it('pairTurnsSince counts turns both ways by address', () => {
+    const { box, send } = world()
+    const deliver = (from: string, recipient: string, turn: number, at: number) => box.markDelivered(recipient, [send({ sender: from }, recipient)], at, turn)
+    deliver(B, A, 1, NOW)
+    deliver(B, A, 1, NOW + 1)
+    deliver(B, A, 2, NOW + 2)
+    deliver(A, B, 5, NOW + 3)
+    deliver(B, A, 9, NOW - 2 * 60 * 60 * 1000)
+    deliver(C, A, 3, NOW)
+    expect(box.pairTurnsSince(A, B, NOW - 60 * 60 * 1000)).toBe(3)
+    expect(box.pairTurnsSince(B, A, NOW - 60 * 60 * 1000)).toBe(3)
+  })
+
+  it('newSince counts messages that answer nothing; sameBody finds the same text to the same recipient', () => {
+    const { box, send } = world()
+    const first = send({ sender: A, body: 'hello' }, B)
+    send({ sender: A, body: 'again', replyTo: first }, B)
+    send({ sender: A, body: 'old', createdAt: NOW - DAY }, B)
+    expect(box.newSince(A, B, NOW - 1000)).toBe(1)
+    expect(box.sameBody(A, B, 'hello', NOW - 1000)).toBe(true)
+    expect(box.sameBody(A, C, 'hello', NOW - 1000)).toBe(false)
+    expect(box.sameBody(A, B, 'old', NOW - 1000)).toBe(false)
+  })
+
+  it('requestsSince leaves out replies to the orchestrator’s needsReply messages and tasks, and clarifications', () => {
+    const { box, send } = world()
+    const since = NOW - 1000
+    const ask = send({ sender: ORC, needsReply: true }, A)
+    const task = send({ sender: ORC, kind: 'task' }, A)
+    const fyi = send({ sender: ORC }, A)
+    const notToA = send({ sender: ORC, needsReply: true }, C)
+    send({ sender: A, replyTo: ask }, ORC)
+    send({ sender: A, replyTo: task }, ORC)
+    send({ sender: A, facts: { clarifies: task } }, ORC)
+    expect(box.requestsSince([A, B], ORC, since)).toBe(0)
+    send({ sender: A, replyTo: fyi }, ORC)
+    send({ sender: A, replyTo: notToA }, ORC)
+    send({ sender: B }, ORC)
+    send({ sender: C }, ORC)
+    send({ sender: A, createdAt: NOW - DAY }, ORC)
+    expect(box.requestsSince([A, B], ORC, since)).toBe(3)
+  })
+
+  it('followUpsTo lists reminders and unanswered notices undelivered or delivered since; refusedRecords by project', () => {
+    const { box, send } = world()
+    const r1 = send({ sender: 'centralu', kind: 'notice', facts: { reminder: 1, of: ['x'] } }, A)
+    const r2 = send({ sender: 'centralu', kind: 'notice', facts: { unanswered: [{ id: 'x', recipient: B, why: 'waited' }] } }, A)
+    const old = send({ sender: 'centralu', kind: 'notice', facts: { reminder: 2, of: ['x'] } }, A)
+    send({ sender: 'centralu', kind: 'notice', facts: { hostCap: true } }, A)
+    box.markDelivered(A, [r1], NOW, 1)
+    box.markDelivered(A, [old], NOW - DAY, 1)
+    expect(box.followUpsTo(A, NOW - 1000).map((r) => r.messageId)).toEqual([r1, r2])
+
+    const refused = send({ sender: 'centralu', kind: 'notice', facts: { refused: { tool: 'start_agent', target: 'q', firstLine: 'do', projectId: 'p1' } } }, to(B, { deliveredAt: NOW, readAt: NOW }))
+    send({ sender: 'centralu', kind: 'notice', facts: { refused: { tool: 'start_agent', target: 'q', firstLine: 'do', projectId: 'p2' } } }, B)
+    expect(box.refusedRecords('p1').map((p) => [p.row.recipient, p.message.id])).toEqual([[B, refused]])
+  })
+})
+
+describe('handoff and trash', () => {
+  it('moveRows lets the heir’s own row win', () => {
+    const { box, send } = world()
+    const shared = send({ sender: C, needsReply: true }, A, B)
+    box.markDelivered(B, [shared], NOW, 4)
+    box.markRead(B, [shared], NOW)
+    const unread = send({ sender: C }, to(A, { held: 'loop' }))
+    box.markDelivered(A, [unread], NOW, 2)
+    const readAsk = send({ sender: C, needsReply: true }, A)
+    box.markDelivered(A, [readAsk], NOW, 2)
+    box.markRead(A, [readAsk], NOW)
+    const readPlain = send({ sender: C }, A)
+    box.markRead(A, [readPlain], NOW)
+    const own = send({ sender: B, needsReply: true }, A)
+
+    expect(box.moveRows(A, B, 'all')).toEqual([shared, unread, readAsk])
+    expect(box.recipient(shared, B)).toMatchObject({ deliveredAt: NOW, readAt: NOW, turnSeq: 4 })
+    expect(box.recipient(shared, A)).toBeUndefined()
+    expect(box.recipient(unread, B)).toMatchObject({ deliveredAt: null, held: null, turnSeq: null, attempts: 0 })
+    expect(box.recipient(readAsk, B)).toMatchObject({ deliveredAt: NOW, readAt: NOW, turnSeq: null })
+    expect(box.recipient(readPlain, A)).toBeDefined()
+    expect(box.recipient(own, A)).toBeDefined()
+  })
+
+  it('moveRows with a scope moves only mail from those recipients', () => {
+    const { box, send } = world()
+    const fromC = send({ sender: C, needsReply: true }, A)
+    const fromOther = send({ sender: ORC, needsReply: true }, A)
+    expect(box.moveRows(A, B, { recipients: [C] })).toEqual([fromC])
+    expect(box.recipient(fromOther, A)).toBeDefined()
+  })
+
+  it('moveRole delivers afresh even when read', () => {
+    const { box, send } = world()
+    const NEW = 'session:h1/orc2'
+    const asked = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
+    box.markDelivered(ORC, [asked], NOW, 3)
+    box.markRead(ORC, [asked], NOW)
+    const direct = send({ sender: A, needsReply: true }, ORC)
+    const done = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
+    box.markDelivered(ORC, [done], NOW, 3)
+    box.settle(done, ORC, 'answered', NOW)
+    expect(box.moveRole(ORC, NEW)).toEqual([asked])
+    expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, via: 'orchestrator' })
+    expect(box.recipient(direct, ORC)).toBeDefined()
+    expect(box.recipient(done, ORC)).toBeDefined()
+  })
+
+  it('purgeParty removes a party’s rows', () => {
+    const { box, send } = world()
+    const onlyA = send({ sender: B }, A)
+    const both = send({ sender: B }, A, C)
+    const fromA = send({ sender: A }, C)
+    expect(box.purgeParty(A)).toBe(2)
+    expect(box.message(onlyA)).toBeUndefined()
+    expect(box.recipients(both).map((r) => r.recipient)).toEqual([C])
+    expect(box.message(fromA)).toBeDefined()
+  })
+})
+
+describe('retention (§6.4)', () => {
+  it('sweep keeps what waits and drops the settled after 30 days', () => {
+    const { box, send } = world()
+    const at = NOW - 40 * DAY
+    const delivered = (id: string, who: string) => {
+      box.markDelivered(who, [id], at, 1)
+      box.markRead(who, [id], at)
+      return id
+    }
+    const plain = delivered(send({ sender: A, createdAt: at }, B), B)
+    const answered = delivered(send({ sender: A, needsReply: true, createdAt: at }, B), B)
+    box.settle(answered, B, 'answered', at)
+    const open = delivered(send({ sender: A, needsReply: true, createdAt: at }, B), B)
+    const undelivered = send({ sender: A, createdAt: at }, B)
+    const held = send({ sender: A, createdAt: at }, to(B, { held: 'policy' }))
+    const released = delivered(send({ sender: A, needsReply: true, createdAt: at }, B), B)
+    box.markReleased(released, B, at, 'waited')
+    const recent = delivered(send({ sender: A, createdAt: NOW - DAY }, B), B)
+    const readNotice = delivered(send({ sender: 'centralu', kind: 'notice', createdAt: NOW - 20 * DAY }, B), B)
+    const unreadNotice = send({ sender: 'centralu', kind: 'notice', createdAt: NOW - 20 * DAY }, to(B, { deliveredAt: NOW - 20 * DAY }))
+    const ancient = send({ sender: A, needsReply: true, createdAt: NOW - 181 * DAY }, B)
+
+    expect(box.sweep(NOW, { batch: 2 })).toEqual({ messages: 5 })
+    const kept = (id: string) => box.message(id) !== undefined
+    expect([plain, answered, released, readNotice, ancient].map(kept)).toEqual([false, false, false, false, false])
+    expect([open, undelivered, held, recent, unreadNotice].map(kept)).toEqual([true, true, true, true, true])
+    expect(box.recipients(plain)).toEqual([])
+    expect(box.sweep(NOW)).toEqual({ messages: 0 })
+  })
+})
