@@ -692,10 +692,10 @@ fn a_host_is_stopped_pid_first_then_its_group_with_stdin_held() {
     let script = r#"
         exec 3<&0
         ( trap '' TERM; read x <&3; echo eof >> "$F" ) &
-        ( trap 'echo member-term >> "$F"; exit 0' TERM; while :; do sleep 0.05; done ) &
+        ( trap 'echo member-term >> "$F"; exit 0' TERM; while kill -0 $PPID 2>/dev/null; do sleep 0.05; done ) &
         trap 'echo leader-term >> "$F"' TERM
         echo ready >> "$F"
-        while :; do sleep 0.05; done
+        while kill -0 $PPID 2>/dev/null; do sleep 0.05; done
     "#;
     let launch = HostLaunch {
         program: "/bin/sh".into(),
@@ -704,6 +704,7 @@ fn a_host_is_stopped_pid_first_then_its_group_with_stdin_held() {
         token: None,
     };
     let mut child = spawn_host(&launch).unwrap();
+    let _ends_the_group = GroupGuard(Some(child.id()));
     let read = || std::fs::read_to_string(&file).unwrap_or_default();
     let until = |what: &str| {
         let end = Instant::now() + Duration::from_secs(10);
@@ -776,4 +777,73 @@ fn the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed() {
     let _ = child.wait();
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_file(file.with_extension("env"));
+}
+
+/**
+ * Ends what a test started in a process group, pass or fail (#1861). The scripts these tests run ignore TERM on
+ * purpose, so a test that failed on an assertion, or ended before its kill step, left them looping for days (a WSL run
+ * left fifteen). Held by a test as soon as it has the pid; when it drops, the group gets SIGKILL and, where the system
+ * can tell (Linux), the drop checks that no live process of the group is left. It cannot run when the test binary is killed:
+ * the scripts end by themselves then (they stop looping once their parent is gone).
+ */
+#[cfg(unix)]
+pub(crate) struct GroupGuard(pub(crate) Option<u32>);
+
+#[cfg(unix)]
+impl GroupGuard {
+    /// The live (not zombie) processes whose group is `pgid`; None where the system cannot say
+    fn members(pgid: u32) -> Option<Vec<u32>> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
+            // "pid (comm) S ppid pgrp ...": comm may hold spaces and parentheses, so read after its last one
+            let Some(rest) = stat.rsplit_once(')').map(|(_, r)| r) else { continue };
+            let mut fields = rest.split_whitespace();
+            let (state, _ppid, group) = (fields.next(), fields.next(), fields.next());
+            if state != Some("Z") && group.and_then(|g| g.parse::<u32>().ok()) == Some(pgid) {
+                found.push(pid);
+            }
+        }
+        Some(found)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        let Some(pgid) = self.0 else { return };
+        // Linux: a group with no live member is a number that may belong to someone else by now, and is not signalled.
+        // Elsewhere the members cannot be listed, so the group is signalled whatever its state.
+        if Self::members(pgid).is_some_and(|m| m.is_empty()) {
+            return;
+        }
+        kill_group_now(pgid);
+        let end = Instant::now() + Duration::from_secs(5);
+        while Self::members(pgid).is_some_and(|m| !m.is_empty()) && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let left = Self::members(pgid).unwrap_or_default();
+        if !thread::panicking() {
+            assert!(left.is_empty(), "the group {pgid} still has live processes after it was killed: {left:?}");
+        }
+    }
+}
+
+/// A supervisor's host and its group ended when a test is over, as `GroupGuard` does for a child the test holds
+#[cfg(unix)]
+pub(crate) struct HostGuard<'a>(pub(crate) &'a Supervisor);
+
+#[cfg(unix)]
+impl Drop for HostGuard<'_> {
+    fn drop(&mut self) {
+        // A poisoned lock (a test thread panicked holding it) still names the child
+        let pgid = self.0.inner.lock().unwrap_or_else(|e| e.into_inner()).child.as_ref().map(|c| c.id());
+        // First: it marks the supervisor as stopping, so its watcher cannot start another host in between
+        self.0.shutdown();
+        drop(GroupGuard(pgid));
+    }
 }
