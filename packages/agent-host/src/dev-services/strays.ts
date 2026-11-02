@@ -41,12 +41,14 @@ const exec = promisify(execFile)
  *     right now cannot be told apart from an ownerless orphan.** When this actually ran, that
  *     extension was hit with SIGTERM (143) and died.
  *
- *     **Init is whatever adopts an orphan on this machine** (#1882): under WSL a per-session `/init` helper, under a
- *     user `systemd --user` that process, in a container its init. A leftover's parent is then alive, and the chain
- *     above would read it as an owner. `orphanAdopter` asks the machine where an orphan of ours lands (a short-lived one
- *     is made and its parent read), and that one process counts as init. Any other living parent, an ancestor of the
- *     host included, is still an owner: it is the keeper or an agent holding its own children. What started the host (the keeper, a launcher) is
- *     never a candidate, so the adopter taking it in does not make it one.
+ *     **WSL's `/init` counts as init** (#1882). There an orphan is adopted by a per-session `/init` helper, not by pid 1,
+ *     so a leftover's parent is alive and the chain above would read it as an owner. `orphanAdopter` asks the machine where
+ *     an orphan of ours lands (a short-lived one is made and its parent read); that process counts as init only when its
+ *     command is exactly `/init`. Every other living parent is still an owner: the keeper or an agent holding its own
+ *     children, and `systemd --user`, which also adopts an editor that detached itself (`code .` from a terminal in the
+ *     project: cwd in the project, no terminal, parent `systemd --user`), and would be offered as a leftover. A systemd
+ *     desktop's own leftovers are therefore still missed, by choice. What started the host (the keeper, a launcher) is
+ *     never a candidate.
  *
  *     If everything in between on the chain is also a candidate (same folder, no terminal), those
  *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
@@ -121,7 +123,7 @@ export function pickStrays(
    * not even their parent, so the parent chain alone would call them ownerless.
    */
   held: readonly number[] = [],
-  /** The process the machine re-parents an orphan to (`orphanAdopter`), taken for init in rule 4 */
+  /** WSL's `/init` helper, where it adopts an orphan of ours (`orphanAdopter`), taken for init in rule 4 */
   adopter: number | null = null,
 ): StrayProcess[] {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
@@ -220,23 +222,27 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
 }
 
 /**
- * Where this machine re-parents an orphan: a shell starts a background process and exits, and the process's parent is
- * read. Null when it could not be found out, which leaves only pid 1 as init. The probe is one `sleep` that outlives the
- * bounds below and is ended with the call.
+ * WSL's `/init` helper when it is where this machine re-parents an orphan, else null (#1882). A shell starts a background
+ * process and exits, and the process's parent is read; it is returned only when its command is exactly `/init`. Another
+ * adopter, `systemd --user` above all, is not taken for init: it also holds an editor that detached itself, which is no
+ * leftover. A container's init is left out too, as no command line names one exactly. The probe is one `sleep` that
+ * outlives the bounds below and is ended with the call (`end`).
  */
-export async function orphanAdopter(run: Run = exec): Promise<number | null> {
+export async function orphanAdopter(run: Run = exec, end: (pid: number) => void = (pid) => process.kill(pid)): Promise<number | null> {
   let pid = 0
   try {
     const opts = { maxBuffer: 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true }
     pid = Number((await run('/bin/sh', ['-c', 'sleep 60 </dev/null >/dev/null 2>&1 & echo $!'], opts)).stdout)
     const ppid = Number((await run('ps', ['-o', 'ppid=', '-p', String(pid)], opts)).stdout)
-    return ppid > 1 ? ppid : null
+    if (!(ppid > 1)) return null
+    const command = (await run('ps', ['-o', 'command=', '-p', String(ppid)], opts)).stdout.trim()
+    return command === '/init' ? ppid : null
   } catch (e) {
     unread('where an orphan lands', e)
     return null
   } finally {
     // The probe's own pid, started a moment ago by this call
-    if (pid > 1) try { process.kill(pid) } catch { /* already gone */ }
+    if (pid > 1) try { end(pid) } catch { /* already gone */ }
   }
 }
 

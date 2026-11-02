@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
-import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, scanProcesses, stopStrays } from './strays.js'
+import { insideAny, noTty, orphanAdopter, parseLsofCwd, parsePsRows, pickStrays, scanProcesses, stopStrays } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { ownProcesses } from '../process.test-helpers.js'
 
@@ -113,7 +113,7 @@ describe('pickStrays', () => {
 
   /**
    * Under a subreaper the orphan's parent is alive: WSL's `/init` session helper, a user `systemd --user`, a container's
-   * init (#1882). The one process the machine adopts orphans to counts as init; any other living parent still owns what it
+   * init (#1882). WSL's `/init` helper, where it adopts our orphans, counts as init; any other living parent still owns what it
    * holds, and what started the host is never offered (the keeper, a launcher).
    */
   it('an orphan adopted by the machine\'s subreaper is on the list; what a living parent holds is not, and nor is what started the host', () => {
@@ -133,6 +133,39 @@ describe('pickStrays', () => {
     const cwd = new Map([[800, '/work/proj'], [701, '/work/proj'], [900, '/work/proj'], [30, '/work/proj'], [40, '/work/proj'], [41, '/work/proj']])
     expect(pickStrays(wsl, cwd, roots, 900, [], 60).map((s) => s.pid)).toEqual([800])
     expect(pickStrays(wsl, cwd, roots, 900).map((s) => s.pid)).toEqual([])
+  })
+
+  /**
+   * A systemd desktop (`systemd --user` adopts what detaches): `code .` from a terminal in the project leaves the editor's
+   * main process with its cwd there, no terminal, and `systemd --user` for a parent. It is not a leftover. Only WSL's
+   * `/init` is taken for init, so nothing is offered; this desktop's own leftovers are missed by choice.
+   */
+  it('an editor that detached itself under `systemd --user` is not offered, even though that process adopts orphans', async () => {
+    const desktop = parsePsRows(
+      [
+        '    1     0 ?        /sbin/init',
+        '  611     1 ?        /usr/lib/systemd/systemd --user',
+        '  900   611 ??       node host.mjs',
+        '  800   611 ?        /usr/share/code/code .', // the detached editor's main process
+        '  801   800 ?        /usr/share/code/code --type=zygote', // its helper
+        '  802   800 ?        /usr/share/code/code --type=renderer',
+      ].join('\n'),
+    )
+    const cwd = new Map([[800, '/work/proj'], [801, '/work/proj'], [802, '/work/proj']])
+    // The probe's orphan is 4242; where it landed (611) and what that process runs are what the machine answers
+    const probe = (adopterCommand: string) => async (file: string, args: string[]) => ({
+      stdout: file === '/bin/sh' ? '4242\n' : args[1] === 'ppid=' ? ' 611\n' : adopterCommand + '\n',
+    })
+    const ended: number[] = []
+    const systemd = await orphanAdopter(probe('/usr/lib/systemd/systemd --user'), (pid) => void ended.push(pid))
+    expect(systemd).toBeNull()
+    expect(pickStrays(desktop, cwd, roots, 900, [], systemd).map((s) => s.pid)).toEqual([])
+    // The same table with WSL's helper in that place: it is the machine's init, and what it holds is listed
+    const init = await orphanAdopter(probe('/init'), (pid) => void ended.push(pid))
+    expect(init).toBe(611)
+    expect(pickStrays(desktop, cwd, roots, 900, [], init).map((s) => s.pid)).toEqual([800, 801, 802])
+    // The probe's own process is ended each time, and only that
+    expect(ended).toEqual([4242, 4242])
   })
 
   it('treats it as someone else\'s when the parent cannot be found in our own account — never fires when in doubt', () => {
