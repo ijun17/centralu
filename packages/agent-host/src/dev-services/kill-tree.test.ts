@@ -418,7 +418,7 @@ describe('leftovers of an ended process on Windows', () => {
       },
     }
     expect(await collectOrphansWindows(root, os)).toEqual([300])
-    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 200, left running by 100, could not be ended \(Command failed: taskkill\)/)])
+    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 200, left running by 100, could not be ended \(status 1: Command failed: taskkill ERROR: Access is denied\.\)/)])
     logged.mockRestore()
   })
 

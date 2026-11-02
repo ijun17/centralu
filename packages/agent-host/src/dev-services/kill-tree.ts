@@ -173,7 +173,8 @@ const REAL_OS: KillOs = {
   platform: process.platform,
   taskkill: (pid) => {
     const exe = systemTool(['taskkill.exe'])
-    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true })
+    // stderr is kept: the message of a failure says why (`collectOrphansWindows` prints it)
+    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000, windowsHide: true })
   },
 }
 
@@ -431,7 +432,7 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
     } catch (e) {
       // taskkill's 128: no such process, i.e. already gone or ended by the /T of one before it. Anything else left it running
       const status = typeof e === 'object' && e !== null && 'status' in e ? e.status : undefined
-      if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${root.pid}, could not be ended (${e instanceof Error ? e.message.split('\n')[0] : 'unknown error'})`)
+      if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${root.pid}, could not be ended (status ${String(status)}: ${e instanceof Error ? e.message.replace(/\s+/g, ' ').trim() : 'unknown error'})`)
     }
   }
   return ended
