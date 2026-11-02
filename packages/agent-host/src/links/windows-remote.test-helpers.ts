@@ -126,6 +126,7 @@ export function pwsh7ModulePath(dir: string): string {
     ['Microsoft.PowerShell.Utility', '1da87e53-152b-403e-98dc-74d7b4d63d59', ['Get-FileHash', 'ConvertTo-Json', 'ConvertFrom-Json', 'Invoke-WebRequest', 'Invoke-RestMethod']],
     ['Microsoft.PowerShell.Archive', 'eb74e8da-9ae2-482a-a648-e96550fb8733', ['Expand-Archive', 'Compress-Archive']],
     ['CimCmdlets', 'fb6cc51d-c096-4b38-b78d-0fed6277e8d0', ['Invoke-CimMethod', 'Get-CimInstance']],
+    ['Microsoft.PowerShell.Management', 'eefcb906-b326-4e99-9f54-8b4bb6ef3c6d', ['Get-Process', 'Get-ChildItem']],
   ] as const) {
     mkdirSync(join(mod, name), { recursive: true })
     writeFileSync(

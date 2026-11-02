@@ -10,7 +10,7 @@ import type {
 import { probeTarget } from './probe.js'
 import { listSshHosts, resolveAlias, type ResolvedHost } from './ssh-config.js'
 import { qualifiedMachine, newMachineId } from './machine-ids.js'
-import { wslDistroError, type RemoteSpec } from './tunnel.js'
+import { dataDirError, wslDistroError, type RemoteSpec } from './tunnel.js'
 import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
@@ -58,14 +58,17 @@ export class Links {
     return !!at && (at.machine.lastKnown('sessions') ?? []).some((s) => isObj(s) && s.id === at.id)
   }
 
-  add(spec: { name: string; sshTarget: string; shell?: RemoteSpec['shell']; wslDistro?: string | null; command?: string | null }): MachineInfo {
+  add(spec: { name: string; sshTarget: string; shell?: RemoteSpec['shell']; wslDistro?: string | null; command?: string | null; dataDir?: string | null }): MachineInfo {
     const trimmed = { name: spec.name.trim(), sshTarget: spec.sshTarget.trim() }
-    const remote: RemoteSpec = { shell: spec.shell ?? 'posix', wslDistro: spec.wslDistro?.trim() || null, command: spec.command?.trim() || null }
+    const remote: RemoteSpec = { shell: spec.shell ?? 'posix', wslDistro: spec.wslDistro?.trim() || null, command: spec.command?.trim() || null, dataDir: spec.dataDir?.trim() || null }
     if (remote.shell === 'wsl' && !remote.wslDistro) throw rpcError('A WSL machine needs the distro name (`wsl.exe -l -v` lists them)')
     // Refused here, by the rule every WSL command applies: stored, it failed every connect and was retried for good
     const badDistro = remote.shell === 'wsl' ? wslDistroError(remote.wslDistro) : null
     if (badDistro) throw rpcError(`${badDistro}; a distro's name is letters, digits, '.', '_' and '-' (\`wsl.exe -l -v\` lists the ones there)`)
     if (remote.command && /[\r\n]/.test(remote.command)) throw rpcError('The remote command must be one line')
+    if (remote.dataDir && remote.command) throw rpcError('A machine with a command of its own sets its data folder in that command, not as a data folder')
+    const badDataDir = remote.dataDir ? dataDirError(remote.dataDir, remote.shell) : null
+    if (badDataDir) throw rpcError(badDataDir)
     if (!trimmed.name) throw rpcError('A machine needs a name')
     if (!trimmed.sshTarget || trimmed.sshTarget.startsWith('-') || /\s/.test(trimmed.sshTarget)) {
       throw rpcError('Not an ssh target: use a host alias from ~/.ssh/config, or user@host')

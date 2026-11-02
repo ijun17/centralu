@@ -10,7 +10,7 @@ import { devUpdateRemote } from './dev-build.js'
 import { installScript, type InstallResult } from './install.js'
 import type { MachineRecord } from './link-deps.js'
 import { connectionCommand, NOT_FOUND, parseConnectionLine, SshTunnel, type ConnectionLine, type RemoteSpec, type SshTunnelOptions } from './tunnel.js'
-import type { HostControl, UpdateStep } from './update.js'
+import { answersAs, type HostControl, type UpdateStep } from './update.js'
 import { HOLD, HOLD_MS, holdCommand } from './swap-hold.js'
 import { sleep } from '../timing.js'
 
@@ -120,7 +120,7 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
         const deadline = Date.now() + (o.checkMs ?? ms)
         for (;;) {
           const now = await lineThere(tunnel, spec, target).catch(() => null)
-          if (now?.hostRunning && now.version === version) return true
+          if (now?.hostRunning && answersAs(version, now.version)) return true
           if (Date.now() > deadline) return false
           await sleep(1_000)
         }

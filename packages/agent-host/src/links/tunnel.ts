@@ -332,6 +332,39 @@ export type RemoteSpec = {
    * is appended
    */
   command?: string | null
+  /**
+   * The data folder there in place of the ssh session's `CC_DATA_DIR` or `~/.centralu` (#1903): every command and script
+   * sent there sets `CC_DATA_DIR` to it first, so `serve`, the host it starts and the installer all use it. A link to a
+   * temporary folder on a machine with a real installation leaves that installation alone. An absolute path (`dataDirError`)
+   */
+  dataDir?: string | null
+}
+
+/**
+ * The data folders a link may name, per shell: what goes inside the shell's quotes with nothing read into it. No trailing
+ * separator. A POSIX shell (and WSL) gets an absolute `/` path of letters, digits, spaces and `. _ -`: inside sh's
+ * double quotes `$`, backquotes and a backslash are read, and `~` is refused with them. Windows gets a drive path whose
+ * names are what a Windows folder may be called, less what PowerShell would read: inside its single quotes only a quote
+ * ends the text (`'` and the curly ones it takes as the same), and the scripts there pass the folder to `-Path`, which
+ * reads backquotes and brackets as a pattern. So `~` (an 8.3 short name such as ME~1, as a CI runner's temp folder
+ * has), `$`, parentheses and letters of any language are taken
+ */
+const DATA_DIR_RE = { posix: /^\/(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+$/, powershell: /^[A-Za-z]:(?:\\[^\\/:*?"<>|'`[\]\u2018-\u201B\p{Cc}]+)+$/u }
+
+/** Why a data folder is not taken for a link of `shell`, or null when it is (`RemoteSpec.dataDir`) */
+export function dataDirError(dir: string, shell: RemoteShell): string | null {
+  const ps = shell === 'powershell'
+  if (dir.length <= 240 && DATA_DIR_RE[ps ? 'powershell' : 'posix'].test(dir)) return null
+  return `Not a data folder Centralu can name there: ${dir} (${ps ? "a drive path such as C:\\centralu-try, with no ' ` [ or ]" : 'an absolute path such as /tmp/centralu-try, of letters, digits, spaces and . _ -'})`
+}
+
+/** `CC_DATA_DIR` set to the spec's data folder, in the shell's terms, before what runs after it; "" when it names none */
+function dataDirSet(spec: RemoteSpec, shell: 'sh' | 'ps'): string {
+  const dir = spec.dataDir
+  if (!dir) return ''
+  const why = dataDirError(dir, spec.shell)
+  if (why) throw new Error(why)
+  return shell === 'ps' ? `$env:CC_DATA_DIR = '${dir}'; ` : `CC_DATA_DIR="${dir}"; export CC_DATA_DIR; `
 }
 
 export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
@@ -649,14 +682,14 @@ function remoteCommand(
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${hubStop === 'update' ? "$env:CENTRALU_STOP_FOR = 'update'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+      `${dataDirSet(spec, 'ps')}${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${hubStop === 'update' ? "$env:CENTRALU_STOP_FOR = 'update'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
         "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${hubStop === 'update' ? 'CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `${dataDirSet(spec, 'sh')}${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${hubStop === 'update' ? 'CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
     `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
@@ -675,8 +708,8 @@ function remoteCommand(
  * `bash -l` inside a WSL distro; PowerShell's own `-EncodedCommand` on Windows.
  */
 export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string }): RemoteCommand {
-  if (spec.shell === 'powershell') return powershellScript(script.ps)
-  const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
+  if (spec.shell === 'powershell') return powershellScript(`${dataDirSet(spec, 'ps')}${script.ps}`)
+  const b64 = Buffer.from(`${dataDirSet(spec, 'sh')}${script.sh}`, 'utf8').toString('base64')
   if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
   const distro = distroOf(spec)
   const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)

@@ -51,7 +51,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
       version,
       files: {
         'package.json': JSON.stringify({ name: 'centralu', version }),
-        'bin/centralu.mjs': fakeServe(version),
+        'bin/centralu.mjs': fakeServe(version, { realServe: pathToFileURL(SERVE_MJS).href }),
         'bin/serve.mjs': `export { managedLauncherScript } from ${JSON.stringify(pathToFileURL(SERVE_MJS).href)}\n`,
       },
     },
@@ -92,7 +92,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
   const running = () => (existsSync(data('running')) ? readFileSync(data('running'), 'utf8') : null)
 
   /** A HostControl as LinkedMachine gives one, with this machine as the remote; what it saw is kept */
-  const control = (env: Record<string, string> = {}) => {
+  const control = (env: Record<string, string> = {}, o: { silent?: string } = {}) => {
     const t = new SshTunnel({ target: 'box', ssh: join(root, 'ssh'), env: { HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin`, ...env } })
     const seen: string[] = []
     const c: HostControl = {
@@ -107,14 +107,14 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
       },
       answers: async (version) => {
         seen.push(`answers ${version}`)
-        return running() === version
+        return version !== o.silent && running() === version
       },
       step: (s: UpdateStep) => void seen.push(s),
     }
     return { c, seen }
   }
-  const update = (version: string, env?: Record<string, string>) => {
-    const { c, seen } = control(env)
+  const update = (version: string, env?: Record<string, string>, o?: { silent?: string }) => {
+    const { c, seen } = control(env, o)
     return { seen, done: updateRemote(c, { version, runtime, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` }) }
   }
   /** 9.9.1 installed by the hub and running, as after an earlier install and a link that started it */
@@ -157,13 +157,46 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     await expect(done).rejects.toThrow(
       /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\); it runs Centralu 9\.9\.1 again\. The end of its host\.log: host 9\.9\.2: the store was written by a newer Centralu/,
     )
-    expect(seen.slice(-5)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back'])
+    expect(seen.slice(-6)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back', 'answers 9.9.1'])
     expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop - (for update)', 'start 9.9.1'])
     expect(running()).toBe('9.9.1')
     // The pointers are what they were, and nothing was removed: both versions are still there
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)
     expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.1', '9.9.2'])
+  }, 60_000 * SLOW)
+
+  /*
+   * #1903: the new version's host took host.lock and hung before it listened. The put-back's stop found nothing on the
+   * port and signalled nothing, and the old version then failed on the lock: no host at all
+   */
+  it('ends a new version that took the lock and hung, by the pid its lock names, and the old one runs again', async () => {
+    await installedAndRunning()
+    const { seen, done } = update('9.9.2', { FAKE_HANGS: '9.9.2' })
+    const hung = () => Number(readFileSync(data('hung'), 'utf8'))
+    try {
+      await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop hung (for update)', 'start 9.9.1'])
+      expect(seen.slice(-2)).toEqual(['roll_back', 'answers 9.9.1'])
+      expect(running()).toBe('9.9.1')
+      expect(() => process.kill(hung(), 0)).toThrow()
+    } finally {
+      // Only the process this test's fake started
+      if (existsSync(data('hung'))) {
+        try {
+          process.kill(hung(), 'SIGKILL')
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 90_000 * SLOW)
+
+  it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
+    await installedAndRunning()
+    const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-' }, { silent: '9.9.1' })
+    await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./)
+    expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
   }, 60_000 * SLOW)
 
   it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {

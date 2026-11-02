@@ -84,6 +84,7 @@ import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } 
 import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
+import { pwsh7ModulePath } from '../packages/agent-host/src/links/windows-remote.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -2253,6 +2254,60 @@ describe('asking the host on the port without handing the token to anyone else (
     }
   }, 90_000 * SLOW)
 
+  /*
+   * #1903: a host that took the folder's lock and then hung before it listened. Nothing answers on the port, so the
+   * probe alone said "not running" and signalled nothing; the version started next then failed on the lock this one
+   * keeps. The lock names it and says serve started it, so it is stopped by that pid.
+   */
+  it('a host that holds the lock but never listened is stopped by the pid its lock names', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const holder = lockHolderProcess(d, 'serve')
+    const stopped = await cli(d, ['--stop'])
+    expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: POSIX ? 'signal' : 'ended' })
+    await holder.exited
+    expect(holder.alive()).toBe(false)
+  }, 90_000 * SLOW)
+
+  /*
+   * #1906 review: a host that listens but whose event loop is stalled answers no probe within 2 s either. It is running,
+   * with turns and terminals, so it is not ended without its shutdown: only a port where nothing listens counts. And the
+   * hand-over's stop (`ifIdle`), which asks again for 30 minutes, never ends a host it could not ask.
+   */
+  it.each([[false], [true]])('a host that listens but answers nothing in time is not ended (ifIdle %s)', async (ifIdle) => {
+    const d = tempDir()
+    ensureServeState(d)
+    const held: Array<{ destroy(): void }> = []
+    // Takes each connection and never answers it, as a host whose event loop is blocked
+    const stalled = createServer((socket) => void held.push(socket))
+    await new Promise<void>((r) => stalled.listen(0, '127.0.0.1', () => r()))
+    try {
+      recordServePort(d, (stalled.address() as { port: number }).port)
+      const holder = lockHolderProcess(d, 'serve')
+      const signals: Array<[number, string]> = []
+      const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, ifIdle, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
+      expect(signals).toEqual([])
+      expect(holder.alive()).toBe(true)
+      expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+    } finally {
+      for (const s of held) s.destroy()
+      await new Promise<void>((r) => stalled.close(() => r()))
+    }
+  }, 60_000 * SLOW)
+
+  it('the hand-over’s stop does not end a lock holder that never listened either: it is not idle, it is not answering', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const holder = lockHolderProcess(d, 'serve')
+    const signals: Array<[number, string]> = []
+    const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, ifIdle: true, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]) })
+    expect(signals).toEqual([])
+    expect(holder.alive()).toBe(true)
+    expect(stopped).toMatchObject({ ok: false, wasRunning: true })
+  }, 60_000 * SLOW)
+
   // On Windows no signal reaches the launcher, so the host is ended and the launcher goes with it (#1723)
   it('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()
@@ -2376,6 +2431,16 @@ describe('the folder’s host on a system with no ps', () => {
     lock(d, { pid: process.pid, started: null, at: created! - 1_000, by: 'serve' })
     expect(lockHolderIsAlive(d)).toBe(false)
     expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+  })
+
+  // A CI runner's shell is PowerShell 7: every lock held on Windows read as dead, and `--stop` left a hung host (#1906)
+  it.skipIf(POSIX)('reads it when started under PowerShell 7, whose module path Windows PowerShell inherits', () => {
+    vi.stubEnv('PSModulePath', pwsh7ModulePath(tempDir()))
+    try {
+      expect(processCreatedAt(process.pid)).toBeGreaterThan(0)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.skipIf(!POSIX)('knows nothing of a creation time where ps tells the start', () => {

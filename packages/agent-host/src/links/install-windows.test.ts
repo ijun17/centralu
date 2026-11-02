@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, fakeServe, tarGz, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
-import { connectionCommand, SshTunnel, type RemoteCommand } from './tunnel.js'
+import { connectionCommand, SshTunnel, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rmFakeDir } from '../fake-exe.test-helpers.js'
 import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath, clixmlErrors, execThroughSilentDeath, remoteScriptText } from './windows-remote.test-helpers.js'
@@ -38,7 +38,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
     windowsRemoteSsh(root)
     const zip = windowsNodeZip()
     // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one
-    const serve = (v: string) => ({ mjs: fakeServe(v), serve: SERVE_SHIM })
+    const serve = (v: string) => ({ mjs: fakeServe(v, { realServe: pathToFileURL(SERVE_MJS).href }), serve: SERVE_SHIM })
     reg = await fakeRegistry([
       ...windowsPackages('9.9.1', serve('9.9.1'), false),
       ...windowsPackages('9.9.2', serve('9.9.2'), false),
@@ -96,7 +96,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   const remote = (...p: string[]) => data('remote', ...p)
   const events = () => (existsSync(data('events')) ? readFileSync(data('events'), 'utf8').trim().split('\n') : [])
   const running = () => (existsSync(data('running')) ? readFileSync(data('running'), 'utf8') : null)
-  const tunnel = (env: Record<string, string> = {}) => new SshTunnel({ target: 'box', remote: { shell: 'powershell' }, ssh: join(root, 'ssh.exe'), env: windowsRemoteEnv(home, env) })
+  const tunnel = (env: Record<string, string> = {}, remote: RemoteSpec = { shell: 'powershell' }) => new SshTunnel({ target: 'box', remote, ssh: join(root, 'ssh.exe'), env: windowsRemoteEnv(home, env) })
   const install = (version: string, o: { runtime?: RemoteRuntime; env?: Record<string, string> } = {}) => {
     const t = tunnel(o.env)
     return installRemote({ exec: recorded(t), spec: { shell: 'powershell' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
@@ -174,12 +174,13 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
 
   describe('updating, rolling back and uninstalling', () => {
     /** A HostControl as LinkedMachine gives one, with this machine as the remote; what it saw is kept */
-    const control = (env: Record<string, string> = {}) => {
-      const t = tunnel(env)
+    const control = (env: Record<string, string> = {}, o: { silent?: string; spec?: RemoteSpec } = {}) => {
+      const spec: RemoteSpec = o.spec ?? { shell: 'powershell' }
+      const t = tunnel(env, spec)
       const seen: string[] = []
       const c: HostControl = {
         exec: recorded(t),
-        spec: { shell: 'powershell' },
+        spec,
         target: 'box',
         script: installScript(),
         hold: () => void seen.push('hold'),
@@ -189,14 +190,14 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
         },
         answers: async (version) => {
           seen.push(`answers ${version}`)
-          return running() === version
+          return version !== o.silent && running() === version
         },
         step: (s: UpdateStep) => void seen.push(s),
       }
       return { c, seen }
     }
-    const update = (version: string, env?: Record<string, string>) => {
-      const { c, seen } = control(env)
+    const update = (version: string, env?: Record<string, string>, o?: { silent?: string }) => {
+      const { c, seen } = control(env, o)
       return { seen, done: updateRemote(c, { version, runtime, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` }) }
     }
     /** 9.9.1 installed by the hub and running, as after an earlier install and a link that started it */
@@ -248,12 +249,67 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       await expect(done).rejects.toThrow(
         /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\); it runs Centralu 9\.9\.1 again\. The end of its host\.log: host 9\.9\.2: the store was written by a newer Centralu/,
       )
-      expect(seen.slice(-5)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back'])
+      expect(seen.slice(-6)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back', 'answers 9.9.1'])
       expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop - (for update)', 'start 9.9.1'])
       expect(running()).toBe('9.9.1')
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(existsSync(remote('previous'))).toBe(false)
       expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.1', '9.9.2'])
+    }, 180_000 * SLOW)
+
+    /*
+     * #1903: the new version's host took host.lock and hung before it listened. The put-back's stop found nothing on
+     * the port and signalled nothing, and the old version then failed on the lock: no host at all
+     */
+    it('ends a new version that took the lock and hung, by the pid its lock names, and the old one runs again', async () => {
+      await installedAndRunning()
+      // Under PowerShell 7's module path, as the ssh session of a CI runner has it: the lock's holder must still be told
+      const { seen, done } = update('9.9.2', { FAKE_HANGS: '9.9.2', PSModulePath: pwsh7ModulePath(root) })
+      const hung = () => Number(readFileSync(data('hung'), 'utf8'))
+      try {
+        await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
+        expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop hung (for update)', 'start 9.9.1'])
+        expect(seen.slice(-2)).toEqual(['roll_back', 'answers 9.9.1'])
+        expect(running()).toBe('9.9.1')
+        expect(() => process.kill(hung(), 0)).toThrow()
+      } finally {
+        // Only the process this test's fake started
+        if (existsSync(data('hung'))) {
+          try {
+            process.kill(hung())
+          } catch {
+            // already gone
+          }
+        }
+      }
+    }, 180_000 * SLOW)
+
+    it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
+      await installedAndRunning()
+      const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-' }, { silent: '9.9.1' })
+      await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./)
+      expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
+    }, 180_000 * SLOW)
+
+    // So a link can drive a temporary folder on a machine whose own installation it must not touch
+    it('installs, starts and updates in the data folder the link names, not the one its ssh session has (#1903)', async () => {
+      // Named as a Windows temp folder may be: an 8.3 short name (a CI runner's), `$` and parentheses, read as written
+      const other = join(root, 'OTHER~1 $data (1)')
+      try {
+        const spec: RemoteSpec = { shell: 'powershell', dataDir: other }
+        const first = control({}, { spec })
+        await installRemote({ exec: first.c.exec, spec, target: 'box', version: '9.9.1', runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
+        await first.c.start()
+        const { c } = control({}, { spec })
+        c.answers = async (version) => readFileSync(join(other, 'running'), 'utf8') === version
+        expect(await updateRemote(c, { version: '9.9.2', runtime, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })).toMatchObject({ current: { version: '9.9.2' } })
+        expect(readFileSync(join(other, 'events'), 'utf8').trim().split('\n')).toEqual(['start 9.9.1', 'stop 9.9.1 (for update)', 'start 9.9.2'])
+        expect(readFileSync(join(other, 'remote', 'current'), 'utf8')).toBe(`9.9.2 ${WIN_NODE_V}\n`)
+        // The folder the ssh session names (its CC_DATA_DIR) was not touched
+        expect(existsSync(data())).toBe(false)
+      } finally {
+        rmFakeDir(other)
+      }
     }, 180_000 * SLOW)
 
     it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {

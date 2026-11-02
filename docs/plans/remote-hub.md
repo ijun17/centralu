@@ -488,6 +488,34 @@ through an additive call, since the hub's mirror knows sessions but not terminal
    still be serving (agent-host.md §5.1).
 6. On success, remove every version that is neither `current` nor `previous`, and every Node no kept version uses.
 
+**Coming back after a failed step (#1903).** Measured on Windows with the real launcher: a normal update stops in about
+2 s, starts in 4 to 11 s and says hello well within step 4's 30 s; a new version that exits at once, or never says hello
+and takes no lock, is put back. Two gaps were closed in the steps above:
+
+- A new version whose host took `host.lock` and then hung never listened, so `serve --stop` probed its port, answered
+  "not running" and signalled nothing, and the old version then failed on the lock: no host at all. `--stop` now also
+  stops a host that holds the lock while nothing listens on its port, when the lock names a process `serve` started and
+  that process is the one that wrote it (`lockHolderIsAlive`, #1888's check). It is ended by that pid, since there is
+  nothing to ask. "Nothing listens" is a listen on the port that succeeds, not a probe that got no answer: a host whose
+  event loop is stalled answers no probe in 2 s either, and is running with its turns. The hand-over's stop (`ifIdle`,
+  #1224) never ends such a holder: it stops only a host that said it is idle.
+- Step 5 counted the old version back once its start went through. It now counts it back only after its hello (30 s);
+  otherwise the update fails saying the put-back failed too.
+
+Two cases stay open while the hub drives the steps one ssh command at a time: **the link dropping between the stop and
+the start** (no host until ssh returns and the link's reconnect starts one), and **the hub dying mid-update** (no host
+until a hub returns; one that dies between the start and the check leaves an unchecked version with no put-back, since the
+hub keeps no update state across its restart). Closing them means the machine runs the whole switch itself, a design of
+its own (#1903).
+
+**Trying it on a temporary folder.** A link can name the data folder on its machine (`RemoteSpec.dataDir`, `machines.add`'s
+`dataDir`, kept as the `links.dataDir.<id>` setting): every command and script the hub sends sets `CC_DATA_DIR` to it
+first, so the scripts' `$d`, `serve`, and the host it starts all use it, and the machine's own installation is left alone.
+It goes on the shell's line, so one rule per shell: a POSIX or WSL link takes an absolute `/` path, a Windows link a drive
+path, each of letters, digits, spaces and `. _ -` with no trailing separator. A machine with a command of its own is
+refused one, since that command sets its own folder. A stored folder this build does not take is said once on the row,
+with no ssh and no retry. A hub build from before it ignores the setting and links the machine's own data folder.
+
 **Rollback** is the same switch in the other direction, offered while `previous` exists. Two steps back is not
 offered: a store migrated twice may no longer be readable by it, and that host would refuse to start with the
 "written by a newer Centralu" sentence anyway. After a rollback the remote is older than the hub again, so §4's prompt

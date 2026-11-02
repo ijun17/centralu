@@ -8,7 +8,7 @@ import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './
 import { installVersion, type InstallVersion } from './registry.js'
 import { RemoteClient } from './remote-client.js'
 import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, type RemoteRun } from './tunnel.js'
-import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { answersAs, rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
 import { sleep } from '../timing.js'
@@ -620,7 +620,7 @@ export class LinkedMachine extends LinkedMachineConnection {
       answers: (version, ms) =>
         new Promise<boolean>((resolve) => {
           const waiter = (v: string | null) => {
-            if (v !== version) return
+            if (!answersAs(version, v)) return
             clearTimeout(timer)
             this.helloWaiters.delete(waiter)
             resolve(true)

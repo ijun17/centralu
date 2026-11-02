@@ -642,13 +642,15 @@ export function processStartTime(pid) {
 }
 
 /**
- * When a pid's process was created, as milliseconds since the epoch, on Windows (PowerShell; the same asking as the e2e
- * runner's lock); null elsewhere, or when it cannot be told (a process of another account)
+ * When a pid's process was created, as milliseconds since the epoch, on Windows (PowerShell); null elsewhere, or when
+ * it cannot be told (a process of another account). Asked of .NET, not `Get-Process`: that one loads a module, which
+ * under PowerShell 7's module path (a CI runner's, a pwsh terminal's) fails, and every lock held on Windows read as a
+ * dead one's (#1906)
  */
 export function processCreatedAt(pid) {
   if (process.platform !== 'win32') return null
   try {
-    const out = execFileSync(windowsPowershell('wmi', process.env), ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', timeout: 10_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    const out = execFileSync(windowsPowershell('wmi', process.env), ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset][Diagnostics.Process]::GetProcessById(${pid}).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', timeout: 10_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
     const ms = Number(out.trim())
     return Number.isFinite(ms) && ms > 0 ? ms : null
   } catch {

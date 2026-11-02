@@ -540,6 +540,11 @@ describe('a hub linked to another host (#82)', () => {
     await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl' })).rejects.toThrow(/distro/)
     // A name WSL would not take is refused at add, by the rule its commands apply, not stored to fail every connect
     await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl', wslDistro: 'Ubuntu 22.04' })).rejects.toThrow(/Not a WSL distro name: Ubuntu 22.04/)
+    // A data folder its shell would read into, or of the other system, is refused at add, for the same reason (#1903)
+    await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', dataDir: 'C:\\cc' })).rejects.toThrow(/Not a data folder Centralu can name there: C:\\cc \(an absolute path/)
+    await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'powershell', dataDir: '/tmp/cc' })).rejects.toThrow(/Not a data folder .*\(a drive path/)
+    // The person's own command sets its own data folder; one given beside it would be ignored
+    await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', command: 'node x.mjs', dataDir: '/tmp/cc' })).rejects.toThrow(/sets its data folder in that command/)
     expect(await u.call('machines.list')).toEqual([])
     const added: MachineInfo = await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
     expect(added).toMatchObject({ id: 'remote-box', shell: 'posix' })
@@ -1274,7 +1279,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
   }
 
-  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean }) {
+  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean; unmanaged?: boolean }) {
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: o.busy === false ? 0 : 2, approvals: o.busy === false ? 0 : 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
@@ -1296,7 +1301,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
         case 'node':
           return out('CENTRALU-INSTALL node ok\n')
         case 'install_beside':
-          return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
+          return out(done({ installed: next, current: o.unmanaged ? null : old, previous: null, removed: [], left: [] }))
         case 'stop': {
           await running.close()
           line = { ...line, hostRunning: false }
@@ -1386,6 +1391,13 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
     // Back on the old version, the prompt is there again
     await eventually(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
+  })
+
+  // #1903: what ran there before was not installed by a hub, so its version is not known; any host that answers is it
+  it('counts the Centralu the hub did not install as back once any host answers, not before', async () => {
+    const { u, runs } = await setup({ startsVersion: '0.0.9', busy: false, unmanaged: true })
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(/did not start on box \(it did not answer within 30 s\); it runs the Centralu that was there again\./)
+    expect(runs.filter((k) => k !== 'open').slice(-3)).toEqual(['stop', 'pointers', 'start'])
   })
 })
 
