@@ -579,11 +579,13 @@ fn a_keeper_out_of_descriptors_pauses_accepting_instead_of_spinning() {
         let d = temp_dir("emfile");
         let _keeper = Children::start(&d.0).unwrap();
         _keeper.answer_hosts(this_process());
-        let mut held = super::super::accept::few_descriptors::exhaust(64);
-        // One descriptor for the client's end; the keeper has none left for its own.
-        drop(held.pop());
+        use super::super::accept::few_descriptors::{exhaust, Spare};
+        // The client's end is opened first: the keeper has no descriptor left for its own, and one freed later would go to
+        // whichever thread opens first.
+        let waiting = Spare::new(libc::AF_UNIX);
+        let held = exhaust(64);
         // Linux leaves it in the listen queue; macOS drops it with the failed accept.
-        let _waiting = UnixStream::connect(socket_path(&d.0)).unwrap();
+        let _waiting = waiting.connect_unix(&socket_path(&d.0));
         thread::sleep(Duration::from_secs(1));
         drop(held);
         let _host = Control::open(&d.0);

@@ -509,14 +509,11 @@ pub(crate) mod tests {
     #[test]
     fn an_old_host_that_ignores_term_is_killed_before_the_new_one_starts() {
         let sup = Supervisor::new();
+        let _ends_it = host_proc::tests::HostGuard(&sup);
         assert!(sup.start(std::sync::Arc::new(Quiet), deaf_host(Default::default())));
         assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
         let pid = sup.hand_over().expect("a host runs");
         let gone = retire_old(&sup, Duration::from_millis(100), Duration::from_secs(5));
-        if !gone {
-            sup.kill_current();
-            sup.shutdown();
-        }
         assert!(gone, "the old host {pid} still runs, holding the lock the new host needs");
         assert!(!crate::os::pid_alive(pid));
     }
@@ -592,6 +589,7 @@ pub(crate) mod tests {
     fn a_host_no_longer_handed_over_is_restarted_when_it_ends() {
         let launches: std::sync::Arc<std::sync::atomic::AtomicUsize> = Default::default();
         let sup = Supervisor::new();
+        let _ends_it = host_proc::tests::HostGuard(&sup);
         assert!(sup.start(std::sync::Arc::new(Quiet), deaf_host(launches.clone())));
         assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
         sup.hand_over().expect("a host runs");

@@ -852,4 +852,4 @@ pub fn workspace_root() -> String {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

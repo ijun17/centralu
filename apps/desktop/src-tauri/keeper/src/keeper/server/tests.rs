@@ -242,6 +242,7 @@ fn a_rollback_refused_while_the_old_host_runs_is_shown_as_failed() {
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
     let k = test_keeper(&data);
+    let _ends_it = crate::host_proc::tests::HostGuard(&k.sup);
     assert!(k.sup.start(sink(&k), deaf_host(Default::default())));
     let ready = || matches!(k.state.lock().unwrap().status, HostStatus::Ready(_));
     assert!(until(Duration::from_secs(10), ready), "the host never said it was ready");

@@ -93,6 +93,11 @@ pub(super) fn spawn<F: FnOnce() + Send + 'static>(name: &str, f: F) -> io::Resul
 #[cfg(test)]
 pub(crate) mod few_descriptors {
     use std::fs::File;
+    use std::net::TcpStream;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
     use std::process::Command;
 
     const ENV: &str = "CC_KEEPER_FEW_DESCRIPTORS_TEST";
@@ -151,6 +156,51 @@ pub(crate) mod few_descriptors {
             .find_map(|l| l.split("accepting again after ").nth(1)?.split(' ').next()?.parse().ok())
             .unwrap_or_else(|| panic!("no line ends the run of failed accepts: {stderr}"));
         assert!(tries <= 30, "{tries} failed accepts in a second: {what} spun");
+    }
+
+    /// A socket opened now, before the process runs out of descriptors, and connected after. Connecting takes no new
+    /// descriptor, so the waiting connection a test queues is its own however many threads are opening files (a descriptor
+    /// freed with `drop(held.pop())` goes to whichever thread opens first, and a client that lost it failed with EMFILE).
+    pub(crate) struct Spare(OwnedFd);
+
+    impl Spare {
+        pub(crate) fn new(domain: libc::c_int) -> Spare {
+            // SAFETY: socket(2) returns a new descriptor that nothing else owns, or -1, which the assert refuses.
+            let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM, 0) };
+            assert!(fd >= 0, "open a spare socket: {}", std::io::Error::last_os_error());
+            // SAFETY: just made, owned by no one else.
+            Spare(unsafe { OwnedFd::from_raw_fd(fd) })
+        }
+
+        fn connect<A>(self, addr: A) -> OwnedFd {
+            // SAFETY: `A` is a sockaddr struct of the spare's own domain; the length is its size.
+            let r = unsafe { libc::connect(self.0.as_raw_fd(), (&raw const addr).cast(), std::mem::size_of::<A>() as libc::socklen_t) };
+            assert_eq!(r, 0, "connect the spare socket: {}", std::io::Error::last_os_error());
+            self.0
+        }
+
+        /// Connects to 127.0.0.1:`port` (a spare made with `AF_INET`).
+        pub(crate) fn connect_tcp(self, port: u16) -> TcpStream {
+            // SAFETY: all zeroes is a valid sockaddr_in.
+            let mut a: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+            a.sin_family = libc::AF_INET as libc::sa_family_t;
+            a.sin_port = port.to_be();
+            a.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
+            self.connect(a).into()
+        }
+
+        /// Connects to the socket at `path` (a spare made with `AF_UNIX`).
+        pub(crate) fn connect_unix(self, path: &Path) -> UnixStream {
+            // SAFETY: all zeroes is a valid sockaddr_un.
+            let mut a: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+            a.sun_family = libc::AF_UNIX as libc::sa_family_t;
+            let bytes = path.as_os_str().as_bytes();
+            assert!(bytes.len() < a.sun_path.len(), "the socket path fits sockaddr_un");
+            for (to, from) in a.sun_path.iter_mut().zip(bytes) {
+                *to = *from as libc::c_char;
+            }
+            self.connect(a).into()
+        }
     }
 
     /// Lowers this process's soft descriptor limit to `limit` and opens files until it is reached.

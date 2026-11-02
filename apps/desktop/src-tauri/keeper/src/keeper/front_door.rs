@@ -751,10 +751,11 @@ mod tests {
             let (a, _ka) = fake_host("A");
             let door = FrontDoor::open(0, "t".into()).unwrap();
             door.point_at(Some(a));
-            let mut held = super::super::accept::few_descriptors::exhaust(64);
-            drop(held.pop());
+            use super::super::accept::few_descriptors::{exhaust, Spare};
+            let waiting = Spare::new(libc::AF_INET);
+            let held = exhaust(64);
             // Linux leaves it in the listen queue; macOS drops it with the failed accept.
-            let _waiting = TcpStream::connect(("127.0.0.1", door.port())).unwrap();
+            let _waiting = waiting.connect_tcp(door.port());
             thread::sleep(Duration::from_secs(1));
             drop(held);
             let mut c = connect(&door);

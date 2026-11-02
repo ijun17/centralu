@@ -29,7 +29,7 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
+import { GitError, isAncestor, isNetworkFailure, remoteHas, showFile } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -4832,6 +4832,26 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     }
   }, 60_000 * SLOW)
 
+  it("tells a branch missing when the remote's only ref ends in its name (ls-remote matches the tail of a ref, the exact ref is checked)", async () => {
+    const repo = integrateRepo({ 'foo/refs/heads/docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    expect(await remoteHas(repo.work, 'origin', 'refs/heads/foo/refs/heads/docs/guide')).toBe(true)
+    expect(await remoteHas(repo.work, 'origin', 'refs/heads/docs/guide')).toBe(false)
+    const r = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/guide', defaultBranch: 'main' })
+    expect(r, JSON.stringify(r)).toMatchObject({ missing: true })
+    expect(r.retry).toBeUndefined()
+  }, 60_000 * SLOW)
+
+  it('works through a stand-in whose folder has an apostrophe, a space and a dollar sign in its name', async () => {
+    const odd = join(root, "it's a $dir")
+    mkdirSync(odd)
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    remoteAnswering(repo, ['ok', 'ok', 'ok'], odd)
+    const r = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/guide', defaultBranch: 'main' })
+    expect(r.retry, JSON.stringify(r)).toBeUndefined()
+    expect(r.missing, JSON.stringify(r)).toBeUndefined()
+    expect(readFileSync(join(odd, 'calls'), 'utf8').trim()).not.toBe('')
+  }, 60_000 * SLOW)
+
   it('keeps a failed fetch as a retry with the exit code and stderr, which fetch it was, and what ls-remote said', async () => {
     const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
     const judge = (branch: string) => judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch, defaultBranch: 'main' })
@@ -4857,17 +4877,18 @@ describe('the integrator lands an auto-tier branch without a pull request from i
 
   // Real git, a bare remote, and a stand-in for upload-pack that answers each call as the plan says: `ok` as git does, `fail`
   // with an error that says nothing about a ref, `hide` as a remote that lists no branch at all (a lagging replica)
-  const remoteAnswering = (repo: ReturnType<typeof integrateRepo>, plan: ('ok' | 'fail' | 'hide')[]) => {
-    const dir = join(root, 'upload-pack')
+  const remoteAnswering = (repo: ReturnType<typeof integrateRepo>, plan: ('ok' | 'fail' | 'hide')[], dir = join(root, 'upload-pack')) => {
     mkdirSync(dir, { recursive: true })
     const slash = (p: string) => p.split(String.fromCharCode(92)).join('/')
-    const counter = slash(join(dir, 'calls'))
+    // Single-quoted for the shell whatever the path holds (a quote in it ends the quote, so it is closed, escaped and opened again)
+    const quoted = (p: string) => `'${slash(p).split("'").join(`'\\''`)}'`
+    const counter = quoted(join(dir, 'calls'))
     const cases = plan
       .map((what, i) => `${i + 1}${i === plan.length - 1 ? '|*' : ''}) ${what === 'ok' ? 'exec git upload-pack "$@"' : what === 'hide' ? 'exec git -c uploadpack.hideRefs=refs/heads upload-pack "$@"' : 'echo "the remote broke: stand-in failure" >&2; exit 1'};;`)
       .join('\n')
     const script = join(dir, 'upload-pack.sh')
-    writeFileSync(script, `#!/bin/sh\nn=$(cat "${counter}" 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > "${counter}"\ncase $n in\n${cases}\nesac\n`, { mode: 0o755 })
-    g(repo.work, 'config', 'remote.origin.uploadpack', `'${slash(script)}'`)
+    writeFileSync(script, `#!/bin/sh\nn=$(cat ${counter} 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > ${counter}\ncase $n in\n${cases}\nesac\n`, { mode: 0o755 })
+    g(repo.work, 'config', 'remote.origin.uploadpack', quoted(script))
   }
 
   it('says the remote listed nothing, as a retry, when ls-remote exits 2 for the branch and for main alike', async () => {
