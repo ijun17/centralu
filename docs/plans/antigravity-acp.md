@@ -509,6 +509,7 @@ mapping from a setup to a line:
 | Setup | The line |
 |---|---|
 | `not_installed`, `install: centralu` | "Antigravity is not installed." and **Install** |
+| `not_installed`, `install: centralu`, `appFound` | "Antigravity is installed on this computer. Install Centralu's connection to it here." (the machine's name on a linked machine) and **Install**. `appFound` is a path check for the person's own Antigravity (`agyAppPaths`: the app folder, or `agy`); no donut |
 | `installing` | "Installing Antigravity… 40%" (the size received when the total is not known), **Stop**, a progress bar |
 | `not_installed` with a failure (not a cancel) | "Could not install Antigravity: <reason>" and **Retry** |
 | `not_installed`, no build for the system | said, no action |

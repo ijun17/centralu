@@ -2,6 +2,7 @@ import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -106,15 +107,25 @@ export function hasSignIn(home: AgyHome): boolean {
  * - Linux: no installer, a tarball unpacked anywhere; `/usr/share/antigravity`, `/opt/antigravity`* and the `antigravity`
  *   launcher in `/usr/bin` or `/usr/local/bin` where a package or a person put one, `~/.local/bin/agy`
  */
+/** This computer's own: what `agyAppPaths` says for the system and the person it runs as */
+export function ownAgyAppPaths(platform: Platform = HOST_PLATFORM): string[] {
+  return agyAppPaths(platform, process.env, homedir())
+}
+
+/** Whether any of `paths` is there: a path check, nothing started */
+export function anyExists(paths: readonly string[]): boolean {
+  return paths.some((p) => existsSync(p))
+}
+
 export function agyAppPaths(platform: Platform, env: Readonly<Record<string, string | undefined>>, home: string): string[] {
-  const { join } = pathsOf(platform)
-  const agy = join(home, '.local', 'bin', 'agy')
+  const p = pathsOf(platform)
+  const agy = p.join(home, '.local', 'bin', 'agy')
   if (platform === 'win32') {
-    const local = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
+    const local = env.LOCALAPPDATA ?? p.join(home, 'AppData', 'Local')
     const programs = env.ProgramFiles ?? 'C:\\Program Files'
-    return [join(local, 'Programs', 'Antigravity'), join(local, 'Programs', 'Antigravity IDE'), join(programs, 'Google', 'Antigravity'), join(local, 'agy', 'bin', 'agy.exe')]
+    return [p.join(local, 'Programs', 'Antigravity'), p.join(local, 'Programs', 'Antigravity IDE'), p.join(programs, 'Google', 'Antigravity'), p.join(local, 'agy', 'bin', 'agy.exe')]
   }
-  if (platform === 'darwin') return ['/Applications/Antigravity.app', join(home, 'Applications', 'Antigravity.app'), agy]
+  if (platform === 'darwin') return ['/Applications/Antigravity.app', p.join(home, 'Applications', 'Antigravity.app'), agy]
   return ['/usr/share/antigravity', '/opt/antigravity', '/usr/bin/antigravity', '/usr/local/bin/antigravity', agy]
 }
 

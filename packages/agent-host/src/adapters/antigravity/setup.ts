@@ -1,8 +1,7 @@
-import { existsSync } from 'node:fs'
 import { createListeners } from '@cc/common'
 import { errorMessage, type ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
-import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
+import { anyExists, hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import type { AgyArchive } from './release.js'
 import { runSignIn, type SignInDeps, type SignInResult } from './sign-in.js'
@@ -66,7 +65,7 @@ export class AgySetup implements ToolSetupControl {
   }
 
   private appFound(): boolean {
-    return (this.deps.appPaths ?? []).some((p) => existsSync(p))
+    return anyExists(this.deps.appPaths ?? [])
   }
 
   signedIn(): boolean {
