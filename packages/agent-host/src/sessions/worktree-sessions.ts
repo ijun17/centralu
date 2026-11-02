@@ -276,7 +276,7 @@ export class WorktreeSessions {
       throw rpcError(`The local ${branch} has ${unpushed ?? 'an unknown number of'} commit(s) that ${there} does not, so it was not moved to ${there}. Push or remove them, then start again.`)
     }
     await this.freeBranch(cwd, projectId, branch, trunk, pushed)
-    if (!onRemote) return { sha: local, ref: branch, existing: true, note: `Started on the local ${branch} at ${local.slice(0, 9)}, not compared with a remote: ${'why' in fetched ? fetched.why : ''}` }
+    if (!onRemote) return { sha: local, ref: branch, existing: true, note: `Started on the local ${branch} at ${local.slice(0, 9)}, not compared with a remote: ${'why' in fetched ? fetched.why : ''}`, ...(remote ? { unfetched: true as const } : {}) }
     if (onRemote === local) return { sha: local, ref: branch, existing: true, note: `Started on ${branch} at ${local.slice(0, 9)}, as ${there} has it` }
     await gitWrite(cwd, ['branch', '--force', branch, onRemote])
     return { sha: onRemote, ref: there, existing: true, note: `Started on ${there} at ${onRemote.slice(0, 9)}, fetched just now; the local ${branch} was at ${local.slice(0, 9)}, with nothing the remote never had, and was moved to it` }

@@ -281,7 +281,12 @@ export function createRpcHandler(
 
   const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
-    'agents.createSession': async (p, ctx) => mgr.createSession({ ...p, ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
+    'agents.createSession': async (p, ctx) => {
+      // Where a worktree forked from (#1488): in the answer, as a linked computer's hub has no other way to read it
+      let worktreeBase: string | undefined
+      const info = await mgr.createSession({ ...p, onWorktreeBase: (note) => (worktreeBase = note), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) })
+      return worktreeBase ? { ...info, worktreeBase } : info
+    },
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
       const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined

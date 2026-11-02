@@ -7,7 +7,7 @@ import { autoCompactOf, launchRefusal, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import type { Worktree } from '../dev-services/git-worktree.js'
+import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
@@ -227,11 +227,13 @@ export class SessionStarts {
     let setupProblems: string[] = []
     // A branch that was there before (#1662) stays when the start fails
     let branchWasThere = false
+    let fallbackBase: string | null = null
     if (params.worktree && params.projectId) {
-      let base: { note: string }
+      let base: ForkBase
       ;({ worktree, setupProblems, base, branchWasThere } = await this.host.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
       // Where it forked from (#1484): the start answer names the base commit
       params.onWorktreeBase?.(base.note)
+      if (base.unfetched) fallbackBase = base.note
     }
 
     /*
@@ -431,6 +433,10 @@ export class SessionStarts {
         text: worktreeSetupNotice(setupProblems),
       })
       params.onSetupProblems?.(setupProblems)
+    }
+    // A fork from a local ref because the remote could not be fetched (#1488): the person is told, as an agent's start answer is
+    if (fallbackBase) {
+      this.host.onEvent({ type: 'notice', sessionId: id, level: 'warning', from: 'Centralu', label: 'worktree setup', text: fallbackBase })
     }
 
     // Restores past conversation. Done **after the adapter comes up** — a session with history but

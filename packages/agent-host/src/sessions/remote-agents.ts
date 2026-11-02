@@ -549,6 +549,8 @@ export class RemoteAgents {
     const notTaken = this.unclaimed(rec, waiting)
     if (notTaken) return notTaken
     const unchecked = [
+      // Where its worktree forked from, as the machine said (#1488); a machine from before it says nothing
+      made.worktreeBase ?? '',
       model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : '',
       // Not passed across (#1038 review): said, rather than dropped without a word
       opts.lsp ? `lsp is not passed to another machine: it starts as ${machine.name} starts a session` : '',

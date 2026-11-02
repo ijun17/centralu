@@ -254,12 +254,13 @@ export type LinkedSessions = {
    * if a name is given. For start_agent's child there (#1038): its model and effort, a new worktree on `worktreeBranch`,
    * and the agent depth it is kept at (`CreateSessionParams.agentDepth`); `callerPreset`, the preset its caller carries
    * there (#1273, `CreateSessionParams.fromHub`), `auto` only once the machine said it takes it (`hubAuto`). `preset` in
-   * the answer: what the machine started it under, as it says
+   * the answer: what the machine started it under, as it says; `worktreeBase`: where its new worktree forked from, in the
+   * words of a local start's answer (#1488), left out by a machine from before it
    */
   createSession(
     project: LinkedProject,
     opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number; callerPreset?: PermissionPreset },
-  ): Promise<Outcome<{ sessionId: string; name: string; preset?: PermissionPreset }>>
+  ): Promise<Outcome<{ sessionId: string; name: string; preset?: PermissionPreset; worktreeBase?: string }>>
   /**
    * Whether a machine runs an `auto` caller's child under `auto` too (#1273, `host.hubAuto` there): its "Allow auto from
    * a linked computer" switch

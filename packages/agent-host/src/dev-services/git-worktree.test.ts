@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
-import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
+import { gitFetchBranch, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
 
 /**
  * A worktree can only be tested against **real git.**
@@ -327,6 +327,45 @@ describe('the base a new worktree forks from (#1484)', () => {
     fixtureGit(repo, ['update-ref', '-d', 'refs/remotes/origin/main'])
     fixtureGit(repo, ['switch', '-q', '-c', 'feature'])
     expect((await resolveForkBase(repo, 'main', { trusted: true })).ref).toBe('main')
+  })
+
+  it('a remote that failed is not fetched again for a while, also once it answers again (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    const bare = join(root, 'origin.git')
+    fixtureGit(repo, ['remote', 'set-url', 'origin', join(root, 'gone.git')])
+    const first = await resolveForkBase(repo, 'main', { trusted: true })
+    expect(first.note).toContain('Could not fetch origin')
+    expect(first.unfetched).toBe(true)
+    fixtureGit(repo, ['remote', 'set-url', 'origin', bare])
+    // The remote is fine now, but the failure is remembered: no fetch, the same words, the local ref
+    const second = await resolveForkBase(repo, 'main', { trusted: true })
+    expect(second).toEqual(first)
+    expect(second.sha).not.toBe(remoteTip)
+    // Another repository is its own
+    const other = join(root, 'second')
+    fixtureGit(root, ['clone', '-q', bare, other])
+    expect((await resolveForkBase(other, 'main', { trusted: true })).sha).toBe(remoteTip)
+  })
+
+  it('starts at once share one fetch, and a reachable remote is not taken for down by their race (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    const answers = await Promise.all([1, 2, 3, 4, 5, 6].map(() => gitFetchBranch(repo, 'origin', 'main')))
+    expect(answers).toEqual(answers.map(() => ({ sha: remoteTip })))
+    // And a later one is not held back by a failure remembered from that round
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual({ sha: remoteTip })
+  })
+
+  it('a branch the remote does not have is not a failed remote: the next fetch is still made (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    const bare = join(root, 'origin.git')
+    expect(await gitFetchBranch(repo, 'origin', 'no-such-branch')).toHaveProperty('why')
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual({ sha: remoteTip })
+    // An unreachable remote, on the other hand, is remembered
+    fixtureGit(repo, ['remote', 'set-url', 'origin', join(root, 'gone.git')])
+    const down = await gitFetchBranch(repo, 'origin', 'main')
+    expect(down).toHaveProperty('why')
+    fixtureGit(repo, ['remote', 'set-url', 'origin', bare])
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual(down)
   })
 
   it('a fetch that hangs is ended at its bound and the worktree forks from what is here', async () => {
