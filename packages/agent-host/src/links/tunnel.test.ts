@@ -7,6 +7,7 @@ import { delimiter, dirname, join } from 'node:path'
 import {
   pairLabel,
   credentialsOf,
+  dataDirError,
   hubKeyOf,
   parseRevoke,
   revokeCommand,
@@ -628,6 +629,17 @@ describe('the remote command per shell (#82)', () => {
     // Nothing inside closes the single quotes early
     expect(cmd.slice("sh -c '".length, -1)).not.toContain("'")
     expect(connectionCommand({ shell: 'posix', command: 'x' })).toBe('x serve --connection')
+  })
+
+  // #1903: the link's own data folder, set before anything runs, in every shell; a path a shell would read into is refused
+  it('sets the data folder the link names before the lookup, in each shell, and refuses one a shell would read into', () => {
+    expect(connectionCommand({ shell: 'posix', dataDir: '/tmp/cc try' })).toMatch(/^sh -c 'CC_DATA_DIR="\/tmp\/cc try"; export CC_DATA_DIR; d=/)
+    expect(decode(stopCommand({ shell: 'powershell', dataDir: 'C:\\cc try' }, { forUpdate: true }))).toContain("$env:CC_DATA_DIR = 'C:\\cc try'; $env:CENTRALU_STOP_BY = 'hub'")
+    expect(connectionCommand({ shell: 'posix', command: 'x', dataDir: '/tmp/cc' })).toBe('x serve --connection')
+    for (const bad of ['relative', '~/cc', '/tmp/$HOME', "/tmp/a'b", '/tmp/a"b', '/tmp/`id`', 'C:\\a;b']) {
+      expect(dataDirError(bad), bad).not.toBeNull()
+      expect(() => connectionCommand({ shell: 'posix', dataDir: bad }), bad).toThrow(/Not a data folder Centralu can name there/)
+    }
   })
 
   // Run by a real sh, as a POSIX remote would: the order is the shell's, not a string's. Skipped on

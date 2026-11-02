@@ -9,7 +9,7 @@ export type LinkedMachineRow = {
   id: string
   name: string
   sshTarget: string
-  remote: { shell: 'posix' | 'powershell' | 'wsl'; wslDistro?: string | null; command?: string | null }
+  remote: { shell: 'posix' | 'powershell' | 'wsl'; wslDistro?: string | null; command?: string | null; dataDir?: string | null }
   slot: number
   addedAt: number
   acceptedVersions: string | null
@@ -50,6 +50,12 @@ const SEEN_KEY = 'links.lastConnected.'
  * (expand only: nothing here changes what a build before it reads)
  */
 const REVOKED_KEY = 'links.revoked.'
+/**
+ * The data folder on the machine a link names (#1903, `RemoteSpec.dataDir`), per machine. A setting the previous build never
+ * reads, so it needs no migration step; that build links the machine's own data folder instead
+ */
+const DATA_DIR_KEY = 'links.dataDir.'
+
 /** The most ids kept per machine: the newest */
 const REVOKED_MOST = 256
 
@@ -94,7 +100,7 @@ export class LinkedMachineRecords {
       id: r.id,
       name: r.name,
       sshTarget: r.ssh_target,
-      remote: { shell: r.shell === 'powershell' || r.shell === 'wsl' ? r.shell : 'posix', wslDistro: r.wsl_distro, command: r.command },
+      remote: { shell: r.shell === 'powershell' || r.shell === 'wsl' ? r.shell : 'posix', wslDistro: r.wsl_distro, command: r.command, dataDir: this.settings.appSetting(`${DATA_DIR_KEY}${r.id}`) },
       slot: r.slot,
       addedAt: r.added_at,
       acceptedVersions: r.accepted_versions,
@@ -152,6 +158,7 @@ export class LinkedMachineRecords {
         )
         .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions, connectColumn(m.autoReconnect))
       this.settings.setAppSetting(LINK_SLOT_KEY, String(slot))
+      if (m.remote.dataDir) this.settings.setAppSetting(`${DATA_DIR_KEY}${m.id}`, m.remote.dataDir)
       return { ...m, autoReconnect: m.autoReconnect !== false, slot }
     })()
   }
@@ -180,6 +187,7 @@ export class LinkedMachineRecords {
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
       this.settings.deleteAppSetting(`${SEEN_KEY}${id}`)
       this.settings.deleteAppSetting(`${REVOKED_KEY}${id}`)
+      this.settings.deleteAppSetting(`${DATA_DIR_KEY}${id}`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)
     })()

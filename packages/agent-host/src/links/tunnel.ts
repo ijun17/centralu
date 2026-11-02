@@ -332,6 +332,29 @@ export type RemoteSpec = {
    * is appended
    */
   command?: string | null
+  /**
+   * The data folder there in place of the ssh session's `CC_DATA_DIR` or `~/.centralu` (#1903): every command and script
+   * sent there sets `CC_DATA_DIR` to it first, so `serve`, the host it starts and the installer all use it. A link to a
+   * temporary folder on a machine with a real installation leaves that installation alone. An absolute path (`dataDirError`)
+   */
+  dataDir?: string | null
+}
+
+/** An absolute path, POSIX or Windows, with nothing a shell reads inside quotes ($, quotes, backquotes, ~) */
+const DATA_DIR_RE = /^(?:\/|[A-Za-z]:[\\/])[A-Za-z0-9._/\\: -]{0,240}$/
+
+/** Why a remote data folder is not taken, or null when it is (`RemoteSpec.dataDir`) */
+export function dataDirError(dir: string): string | null {
+  return DATA_DIR_RE.test(dir) ? null : `Not a data folder Centralu can name there: ${dir} (an absolute path of letters, digits, spaces and . _ - : / \\)`
+}
+
+/** `CC_DATA_DIR` set to the spec's data folder, in the shell's terms, before what runs after it; "" when it names none */
+function dataDirSet(spec: RemoteSpec, shell: 'sh' | 'ps'): string {
+  const dir = spec.dataDir
+  if (!dir) return ''
+  const why = dataDirError(dir)
+  if (why) throw new Error(why)
+  return shell === 'ps' ? `$env:CC_DATA_DIR = '${dir}'; ` : `CC_DATA_DIR="${dir}"; export CC_DATA_DIR; `
 }
 
 export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
@@ -649,14 +672,14 @@ function remoteCommand(
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${hubStop === 'update' ? "$env:CENTRALU_STOP_FOR = 'update'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+      `${dataDirSet(spec, 'ps')}${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${hubStop === 'update' ? "$env:CENTRALU_STOP_FOR = 'update'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
         "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${hubStop === 'update' ? 'CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `${dataDirSet(spec, 'sh')}${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${hubStop === 'update' ? 'CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
     `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
@@ -675,8 +698,8 @@ function remoteCommand(
  * `bash -l` inside a WSL distro; PowerShell's own `-EncodedCommand` on Windows.
  */
 export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string }): RemoteCommand {
-  if (spec.shell === 'powershell') return powershellScript(script.ps)
-  const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
+  if (spec.shell === 'powershell') return powershellScript(`${dataDirSet(spec, 'ps')}${script.ps}`)
+  const b64 = Buffer.from(`${dataDirSet(spec, 'sh')}${script.sh}`, 'utf8').toString('base64')
   if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
   const distro = distroOf(spec)
   const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)

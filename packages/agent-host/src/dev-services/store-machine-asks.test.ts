@@ -103,3 +103,15 @@ describe('the switch for a machine’s sessions to ask this computer’s project
     again.close()
   })
 })
+
+describe('the data folder a link names on its machine (#1903)', () => {
+  it('is kept with the machine and removed with it', () => {
+    const store = new Store()
+    store.machines.addLinkedMachine({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix', dataDir: '/tmp/cc-try' }, addedAt: 1, acceptedVersions: null })
+    linked(store, 'm2')
+    expect(store.machines.listLinkedMachines().map((m) => m.remote.dataDir)).toEqual(['/tmp/cc-try', null])
+    store.machines.removeLinkedMachine('m1')
+    linked(store, 'm1')
+    expect(store.machines.listLinkedMachines().find((m) => m.id === 'm1')?.remote.dataDir).toBeNull()
+  })
+})

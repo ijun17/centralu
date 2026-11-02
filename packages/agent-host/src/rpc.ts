@@ -118,7 +118,7 @@ export type RpcServices = {
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
 export type MachinesPort = {
   list(): MachineInfo[]
-  add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
+  add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null; dataDir?: string | null }): MachineInfo
   remove(id: string): Promise<void>
   reconnect(id: string, opts?: { start?: boolean }): MachineInfo
   /** Closes the link until the person connects it again (#1134) */

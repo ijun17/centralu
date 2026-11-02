@@ -290,6 +290,26 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
     }, 180_000 * SLOW)
 
+    // So a link can drive a temporary folder on a machine whose own installation it must not touch
+    it('installs, starts and updates in the data folder the link names, not the one its ssh session has (#1903)', async () => {
+      const other = join(root, 'other data')
+      try {
+        const spec: RemoteSpec = { shell: 'powershell', dataDir: other }
+        const first = control({}, { spec })
+        await installRemote({ exec: first.c.exec, spec, target: 'box', version: '9.9.1', runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
+        await first.c.start()
+        const { c } = control({}, { spec })
+        c.answers = async (version) => readFileSync(join(other, 'running'), 'utf8') === version
+        expect(await updateRemote(c, { version: '9.9.2', runtime, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })).toMatchObject({ current: { version: '9.9.2' } })
+        expect(readFileSync(join(other, 'events'), 'utf8').trim().split('\n')).toEqual(['start 9.9.1', 'stop 9.9.1 (for update)', 'start 9.9.2'])
+        expect(readFileSync(join(other, 'remote', 'current'), 'utf8')).toBe(`9.9.2 ${WIN_NODE_V}\n`)
+        // The folder the ssh session names (its CC_DATA_DIR) was not touched
+        expect(existsSync(data())).toBe(false)
+      } finally {
+        rmFakeDir(other)
+      }
+    }, 180_000 * SLOW)
+
     it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {
       await installedAndRunning()
       await update('9.9.2').done

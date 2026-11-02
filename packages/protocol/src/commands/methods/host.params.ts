@@ -101,6 +101,8 @@ export const hostParams = {
     shell: RemoteShell.default('posix'),
     wslDistro: z.string().max(64).nullable().optional(),
     command: z.string().max(1024).nullable().optional(),
+    /** The data folder on that machine in place of its `~/.centralu` (#1903): a temporary one, for trying updates there. Additive */
+    dataDir: z.string().max(255).nullable().optional(),
   }),
   /**
    * The concrete `Host` aliases of the ssh config of the computer this host runs on (#514): `~/.ssh/config`

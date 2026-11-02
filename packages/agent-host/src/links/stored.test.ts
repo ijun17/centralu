@@ -21,7 +21,7 @@ describe('linked machines in the store (#82)', () => {
     // b's folded rule ids may still be on a screen: the next machine does not inherit its slot
     expect(reg.add(machine('c')).slot).toBe(3)
     expect(reg.list()).toEqual([
-      expect.objectContaining({ id: 'a', slot: 1, remote: { shell: 'wsl', wslDistro: 'Ubuntu-24.04', command: null } }),
+      expect.objectContaining({ id: 'a', slot: 1, remote: { shell: 'wsl', wslDistro: 'Ubuntu-24.04', command: null, dataDir: null } }),
       expect.objectContaining({ id: 'c', slot: 3 }),
     ])
     reg.setAcceptedVersions('a', '1|2')
