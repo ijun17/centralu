@@ -243,7 +243,7 @@ export function App({
       */}
       <ErrorBoundary platform={platform}>
         {/* h-full, not h-screen (100vh) — vh does not know about zoom (--text-zoom comment in index.css) */}
-        <div className="relative flex h-full flex-col bg-surface-floor text-ink">
+        <div className="relative flex h-full flex-col border border-line bg-surface-floor text-ink">
           <TopBar />
           {/*
             The shell's banner sits in the flow, below the top bar (#326). It used to be laid over
