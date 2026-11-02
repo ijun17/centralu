@@ -228,4 +228,16 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
       store.close()
     }
   })
+  it('stamps every line it logs with the time (#1784)', () => {
+    const lines: string[] = []
+    const store = new Store()
+    try {
+      const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }), log: (l: string) => void lines.push(l) }
+      linkDepsFor(store, rest).log!('[links] box: hello')
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z \[links\] box: hello$/)
+    } finally {
+      store.close()
+    }
+  })
 })

@@ -1199,8 +1199,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         // The machine's calls to this hub (#550): answered as this machine, whatever they say, by the hub's allowlist
         ...(this.deps.reverse ? { call: (method: string, params: unknown, signal: AbortSignal) => this.deps.reverse!({ id: this.id, name: this.name }, method, params, signal) } : {}),
         terminal: (f) => this.deps.terminal({ ...f, terminalId: this.q.id(f.terminalId) }),
-        down: (reason) => {
+        down: (reason, detail) => {
           if (this.client !== client) return
+          this.deps.log?.(`[links] ${this.name}: the link dropped: ${detail}`)
           /*
            * A short drop is dialled again at once, with the switch off too (#1341, owner decision): the client redials the
            * same forward a few times (`LINK_REDIALS`, about 6 s, no ssh), and a blip or a host swapped in place is back

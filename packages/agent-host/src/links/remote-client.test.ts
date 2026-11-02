@@ -23,14 +23,14 @@ async function host(port = 0, build = { commit: 'abc1234', protocolVersion: PROT
 }
 
 function client(port: number, extra: Partial<ConstructorParameters<typeof RemoteClient>[0]> = {}) {
-  const seen = { hellos: [] as RemoteHello[], events: [] as unknown[], terms: [] as unknown[], downs: [] as string[], refusals: [] as unknown[] }
+  const seen = { hellos: [] as RemoteHello[], events: [] as unknown[], terms: [] as unknown[], downs: [] as string[], downDetails: [] as string[], refusals: [] as unknown[] }
   const c = new RemoteClient(
     { url: `ws://127.0.0.1:${port}`, token: TOKEN, maxBackoffMs: 100, ...extra },
     {
       hello: (h) => seen.hellos.push(h),
       event: (e) => seen.events.push(e),
       terminal: (f) => seen.terms.push(f),
-      down: (r) => seen.downs.push(r),
+      down: (r, d) => (seen.downs.push(r), seen.downDetails.push(d)),
       refused: (r) => seen.refusals.push(r),
     },
   )
@@ -98,6 +98,24 @@ describe('the link client (#82)', () => {
     await eventually(() => seen.events.length === 2)
     expect(seen.events).toEqual([ev('a'), ev('b')])
     expect(seen.hellos.at(-1)).toMatchObject({ resync: false, newLifetime: false })
+  })
+
+  it('says in the log which side ended a dropped link, and with what code (#1784)', async () => {
+    const { server, port } = await host()
+    const { c, seen } = client(port)
+    c.connect()
+    await eventually(() => c.connected)
+    // A socket cut under the hub: no close frame
+    for (const ws of (server as unknown as { clients: Set<{ terminate(): void }> }).clients) ws.terminate()
+    await eventually(() => seen.downs.length === 1)
+    expect(seen.downs[0]).toBe('closed (1006)')
+    expect(seen.downDetails[0]).toMatch(/this side noticed first/)
+    await eventually(() => c.connected)
+    // The host closes it with a frame: it is the one that ended it
+    for (const ws of (server as unknown as { clients: Set<{ close(code: number, reason: string): void }> }).clients) ws.close(1001, 'going away')
+    await eventually(() => seen.downs.length === 2)
+    expect(seen.downs[1]).toBe('closed (1001)')
+    expect(seen.downDetails[1]).toBe("the machine's host closed it first: 1001 going away")
   })
 
   it('a host restarted at the same address is a new lifetime: the hub has to read its snapshot again', async () => {
