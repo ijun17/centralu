@@ -414,7 +414,7 @@ describe('handoff and trash', () => {
     const done = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
     box.markDelivered(ORC, [done], NOW, 3)
     box.settle(done, ORC, 'answered', NOW)
-    expect(box.moveRole(ORC, NEW)).toEqual([asked])
+    expect(box.moveRole(NEW)).toEqual([asked])
     expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, via: 'orchestrator' })
     expect(box.recipient(direct, ORC)).toBeDefined()
     expect(box.recipient(done, ORC)).toBeDefined()

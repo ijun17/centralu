@@ -180,7 +180,7 @@ const moved = (db: Database.Database) => rawRows<Moved>(db, `SELECT message_id, 
 describe('movePendingThreadMail', () => {
   it('the move copies each pending thread message once with its id and marks the old receipt handled', () => {
     const { store, db, ids } = upgraded()
-    expect(movePendingThreadMail(db, NOW)).toEqual({ messages: 7, recipients: 8 })
+    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
     const m = (k: string) => store.mailbox.message(ids[k] ?? '')
     expect(m('q')).toMatchObject({ kind: 'message', needsReply: true, legacyThread: ids.thread, origin: 'mail', facts: { legacyKind: 'question' }, rootId: ids.q, causeId: null, depth: 0 })
     expect(m('n')).toMatchObject({ kind: 'message', needsReply: false, facts: { legacyKind: 'note' } })
@@ -211,7 +211,7 @@ describe('movePendingThreadMail', () => {
 
   it('the move keeps a quiet report quiet and an app’s needsOwner', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     expect(store.mailbox.message(ids.rep ?? '')?.facts.quiet).toBe(true)
     expect(store.mailbox.message(ids.t ?? '')?.facts.quiet).toBeUndefined()
     expect(store.mailbox.message(ids.ap ?? '')?.facts).toMatchObject({ needsOwner: true })
@@ -221,9 +221,9 @@ describe('movePendingThreadMail', () => {
 
   it('a second move finds nothing', () => {
     const { store, db } = upgraded()
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     const after = moved(db)
-    expect(movePendingThreadMail(db, NOW + 1)).toEqual({ messages: 0, recipients: 0 })
+    expect(movePendingThreadMail(db, NOW + 1, () => null)).toEqual({ messages: 0, recipients: 0 })
     expect(moved(db)).toEqual(after)
     store.close()
   })
@@ -233,31 +233,31 @@ describe('movePendingThreadMail', () => {
     const was = receipts(db)
     // The last statement of the move fails after the copies were written: the crash of a host between the two sides
     db.exec(`CREATE TRIGGER fail_handled BEFORE UPDATE OF handled_at ON mail_receipts BEGIN SELECT RAISE(ABORT, 'crash'); END`)
-    expect(() => movePendingThreadMail(db, NOW)).toThrow(/crash/)
+    expect(() => movePendingThreadMail(db, NOW, () => null)).toThrow(/crash/)
     expect(moved(db)).toEqual([])
     expect(rawRows(db, `SELECT id FROM mail`)).toEqual([])
     expect(receipts(db)).toEqual(was)
     db.exec(`DROP TRIGGER fail_handled`)
-    expect(movePendingThreadMail(db, NOW)).toEqual({ messages: 7, recipients: 8 })
+    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
     store.close()
   })
 
   it('the move leaves history and mail past retention alone', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     expect(store.mailbox.message(ids.a ?? '')).toBeUndefined()
     expect(store.mailbox.message(ids.old ?? '')).toBeUndefined()
     store.close()
   })
 
-  it('moved undelivered rows stay pending; old policy holds are not carried', () => {
+  it('moved undelivered rows stay pending, and every old hold is carried: the move lets nothing held go', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW)
-    expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([ids.n, ids.e, ids.pol, ids.rep])
+    movePendingThreadMail(db, NOW, () => null)
+    expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([ids.n, ids.e, ids.rep])
     expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toEqual([ids.q])
-    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBeNull()
+    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBe('policy')
     expect(store.mailbox.recipient(ids.ap ?? '', S1)?.held).toBe('loop')
-    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap])
+    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap, ids.pol])
     // A moved row is settled `legacy`: never watched, so neither reminded nor waited on
     expect(store.mailbox.watchedTo(S3)).toEqual([])
     store.close()
@@ -265,10 +265,10 @@ describe('movePendingThreadMail', () => {
 
   it('a reply whose target moved in an earlier run keeps the target’s root', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     const mail = new MailService(store.mail, { hostId: () => HOST, now: () => NOW + 10 })
     const reply = mail.post(ids.thread ?? '', S3, { kind: 'answer', body: 'agreed', replyTo: ids.q })
-    movePendingThreadMail(db, NOW + 20)
+    movePendingThreadMail(db, NOW + 20, () => null)
     expect(store.mailbox.message(reply.message.id)).toMatchObject({ replyTo: ids.q, rootId: ids.q })
     store.close()
   })
@@ -276,7 +276,7 @@ describe('movePendingThreadMail', () => {
   it('the move marks the old receipt read, so the v64 build does not count moved mail as work in hand', () => {
     const { store, db, ids } = upgraded()
     expect(store.mail.hasMailInHand(`${HOST}.t_work`, S2)).toBe(true)
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     expect(store.mail.hasMailInHand(`${HOST}.t_work`, S2)).toBe(false)
     expect(store.mail.hasMailInHand(ids.thread ?? '', S3)).toBe(false)
     expect(receipts(db).find((r) => r.message_id === ids.q && r.recipient === S2)?.read_at).toBe(NOW)
@@ -291,7 +291,7 @@ describe('movePendingThreadMail', () => {
     store.mail.setHeld(S3, [id], 'policy')
     store.mail.releaseHeld(S3, [id], null, NOW - 500)
     expect(receipts(db).find((r) => r.message_id === id)?.held).toBe('released')
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     expect(store.mailbox.recipient(id, S3)).toMatchObject({ held: 'released', deliveredAt: null })
     expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toContain(id)
     store.close()
@@ -305,7 +305,7 @@ describe('movePendingThreadMail', () => {
     }
     post(`${HOST}.m_first`, null, NOW - 1000)
     post(`${HOST}.m_back`, `${HOST}.m_first`, NOW - 5000)
-    movePendingThreadMail(db, NOW)
+    movePendingThreadMail(db, NOW, () => null)
     expect(store.mailbox.message(`${HOST}.m_back`)).toMatchObject({ replyTo: `${HOST}.m_first`, rootId: `${HOST}.m_first` })
     store.close()
   })
@@ -361,19 +361,19 @@ describe('the move is at most once, whatever the old receipts were', () => {
 
         type Old = Receipt & { kind: string; created_at: number }
         const isPending = (r: Old) =>
-          r.handled_at === null && r.held !== 'dismissed' && r.created_at >= NOW - 180 * DAY && (r.delivered_at === null || (r.read_at === null && ['question', 'assign'].includes(r.kind)))
+          r.handled_at === null && r.held !== 'dismissed' && r.created_at >= NOW - 180 * DAY && (r.delivered_at === null || r.read_at === null || r.kind === 'question')
         const all = () => rawRows<Old>(db, `SELECT r.*, m.kind, m.created_at FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id ORDER BY r.message_id, r.recipient`)
         const expected = all().filter(isPending).map((r) => `${r.message_id}|${r.recipient}`)
 
         store.upgrade()
         if (expected.length > 0 && random() < 0.5) {
           db.exec(`CREATE TRIGGER crash BEFORE UPDATE OF handled_at ON mail_receipts BEGIN SELECT RAISE(ABORT, 'crash'); END`)
-          expect(() => movePendingThreadMail(db, NOW)).toThrow(/crash/)
+          expect(() => movePendingThreadMail(db, NOW, () => null)).toThrow(/crash/)
           db.exec(`DROP TRIGGER crash`)
           expect(moved(db), `seed ${seed}`).toEqual([])
         }
-        const first = movePendingThreadMail(db, NOW)
-        const second = movePendingThreadMail(db, NOW + 1)
+        const first = movePendingThreadMail(db, NOW, () => null)
+        const second = movePendingThreadMail(db, NOW + 1, () => null)
         expect(moved(db).map((r) => `${r.message_id}|${r.recipient}`), `seed ${seed}`).toEqual(expected)
         expect(first.recipients, `seed ${seed}`).toBe(expected.length)
         expect(second, `seed ${seed}`).toEqual({ messages: 0, recipients: 0 })

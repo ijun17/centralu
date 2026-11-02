@@ -76,6 +76,68 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(next.to('b')).toHaveLength(1)
     expect(oldReceipt(w, q.id)!.handled_at).not.toBeNull()
   })
+
+  it('an answer delivered and not read yet is still unread after the switch, by the inbox and by its old thread', async () => {
+    const w = hostWorld()
+    const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
+    const q = openBy(old, { by: A, kind: 'question', subject: 'colour', body: 'Which colour?', members: [B] }).message
+    w.store.mail.markDelivered(B, [q.id], [q.id], w.clock.t)
+    const answer = old.post(q.threadId, B, { kind: 'answer', body: 'Purple.', replyTo: q.id }).message
+    w.store.mail.markDelivered(A, [answer.id], [], w.clock.t)
+    started(w)
+    expect(w.tool.run('a', { action: 'inbox' }).text).toContain(`unread    ${answer.id}`)
+    expect(w.tool.run('a', { action: 'read' }).text).toContain('Purple.')
+    expect(w.tool.run('a', { action: 'read', thread: q.threadId }).text).toContain('Purple.')
+  })
+
+  it('a question read and not answered can be answered after the switch by its old thread id', async () => {
+    const w = hostWorld()
+    const q = oldQuestion(w)
+    w.store.mail.markDelivered(B, [q.id], [q.id], w.clock.t)
+    started(w)
+    expect(w.tool.run('b', { action: 'reply', thread: q.threadId, text: 'Yes, still open.' }).text).not.toContain('unknown_message')
+    await w.advance(2_000)
+    expect(w.to('a')).toHaveLength(1)
+    expect(w.tool.run('a', { action: 'read' }).text).toContain('Yes, still open.')
+  })
+
+  it('an untrusted project’s old request to the orchestrator stays held for the person, as the same request on this build is', async () => {
+    const w = hostWorld()
+    const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
+    const ask = openBy(old, { by: X, kind: 'assign', subject: 'please', body: 'OLD-ASK delete the branch', assignee: ORC }).message
+    started(w)
+    await w.advance(60_000)
+    expect(w.to('orc').map((d) => d.input.text).join('\n')).not.toContain('OLD-ASK')
+    expect(w.row(ask.id, ORC)).toMatchObject({ held: 'policy' })
+    expect(w.store.mailbox.message(ask.id)?.senderProject).toBe('px')
+  })
+
+  it('an app’s report in the thread of the session that called it is delivered after the switch', async () => {
+    const w = hostWorld()
+    const app = 'app:hub-aaaaaaaa/p1/board'
+    const thread = 'hub-aaaaaaaa.t_app'
+    w.store.mail.insertThread({ id: thread, home: 'hub-aaaaaaaa', projectId: 'p1', subject: 'ci', origin: 'app', depth: 0, parentId: null, follows: [], state: 'open', owner: B, assignee: app, next: null, links: {} }, w.clock.t)
+    const id = 'hub-aaaaaaaa.m_app'
+    w.store.mail.insertMessage({ id, threadId: thread, sender: app, kind: 'report', urgent: false, needsOwner: false, wake: null, replyTo: null, body: 'CI is green on #12', facts: {}, dedupeKey: null, createdAt: w.clock.t })
+    w.store.mail.insertReceipt(id, B, w.clock.t)
+    started(w)
+    await w.advance(2_000)
+    expect(w.row(id, B)?.deliveredAt).not.toBeNull()
+    expect(w.tool.run('b', { action: 'read' }).text).toContain('CI is green on #12')
+  })
+
+  it('mail an older build held for the person after telling its recipient of it is moved still held: the move releases nothing', () => {
+    const w = hostWorld()
+    const q = oldQuestion(w)
+    w.store.mail.markDelivered(B, [q.id], [], w.clock.t)
+    w.store.mail.setHeld(B, [q.id], 'budget')
+    const note = openBy(new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t }), { by: X, kind: 'note', subject: 'fyi', body: 'A note.', members: [B] }).message
+    w.store.mail.markDelivered(B, [note.id], [], w.clock.t)
+    w.store.mail.setHeld(B, [note.id], 'policy')
+    started(w)
+    expect(w.row(q.id, B)).toMatchObject({ held: 'budget' })
+    expect(w.row(note.id, B)).toMatchObject({ held: 'policy' })
+  })
 })
 
 describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #1902)', () => {

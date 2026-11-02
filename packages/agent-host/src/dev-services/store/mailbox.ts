@@ -349,6 +349,11 @@ export class MailboxRecords {
     )[0]
   }
 
+  /** Whether a message of `sender` moved from a v61 thread (§6.3) has a row for `recipient`: the old build let it write there */
+  movedTo(sender: string, recipient: string): boolean {
+    return this.messages(`m.sender = ? AND m.legacy_thread IS NOT NULL AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) LIMIT 1`, sender, recipient).length > 0
+  }
+
   /** The newest task from `sender` whose row to `recipient` is not settled */
   newestTask(sender: string, recipient: string): MailRow | undefined {
     return this.messages(
@@ -771,24 +776,27 @@ export class MailboxRecords {
   }
 
   /**
-   * The orchestrator's role moved (§7.7): rows sent to the role (`via = 'orchestrator'`) that are watched and not settled,
-   * or not delivered, go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the message ids moved
+   * The orchestrator's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
+   * replaced), watched and not settled or not delivered, go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
+   * message ids moved
    */
-  moveRole(from: string, to: string): string[] {
+  moveRole(to: string): string[] {
     return this.transaction(() => {
-      const ids = this.rows(
-        `r.recipient = ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING})) ORDER BY m.created_at, m.id`,
-        from,
-      ).map((r) => r.messageId)
-      this.db
-        .prepare(
-          `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
-             held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
-           WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`,
-        )
-        .run(to, from, idList(ids))
-      this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
-      return ids
+      const rows = this.rows(
+        `r.recipient <> ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING})) ORDER BY m.created_at, m.id`,
+        to,
+      )
+      const move = this.db.prepare(
+        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
+           held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
+         WHERE message_id = ? AND recipient = ?`,
+      )
+      const drop = this.db.prepare(`DELETE FROM mail_recipients WHERE message_id = ? AND recipient = ?`)
+      for (const r of rows) {
+        move.run(to, r.messageId, r.recipient)
+        drop.run(r.messageId, r.recipient)
+      }
+      return rows.map((r) => r.messageId)
     })
   }
 
@@ -898,10 +906,16 @@ export class MailboxRecords {
     )
   }
 
-  /** The parties of watched rows not settled, as recipients or senders: whom the delivery's sweep checks are still here (`partyGone`, §7.7) */
+  /**
+   * The parties of watched rows not settled, as recipients or senders: whom the delivery's sweep checks are still here (`partyGone`, §7.7). A row sent
+   * to the role waits for the next orchestrator (`moveRole`), not for the session that held it
+   */
   openParties(): string[] {
     return this.db
-      .prepare<[], { a: string }>(`SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND ${WATCHED} UNION SELECT m.sender FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE r.settled IS NULL AND ${WATCHED}`)
+      .prepare<[], { a: string }>(
+        `SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND COALESCE(r.via, '') <> 'orchestrator' AND ${WATCHED}
+         UNION SELECT m.sender FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE r.settled IS NULL AND ${WATCHED}`,
+      )
       .all()
       .map((r) => r.a)
   }

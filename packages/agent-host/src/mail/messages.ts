@@ -764,10 +764,10 @@ export class MessageService {
     })
   }
 
-  /** The orchestrator's role moved to `to` (D15): rows sent to the role are delivered afresh, read or not, and the new orchestrator is told of each. Returns how many */
-  roleMoved(from: string, to: string): number {
+  /** The orchestrator's role is `to`'s (D15): rows sent to the role that another session held are delivered afresh, read or not, and the new orchestrator is told of each. Returns how many */
+  roleMoved(to: string): number {
     return this.run(() => {
-      const ids = this.records.moveRole(from, to)
+      const ids = this.records.moveRole(to)
       this.movedNotice(to, ids)
       return ids.length
     })

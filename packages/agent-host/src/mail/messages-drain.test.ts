@@ -298,7 +298,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     due(w)
     w.records.markDelivered(ORC, [viaRole.id, direct.id], w.clock.t, 2)
     w.records.markRead(ORC, [viaRole.id], w.clock.t)
-    expect(w.mail.roleMoved(ORC, ORC2)).toBe(1)
+    expect(w.mail.roleMoved(ORC2)).toBe(1)
     expect(w.rowOf(viaRole.id, ORC2)).toMatchObject({ via: 'orchestrator', deliveredAt: null, readAt: null, turnSeq: null })
     expect(w.records.recipient(viaRole.id, ORC)).toBeUndefined()
     expect(w.rowOf(direct.id, ORC).deliveredAt).not.toBeNull()

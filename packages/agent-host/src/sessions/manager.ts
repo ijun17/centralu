@@ -128,8 +128,8 @@ export type MailHooks = {
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
-  /** The orchestrator's role moved to a new session (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
-  roleMoved?(fromSessionId: string, toSessionId: string): void
+  /** The orchestrator's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
+  roleMoved?(toSessionId: string): void
   /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
   askedBy?(orchestratorId: string): Asker | null
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
@@ -1915,7 +1915,7 @@ export class SessionManager {
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
       refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
-      roleMoved: (fromId, toId) => self.mailHooks?.roleMoved?.(fromId, toId),
+      roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
       newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
       requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),

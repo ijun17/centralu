@@ -83,7 +83,7 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
     const w = world()
     const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
     const { message, thread } = openBy(old, { by: A, kind: 'question', subject: 'about #12', body: 'still open?', members: [B] })
-    w.store.movePendingThreadMail(w.clock.t)
+    w.store.movePendingThreadMail(w.clock.t, () => null)
     w.clock.t += 10
     w.run('b', { action: 'reply', thread: thread.id, text: 'yes' })
     expect(w.store.mailbox.feedOf(B, { limit: 1 })[0]).toMatchObject({ replyTo: message.id })

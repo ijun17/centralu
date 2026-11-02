@@ -74,6 +74,7 @@ export type HostMail = {
  */
 export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostId: string; delivery?: MailDeliveryOptions; now?: () => number } ): HostMail {
   const { hostId } = opts
+  const now = opts.now ?? Date.now
   const addressOf = (id: string) => sessionAddress(hostId, id)
   const projects = () => store.projects.listProjects()
   const reach = mailReach({
@@ -84,8 +85,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     orchestratorId: () => sessions.orchestratorId() ?? null,
     orchestratorAsks: () => sessions.orchestratorAsks() === null,
-    // Nothing records an app's caller before the apps' mail API (§13)
-    appCalledBy: () => false,
+    // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session
+    appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
     project: (projectId) => {
       const p = projects().find((x) => x.id === projectId)
       return p && { trusted: p.trusted === true, name: p.name }
@@ -171,8 +172,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
-    roleMoved: (from, to) => {
-      if (service.roleMoved(addressOf(from), addressOf(to)) > 0) delivery.poke(to)
+    roleMoved: (to) => {
+      if (service.roleMoved(addressOf(to)) > 0) delivery.poke(to)
     },
   }
 
@@ -185,7 +186,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     hooks,
     afterReady: () => {
       try {
-        const moved = store.movePendingThreadMail(Date.now())
+        const moved = store.movePendingThreadMail(now(), (address) => reach.projectOf(address))
         if (moved.messages > 0) console.error(`[mail] moved ${moved.messages} pending message(s) an older build left in its threads`)
       } catch (e) {
         // The move is one transaction: nothing moved, and the next ready tries again

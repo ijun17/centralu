@@ -57,6 +57,23 @@ describe('deleting a session while it holds work in the mailbox', () => {
     expect(world.store.mailbox.feedOf(addressOf(s.id), { limit: 10 })).toEqual([])
   })
 
+  it('a request to the orchestrator’s role outlives the orchestrator put in the trash: the next orchestrator made gets it, delivered afresh (D15)', async () => {
+    const asker = await create()
+    const orc = await world.mgr.orchestrator()
+    world.adapter.capabilities.gatesSteps = true
+    expect(m.tool.run(asker.id, { action: 'send', to: 'orchestrator', text: 'Can you look at CI?' }).text).toContain('Sent')
+    const request = read.between(addressOf(asker.id), addressOf(orc.id))[0]!
+    await world.rpc('agents.deleteSession', { sessionId: orc.id })
+    expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ settled: null })
+    // Nothing for the sweep to settle meanwhile: the row waits for the role, not for the session that held it
+    expect(world.store.mailbox.openParties()).not.toContain(addressOf(orc.id))
+
+    const next = await world.mgr.orchestrator()
+    expect(next.id).not.toBe(orc.id)
+    expect(read.row(request.id, addressOf(next.id))).toMatchObject({ via: 'orchestrator', settled: null, deliveredAt: null })
+    expect(read.row(request.id, addressOf(orc.id))).toBeUndefined()
+  })
+
   it('a mailbox that fails does not undo the move to the trash, and says so', async () => {
     const worker = await create()
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})

@@ -94,7 +94,7 @@ describe('the role moves (§7.7, D15, #1683)', () => {
     // The old orchestrator goes to the trash: what came to the role is not settled gone with it
     w.hooks.sessionGone('orc')
     expect(w.row(request.id, ORC)!.settled).toBeNull()
-    w.hooks.roleMoved!('orc', 'b')
+    w.hooks.roleMoved!('b')
     expect(w.row(request.id, B)).toMatchObject({ deliveredAt: null, readAt: null, settled: null })
     expect(w.row(request.id, ORC)).toBeUndefined()
   })

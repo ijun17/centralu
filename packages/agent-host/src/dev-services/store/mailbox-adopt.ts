@@ -12,11 +12,8 @@ import { factsFrom, RECIPIENT_HOLD_WORDS, type MailFacts, type MailKind } from '
 /** v61 mail older than this is not moved: retention would not have kept it waiting (§6.4) */
 const MOVE_WITHIN_MS = 180 * 24 * 60 * 60 * 1000
 
-/**
- * v61 holds carried by a move: the recipient holds but `policy`, which is judged again at drain (§7.4), and the person's
- * `released` (sent as it is, never held again)
- */
-const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS.filter((w) => w !== 'policy'), 'released'])
+/** v61 holds carried by a move: every recipient hold, so the move lets nothing held go, and the person's `released` (sent as it is, never held again) */
+const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS, 'released'])
 
 type PendingSql = MessageSql & {
   r_recipient: string
@@ -43,11 +40,12 @@ function kindOf(m: MessageRow, threadOrigin: string): { kind: MailKind; needsRep
  * Moves the v61 receipts still pending into the v65 tables, and marks each old one handled, in one transaction (§6.3):
  * delivered or not, a receipt moved is handled in the old tables, so an older build serving again never delivers it, and
  * a second run finds nothing, and marked read, so the older build's readers of unread mail (`hasMailInHand`, the review
- * clause of `openChildren`) do not count it as work in hand for good. Pending is: not handled, not dismissed by the person, sent within retention, and either not
- * delivered or an unread `question` or `assign`. Each message is copied once under its own id, its rows settled `legacy`
- * (never awaited). Returns how many messages and rows were written
+ * clause of `openChildren`) do not count it as work in hand for good. Pending is: not handled, not dismissed by the person, sent within retention, and
+ * not delivered, not read, or a `question` (read and not answered). Each message is copied once under its own id, its rows settled `legacy` (never
+ * awaited). A session's message carries its sender's project (`projectOf`; the old tool left its threads' project empty), so the one hold judges it
+ * at drain. Returns how many messages and rows were written
  */
-export function movePendingThreadMail(db: Database.Database, now: number): { messages: number; recipients: number } {
+export function movePendingThreadMail(db: Database.Database, now: number, projectOf: (address: string) => string | null): { messages: number; recipients: number } {
   return db
     .transaction(() => {
       const pending = db
@@ -57,7 +55,7 @@ export function movePendingThreadMail(db: Database.Database, now: number): { mes
                   t.project_id AS t_project_id, t.owner AS t_owner, t.origin AS t_origin
              FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id JOIN mail_threads t ON t.id = m.thread_id
             WHERE r.handled_at IS NULL AND COALESCE(r.held, '') <> 'dismissed' AND m.created_at >= ?
-              AND (r.delivered_at IS NULL OR (r.read_at IS NULL AND m.kind IN ('question', 'assign')))
+              AND (r.delivered_at IS NULL OR r.read_at IS NULL OR m.kind = 'question')
             ORDER BY m.thread_id, m.seq, r.recipient`,
         )
         .all(now - MOVE_WITHIN_MS)
@@ -89,7 +87,7 @@ export function movePendingThreadMail(db: Database.Database, now: number): { mes
         messages += insertMail.run({
           id: m.id,
           sender: m.sender,
-          senderProject: m.sender === p.t_owner && sender?.kind === 'session' ? p.t_project_id : null,
+          senderProject: sender?.kind === 'session' ? (projectOf(m.sender) ?? (m.sender === p.t_owner ? p.t_project_id : null)) : null,
           kind,
           needsReply: needsReply ? 1 : 0,
           replyTo: target ? m.replyTo : null,
