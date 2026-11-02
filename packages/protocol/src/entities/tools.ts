@@ -74,6 +74,8 @@ export const ToolSetup = z.object({
   failure: z.object({ reason: ToolSetupFailureReason, message: z.string(), verifyUri: z.string().optional() }).optional(),
   /** The plan the tool said at its last sign-in (Antigravity's `_meta.antigravity.tier`), with its upgrade link when it gave one */
   plan: z.object({ name: z.string(), upgradeUri: z.string().optional() }).optional(),
+  /** While `not_installed`: the tool's own app is on that machine though Centralu's connection to it is not (Antigravity's line says so); absent otherwise */
+  appFound: z.literal(true).optional(),
 })
 export type ToolSetup = z.infer<typeof ToolSetup>
 

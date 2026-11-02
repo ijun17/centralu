@@ -2,6 +2,7 @@ import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -9,7 +10,8 @@ import { createInflateRaw } from 'node:zlib'
 import { errorMessage } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { processStartTime } from '../../dev-services/instance-lock.js'
-import { HOST_PLATFORM, type Platform } from '../../os.js'
+import { whichTool } from '../../env-path.js'
+import { HOST_PLATFORM, pathsOf, type Platform } from '../../os.js'
 import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from './release.js'
@@ -95,6 +97,40 @@ export function hasSignIn(home: AgyHome): boolean {
   } catch {
     return false
   }
+}
+
+type Env = Record<string, string | undefined>
+
+/**
+ * Where the person's own Antigravity (the desktop app, or Google's `agy` command) lives on `platform`: a path check each,
+ * no process started. Confirmed against Google's pages and users' reports; `*` marks a guess:
+ * - macOS: `/Applications/Antigravity.app` (`~/Applications`*), `~/.local/bin/agy`
+ * - Windows: `%LOCALAPPDATA%\Programs\Antigravity` (the per-user installer; `Antigravity IDE`*), `%ProgramFiles%\Google\Antigravity`,
+ *   `%LOCALAPPDATA%\agy\bin\agy.exe`
+ * - Linux: Google's apt package (`/usr/share/antigravity`, an `antigravity` launcher in `/usr/bin`) or a tarball unpacked
+ *   anywhere; `/opt/antigravity`* and `/opt/antigravity-ide`* (community packages), `/usr/local/bin/antigravity`, `~/.local/bin/agy`
+ * Both installers take a `--dir`, so the PATH is searched too (`agyAppFinder`).
+ */
+export function agyAppPaths(platform: Platform, env: Env, home: string): string[] {
+  const p = pathsOf(platform)
+  const agy = p.join(home, '.local', 'bin', 'agy')
+  if (platform === 'win32') {
+    const local = env.LOCALAPPDATA ?? p.join(home, 'AppData', 'Local')
+    const programs = env.ProgramFiles ?? 'C:\\Program Files'
+    return [p.join(local, 'Programs', 'Antigravity'), p.join(local, 'Programs', 'Antigravity IDE'), p.join(programs, 'Google', 'Antigravity'), p.join(local, 'agy', 'bin', 'agy.exe')]
+  }
+  if (platform === 'darwin') return ['/Applications/Antigravity.app', p.join(home, 'Applications', 'Antigravity.app'), agy]
+  return ['/usr/share/antigravity', '/opt/antigravity', '/opt/antigravity-ide', '/usr/bin/antigravity', '/usr/local/bin/antigravity', agy]
+}
+
+/**
+ * Whether the person's own Antigravity is on this machine: one of `agyAppPaths`, or `agy` or `antigravity` on the PATH (the
+ * host's own search, which starts nothing). Read at each setup read, so an app installed meanwhile shows at once.
+ * `exists` stands in for the disk in tests.
+ */
+export function agyAppFinder(platform: Platform = HOST_PLATFORM, env: Env = process.env, home: string = homedir(), exists?: (path: string) => boolean): () => boolean {
+  const paths = agyAppPaths(platform, env, home)
+  return () => paths.some((p) => (exists ?? existsSync)(p)) || ['agy', 'antigravity'].some((name) => whichTool(name, env, platform, exists) !== null)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

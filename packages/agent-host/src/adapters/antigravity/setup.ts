@@ -28,6 +28,8 @@ export type AgySetupDeps = {
   /** This machine's archive, or null where Google ships no build */
   archive: AgyArchive | null
   version: string
+  /** Whether the person's own Antigravity (app or `agy`) is on this machine (`ToolSetup.appFound`; `agyAppFinder`) */
+  appFound?: () => boolean
   installIo?: InstallIo
   signIn?: SignInDeps
   /** Replaced by a test that models the agent's sign-in */
@@ -62,6 +64,10 @@ export class AgySetup implements ToolSetupControl {
     return this.deps.archive !== null && isInstalled(this.deps.home, this.deps.archive)
   }
 
+  private appFound(): boolean {
+    return this.deps.appFound?.() ?? false
+  }
+
   signedIn(): boolean {
     return this.installed() && !this.signedOutSeen && hasSignIn(this.deps.home)
   }
@@ -73,7 +79,7 @@ export class AgySetup implements ToolSetupControl {
       return { ...base, state: 'not_installed', failure: { reason: 'unsupported_platform', message: 'Google ships no Antigravity agent for this system' } }
     }
     if (this.installing) return { ...base, state: 'installing', ...(this.progress ? { progress: this.progress } : {}) }
-    if (!this.installed()) return { ...base, state: 'not_installed', ...failure }
+    if (!this.installed()) return { ...base, state: 'not_installed', ...failure, ...(this.appFound() ? { appFound: true } : {}) }
     if (this.signingIn) return { ...base, state: 'signing_in' }
     if (!this.signedIn()) return { ...base, state: 'signed_out', ...failure }
     return { ...base, state: 'ready', ...(this.plan ? { plan: this.plan } : {}) }

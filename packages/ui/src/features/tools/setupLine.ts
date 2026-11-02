@@ -14,6 +14,8 @@ export type SetupView =
   | { kind: 'terminal_login' }
   /** Centralu installs it (`agents.installTool`) */
   | { kind: 'install' }
+  /** As `install`, for a tool whose own app is already on that machine (`ToolSetup.appFound`): only the sentence differs */
+  | { kind: 'install_app_found' }
   | { kind: 'installing'; received: number; total: number | null }
   | { kind: 'install_failed'; message: string }
   /** Google ships no build for this system: nothing to press */
@@ -51,7 +53,7 @@ export function setupView(setup: ToolSetup, linked: boolean): SetupView {
       if (setup.failure?.reason === 'unsupported_platform') return { kind: 'unsupported', message: setup.failure.message }
       // A cancel is the person's own act: the line goes back to offering it, with nothing to apologise for
       if (setup.failure && setup.failure.reason !== 'cancelled') return { kind: 'install_failed', message: setup.failure.message }
-      return { kind: 'install' }
+      return { kind: setup.appFound ? 'install_app_found' : 'install' }
     case 'installing':
       return { kind: 'installing', received: setup.progress?.received ?? 0, total: setup.progress?.total ?? null }
     case 'signing_in':

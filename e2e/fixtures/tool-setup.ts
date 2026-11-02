@@ -103,6 +103,33 @@ export function toolSetupTests(): void {
       await expect(line).toHaveAttribute('data-setup', 'sign_in')
     })
 
+    test("the app is installed but Centralu's connection is not: the line says so, and Install works as before", async ({ page }) => {
+      await antigravity(page, centralu('not_installed', { appFound: true }))
+      await pickAntigravity(page)
+      const line = page.getByTestId('tool-blocked')
+      await expect(line).toContainText("Antigravity is installed on this computer. Install Centralu's connection to it here.")
+      await expect(line).toHaveAttribute('data-setup', 'install_app_found')
+      await page.getByTestId('tool-blocked-install').click()
+      expect(await calls(page)).toEqual(['install:antigravity'])
+      await expect(line).toHaveAttribute('data-setup', 'installing')
+      // As the host does, an install in progress no longer carries the flag
+      expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.detected.find((t: any) => t.name === 'antigravity').setup.appFound)).toBeUndefined()
+    })
+
+    test('on a linked machine the sentence names that machine', async ({ page }) => {
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.machines.add({ shell: 'posix', name: 'Box', sshTarget: 'me@box' }))
+      await antigravity(page, centralu('ready'))
+      await antigravity(page, centralu('not_installed', { appFound: true }), 'box')
+      await page.getByTestId('add-project').click()
+      await page.getByTestId('add-project-on-box').click()
+      await page.getByTestId('add-remote-project-path').fill('/srv/beta')
+      await page.getByTestId('add-remote-project-confirm').click()
+      await expect(page.getByTestId('add-remote-project-dialog')).toHaveCount(0)
+      await openSessionDialog(page, 'beta')
+      await page.getByTestId('tool-option-antigravity').click()
+      await expect(page.getByTestId('tool-blocked')).toContainText("Antigravity is installed on Box. Install Centralu's connection to it here.")
+    })
+
     test('signed out: Sign in, waiting for the browser with Stop, then the line fades out and Start enables', async ({ page }) => {
       await antigravity(page, centralu('signed_out'))
       await pickAntigravity(page)

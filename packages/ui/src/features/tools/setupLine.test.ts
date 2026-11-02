@@ -38,6 +38,13 @@ describe('setupView: what a tool\'s line says', () => {
     expect(setupView(managed({ state: 'not_installed', failure: { reason: 'cancelled', message: 'x' } }), false)).toEqual({ kind: 'install' })
   })
 
+  it('not installed with the tool\'s own app on that machine keeps Install and says so, unless the install failed', () => {
+    expect(setupView(managed({ state: 'not_installed', appFound: true }), false)).toEqual({ kind: 'install_app_found' })
+    expect(setupView(managed({ state: 'not_installed', appFound: true }), true)).toEqual({ kind: 'install_app_found' })
+    expect(setupView(managed({ state: 'not_installed', appFound: true, failure: { reason: 'cancelled', message: 'x' } }), false)).toEqual({ kind: 'install_app_found' })
+    expect(setupView(managed({ state: 'not_installed', appFound: true, failure: { reason: 'checksum', message: 'bad file' } }), false)).toEqual({ kind: 'install_failed', message: 'bad file' })
+  })
+
   it('a system Google ships no build for has nothing to press', () => {
     expect(setupView(managed({ state: 'not_installed', failure: { reason: 'unsupported_platform', message: 'no build' } }), false)).toEqual({ kind: 'unsupported', message: 'no build' })
   })
