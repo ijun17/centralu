@@ -144,6 +144,40 @@ describe('removing a worktree (#1655, #1560)', () => {
     expect(existsSync(join(path, 'a.txt'))).toBe(true)
   })
 
+  // A link names its target to git: removing the link took the other worktree, uncommitted work and all
+  it('never removes a link, nor the worktree it leads to', async () => {
+    const target = join(root, 'worktrees', 'p', 'session-target')
+    await gitWorktreeAdd(repo, target, 'centralu/target', undefined, TRUSTED)
+    writeFileSync(join(target, 'a.txt'), 'not committed\n')
+    // A junction is Windows' own (POSIX makes a symlink of it); a directory symlink may need a right Windows withholds
+    for (const type of ['junction', 'dir'] as const) {
+      const link = join(root, 'worktrees', 'p', `session-${type}`)
+      try {
+        symlinkSync(target, link, type)
+      } catch {
+        continue
+      }
+      await expect(gitWorktreeRemove(repo, link, { worktreeRoot: join(root, 'worktrees') })).rejects.toThrow(/is a link/)
+      expect(existsSync(join(target, 'a.txt'))).toBe(true)
+      expect(await listed(target)).toBe(true)
+    }
+  })
+
+  it('never takes another project\'s folder of worktrees for a leftover', async () => {
+    const worktrees = join(root, 'worktrees')
+    const otherProject = join(root, 'other-repo')
+    fixtureGit(root, ['init', '-q', '-b', 'main', otherProject])
+    writeFileSync(join(otherProject, 'a.txt'), 'x\n')
+    fixtureGit(otherProject, ['add', '.'])
+    fixtureGit(otherProject, ['commit', '-qm', 'init'])
+    const theirs = join(worktrees, 'q', 'session-theirs')
+    await gitWorktreeAdd(otherProject, theirs, 'centralu/theirs', undefined, TRUSTED)
+    writeFileSync(join(theirs, 'a.txt'), 'not committed\n')
+
+    await expect(gitWorktreeRemove(repo, join(worktrees, 'q'), { worktreeRoot: worktrees })).rejects.toThrow(/not a worktree/)
+    expect(existsSync(join(theirs, 'a.txt'))).toBe(true)
+  })
+
   // A Windows short name (8.3) for the folder: git lists its long name, and its entry has to go too
   it.skipIf(process.platform !== 'win32')('removes a worktree named by its short name, git\'s entry included', async (ctx) => {
     const path = join(root, 'worktrees', 'a-folder-with-a-long-name', 'session-short')

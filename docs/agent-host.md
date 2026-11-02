@@ -853,8 +853,9 @@ agent's cleanup, a purge, a branch taken over). The host removes the folder (`re
 paths taken), then git drops its entry. git did the delete before, and on Windows it deleted through a junction what
 the junction led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters after it had
 already dropped its entry and the `.git` file, so the folder stayed with nothing to clean it (a junction to the project
-took the project with its `.git`). A folder that holds a checkout git lists is never removed. A folder git no longer
-lists is removed the same way only inside the worktree root and with no `.git` of its own (what such a stop left);
+took the project with its `.git`). A link (a symlink, a junction) is never removed: git would take the worktree it
+leads to. A folder that holds a checkout git lists is never removed. A folder git no longer lists is removed the same
+way only as a session's folder in the worktree root (`<root>/<project>/<session>`) with no `.git` of its own (what such a stop left);
 anything else unlisted is refused. git is given the path as it lists it (a Windows short name it does not match).
 A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
 retry; the archive's answer and the purge say so.

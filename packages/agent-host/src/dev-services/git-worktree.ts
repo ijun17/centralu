@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
 import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
@@ -293,9 +293,11 @@ export function pathKey(path: string): string {
  * a folder that nothing would clean (measured, git 2.47). `removeData` never follows a link and takes long paths. git
  * then drops its entry for the folder that is gone, named as git lists it (a Windows short name it does not match).
  *
- * Never a folder that holds a checkout git lists (the project, another worktree). A folder git no longer lists is what
- * such a removal left part way only when it is inside `worktreeRoot` (Centralu's worktrees) and has no `.git` of its
- * own; anything else unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
+ * Never a link (a symlink, a junction): git would take what it leads to, another worktree uncommitted work and all.
+ * Never a folder that holds a checkout this repository lists (the project, another worktree). A folder git no longer
+ * lists is what such a removal left part way only when it is a session's folder in `worktreeRoot`
+ * (`<root>/<project>/<session>`, never a project's folder of them) and has no `.git` of its own; anything else
+ * unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
  * and git's entry stays so the removal can be tried again.
  */
 export async function gitWorktreeRemove(
@@ -303,6 +305,7 @@ export async function gitWorktreeRemove(
   path: string,
   { unlocked = false, worktreeRoot }: { unlocked?: boolean; worktreeRoot?: string } = {},
 ): Promise<void> {
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, not a worktree; nothing was removed`)
   const key = pathKey(path)
   const list = await gitWorktreeList(repoCwd)
   const entry = list.find((w) => pathKey(w.path) === key)
@@ -310,7 +313,8 @@ export async function gitWorktreeRemove(
   if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
   const held = list.find((w) => w !== entry && pathKey(w.path).startsWith(`${key}/`))
   if (held) throw new Error(`${path} holds ${held.path}, which git lists as a checkout; nothing was removed`)
-  const leftover = worktreeRoot !== undefined && key.startsWith(`${pathKey(worktreeRoot)}/`)
+  const inRoot = worktreeRoot === undefined ? null : `${pathKey(worktreeRoot)}/`
+  const leftover = inRoot !== null && key.startsWith(inRoot) && key.slice(inRoot.length).split('/').length === 2
   if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
     throw new Error(`${path} is not a worktree of ${repoCwd}`)
   }
