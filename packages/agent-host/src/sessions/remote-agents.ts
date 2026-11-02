@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import { NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
+import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
@@ -1413,7 +1413,8 @@ export class RemoteAgents {
     // Asked and not reached: the link went away after the list was read. That is the machine away, not a machine without the checkout
     const unreached = read.map(({ r }) => (!r.ok && (r.error.includes(NOT_REACHABLE) || r.error.includes(NOT_CONNECTED_PHRASE)) ? r.error : null))
     if (read.length > 0 && unreached.every((e) => e !== null)) {
-      return { error: awayRefusal(machine.name, NOT_REACHABLE, 'nothing was started there') }
+      // One the person disconnected meanwhile says so, as above
+      return { error: awayRefusal(machine.name, unreached.every((e) => e?.includes(NOT_CONNECTED_PHRASE)) ? NOT_CONNECTED : NOT_REACHABLE, 'nothing was started there') }
     }
     const same = read.filter(({ r }) => r.ok && r.origin && gitRemoteKey(r.origin) === key).map(({ p }) => p)
     const chosen = same.length === 1 ? same[0] : same.filter((p) => p.name === project.name).length === 1 ? same.find((p) => p.name === project.name) : undefined

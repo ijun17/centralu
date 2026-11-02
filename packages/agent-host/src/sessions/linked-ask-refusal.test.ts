@@ -42,7 +42,7 @@ async function hub(away?: string) {
   const reader = {
     machineOf: (id: string) => (id.startsWith('m1.') ? 'Box' : null),
     machineNamed: (name: string) => (name === 'Box' ? { id: 'm1', name } : null),
-    projects: async () => ({ projects: [project], away: away ? [{ machineId: 'm1', machine: 'Box', why: away }] : [] }),
+    projects: async () => ({ projects: [project], away: away ? [{ machineId: 'm1', machine: 'Box', why: away }] : [], machines: [{ machine: 'Box', machineId: 'm1' }] }),
     projectSessions: async () => ({ ok: true as const, sessions: [{ id: 'm1.w1', name: 'Worker', state: 'idle' }, { id: 'm1.w2', name: 'Other', state: 'idle' }] }),
     sessionsMoved: async () => {
       movedReads++
@@ -59,7 +59,7 @@ async function hub(away?: string) {
   const hubProject = { id: 'h9.p-web', projectId: 'p-web', name: 'web', hub: 'Desk', hubId: 'h9', ...(away ? { away } : {}) }
   mgr.useLinkedHubs({ projects: async () => ({ projects: [hubProject], away: [] }), ask: () => Promise.reject(new Error('asked a hub that is down')) })
   cleanup.push(() => void mgr.disposeAll())
-  return { mgr, movedReads: () => movedReads }
+  return { mgr, reader, movedReads: () => movedReads }
 }
 
 describe('ask_project to a linked machine, when the session is not named', () => {
@@ -82,6 +82,7 @@ describe('a refusal for a machine that is down says when to try again (#1143)', 
       error(await mgr.askProject('h1', { project: 'h9/web', task: 'x' })),
       error(await mgr.startAgent('h1', { task: 'x', machine: 'Box' })),
       error(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'm1/api' })),
+      error(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'm1/never-seen' })),
     ]
   }
 
@@ -92,7 +93,18 @@ describe('a refusal for a machine that is down says when to try again (#1143)', 
       `Desk ${NOT_CONNECTED_PHRASE}, so web on Desk cannot be asked. ${after}`,
       `Box ${NOT_CONNECTED_PHRASE}, so nothing was started there. ${after}`,
       `Could not create it — api [m1.p-api] is on Box, which ${NOT_CONNECTED_PHRASE}. ${after}`,
+      `Could not create it — Box ${NOT_CONNECTED_PHRASE}, so "m1/never-seen" cannot be created there. ${after}`,
     ])
+  })
+
+  // The person disconnected it after its projects were listed, before start_agent read their origin
+  it('start_agent: one disconnected between the list and the read says so', async () => {
+    const { mgr, reader } = await hub()
+    Object.assign(reader, { origin: async () => ({ ok: false, error: `Box ${NOT_CONNECTED_PHRASE}` }) })
+    expect(await mgr.startAgent('h1', { task: 'x', machine: 'Box' })).toMatchObject({
+      ok: false,
+      error: `Box ${NOT_CONNECTED_PHRASE}, so nothing was started there. Try again once the person has connected it.`,
+    })
   })
 
   it('one whose link dropped: once its link is back', async () => {
@@ -102,6 +114,7 @@ describe('a refusal for a machine that is down says when to try again (#1143)', 
       `Desk is ${NOT_REACHABLE}, so web on Desk cannot be asked. ${after}`,
       `Box is ${NOT_REACHABLE}, so nothing was started there. ${after}`,
       `Could not create it — api [m1.p-api] is on Box, which is ${NOT_REACHABLE}. ${after}`,
+      `Could not create it — Box is ${NOT_REACHABLE}, so "m1/never-seen" cannot be created there. ${after}`,
     ])
   })
 })
