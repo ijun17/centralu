@@ -66,12 +66,9 @@ itSymlink('copies workspace package dependencies before checking sibling links, 
   await symlink(outside, join(main, 'node_modules', 'away'), 'dir')
   await prepareWorktreeDependencies(main, child)
   expect(await readFile(join(child, 'packages', 'a', 'node_modules', 'sibling', 'index.js'), 'utf8')).toBe('original')
-  // An absolute link into the main checkout must never lead there from the child. Linux and Windows make it again
-  // leading to the same place in the child (the copy's `links` rule); macOS clones the tree as it is, so the link
-  // still leads into the main checkout and is dropped (#1708).
-  const escape = join(child, 'node_modules', 'escape')
-  if (process.platform === 'darwin') await expect(lstat(escape)).rejects.toMatchObject({ code: 'ENOENT' })
-  else expect(realpathSync.native(escape)).toBe(realpathSync.native(child))
+  // An absolute link into the main checkout must never lead there from the child: it is made again leading to the
+  // same place in the child, by the copy's `links` rule on Linux and Windows and after macOS's clone (#1708)
+  expect(realpathSync.native(join(child, 'node_modules', 'escape'))).toBe(realpathSync.native(child))
   // A link leading outside both checkouts keeps its target in the copy and is then dropped.
   await expect(lstat(join(child, 'node_modules', 'away'))).rejects.toMatchObject({ code: 'ENOENT' })
 })

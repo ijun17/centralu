@@ -661,6 +661,14 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk as the remote has it (#1484, `resolveForkBase`): the trunk is fetched (bounded, trusted projects only) and the
 child forks from `origin/<trunk>`, never from the checkout's HEAD, which may be any branch; with no remote, a failed or timed-out fetch, or an
 untrusted project it forks from the newer of the local trunk and the remote-tracking ref last fetched, and with no trunk found at all from HEAD.
+A branch asked for that is already there (#1662, a pull request's handed to a new session; `WorktreeSessions.takeBranch`)
+is not forked: the worktree starts on it as the remote has it, fetched (trusted projects only), tracking it when only the remote
+has it. A local branch behind the remote is moved to its head when every commit of its own was on the remote at some point
+(the remote-tracking ref's reflog, so a rebased pull request counts) or is on the trunk; otherwise the start is refused with
+the count. An archived session's worktree that has the branch checked out is removed when it has no uncommitted change and
+every commit of its own is on a remote or the trunk; any other worktree that has it (a session not archived, the project's
+folder, one of the person's) is never touched, and the refusal names it. A start that fails keeps such a branch, and so does the session's cleanup later: `worktree_branch_was_there:<session>`, an
+app setting (no store step; a build before it reads nothing new), marks it, and goes when the session is deleted for good.
 The start answer's `notice` names the base commit and what could not be done (a start on a linked machine does not carry it back yet). The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
@@ -838,13 +846,26 @@ configured setup command. With an unchanged root lockfile (`pnpm-lock.yaml`, `pa
 project checkout, including workspace packages whose `package.json` is unchanged. Existing folders and links
 are left alone. The existing APFS clone / ordinary-copy fallback gives the child independent files: a symlink
 to the project's dependencies would let it change the original checkout. Internal dependency links stay;
-links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
+links escaping the new worktree are removed after all package copies finish, except a link into the project, which is made
+again leading to the same place in the worktree (on Linux and Windows by the copy, after macOS's APFS clone by `dropEscapingLinks`, #1708). No install or lifecycle script
 runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
 or cannot be copied, the configured setup command or the child must install them; creation still continues.
 What provisioning could not do (a copy skipped or refused, a link dropped, dependencies or the setup command
 failing) is a warning notice at the top of the new session, and a `start_agent` child also gets it in its task,
 since an agent does not read notices (#841). A step after `git worktree add` that throws before a session owns
 the worktree removes the folder and its branch again (#774); what could not be removed is named in the error.
+
+**Removing a worktree** (#1655, #1560, `gitWorktreeRemove`, the one path for every removal: a start that failed, an
+agent's cleanup, a purge, a branch taken over). The host removes the folder (`removeData`: never through a link, long
+paths taken), then git drops its entry. git did the delete before, and on Windows it deleted through a junction what
+the junction led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters after it had
+already dropped its entry and the `.git` file, so the folder stayed with nothing to clean it (a junction to the project
+took the project with its `.git`). A link (a symlink, a junction) is never removed: git would take the worktree it
+leads to. A folder that holds a checkout git lists is never removed. A folder git no longer lists is removed the same
+way only as a session's folder in the worktree root (`<root>/<project>/<session>`) with no `.git` of its own (what such a stop left);
+anything else unlisted is refused. git is given the path as it lists it (a Windows short name it does not match).
+A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
+retry; the archive's answer and the purge say so.
 
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
@@ -962,7 +983,7 @@ occupants are checked again after the snapshot and again after archiving: one th
 from the archive, opened there) keeps the worktree in place, with the snapshot kept. A sidebar delete already
 under way refuses it too, and a cleanup cannot join a delete that started first: that delete's archive record
 carries no recovery snapshot, so the worktree stays in place for that path. Failed capture leaves the worktree and branch in place. Once captured,
-the session goes to the archive, then git removes the worktree (including initialized submodules) and branch.
+the session goes to the archive, then the worktree (including initialized submodules) and branch are removed.
 After archiving, removal errors return `deleted` with a warning naming the leftover worktree/branch and
 recovery location. The parent cannot retry an archived session through `agent_session`. Capture errors still
 return a refusal before archiving. The

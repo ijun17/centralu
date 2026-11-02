@@ -368,6 +368,147 @@ describe('worktree sessions', () => {
     expect(existsSync(join(s.worktree!.path, 'only-on-release.txt'))).toBe(true)
   })
 
+  /*
+   * #1662: a pull request's branch handed to a new session, while an archived session's worktree may still hold it and
+   * the local branch may be behind the remote. A bare repository stands for the remote; `other` is another clone.
+   */
+  describe('a branch that is already there (#1662)', () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', ...args], { cwd, encoding: 'utf8' }).trim()
+    const commit = (cwd: string, file: string) => {
+      writeFileSync(join(cwd, file), `${file}\n`)
+      git(cwd, 'add', '.')
+      git(cwd, 'commit', '-qm', file)
+      return git(cwd, 'rev-parse', 'HEAD')
+    }
+    let other = ''
+    beforeEach(() => {
+      git(root, 'init', '-q', '--bare', '-b', 'main', 'origin.git')
+      git(repo, 'remote', 'add', 'origin', join(root, 'origin.git'))
+      git(repo, 'push', '-q', 'origin', 'main')
+      git(root, 'clone', '-q', join(root, 'origin.git'), 'other')
+      other = join(root, 'other')
+      // What an install adds is ignored, as in a real project: it is not an uncommitted change
+      writeFileSync(join(repo, '.git', 'info', 'exclude'), 'node_modules\n')
+    })
+    const start = (branch: string) =>
+      wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: branch }) as Promise<SessionInfo>
+    const headOf = (s: SessionInfo) => git(s.worktree!.path, 'rev-parse', 'HEAD')
+    /** A session on `branch` with one commit pushed, then archived with its worktree kept */
+    const archived = async (branch: string) => {
+      const s = await start(branch)
+      commit(s.worktree!.path, `${branch.replace('/', '-')}.txt`)
+      git(s.worktree!.path, 'push', '-q', 'origin', branch)
+      await wtRpc('agents.deleteSession', { sessionId: s.id })
+      expect(existsSync(s.worktree!.path)).toBe(true)
+      return s
+    }
+
+    it('a branch only the remote has: the worktree starts on its head and tracks it', async () => {
+      git(other, 'checkout', '-q', '-b', 'pr/remote')
+      const tip = commit(other, 'remote.txt')
+      git(other, 'push', '-q', 'origin', 'pr/remote')
+
+      const s = await start('pr/remote')
+      expect(headOf(s)).toBe(tip)
+      expect(git(s.worktree!.path, 'rev-parse', '--abbrev-ref', '@{upstream}')).toBe('origin/pr/remote')
+    })
+
+    it("takes over an archived session's clean worktree, long paths and junctions in it, and moves a local branch behind to the remote's head", async () => {
+      const old = await archived('pr/behind')
+      // An install in the old worktree: a path past 260 characters and a junction leading out of it
+      let deep = join(old.worktree!.path, 'node_modules', '.pnpm')
+      for (let i = 0; i < 12; i++) deep = join(deep, `segment-${i}-abcdefghijklmnopqrst`)
+      mkdirSync(deep, { recursive: true })
+      writeFileSync(join(deep, 'index.js'), 'x')
+      mkdirSync(join(root, 'outside'))
+      writeFileSync(join(root, 'outside', 'keep.txt'), 'kept')
+      symlinkSync(join(root, 'outside'), join(old.worktree!.path, 'node_modules', 'away'), 'junction')
+      git(other, 'fetch', '-q', 'origin')
+      git(other, 'checkout', '-q', 'pr/behind')
+      const tip = commit(other, 'review-fix.txt')
+      git(other, 'push', '-q', 'origin', 'pr/behind')
+
+      const s = await start('pr/behind')
+      expect(headOf(s)).toBe(tip)
+      expect(existsSync(old.worktree!.path)).toBe(false)
+      expect(readFileSync(join(root, 'outside', 'keep.txt'), 'utf8')).toBe('kept')
+    })
+
+    it('a remote rebased since: the commits it replaced were pushed, so the old worktree and branch give way to its head', async () => {
+      const old = await archived('pr/rebased')
+      git(other, 'fetch', '-q', 'origin')
+      git(other, 'checkout', '-q', 'pr/rebased')
+      git(other, 'commit', '-q', '--amend', '-m', 'rebased')
+      git(other, 'push', '-q', '--force', 'origin', 'pr/rebased')
+      const tip = git(other, 'rev-parse', 'HEAD')
+
+      const s = await start('pr/rebased')
+      expect(headOf(s)).toBe(tip)
+      expect(existsSync(old.worktree!.path)).toBe(false)
+    })
+
+    it("keeps an archived session's worktree with uncommitted changes, and says whose it is", async () => {
+      const old = await archived('pr/dirty')
+      writeFileSync(join(old.worktree!.path, 'a.txt'), 'not committed\n')
+
+      await expect(start('pr/dirty')).rejects.toThrow(new RegExp(`archived session "${old.name}".*uncommitted`))
+      expect(readFileSync(join(old.worktree!.path, 'a.txt'), 'utf8')).toBe('not committed\n')
+    })
+
+    it("keeps an archived session's worktree and branch with a commit no remote has", async () => {
+      const old = await archived('pr/unpushed')
+      const mine = commit(old.worktree!.path, 'only-here.txt')
+
+      await expect(start('pr/unpushed')).rejects.toThrow(/1 commit\(s\) that origin\/pr\/unpushed does not/)
+      expect(git(old.worktree!.path, 'rev-parse', 'HEAD')).toBe(mine)
+      expect(git(repo, 'rev-parse', 'refs/heads/pr/unpushed')).toBe(mine)
+    })
+
+    it('a start that fails takes its new worktree away but keeps the branch that was there, commits and all', async () => {
+      git(repo, 'branch', 'mine')
+      git(repo, 'checkout', '-q', 'mine')
+      const mine = commit(repo, 'only-local.txt')
+      git(repo, 'checkout', '-q', 'main')
+      adapter.failCreate = 'claude is not installed'
+
+      await expect(start('mine')).rejects.toThrow(/not installed/)
+      expect(git(repo, 'rev-parse', 'refs/heads/mine')).toBe(mine)
+      expect(git(repo, 'worktree', 'list', '--porcelain')).not.toMatch(/branch refs\/heads\/mine/)
+    })
+
+    it("a session's cleanup keeps a branch that was there before it, the trunk included, and removes only its worktree", async () => {
+      git(repo, 'checkout', '-q', '-b', 'elsewhere')
+      for (const branch of ['main', 'pr/kept']) {
+        if (branch !== 'main') git(repo, 'branch', branch, 'main')
+        const tip = git(repo, 'rev-parse', `refs/heads/${branch}`)
+        const s = await start(branch)
+        const r = await wtMgr.worktrees.cleanUpWorktreeChild(wtMgr.listSessions().find((x) => x.id === s.id)!)
+
+        expect(r).toMatchObject({ ok: true, note: expect.stringMatching(/was kept: it was there before/) })
+        expect(git(repo, 'rev-parse', `refs/heads/${branch}`)).toBe(tip)
+        expect(existsSync(s.worktree!.path)).toBe(false)
+      }
+    })
+
+    it("keeps an archived session's worktree with local commits when there is no remote to compare with", async () => {
+      git(repo, 'remote', 'remove', 'origin')
+      const old = await start('local/only')
+      const mine = commit(old.worktree!.path, 'only-here.txt')
+      await wtRpc('agents.deleteSession', { sessionId: old.id })
+
+      await expect(start('local/only')).rejects.toThrow(new RegExp(`archived session "${old.name}".*1 commit that no remote and not the trunk has`))
+      expect(git(old.worktree!.path, 'rev-parse', 'HEAD')).toBe(mine)
+    })
+
+    it("never takes a worktree a session not archived works in", async () => {
+      const live = await start('pr/live')
+
+      await expect(start('pr/live')).rejects.toThrow(new RegExp(`the worktree of the session "${live.name}"`))
+      expect(existsSync(join(live.worktree!.path, 'a.txt'))).toBe(true)
+    })
+  })
+
   it('refuses a request to branch off a branch that does not exist — quietly falling back to HEAD would surface the mistake only after a commit', async () => {
     await expect(
       wtRpc('agents.createSession', {

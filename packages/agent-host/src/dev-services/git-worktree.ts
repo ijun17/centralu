@@ -1,9 +1,15 @@
+import { existsSync, lstatSync } from 'node:fs'
+import { wireSegments } from '@cc/protocol'
+import { join } from 'node:path'
+import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 import { execFailure } from './exec-error.js'
 import { runGit } from './git-exec.js'
 import { git, gitHeadSha, gitRevParse, gitSummary, isRepo, type GitTrust, type SummaryLimits } from './git.js'
 import { cloneEnv } from './project-clone.js'
 import { gitWrite } from './git-write.js'
+import { removeData } from './data-folder.js'
+import { canonicalPath } from './path-guard.js'
 
 
 /*
@@ -45,6 +51,8 @@ export async function gitWorktreeAdd(
   branch: string,
   from?: string,
   trust: GitTrust = {},
+  /** The branch is there already (#1662): the worktree checks it out as it is, and `from` is not read */
+  existing = false,
 ): Promise<Worktree> {
   /*
    * **Only in a trusted project (#407).** A checkout writes every tracked file through the
@@ -58,7 +66,7 @@ export async function gitWorktreeAdd(
   if (trust.trusted !== true) {
     throw rpcError('A worktree can only be created in a trusted project')
   }
-  await gitWrite(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
+  await gitWrite(repoCwd, existing ? ['worktree', 'add', path, branch] : ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
   return { path, branch }
 }
 
@@ -131,10 +139,7 @@ export async function resolveForkBase(
     if (!sha) return NO_COMMIT
     return { sha, ref: 'HEAD', note: `No trunk is set for this project and none was found (no remote default branch, no main or master), so the worktree forks from the checkout's HEAD at ${short(sha)}, which may not be the trunk` }
   }
-  if (!remote) {
-    const own = await configValue(repoCwd, `branch.${branch}.remote`)
-    remote = remotes.includes(own) ? own : remotes.includes('origin') ? 'origin' : remotes.length === 1 ? (remotes[0] ?? null) : null
-  }
+  if (!remote) remote = await gitBranchRemote(repoCwd, branch, remotes)
   const tracking = remote ? `refs/remotes/${remote}/${branch}` : null
   let why: string
   if (!remote || !tracking) {
@@ -142,28 +147,16 @@ export async function resolveForkBase(
   } else if (opts.trusted !== true) {
     why = `Not fetched: the project is not trusted, and a fetch runs the repository's network settings`
   } else {
-    try {
-      const own = (await configValue(repoCwd, 'core.sshCommand')) !== ''
-      await runGit(repoCwd, ['fetch', '--no-tags', '--no-recurse-submodules', '--quiet', '--', remote, `+refs/heads/${branch}:${tracking}`], {
-        allowRepoPrograms: true,
-        timeout: opts.timeoutMs ?? FORK_FETCH_TIMEOUT_MS,
-        env: cloneEnv(process.env, own),
-      })
-      const sha = await gitRevParse(repoCwd, tracking)
-      if (sha) {
-        // Commits only the local trunk has: not on the remote, so not in the worktree
-        const onlyLocal = (await local(branch)) ? await commitCount(repoCwd, `${tracking}..refs/heads/${branch}`) : null
-        return {
-          sha,
-          ref: `${remote}/${branch}`,
-          note: `Forked from ${remote}/${branch} at ${short(sha)}, fetched just now${onlyLocal ? `. The local ${branch} has ${onlyLocal} commit(s) the remote does not, which the worktree does not have` : ''}`,
-        }
+    const fetched = await gitFetchBranch(repoCwd, remote, branch, opts.timeoutMs)
+    if ('why' in fetched) why = fetched.why
+    else {
+      // Commits only the local trunk has: not on the remote, so not in the worktree
+      const onlyLocal = (await local(branch)) ? await commitCount(repoCwd, `${tracking}..refs/heads/${branch}`) : null
+      return {
+        sha: fetched.sha,
+        ref: `${remote}/${branch}`,
+        note: `Forked from ${remote}/${branch} at ${short(fetched.sha)}, fetched just now${onlyLocal ? `. The local ${branch} has ${onlyLocal} commit(s) the remote does not, which the worktree does not have` : ''}`,
       }
-      why = `${remote} has no branch ${branch}`
-    } catch (e) {
-      const f = execFailure(e)
-      const said = f.stderr?.trim() || f.message || 'git failed'
-      why = `Could not fetch ${remote} (${said.split('\n')[0]})`
     }
   }
   // Not fetched: the newer of the local trunk and the remote-tracking ref as last fetched
@@ -185,6 +178,45 @@ export async function resolveForkBase(
   const behindRemote = l && t && sha === l ? await commitCount(repoCwd, `refs/heads/${branch}..${tracking}`) : null
   const stale = behindRemote ? `. It is ${behindRemote} commit(s) behind the last ${remote}/${branch} fetched` : ''
   return { sha, ref, note: `${why}, so the worktree forks from the local ref ${ref} at ${short(sha)}, which may be behind the remote${stale}` }
+}
+
+/** The remote `branch` is fetched from: its own (`branch.<name>.remote`), else origin, else the only one; null when there is none */
+export async function gitBranchRemote(repoCwd: string, branch: string, remotes?: string[]): Promise<string | null> {
+  const all = remotes ?? (await git(repoCwd, ['remote']).catch(() => '')).split('\n').map((r) => r.trim()).filter(Boolean)
+  const own = await configValue(repoCwd, `branch.${branch}.remote`)
+  return all.includes(own) ? own : all.includes('origin') ? 'origin' : all.length === 1 ? (all[0] ?? null) : null
+}
+
+/**
+ * Fetches `branch` from `remote` into its remote-tracking ref, bounded (`timeoutMs`), and gives the commit it is at; or
+ * why not, in words for an answer. It runs the repository's network settings, so a caller fetches for a trusted
+ * project only. A prompt no one can answer has nothing to wait on (`cloneEnv`), as for a clone.
+ */
+export async function gitFetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs = FORK_FETCH_TIMEOUT_MS): Promise<{ sha: string } | { why: string }> {
+  const tracking = `refs/remotes/${remote}/${branch}`
+  try {
+    const own = (await configValue(repoCwd, 'core.sshCommand')) !== ''
+    await runGit(repoCwd, ['fetch', '--no-tags', '--no-recurse-submodules', '--quiet', '--', remote, `+refs/heads/${branch}:${tracking}`], {
+      allowRepoPrograms: true,
+      timeout: timeoutMs,
+      env: cloneEnv(process.env, own),
+    })
+    const sha = await gitRevParse(repoCwd, tracking)
+    return sha ? { sha } : { why: `${remote} has no branch ${branch}` }
+  } catch (e) {
+    const f = execFailure(e)
+    const said = f.stderr?.trim() || f.message || 'git failed'
+    return { why: `Could not fetch ${remote} (${said.split('\n')[0]})` }
+  }
+}
+
+/**
+ * The tips `remote`'s copy of `branch` had here, newest first (its reflog, at most 200): a commit one of them holds was
+ * pushed, also when a force-push replaced it since (#1662, a rebased pull request). None when there is no reflog.
+ */
+export async function gitRemoteTips(repoCwd: string, remote: string, branch: string): Promise<string[]> {
+  const out = await git(repoCwd, ['log', '--walk-reflogs', '-n', '200', '--format=%H', `refs/remotes/${remote}/${branch}`]).catch(() => '')
+  return out.split('\n').map((line) => line.trim()).filter(Boolean)
 }
 
 /**
@@ -245,14 +277,52 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
   }
 }
 
+/** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
+export function pathKey(path: string): string {
+  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
+  return traitsFor().foldsPathCase ? key.toLowerCase() : key
+}
+
 /**
- * Removes a worktree. `force` discards even uncommitted changes.
+ * Removes a worktree for good, uncommitted changes and all: its folder, then git's entry for it. The caller has saved
+ * the work in it or has the person's decision to lose it. A locked worktree stays unless `unlocked` (git's second
+ * `--force`).
  *
- * The caller must preserve local work or obtain the person's discard decision before forcing
- * removal. `withSubmodules` also removes initialized submodules (git requires a second force).
+ * **The host removes the folder, not git (#1655, #1560).** On Windows git deleted through a junction what the junction
+ * led to (a pnpm-style link out of the worktree; one leading to the project took the project and its `.git`), and
+ * stopped at a path past 260 characters once it had already dropped its entry and the worktree's `.git` file, leaving
+ * a folder that nothing would clean (measured, git 2.47). `removeData` never follows a link and takes long paths. git
+ * then drops its entry for the folder that is gone, named as git lists it (a Windows short name it does not match).
+ *
+ * Never a link (a symlink, a junction): git would take what it leads to, another worktree uncommitted work and all.
+ * Never a folder that holds a checkout this repository lists (the project, another worktree). A folder git no longer
+ * lists is what such a removal left part way only when it is a session's folder in `worktreeRoot`
+ * (`<root>/<project>/<session>`, never a project's folder of them) and has no `.git` of its own; anything else
+ * unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
+ * and git's entry stays so the removal can be tried again.
  */
-export async function gitWorktreeRemove(repoCwd: string, path: string, force = false, withSubmodules = false): Promise<void> {
-  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force', ...(withSubmodules ? ['--force'] : [])] : []), path])
+export async function gitWorktreeRemove(
+  repoCwd: string,
+  path: string,
+  { unlocked = false, worktreeRoot }: { unlocked?: boolean; worktreeRoot?: string } = {},
+): Promise<void> {
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, not a worktree; nothing was removed`)
+  const key = pathKey(path)
+  const list = await gitWorktreeList(repoCwd)
+  const entry = list.find((w) => pathKey(w.path) === key)
+  if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
+  if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
+  const held = list.find((w) => w !== entry && pathKey(w.path).startsWith(`${key}/`))
+  if (held) throw new Error(`${path} holds ${held.path}, which git lists as a checkout; nothing was removed`)
+  const inRoot = worktreeRoot === undefined ? null : `${pathKey(worktreeRoot)}/`
+  const leftover = inRoot !== null && key.startsWith(inRoot) && wireSegments(key.slice(inRoot.length)).length === 2
+  if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
+    throw new Error(`${path} is not a worktree of ${repoCwd}`)
+  }
+  await removeData(path).catch((e: Error) => {
+    throw new Error(`${path} was removed only in part, and what is left stays there: ${e.message}`)
+  })
+  if (entry) await git(repoCwd, ['worktree', 'remove', '--force', '--force', entry.path])
 }
 
 /**
@@ -272,12 +342,12 @@ export async function gitBranchAhead(repoCwd: string, branch: string, trunk: str
  * How many commits of a worktree's own neither a remote nor the trunk has (#1161 item 3): what removing the worktree and
  * its branch would lose for good. Its own: those its checkout is on now (`head`, a commit id) and those of the branch
  * made for it, which the agent may have moved off. Read in the repository, against every remote-tracking ref as last
- * fetched or pushed: a branch pushed from here has its own. null when it cannot be told (a ref gone, git failing),
- * which a caller must read as "keep it".
+ * fetched or pushed: a branch pushed from here has its own. `pushed`: commits known to have been on a remote too
+ * (`gitRemoteTips`). null when it cannot be told (a ref gone, git failing), which a caller must read as "keep it".
  */
-export async function gitUnpublishedCommits(repoCwd: string, head: string, branch: string, trunk: string): Promise<number | null> {
+export async function gitUnpublishedCommits(repoCwd: string, head: string, branch: string, trunk: string, pushed: string[] = []): Promise<number | null> {
   try {
-    const n = Number((await git(repoCwd, ['rev-list', '--count', head, `refs/heads/${branch}`, '--not', trunk, '--remotes'])).trim())
+    const n = Number((await git(repoCwd, ['rev-list', '--count', head, `refs/heads/${branch}`, '--not', trunk, '--remotes', ...pushed])).trim())
     return Number.isFinite(n) ? n : null
   } catch {
     return null
@@ -316,30 +386,26 @@ export async function gitWorktreeDirty(
   return { dirty: changedFiles > 0, changedFiles, ...(summary.more ? { more: true as const } : {}) }
 }
 
+/** One worktree git lists (#715, #1655): detached ones have no branch; the first git lists is the project's own folder */
+export type WorktreeEntry = { path: string; branch: string | null; main: boolean; locked: boolean }
+
 /**
- * The list of registered worktrees. Used to filter out one a person deleted from Finder
+ * Every worktree git lists for this repository, detached ones too. Used to filter out one a person deleted from Finder
  * (git still lists it too — that state is what `prune` is for).
  */
-export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
+export async function gitWorktreeList(repoCwd: string): Promise<WorktreeEntry[]> {
   if (!(await isRepo(repoCwd))) return []
   const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  const list: Worktree[] = []
-  let path = ''
-  for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) path = line.slice('worktree '.length).trim()
-    else if (line.startsWith('branch ') && path) {
-      list.push({ path, branch: line.slice('branch refs/heads/'.length).trim() })
-      path = ''
+  return out.split('\n\n').filter((block) => block.startsWith('worktree ')).map((block, i) => {
+    const lines = block.split('\n').map((line) => line.trim())
+    const branch = lines.find((line) => line.startsWith('branch refs/heads/'))
+    return {
+      path: (lines[0] ?? '').slice('worktree '.length),
+      branch: branch ? branch.slice('branch refs/heads/'.length) : null,
+      main: i === 0,
+      locked: lines.some((line) => line === 'locked' || line.startsWith('locked ')),
     }
-  }
-  return list
-}
-
-/** Every path git lists as a worktree of this repository, detached ones too (#715). */
-export async function gitWorktreePaths(repoCwd: string): Promise<string[]> {
-  if (!(await isRepo(repoCwd))) return []
-  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  return out.split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length).trim())
+  })
 }
 
 /** Cleans up only the registration of a worktree that is gone (does not delete the directory) */

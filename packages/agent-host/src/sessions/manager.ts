@@ -2254,6 +2254,7 @@ export class SessionManager {
       refusal: (...a) => self.toolRegistry.refusal(...a),
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.trash.purgeSession(...a),
+      archiveBusy: (...a) => self.trash.archiveBusy(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
       get trashing() {
         return self.trash.trashing

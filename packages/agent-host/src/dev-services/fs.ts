@@ -8,7 +8,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, MissingPathError, pathParts, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
-import { clonesFiles, HOST_PLATFORM, traitsFor, type Platform } from '../os.js'
+import { clonesFiles, familyOf, HOST_PLATFORM, traitsFor, type Platform } from '../os.js'
 import { realOs } from '../os/real.js'
 import { retarget } from '../os/rules.js'
 import { rpcError } from '../rpc-error.js'
@@ -435,7 +435,8 @@ export async function copyTree(
   // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
   // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
-  // 2026-10-04). macOS took the clone path above, which keeps links as they are. `links`: a whole link into the
+  // 2026-10-04). macOS took the clone path above, which keeps links as they are (`dropEscapingLinks` leads them into
+  // the worktree afterwards, #1708). `links`: a whole link into the
   // project leads to the same place in the worktree, as copyTreeWindows makes it, not into the project.
   // Sync, as Node's was: a 20 000-entry pnpm tree takes 1.7 s this way and 7.4 s step by step through promises (Linux)
   realOs().files.cpSync(src, dst, { recursive: true, verbatimSymlinks: true, links })
@@ -593,11 +594,16 @@ export async function prepareCopyTarget(root: string, rel: string): Promise<stri
  * The read itself is cheap — 177ms (measured) to walk the whole forest above, next to the 4
  * seconds it takes to copy the same tree. This does not follow a link inward: it never gets
  * caught in a cycle, and never walks the same tree twice.
+ *
+ * Given `from`, the folder `root` is a copy of (the project, for its worktree), a link that leads into `from` is made
+ * again leading to the same place inside `root` (`retarget`), as `copyTree`'s `links` rule makes it on Linux and
+ * Windows: macOS's clone keeps every link as written, so this is where its copy follows the rule too (#1708).
  */
-export async function dropEscapingLinks(root: string, start: string): Promise<string[]> {
+export async function dropEscapingLinks(root: string, start: string, from?: string): Promise<string[]> {
   const rootReal = await realpath(root)
   const startReal = await realpath(start)
   if (!isInside(rootReal, startReal)) throw new UnsafePathError('Path is outside the project')
+  const fromReal = from === undefined ? null : await realpath(from).catch(() => null)
 
   const removed: string[] = []
   const stack = [startReal]
@@ -613,9 +619,14 @@ export async function dropEscapingLinks(root: string, start: string): Promise<st
     for (const entry of entries) {
       const abs = join(dir, entry.name)
       if (entry.isSymbolicLink()) {
-        if (await linkStaysInside(rootReal, abs)) continue
+        const target = await linkTarget(abs)
+        if (isInside(rootReal, target)) continue
         await rm(abs, { force: true })
-        removed.push(relative(rootReal, abs))
+        const there = fromReal === null ? null : retarget(target, { from: fromReal, to: rootReal }, familyOf())
+        // To a folder a junction, which Windows makes without a privilege (elsewhere the kind is not asked); one that
+        // cannot be made is dropped, as one leading outside
+        const kind = there !== null && (await stat(there).then((s) => s.isDirectory(), () => false)) ? 'junction' : undefined
+        if (there === null || !(await symlink(there, abs, kind).then(() => true, () => false))) removed.push(relative(rootReal, abs))
       } else if (entry.isDirectory()) {
         stack.push(abs)
       }
@@ -624,13 +635,13 @@ export async function dropEscapingLinks(root: string, start: string): Promise<st
   return removed
 }
 
-async function linkStaysInside(rootReal: string, link: string): Promise<boolean> {
+/** Where a link really leads */
+async function linkTarget(link: string): Promise<string> {
   /*
    * A broken link cannot be resolved by realpath. The judgment is still made on the text alone —
    * the target not existing right now only means it cannot be read right now, and a link
    * pointing at `~/.ssh/id_rsa` becomes a window the moment that file comes into existence.
    */
-  const target = await realpath(link).catch(async () => resolve(dirname(link), await readlink(link)))
-  return isInside(rootReal, target)
+  return realpath(link).catch(async () => resolve(dirname(link), await readlink(link)))
 }
 

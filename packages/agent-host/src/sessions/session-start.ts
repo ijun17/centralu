@@ -225,9 +225,11 @@ export class SessionStarts {
      */
     let worktree: Worktree | null = null
     let setupProblems: string[] = []
+    // A branch that was there before (#1662) stays when the start fails
+    let branchWasThere = false
     if (params.worktree && params.projectId) {
       let base: { note: string }
-      ;({ worktree, setupProblems, base } = await this.host.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
+      ;({ worktree, setupProblems, base, branchWasThere } = await this.host.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
       // Where it forked from (#1484): the start answer names the base commit
       params.onWorktreeBase?.(base.note)
     }
@@ -345,11 +347,11 @@ export class SessionStarts {
        * The branch is deleted along with it (#167). It was created together with the worktree via
        * `-b`, so deleting only the directory would block re-creating one under the same name with
        * "already exists", and if no name was ever set, a fresh `centralu/…` piled up on every
-       * failure. Since `-b` fails if the name already exists, any branch that got this far was just
-       * created by this call, and has not a single commit on it. What could not be removed is said
+       * failure. A branch `-b` made here has not a single commit on it; one that was there before the
+       * worktree started on it (#1662) is not this call's, and stays. What could not be removed is said
        * (#841): swallowed, the next start under the same name failed with "already exists" and no cause.
        */
-      const left = worktree && params.projectId ? await this.host.worktrees.discardNewWorktree(params.cwd, worktree, params.projectId) : null
+      const left = worktree && params.projectId ? await this.host.worktrees.discardNewWorktree(params.cwd, worktree, params.projectId, branchWasThere) : null
       const msg = (err as Error).message
       // What the person can act on keeps its code (a tool not signed in: its line offers Sign in, review of #1685)
       const code: unknown = Reflect.get(Object(err), 'code')

@@ -60,7 +60,7 @@ export async function prepareWorktreeDependencies(projectCwd: string, worktreeCw
   }
   // pnpm workspace links can point to a sibling package's node_modules: check after all copies land.
   for (const dst of copied) {
-    const removed = await dropEscapingLinks(worktreeCwd, dst).catch((err: NodeJS.ErrnoException) => {
+    const removed = await dropEscapingLinks(worktreeCwd, dst, projectCwd).catch((err: NodeJS.ErrnoException) => {
       if (err.code === 'ENOENT') return [] // A copy may have failed before creating its destination.
       throw err
     })
