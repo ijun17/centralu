@@ -52,6 +52,14 @@ describe('who may write to whom (§9.1)', () => {
     expect(policy().isOrchestrator?.(a('gone'))).toBe(false)
   })
 
+  it('a refusal for a session that is not here names the id looked up, so a role word is told from a session that is gone (#1567)', () => {
+    // `to: "parent"` is no address of a role: it is read as the id "parent", which this host has not got
+    expect(may(CHILD, a('no-such-parent'))).toContain('(no-such-parent)')
+    expect(may(CHILD, a('no-such-parent'))).toContain('not a session of this host')
+    expect(policy().mayWrite(a('gone'), OTHER, null)).toContain('(gone)')
+    expect(may(PERSON, a('gone'))).toContain('(gone)')
+  })
+
   it('the orchestrator writes to any session, and a coordinator to the members of its scope only', () => {
     expect(may(ORCH, OTHER)).toBeNull()
     expect(may(COORD, MEMBER)).toBeNull()

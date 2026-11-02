@@ -53,6 +53,11 @@ export type LinkedReportsHost = {
    * machine) is reported to nobody, and one the hub cannot tell yet stays owed until it can. Any other session's goes
    */
   reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
+  /**
+   * Whether a link lost over this session's paused report keeps the report (#1523): a child start_agent started follows its work
+   * across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then
+   */
+  keepsOverLoss?(sessionId: string): boolean
 }
 
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
@@ -183,9 +188,12 @@ export class LinkedReports {
     }
     const step = linkedTurnEnd(wait.busy, e)
     if (step?.step === 'busy') {
+      // Whose the turn is settles where it starts: the events after it (words, a tool, a card) are the same turn
+      if (!wait.busy) {
+        wait.turn = wait.next ?? { by: 'work' }
+        delete wait.next
+      }
       wait.busy = true
-      wait.turn = wait.next ?? { by: 'work' }
-      delete wait.next
       // A turn runs: its own end reports
       this.stopSettling(sessionId)
       return
@@ -425,6 +433,12 @@ export class LinkedReports {
       if (!sessionId.startsWith(prefix) || !wait.paused) continue
       if (this.settling.has(sessionId)) {
         this.settle(sessionId, wait)
+        continue
+      }
+      if (this.host.keepsOverLoss?.(sessionId)) {
+        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for
+        wait.busy = false
+        delete wait.turn
         continue
       }
       this.drop(sessionId)

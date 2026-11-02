@@ -131,8 +131,8 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
   }
 })
 
-// #1342: the stored side of the person's message ending a paused report, across a hub swap
-it("a hub swap keeps a paused report ended by the person's message ended: one notice, the stored record cleared, no later report", async () => {
+// #1342, #1386: the stored side of a paused report over the person's message, across a hub swap: their message does not end it
+it("a hub swap keeps a paused report owed over the person's message: no notice, the stored record kept, their turn is not reported", async () => {
   const delivered: string[] = []
   const reports = new LinkedReports({
     children,
@@ -151,16 +151,17 @@ it("a hub swap keeps a paused report ended by the person's message ended: one no
   ra.observe(person)
   reports.observe(person)
   await new Promise((r) => setTimeout(r, 20))
-  expect(told.length + delivered.length).toBe(1)
-  expect(children.linkedReports.has(child.sessionId)).toBe(false)
-  expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].owed).toBeUndefined()
-  // Their turn fails: nothing more is reported
+  expect(told.length + delivered.length).toBe(0)
+  expect(children.linkedReports.get(child.sessionId)?.paused).toEqual([task])
+  expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].owed).toEqual({ paused: [task] })
+  // Their turn fails: it is theirs, and nothing of it is reported
   for (const e of [{ type: 'state_change', sessionId: child.sessionId, state: 'working' }, { type: 'error', sessionId: child.sessionId, error: { message: 'compact crashed' } }]) {
     ra.observe(e)
     reports.observe(e)
   }
   await new Promise((r) => setTimeout(r, 20))
-  expect(told.length + delivered.length).toBe(1)
+  expect(told.length + delivered.length).toBe(0)
+  expect(children.linkedReports.get(child.sessionId)?.paused).toEqual([task])
   reports.dispose()
 })
 
