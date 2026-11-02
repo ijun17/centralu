@@ -160,10 +160,11 @@ export function pickStrays(
 }
 
 /**
- * How long `ps` or `lsof` may take. On a saturated machine either can take far longer than a quiet one's tens of ms (the
- * Windows process listing needed 60 s for the same reason, #1779); a listing that does not finish is not "no leftovers"
+ * How long `ps` or `lsof` may take. On a saturated machine either can take far longer than a quiet one's tens of ms (#1793);
+ * a listing that does not finish is not "no leftovers", it is said on stderr. Two listings run one after the other and the
+ * screen gives a call 30 s, so each gets 12 s
  */
-const LIST_TIMEOUT_MS = 60_000
+const LIST_TIMEOUT_MS = 12_000
 
 type Run = (file: string, args: string[], opts: { maxBuffer: number; timeout: number; windowsHide: boolean }) => Promise<{ stdout: string }>
 
@@ -192,7 +193,7 @@ async function cwdsOf(run: Run, pids: readonly number[]): Promise<Map<number, st
     // lsof exits 1 when some process cannot be read, but it still **prints what it did read** — that is not discarded
     const partial = isObj(e) && typeof e.stdout === 'string' ? e.stdout : undefined
     // An exit code is lsof's own answer; a kill by the timeout, or no lsof to run, is not an answer
-    if (isObj(e) && (e.killed === true || typeof e.code === 'string')) unread('the working folders', e)
+    if (isObj(e) && (e.killed === true || e.signal != null || typeof e.code === 'string')) unread('the working folders', e)
     return partial ? parseLsofCwd(partial) : new Map()
   }
 }
