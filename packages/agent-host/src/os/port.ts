@@ -85,6 +85,12 @@ export type CopyTreeOptions = {
   force?: boolean
   errorOnExist?: boolean
   links?: { from: string; to: string }
+  /**
+   * `promises.cp` only, the `Os`'s own: a step that reads a name (a stat, a listing, a link; not a file's copy) that has not answered within this many
+   * milliseconds fails the copy with `ETIMEDOUT`, naming it. The step itself goes on in libuv's pool until the OS gives
+   * up, so the copy does not hold a caller that cannot wait for a link into a share that does not answer (#1707)
+   */
+  stepMs?: number
 }
 /** Open flags by name, or a number from `files.constants` (`O_RDONLY | O_NOFOLLOW`; on Windows `O_NOFOLLOW` and `O_NONBLOCK` are 0) */
 export type OpenFlags = 'r' | 'r+' | 'w' | 'wx' | 'a' | 'ax' | number

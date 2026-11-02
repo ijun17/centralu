@@ -628,8 +628,8 @@ export class ExternalApps {
    * build serving during a swap still reads the old key — and only where the new key has nothing yet, so running this
    * again after an interruption changes nothing and never writes over what the app has written since.
    */
-  carryAppState(from: AppRef, to: AppRef): void {
-    carryAppFiles(this.deps.dataRoot, this.startEnv.appKey(from), this.startEnv.appKey(to))
+  async carryAppState(from: AppRef, to: AppRef): Promise<void> {
+    await carryAppFiles(this.deps.dataRoot, this.startEnv.appKey(from), this.startEnv.appKey(to))
     this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
   }
 

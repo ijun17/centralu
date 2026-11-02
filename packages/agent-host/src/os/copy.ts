@@ -417,6 +417,23 @@ export function copyTreeSync(
   for (let s = steps.next(); !s.done;) s = steps.next(answerSync(f, s.value))
 }
 
+/**
+ * The step's answer, or `ETIMEDOUT` once `ms` have passed without one (`CopyTreeOptions.stepMs`). Only for the steps that read
+ * a name (a stat, a listing, a link): a file's copy takes as long as the file is large, and is not a question the OS fails to answer
+ */
+function answeredWithin(answer: Promise<CopyAnswer>, ms: number | undefined, step: CopyStep): Promise<CopyAnswer> {
+  if (ms === undefined || step.op === 'copyFile') return answer
+  let timer: NodeJS.Timeout
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const { path } = step
+      reject(Object.assign(new Error(`ETIMEDOUT: ${step.op} '${path}' did not answer within ${ms} ms; a link into a share or drive that is not answering?`), { code: 'ETIMEDOUT', syscall: step.op, path }))
+    }, ms)
+    timer.unref()
+  })
+  return Promise.race([answer, late]).finally(() => clearTimeout(timer))
+}
+
 /** `copySteps` with promise calls: nothing in it blocks the event loop */
 export async function copyTreeAsync(
   f: CopyFilesAsync,
@@ -427,5 +444,5 @@ export async function copyTreeAsync(
   P: PlatformPath,
 ): Promise<void> {
   const steps = copySteps(from, to, o ?? {}, family, P)
-  for (let s = steps.next(); !s.done;) s = steps.next(await answerAsync(f, s.value))
+  for (let s = steps.next(); !s.done;) s = steps.next(await answeredWithin(answerAsync(f, s.value), o?.stepMs, s.value))
 }

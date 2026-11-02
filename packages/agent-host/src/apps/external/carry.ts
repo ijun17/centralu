@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync
 import { basename, dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { realOs } from '../../os/real.js'
+import type { Os } from '../../os/port.js'
 import { VERSIONS_REL } from './versions.js'
 
 /**
@@ -19,12 +20,20 @@ import { VERSIONS_REL } from './versions.js'
  * Only where the new key has nothing yet, so running it again after an interruption changes nothing, and never writes
  * over what the app has written under its new key since. A folder is copied beside its place and renamed into it, so
  * an interrupted copy never stands as a whole one that the next run would then skip.
+ *
+ * Off the event loop (#1707): an app writes its data folder, so it may hold a link into a share that does not answer, and
+ * Windows waits about 21 s for the first stat of one. A step that does not answer within `CARRY_STEP_MS` fails the
+ * carry (the app stays in the user folder, as for any failed carry), and the copy beside its place is removed.
  */
-export function carryAppFiles(dataRoot: string, fromKey: string, toKey: string): void {
-  copyFolderOnce(join(dataRoot, 'app-data', fromKey), join(dataRoot, 'app-data', toKey))
+export async function carryAppFiles(dataRoot: string, fromKey: string, toKey: string, { os = realOs(), stepMs = CARRY_STEP_MS }: { os?: Os; stepMs?: number } = {}): Promise<void> {
+  const copy = (from: string, to: string) => copyFolderOnce(os, stepMs, from, to)
+  await copy(join(dataRoot, 'app-data', fromKey), join(dataRoot, 'app-data', toKey))
   for (const suffix of ['.log', '.log.1']) copyFileOnce(join(dataRoot, 'app-logs', fromKey + suffix), join(dataRoot, 'app-logs', toKey + suffix))
-  copyFolderOnce(join(dataRoot, VERSIONS_REL, fromKey), join(dataRoot, VERSIONS_REL, toKey))
+  await copy(join(dataRoot, VERSIONS_REL, fromKey), join(dataRoot, VERSIONS_REL, toKey))
 }
+
+/** How long one step of a carry's copy may wait for the OS before the carry fails */
+export const CARRY_STEP_MS = 5000
 
 /**
  * The way back (#1204): what a deleted project's root app kept under its project's key goes back to the key it was
@@ -104,7 +113,7 @@ export function sweepCarryLeftovers(dataRoot: string): void {
   }
 }
 
-function copyFolderOnce(from: string, to: string): void {
+async function copyFolderOnce(os: Os, stepMs: number, from: string, to: string): Promise<void> {
   if (!existsSync(from) || existsSync(to)) return
   mkdirSync(dirname(to), { recursive: true })
   const tmp = `${to}.carry-${randomUUID()}`
@@ -113,8 +122,7 @@ function copyFolderOnce(from: string, to: string): void {
     // into the folder leads into the new key's (`to`, where `tmp` is renamed), not the old one's (#1650 review). A
     // junction, all an app on Windows can make without a right, always holds a whole path: kept as written, the two
     // keys would share what is behind it, and removing the old key's copy would take the new key's data with it.
-    // Sync: a link to a share that does not answer holds the event loop until Windows gives up (about 21 s, once)
-    realOs().files.cpSync(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true, links: { from, to } })
+    await os.files.promises.cp(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true, links: { from, to }, stepMs })
     renameSync(tmp, to)
   } catch (e) {
     removeDataQuietly(tmp, '[apps]')
