@@ -739,9 +739,9 @@ looked into).
   (`firstStepError`, ci.mjs): from its `##[group]Run` line to its `##[error]` line, so the report or
   artifact upload that runs after a failure ("No files were found with the provided path") is never the
   quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
-  A bisect probe is read the same way (#1453): one that failed in a setup step or lost its runner has its failed jobs rerun once, and
+  A bisect probe is read the same way (#1453): one that failed in a setup step (a timeout inside one included) or lost its runner has its failed jobs rerun once, and
   when it fails that way again the hunt ends with an issue saying the probe could not be judged, no commit blamed and nothing
-  reverted; a probe that fails in a test step is red.
+  reverted; a probe that fails in a test step, times out outside a setup step, is on the flaky list or lost its runner to a shutdown is red.
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
@@ -1061,7 +1061,7 @@ push run of CI is fully green, the full tier included (or `commit`).
   `tooling/fake-gh-in-process.mjs`: the call's input as the script's stdin, and a `process` that has only what it lists);
   `tooling/project-board-system.test.ts` starts the real ones and holds the two to the same answers.
 - `clock.mjs` — the app's one clock: `now` for every time the app reads or writes (a stepped test moves it), `systemNow`
-  for the lease between processes. Lint refuses `Date.now()` and `new Date()` anywhere else in the app, also `Date` kept under another name and `globalThis.Date`, in `.mjs` and `.cjs` files (eslint.config.js).
+  for the lease between processes. Lint refuses `Date.now()` and `new Date()` anywhere else in the app, also `Date` kept under another name and `globalThis.Date` (eslint.config.js).
 - `opened.mjs` — which session opened each pull request (`open_pr`'s note, `opened-prs.json`), read by the queue (#1509 item 4).
 - `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).

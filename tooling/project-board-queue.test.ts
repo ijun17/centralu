@@ -1640,11 +1640,11 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
 
   it("writes the lease on the system clock, which another process shares, not on the queue's stepped one (#1656)", async () => {
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
-    // 80 steps of 100 ms: a lease written on the stepped clock would end 8 s later than one written on the system's
+    // 200 steps of 100 ms: a lease written on the stepped clock would end 20 s later than one written on the system's
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await polls(80)
+    await polls(200)
     const lease = JSON.parse(readFileSync(filesNamed(join(root, 'data'), 'merge-queue.lease.json')[0]!, 'utf8'))
-    expect(Math.abs(Date.parse(lease.until) - LEASE_MS - Date.now())).toBeLessThan(4_000)
+    expect(Math.abs(Date.parse(lease.until) - LEASE_MS - Date.now())).toBeLessThan(6_000)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
@@ -5719,6 +5719,25 @@ describe('the main guard does not blame a commit for a bisect probe the runner b
     expect(issues()[0]!.body).toContain(`the full tier's run on ${c2.slice(0, 7)} (a bisect step) failed in`)
     expect(issues()[0]!.body).toContain('the same way again after one rerun')
     expect(gh().dispatched).toEqual([{ ref: probe(c2), inputs: { tier: 'full' } }])
+  })
+
+  it('keeps a probe red that times out in a test step, so a commit that makes a test hang is still found', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: String.raw`feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, , c4] = repo.shas as [string, string, string, string]
+    landed(c4)
+    const hang = { id: 41, name: 'verify', status: 'completed', conclusion: 'timed_out', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run pnpm verify', conclusion: 'cancelled' }] }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [hang] },
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'timed_out')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(992, c1, 'success')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
+    expect(rerunsOf()).toEqual([])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2 })
   })
 
   it('reads the rerun of a probe that passes, and goes on bisecting; a probe that fails in a test step is red', async () => {

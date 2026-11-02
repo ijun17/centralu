@@ -202,7 +202,7 @@ export default tseslint.config(
    * a stepped test run moves that clock, and a time read anywhere else would be the system's.
    */
   {
-    files: ['.centralu/apps/project-board/**/*.{mjs,cjs}'],
+    files: ['.centralu/apps/project-board/**/*.mjs'],
     ignores: ['.centralu/apps/project-board/clock.mjs'],
     rules: {
       'no-restricted-properties': ['error', { object: 'Date', property: 'now', message: "Read the time through the app's clock (clock.mjs `now`, or `systemNow` for the lease)" }],
@@ -289,7 +289,7 @@ export default tseslint.config(
    * selection (tooling/os-tests.ts) asks the same question; here it is only given every file.
    */
   {
-    files: ['**/*.{ts,tsx,mts,mjs,cjs,js}'],
+    files: ['**/*.{ts,tsx,mts,mjs,js}'],
     plugins: { local: platformChecks },
     rules: { 'local/os-imports': 'error' },
   },

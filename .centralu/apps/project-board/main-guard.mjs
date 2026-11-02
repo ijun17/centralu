@@ -418,9 +418,12 @@ async function stepHunt(ctx) {
   // run): rerun its failed jobs once, and when it fails that way again, end the hunt rather than blame a commit for the runner's outage
   if (!['success', 'cancelled', 'skipped'].includes(run.conclusion)) {
     const why = await diagnose(repo, run, { failingLine })
-    if (why.kind === 'infrastructure' && !why.shutdown) {
+    // Only the setup's and the runner's (as for main's own run): a timeout outside a setup step, a job on the flaky list or a runner shutdown
+    // may be the commit's (it hangs, it exhausts the runner), so that probe stays red
+    if (why.kind === 'infrastructure' && !why.shutdown && (why.cause === 'setup' || why.cause === 'runner' || why.inSetup)) {
       const what = infraText(why.names, why.step, why.cause)
       if (probe.rerun) return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${what}, the same way again after one rerun. No commit is blamed, and nothing was reverted.`)
+      if (renew && !renew()) return { did: 'yielded' }
       save({ hunt: { ...hunt, probe: { ...probe, rerun: { attempt: run.attempt ?? 1, at: new Date(now).toISOString(), what } } } })
       try {
         await rerunRun(repo, run.id, { failedOnly: true })

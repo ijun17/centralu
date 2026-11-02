@@ -971,4 +971,24 @@ describe('a tool that runs out of time is stopped with everything it started (#1
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it.skipIf(process.platform === 'win32')('is ended with its tool when the group it runs in is killed (the board cancelling pre-pr)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-group-'))
+    const pidFile = join(dir, 'pid')
+    writeFileSync(join(dir, 'worker.js'), `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`)
+    writeFileSync(join(dir, 'main.js'), `require('child_process').spawn(process.execPath, [require('path').join(__dirname, 'worker.js')], { stdio: 'ignore' }); setInterval(() => {}, 1000)`)
+    const { spawn } = await import('node:child_process')
+    // Its own process group, as pre-pr's is when the board starts it
+    const lead = spawn(process.execPath, [fileURLToPath(new URL('../scripts/run-limited.mjs', import.meta.url)), '600000', process.execPath, join(dir, 'main.js')], { detached: true, stdio: 'ignore' })
+    try {
+      for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 100))
+      const pid = Number(readFileSync(pidFile, 'utf8'))
+      process.kill(-lead.pid!, 'SIGKILL')
+      const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
+      for (let i = 0; i < 50 && alive(); i++) await new Promise((r) => setTimeout(r, 100))
+      expect(alive()).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
