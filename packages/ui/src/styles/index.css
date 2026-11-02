@@ -107,8 +107,8 @@
   --color-ink: #ededed; /* body text */
   --color-ink-muted: #a8a8a8; /* secondary */
   --color-ink-faint: #707070; /* background information */
-  /* A session mark waiting on an approval: the one fill that stands apart from an idle mark and from a question's grey (#1740) */
-  --color-mark-waiting: #f4f4f4;
+  /* A session mark waiting on an approval (#1740): one step darker than the working mark's edge (`ink-muted`), so it reads as the lighter one among the marks without being white. Light presets: the inverse of the dark pair */
+  --color-mark-waiting: #989898;
   --color-mark-waiting-ink: #111111;
 
   /*
@@ -396,8 +396,8 @@
   --color-ink: #2a2a2a;
   --color-ink-muted: #5a5a5a;
   --color-ink-faint: #7a7a7a;
-  --color-mark-waiting: #111111;
-  --color-mark-waiting-ink: #f0f0f0;
+  --color-mark-waiting: #676767;
+  --color-mark-waiting-ink: #eeeeee;
 
   --color-diff-add: #1a7f37;
   --color-diff-add-bg: #dafbe1;
@@ -473,7 +473,7 @@
   --color-ink: #f0f0f0;
   --color-ink-muted: #c8c8c8;
   --color-ink-faint: #9e9e9e;
-  --color-mark-waiting: #f4f4f4;
+  --color-mark-waiting: #b8b8b8;
   --color-mark-waiting-ink: #000000;
 
   --color-diff-add: #8af59a;
@@ -516,7 +516,7 @@
   --color-ink: #121212;
   --color-ink-muted: #3a3a3a;
   --color-ink-faint: #595959;
-  --color-mark-waiting: #000000;
+  --color-mark-waiting: #474747;
   --color-mark-waiting-ink: #ffffff;
 
   --color-diff-add: #0b5a1f;
@@ -1348,7 +1348,7 @@
   background-color: var(--color-surface-selected);
 }
 /* A session waiting on an approval: its own fill and letter ink, set per preset (`mark-waiting`, `mark-waiting-ink`), so it
-   stands out without a line under the row (#1740). Near white in the dark presets */
+   stands out without a line under the row (#1740) */
 .cc-mark[data-look='waiting'][data-state='waiting_approval'] > .cc-chip {
   background-color: var(--color-mark-waiting);
   color: var(--color-mark-waiting-ink);
