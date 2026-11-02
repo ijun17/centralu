@@ -295,6 +295,10 @@ export class WorktreeSessions {
       if (unpublished === null) throw kept('may hold commits no remote has (it could not be told)')
       if (unpublished > 0) throw kept(`has ${unpublished} commit${unpublished === 1 ? '' : 's'} that no remote and not the trunk has`)
     }
+    // Restored while the checks above ran: it is a session's worktree again, and is not taken
+    if (this.host.meta.has(archived.session.id) || !this.host.store.trash.trashedSession(archived.session.id)) {
+      throw rpcError(`${where}, the worktree of "${archived.session.name}", which was restored from the archive just now. Nothing was removed.`)
+    }
     await gitWorktreeRemove(cwd, holder.path)
     console.error(`[worktree] removed the archived session ${archived.session.id.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
   }

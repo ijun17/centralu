@@ -137,6 +137,20 @@ describe('removing a worktree (#1655, #1560)', () => {
     expect(existsSync(join(other, 'work.txt'))).toBe(true)
   })
 
+  it('keeps a folder git does not list inside a checkout it lists, or of a folder that is no repository', async () => {
+    const inside = join(repo, 'build')
+    mkdirSync(inside)
+    writeFileSync(join(inside, 'out.txt'), 'the project\'s')
+    const plain = join(root, 'plain')
+    mkdirSync(plain)
+    writeFileSync(join(plain, 'data.txt'), 'kept')
+
+    await expect(gitWorktreeRemove(repo, inside)).rejects.toThrow(/not a worktree/)
+    await expect(gitWorktreeRemove(plain, join(plain, 'data.txt'))).rejects.toThrow(/not a worktree/)
+    expect(existsSync(join(inside, 'out.txt'))).toBe(true)
+    expect(existsSync(join(plain, 'data.txt'))).toBe(true)
+  })
+
   it('keeps a locked worktree unless asked to take it anyway', async () => {
     const path = join(root, 'worktrees', 'p', 'session-locked')
     await gitWorktreeAdd(repo, path, 'centralu/locked', undefined, TRUSTED)

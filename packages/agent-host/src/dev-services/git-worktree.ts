@@ -298,10 +298,14 @@ export function pathKey(path: string): string {
  */
 export async function gitWorktreeRemove(repoCwd: string, path: string, unlocked = false): Promise<void> {
   const key = pathKey(path)
-  const entry = (await gitWorktreeList(repoCwd)).find((w) => pathKey(w.path) === key)
+  const list = await gitWorktreeList(repoCwd)
+  const entry = list.find((w) => pathKey(w.path) === key)
   if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
   if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
-  if (!entry && existsSync(join(path, '.git'))) throw new Error(`${path} is not a worktree of ${repoCwd}`)
+  // Not listed: only a leftover outside every checkout git lists, of a repository git can read
+  if (!entry && (list.length === 0 || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
+    throw new Error(`${path} is not a worktree of ${repoCwd}`)
+  }
   await removeData(path).catch((e: Error) => {
     throw new Error(`${path} was removed only in part, and what is left stays there: ${e.message}`)
   })
