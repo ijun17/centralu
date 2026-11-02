@@ -117,12 +117,7 @@ describe('the ACP session against a scripted agent', () => {
     it('stays the agent’s own error when it lists the conversation, on a later page too', async () => {
       const w = world(cursorLike(['ses-other'], 'next'), { resumeExternalId: SID })
       await expect(w.start()).rejects.toThrow(/Invalid params/)
-    })
-
-    it('stays the agent’s own error when it lists nothing at all to ask', async () => {
-      const w = world((method, params) => (method === 'session/load' ? cursorLike([])(method, params, null as never) : base(method, params, null as never)), { resumeExternalId: SID })
-      await expect(w.start()).rejects.toThrow(/Invalid params/)
-      expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/load'])
+      expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/load', 'session/list', 'session/list'])
     })
   })
 

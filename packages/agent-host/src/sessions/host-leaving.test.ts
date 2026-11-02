@@ -200,25 +200,22 @@ describe('a host leaving (#839)', () => {
     expect(claude.created).toHaveLength(1)
   })
 
-  it('a kept process whose start is refused is stopped, whatever the refusal (#1720)', async () => {
+  it('a kept process whose start is refused is stopped, whatever the refusal, unless the host is handing over (#1720)', async () => {
     const id = await asleep()
+    const other = await asleep()
+    await session()
     // The tool can no longer resume (a build that dropped it, a project removed meanwhile): the start answers `resumed: false`
     Object.assign(claude.capabilities, { resume: false })
     const kept = new FakeProcess()
     await mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
     expect(kept.kills).toEqual(['SIGTERM'])
-    expect(claude.created).toHaveLength(1)
-  })
-
-  it('a kept process whose start is refused while the host hands over is left for the next host', async () => {
-    const id = await asleep()
-    await session()
-    Object.assign(claude.capabilities, { resume: false })
+    expect(claude.created).toHaveLength(3)
+    // Handing over, the same refusal leaves the process for the next host
     const left = leaveHeld(claude.last, 'detachAll')
-    const kept = new FakeProcess()
-    await mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
+    const next = new FakeProcess()
+    await mgr.adoptKept([{ sessionId: other, tool: 'claude', process: next }])
     await left()
-    expect(kept.kills).toEqual([])
+    expect(next.kills).toEqual([])
   })
 
   it.each([
