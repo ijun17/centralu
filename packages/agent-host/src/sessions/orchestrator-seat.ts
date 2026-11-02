@@ -1,4 +1,3 @@
-import { stamped } from '../log-file.js'
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
@@ -230,7 +229,7 @@ export function orchestratorToolsFor(
      * ends from here on, as before #1082: anything older came before this answer, and was not taken for its end
      */
     if (mine?.instruction !== undefined) {
-      console.error(stamped(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`))
+      console.error(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`)
       delete mine.instruction
     }
     // As here (#166): a new instruction without a report replaces this orchestrator's earlier request

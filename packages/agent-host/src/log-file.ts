@@ -18,9 +18,6 @@ import { traitsFor } from './os.js'
  * terminal or from Finder.
  */
 
-/** A log line with the time in front (#1784): the one stamp every `[links]` line takes, so they can be placed against the other logs */
-export const stamped = (line: string): string => `${new Date().toISOString()} ${line}`
-
 /** Once one file exceeds this, one generation is rolled off */
 export const MAX_LOG_BYTES = 8 * 1024 * 1024
 

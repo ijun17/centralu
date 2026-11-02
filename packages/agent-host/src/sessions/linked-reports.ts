@@ -1,4 +1,3 @@
-import { stamped } from '../log-file.js'
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { HUB_SENDER } from './hub-sender.js'
@@ -331,7 +330,7 @@ export class LinkedReports {
     const timer = setTimeout(() => {
       this.settling.delete(sessionId)
       if (!quiet() || this.host.closing) return
-      console.error(stamped(`[links] ${sessionId}: its background work ended and no turn followed; reporting the work as ended`))
+      console.error(`[links] ${sessionId}: its background work ended and no turn followed; reporting the work as ended`)
       this.settle(sessionId, wait)
     }, PAUSED_REPORT_SETTLE_MS)
     timer.unref?.()

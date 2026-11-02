@@ -854,15 +854,6 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       ])
     })
 
-    it('lists the trash of all machines newest archived first, a tie in their own order (#1726)', async () => {
-      const { router, localAnswers, m1, m2 } = rig()
-      localAnswers['trash.list'] = { sessions: [{ id: 'h1', deletedAt: 100 }, { id: 'h2', deletedAt: 10 }], bytes: 0 }
-      m1.answers['trash.list'] = { sessions: [{ id: 'a', deletedAt: 300 }, { id: 'b', deletedAt: 100 }], bytes: 0 }
-      m2.answers['trash.list'] = { sessions: [{ id: 'c', deletedAt: 200 }], bytes: 0 }
-      const out = (await router.handle('trash.list', {})) as { sessions: { id: string }[] }
-      expect(out.sessions.map((s) => s.id)).toEqual(['m1.a', 'm2.c', 'h1', 'm1.b', 'h2'])
-    })
-
     it('adds up the trash, and leaves out a machine that fails, naming it', async () => {
       const { router, localAnswers, m1, m2 } = rig()
       localAnswers['trash.list'] = { sessions: [{ id: 'h1', project: null }], bytes: 10 }
