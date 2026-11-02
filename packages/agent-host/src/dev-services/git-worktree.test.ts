@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
-import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
+import { gitFetchBranch, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
 
 /**
  * A worktree can only be tested against **real git.**
@@ -347,10 +347,10 @@ describe('the base a new worktree forks from (#1484)', () => {
     expect((await resolveForkBase(other, 'main', { trusted: true })).sha).toBe(remoteTip)
   })
 
-  it('a fetch that succeeds, or a repository with no remote, is not marked unfetched', async () => {
-    expect((await resolveForkBase(repo, 'main', { trusted: true })).unfetched).toBeUndefined()
-    withRemote()
-    expect((await resolveForkBase(repo, 'main', { trusted: true })).unfetched).toBeUndefined()
+  it('a branch the remote does not have is not a failed remote: the next fetch is still made (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    expect(await gitFetchBranch(repo, 'origin', 'no-such-branch')).toHaveProperty('why')
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual({ sha: remoteTip })
   })
 
   it('a fetch that hangs is ended at its bound and the worktree forks from what is here', async () => {

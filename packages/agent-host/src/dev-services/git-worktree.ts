@@ -216,7 +216,8 @@ export async function gitFetchBranch(repoCwd: string, remote: string, branch: st
     const f = execFailure(e)
     const said = f.stderr?.trim() || f.message || 'git failed'
     const why = `Could not fetch ${remote} (${said.split('\n')[0]})`
-    failedFetches.set(key, { at: Date.now(), why })
+    // Not when the remote answered that this branch is not there (a new branch): that says nothing of the next one (untranslated, `cloneEnv`)
+    if (!/couldn't find remote ref/i.test(said)) failedFetches.set(key, { at: Date.now(), why })
     return { why }
   }
 }
