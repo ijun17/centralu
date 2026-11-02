@@ -94,8 +94,7 @@ export type RemoteClientEvents = {
   hello?: (h: RemoteHello) => void
   event?: (event: unknown) => void
   terminal?: (frame: { terminalId: string; data?: string; exitCode?: number | null }) => void
-  /** `detail`: which side ended the connection and with what code, for the log only (the row says `reason`) */
-  down?: (reason: string, detail: string) => void
+  down?: (reason: string) => void
   /** Dialled again `redials` times in a row and no host answered: it dials no more (the owner closes it) */
   gaveUp?: (reason: string) => void
   refused?: (r: RemoteRefusal) => void
@@ -233,9 +232,7 @@ export class RemoteClient {
       this.on.refused?.({ code, reason: String(reason), ...(this.refusal ? { error: this.refusal } : {}), ...(proving ? { proving } : {}) })
       return
     }
-    // 1006: no close frame came, the socket was lost under this side (ssh or the network); any other code is the host's own close
-    const text = String(reason)
-    this.lost(ws, `closed (${code})`, code === 1006 ? 'closed (1006) with no close frame: this side noticed first, the connection was lost' : `the machine's host closed it first: ${code}${text ? ` ${text}` : ''}`)
+    this.lost(ws, `closed (${code})`)
   }
 
   /**
@@ -401,7 +398,7 @@ export class RemoteClient {
     this.pending.rejectAll(linkError(`${reason} before the machine answered; it may or may not have done this`, false))
   }
 
-  private lost(ws: WebSocket, reason: string, detail = reason): void {
+  private lost(ws: WebSocket, reason: string): void {
     if (this.ws !== ws) return
     this.detach(ws)
     this.ws = null
@@ -410,7 +407,7 @@ export class RemoteClient {
     this.clearTimers()
     this.failAll('The link dropped')
     if (this.closed) return
-    if (wasReady) this.on.down?.(reason, detail)
+    if (wasReady) this.on.down?.(reason)
     // `attempt` counts the dials since the last hello
     if (this.opts.redials !== undefined && this.attempt >= this.opts.redials) {
       this.on.gaveUp?.(reason)
