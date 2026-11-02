@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
@@ -148,7 +148,7 @@ describe('removing a worktree (#1655, #1560)', () => {
   it.skipIf(process.platform !== 'win32')('removes a worktree named by its short name, git\'s entry included', async (ctx) => {
     const path = join(root, 'worktrees', 'a-folder-with-a-long-name', 'session-short')
     await gitWorktreeAdd(repo, path, 'centralu/short', undefined, TRUSTED)
-    const short = execFileSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true }).trim()
+    const short = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true }).stdout.trim()
     if (short.toLowerCase() === path.toLowerCase()) ctx.skip()
 
     await gitWorktreeRemove(repo, short)
