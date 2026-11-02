@@ -3139,6 +3139,41 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
    */
   it('says the turn a note starts is reported when its end is read before the answer to the send', () => noteAfterItsTurn(true))
 
+  // #1864 review: the caller's own Stop, while the send's answer is on its way, drops the report the note's turn was owed
+  it('does not say the turn a note starts is reported when the caller stopped it before the answer to the send', async () => {
+    const { remote, answer, start, agent, reports } = await rig()
+    const call = start({ task: 'a question for you', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+    // The machine takes the note once the turn it was meant for has ended, and answers only when let
+    let take!: () => void
+    let answerIt!: () => void
+    const taken = new Promise<void>((resolve) => (take = resolve))
+    const answered = new Promise<void>((resolve) => (answerIt = resolve))
+    const deliver = remote.mgr.sendFromHub.bind(remote.mgr)
+    vi.spyOn(remote.mgr, 'sendFromHub').mockImplementation(async (...a) => {
+      await taken
+      await deliver(...a)
+      await answered
+    })
+    const note = agent(r.sessionId, 'send', 'use the staging data')
+    const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
+    remote.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    await eventually(() => reports() === 1)
+    take()
+    // The note's turn runs there: the caller stops it before the send has answered
+    await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
+    await agent(r.sessionId, 'stop')
+    answerIt()
+    // Nor that it went into another's turn: it was the caller's own
+    const said = await note
+    expect(said).toMatchObject({ ok: true, state: 'working', reported: false })
+    expect(said).not.toHaveProperty('notice')
+  })
+
   // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
   it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
     const { remote, hub, answer, start, reports, control } = await rig()
