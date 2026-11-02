@@ -64,9 +64,15 @@ describe('carrying an app to a new key', () => {
    */
   describe('when the files do not answer (a link into a share that is not there)', () => {
     const never = () => new Promise<never>(() => {})
-    const stalling: Os = {
-      ...os,
-      files: { ...os.files, promises: { ...os.files.promises, cp: (a, b, o) => copyTreeAsync({ ...os.files.promises, lstat: never }, a, b, o, HOST_FAMILY, os.paths.path) } },
+    // Answers every step but the one for a file of the app's data, so the copy beside its place is made before it stalls
+    let mkdirs = 0
+    const stalling = (root: string): Os => {
+      const files = {
+        ...os.files.promises,
+        mkdir: (...a: Parameters<typeof os.files.promises.mkdir>) => (mkdirs++, os.files.promises.mkdir(...a)),
+        lstat: (p: string) => (p === join(root, 'app-data', 'keyA', 'f') ? never() : os.files.promises.lstat(p)),
+      }
+      return { ...os, files: { ...os.files, promises: { ...os.files.promises, cp: (a, b, o) => copyTreeAsync(files, a, b, o, HOST_FAMILY, os.paths.path) } } }
     }
 
     it('keeps the host serving meanwhile, and fails within the bound with the step named and nothing left beside the place', async () => {
@@ -78,12 +84,14 @@ describe('carrying an app to a new key', () => {
       const timer = setInterval(() => ticks++, 10)
       const t0 = Date.now()
       try {
-        await expect(carryAppFiles(root, 'keyA', 'keyB', { os: stalling, stepMs: 200 })).rejects.toMatchObject({ code: 'ETIMEDOUT', message: expect.stringContaining('did not answer within 200 ms') })
+        await expect(carryAppFiles(root, 'keyA', 'keyB', { os: stalling(root), stepMs: 200 })).rejects.toMatchObject({ code: 'ETIMEDOUT', message: expect.stringContaining('did not answer within 200 ms') })
       } finally {
         clearInterval(timer)
       }
       expect(Date.now() - t0).toBeLessThan(5000)
       expect(ticks).toBeGreaterThan(5)
+      // The copy beside its place was started, and is gone
+      expect(mkdirs).toBeGreaterThan(0)
       expect(os.files.readdirSync(join(root, 'app-data'))).toEqual(['keyA'])
     })
   })

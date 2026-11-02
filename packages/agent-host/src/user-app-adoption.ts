@@ -376,10 +376,16 @@ export class UserAppAdoption {
     const path = spelled(app.dir)
     // An import the person has not enabled stays off: its project starts untrusted, and trusting it is enabling it
     const held = app.status === 'unconfirmed' || (app.imported !== undefined && app.imported.confirmedAt === null)
-    const known = this.deps.store.projects.findProjectByPath(path)?.id
-    const projectId = known ?? randomUUID()
-    // The files first: copies, made only where the new key has none, so an interrupted run repeats them harmlessly
-    await this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
+    let projectId = this.deps.store.projects.findProjectByPath(path)?.id ?? randomUUID()
+    // The files first: copies, made only where the new key has none, so an interrupted run repeats them harmlessly. The copy
+    // can take a while (it does not hold the host): a project added at this folder meanwhile is the one the files belong to
+    for (;;) {
+      await this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
+      if (!existsSync(join(app.dir, MANIFEST_FILE))) throw new Error('its folder was removed while its files were carried')
+      const now = this.deps.store.projects.findProjectByPath(path)?.id
+      if (!now || now === projectId) break
+      projectId = now
+    }
     // The mark before the record: a mark the record never took (a failed transaction) is replaced by the next attempt
     const mark = randomUUID()
     mkdirSync(join(app.dir, ADOPTION_MARK[0]), { recursive: true })

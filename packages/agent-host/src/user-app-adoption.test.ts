@@ -678,6 +678,38 @@ describe('what is not moved, and when', () => {
     expect(carry).toHaveBeenCalledTimes(1)
   })
 
+  // The copy no longer holds the host, so the person can act while it runs
+  it('carries the files again for a project added at the folder while they were carried, so they are the one the store moves them to', async () => {
+    plantUserApp('busy')
+    rt.refresh()
+    const real = rt.carryAppState.bind(rt)
+    const keys: string[] = []
+    let first = true
+    vi.spyOn(rt, 'carryAppState').mockImplementation(async (from, to) => {
+      keys.push(to.projectId!)
+      if (first) {
+        first = false
+        store.projects.addProject({ id: 'added-meanwhile', path: join(dataRoot, 'apps', 'busy'), name: 'busy' })
+      }
+      await real(from, to)
+    })
+    expect(await adoption.run()).toBe(1)
+    expect(keys).toHaveLength(2)
+    expect(keys[1]).toBe('added-meanwhile')
+  })
+
+  it('does not make a project of a folder that was removed while its files were carried', async () => {
+    plantUserApp('gone')
+    rt.refresh()
+    vi.spyOn(rt, 'carryAppState').mockImplementation(async () => {
+      rmSync(join(dataRoot, 'apps', 'gone'), { recursive: true, force: true })
+    })
+    const before = store.projects.listProjects().length
+    expect(await adoption.run()).toBe(0)
+    expect(store.projects.listProjects()).toHaveLength(before)
+    expect(existsSync(join(dataRoot, 'apps', 'gone'))).toBe(false)
+  })
+
   it('half copies an interrupted move left are swept', () => {
     expect(existsSync(join(dataRoot, 'app-data', '_user', 'helper.carry-0b7c2e4a-1f3d-4c5b-9a8e-123456789abc'))).toBe(false)
   })
