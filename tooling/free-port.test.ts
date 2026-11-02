@@ -15,18 +15,21 @@ describe('freePort', () => {
     const ephemeral = (probe.address() as { port: number }).port
     const ports = await Promise.all(Array.from({ length: 50 }, () => freePort()))
     for (const p of ports) {
-      expect(p).toBeGreaterThanOrEqual(20000)
-      expect(p).toBeLessThan(30000)
+      expect(p).toBeGreaterThanOrEqual(12000)
+      expect(p).toBeLessThan(17000)
       expect(p).not.toBe(ephemeral)
     }
   })
 
-  it('never gives one port twice, and never one that is taken', async () => {
-    const first = await freePort()
+  it('passes over a port that is taken, where its search begins', async () => {
     const taken = createServer()
     held.push(taken)
-    await new Promise<void>((r) => taken.listen(first, '127.0.0.1', r))
-    const more = await Promise.all(Array.from({ length: 200 }, () => freePort()))
-    expect(new Set([first, ...more]).size).toBe(201)
+    await new Promise<void>((r) => taken.listen(12007, '127.0.0.1', r))
+    expect(await freePort(7)).not.toBe(12007)
+  })
+
+  it('never gives one port twice', async () => {
+    const ports = await Promise.all(Array.from({ length: 200 }, () => freePort()))
+    expect(new Set(ports).size).toBe(200)
   })
 })

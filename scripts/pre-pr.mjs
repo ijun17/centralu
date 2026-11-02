@@ -11,8 +11,8 @@
 //             since it lands on its own.
 //   orphans   dependency-cruiser's `no-orphans` rule as an error (in `pnpm verify` it only warns).
 //   deps      every other dependency-cruiser rule at error severity, as `pnpm depcruise` fails on them (a cycle, a layer rule).
-//   lint      `pnpm lint` on the files the branch changed: CI's run (type-aware rules, allowlists) over fewer files.
-//             A finding in an untouched file is left to CI.
+//   lint      `pnpm lint` on the files the branch changed: CI's run (type-aware rules, allowlists, the packages' type-assertion
+//             ceilings) over fewer files. A finding in an untouched file is left to CI.
 //   store-step  a store step number this branch adds (a new `to: N,` under the migrations folder) that main
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
@@ -88,7 +88,6 @@ export function orphansOf(cruise) {
   return [...new Set((cruise?.summary?.violations ?? []).filter((v) => v?.rule?.name === 'no-orphans').map((v) => v.from))].sort()
 }
 
-/** vitest's JSON reporter: every test as `{ file, name, status }`, the file relative to `root` with `/`. */
 /** dependency-cruiser's JSON: the error-severity violations other than no-orphans, one sentence each. */
 export function depErrorsOf(cruise) {
   const lines = (cruise?.summary?.violations ?? [])
@@ -103,6 +102,7 @@ export function depErrorsOf(cruise) {
 /** A file `pnpm lint` reads: what ESLint's configuration covers, by extension. */
 export const isLintable = (path) => /\.[cm]?[jt]sx?$/.test(path)
 
+/** vitest's JSON reporter: every test as `{ file, name, status }`, the file relative to `root` with `/`. */
 export function vitestTests(report, root) {
   return (report?.testResults ?? []).flatMap((f) =>
     (f.assertionResults ?? []).map((t) => ({
@@ -788,7 +788,7 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
 
     check()
     if (!skip('orphans') || !skip('deps')) {
-      log('dependency-cruiser, orphans as errors')
+      log('dependency-cruiser')
       const cruise = runners.depcruise(top)
       if (!skip('orphans')) {
         for (const file of orphansOf(cruise)) {
