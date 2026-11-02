@@ -87,6 +87,18 @@ describe('a usage read that is a command run (#1623)', () => {
     expect(read).toHaveBeenCalledTimes(2)
   })
 
+  it('reads again when the clock moved back after a failure, rather than wait out a failure time from the future', async () => {
+    let clock = 10_000
+    const read = vi.fn(async (): Promise<string> => {
+      throw new Error('spawn failed')
+    })
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 1000, failMs: 500, softMs: 50, now: () => clock, onFail: () => {} })
+    await ask()
+    clock = 100
+    await ask()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
   it('lets how long an answer is fresh depend on the answer', async () => {
     let clock = 0
     const read = vi.fn(async () => 'out')

@@ -84,6 +84,42 @@ async function stop(server: Server) {
 }
 
 describe('OriginPorts', () => {
+  describe('a port the OS reserves (EACCES)', () => {
+    const [P1, P2] = [21001, 21002]
+    /** Binds like the OS: EACCES for the reserved ports, a real loopback server otherwise */
+    const listenWithReserved = (reserved: number[]) => (port: number, handler: Parameters<typeof createServer>[1]) =>
+      reserved.includes(port)
+        ? Promise.reject(Object.assign(new Error('listen EACCES'), { code: 'EACCES' }))
+        : new Promise<Server>((resolve, reject) => {
+            const server = createServer(handler)
+            server.once('error', reject)
+            server.listen(0, '127.0.0.1', () => resolve(server))
+          })
+
+    it('is skipped for a new pick, like a port that is held', async () => {
+      const ports = new OriginPorts(diskStore(), {
+        range: [P1, P2], pick: sequence([P1, P2]), log: noop, listen: listenWithReserved([P1]),
+      })
+      expect((await serve(ports, 'k')).port).toBe(P2)
+    })
+
+    it('serves a key whose recorded port is reserved elsewhere for this run and keeps the record, so the next start uses it again', async () => {
+      const disk = diskStore()
+      disk.save({ assigned: { k: P1 }, retired: [] })
+      const lines: string[] = []
+      const first = await serve(
+        new OriginPorts(disk, { range: [P1, P2], pick: sequence([P2]), log: (l) => lines.push(l), listen: listenWithReserved([P1]) }),
+        'k',
+      )
+      expect(first.port).toBe(P2)
+      expect(disk.load()).toEqual({ assigned: { k: P1 }, retired: [] })
+      expect(lines).toHaveLength(1)
+      await stop(first.server)
+      // The reservation is gone at the next start: the recorded port is used
+      expect((await serve(new OriginPorts(disk, { range: [P1, P2], pick: sequence([P2]), log: noop, listen: listenWithReserved([]) }), 'k')).port).toBe(P1)
+    })
+  })
+
   it('uses distinct candidate ports outside the ephemeral range that can all be rebound', async () => {
     const candidates = await freePorts(3)
     expect(new Set(candidates).size).toBe(3)

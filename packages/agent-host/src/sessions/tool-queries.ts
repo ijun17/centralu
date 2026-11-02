@@ -13,6 +13,7 @@ import {
 import type { AgentAdapter, LocalUsage, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { withTimeout } from '../timing.js'
+import { isFromTheFuture } from '../usage-clock.js'
 
 /** How long one read of a tool's model list may run, whoever waits on it (#660) */
 const MODEL_LIST_READ_MS = 60_000
@@ -142,7 +143,7 @@ export class ToolQueries {
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
+    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
@@ -241,7 +242,7 @@ export class ToolQueries {
     }
 
     const hit = this.modelCache.get(tool)
-    if (hit && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
+    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
 
     try {
       const models = await withTimeout(this.fetchModels(tool, adapter), 15_000)
@@ -266,10 +267,10 @@ export class ToolQueries {
     const adapter = this.host.adapters.get(tool)
     if (!adapter?.listModels) return null
     const hit = this.modelCache.get(tool)
-    const stale = !hit || Date.now() - hit.at >= 5 * 60_000
+    const stale = !hit || isFromTheFuture(hit.at, Date.now()) || Date.now() - hit.at >= 5 * 60_000
     if (hit && !stale && !fresh) return { models: hit.models, cached: true }
     const failedAt = this.modelFailures.get(tool)
-    const failedRecently = failedAt !== undefined && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
+    const failedRecently = failedAt !== undefined && !isFromTheFuture(failedAt, Date.now()) && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
     if (failedRecently) return hit && !fresh ? { models: hit.models, cached: true } : null
     const read = this.fetchModels(tool, adapter)
     // Nobody may be left waiting on this when it fails after the bound

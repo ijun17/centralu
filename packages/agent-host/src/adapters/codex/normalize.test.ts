@@ -474,6 +474,28 @@ describe('state and gauges', () => {
     expect((out[0] as { resumeAt?: string }).resumeAt).toMatch(/^\d{4}-/)
   })
 
+  it('reads the weekly window when it is the one that is full, not the 5 hour one', () => {
+    const out = n('account/rateLimits/updated', {
+      rateLimits: {
+        primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 1787100000 },
+        secondary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1787198872 },
+        rateLimitReachedType: 'rate_limit_reached',
+      },
+    })
+    expect(out[0]).toMatchObject({ usedPercent: 100, windowMins: 10080, resumeAt: new Date(1787198872 * 1000).toISOString() })
+  })
+
+  it('resumes at the later reset when both windows are full', () => {
+    const out = n('account/rateLimits/updated', {
+      rateLimits: {
+        primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1787100000 },
+        secondary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1787198872 },
+        rateLimitReachedType: 'rate_limit_reached',
+      },
+    })
+    expect(out[0]).toMatchObject({ windowMins: 10080, resumeAt: new Date(1787198872 * 1000).toISOString() })
+  })
+
   it('a spend limit is a limit too', () => {
     const out = n('account/rateLimits/updated', {
       rateLimits: { primary: { usedPercent: 40 }, spendControlReached: true },

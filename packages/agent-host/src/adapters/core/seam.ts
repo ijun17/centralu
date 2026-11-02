@@ -1,7 +1,6 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
 import type { InputReceipt } from '../input-receipts.js'
-import type { GateRequests } from './gate.js'
 import type { ToolLaunch } from './tool-process.js'
 
 /**
@@ -53,8 +52,6 @@ export interface RunningTurn {
 export interface CoreIo {
   /** The process this io belongs to, tapped (frames recorded) */
   readonly process: AgentProcess
-  /** The gate requests of the session (`SessionProcess.gates`): a Stop, a new process, an exit and the close deny them */
-  readonly gates: GateRequests
   emit(event: NormalizedEvent): void
   /** The tool took the input (receipts): ACP at its write, since `session/prompt` has no earlier answer (§2.3) */
   inputAccepted(inputId: string): void
