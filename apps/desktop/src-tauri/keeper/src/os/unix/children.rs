@@ -737,12 +737,21 @@ mod tests {
         assert_eq!(output_of(Err(io::Error::from_raw_os_error(libc::EINTR))), Output::Interrupted);
     }
 
+    /// Terminals past stderr that this process was started with and that nothing closes on exec: WSL's relay
+    /// leaves its `/dev/ptmx` on descriptor 6 for everything it starts (#1883). They reach every child, the keeper's
+    /// own descriptors being all close-on-exec, and are not a pty end the spawn made.
+    fn inherited_terminals() -> Vec<RawFd> {
+        // SAFETY: isatty on a descriptor number, open or not.
+        (3..256).filter(|&fd| unsafe { libc::isatty(fd) } == 1 && !cloexec(fd)).collect()
+    }
+
     /// CH4: `openpty` does not set close-on-exec. The master stays in the keeper and the slave is
     /// open in it while the child starts, so without the flag every later child (this one's own
     /// descriptors past 2 included) inherits terminals it has no business with.
     #[test]
     fn neither_end_of_a_pty_is_inherited() {
         let mut w = ExitWatch::new().unwrap();
+        let launched_with = inherited_terminals();
         // A terminal on any descriptor past stderr is a pty end that leaked into the child.
         let script = "i=3; while [ $i -lt 256 ]; do [ -t $i ] && printf 'leak%s ' $i; i=$((i+1)); done; printf checked";
         let s = spawn_pty("/bin/sh", &["-c".into(), script.into()], "/", &env(), 80, 24).unwrap();
@@ -750,7 +759,8 @@ mod tests {
         assert!(cloexec(s.out.as_raw_fd()), "the master is inheritable");
         let (got, _) = read_to_end(s.out.as_raw_fd(), Duration::from_secs(10));
         wait_exit(&mut w, s.pid);
-        assert!(got.contains("checked") && !got.contains("leak"), "{got:?}");
+        let leaked: Vec<RawFd> = got.split_whitespace().filter_map(|w| w.strip_prefix("leak")?.parse().ok()).filter(|fd| !launched_with.contains(fd)).collect();
+        assert!(got.contains("checked") && leaked.is_empty(), "{got:?}, launched with {launched_with:?}");
     }
 
     #[test]

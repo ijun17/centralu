@@ -562,7 +562,12 @@ fn finds_the_node_this_shell_knows() {
     if !Path::new(&shell).exists() {
         return;
     }
-    let Ok(out) = Command::new(&shell).args(["-ilc", "command -v node"]).output() else {
+    // Asked the way the probe asks: no stdin and a session of its own. An interactive shell in the background group of
+    // a terminal's session is stopped (SIGTTOU) and `output()` never returned: under WSL a full run hung here (#1883).
+    let mut ask = Command::new(&shell);
+    ask.args(["-ilc", "command -v node"]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    crate::os::new_session(&mut ask);
+    let Ok(out) = ask.output() else {
         return;
     };
     let expected = String::from_utf8_lossy(&out.stdout).trim().to_string();

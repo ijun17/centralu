@@ -1,13 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { appTemplateDir, scaffoldApp } from '../../packages/agent-host/src/apps/external/scaffold.js'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createInterface } from 'node:readline'
-import { fileURLToPath } from 'node:url'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
-import { freePort, homeEnv, hostRun } from './real-host.js'
+import { freePort, homeEnv, spawnHost, type SpawnedHost } from './real-host.js'
 
 /**
  * Two hosts for the linked-hosts e2e (#82): a remote and a hub linked to it as machine `m1`
@@ -15,8 +11,6 @@ import { freePort, homeEnv, hostRun } from './real-host.js'
  * the person's data nor their CLI logins are touched. The page reaches the hub through the TCP
  * relay on 5180 (`Relay` in real-host.ts), the address the linked vite server is built with.
  */
-
-const root = fileURLToPath(new URL('../../', import.meta.url))
 
 export const LINKED_TOKEN = 'e2e-linked-token'
 export const LINKED_UI_ORIGIN = 'http://127.0.0.1:5179'
@@ -34,48 +28,15 @@ function side(name: string): Side {
   return s
 }
 
-export type LinkedHost = { port: number; child: ChildProcess; stderr: () => string; kill(signal?: NodeJS.Signals): Promise<void> }
+export type LinkedHost = { port: number } & SpawnedHost
 
 export async function startLinkedHost(s: Side, port: number, link?: { port: number }, opts: { hubVersion?: string } = {}): Promise<LinkedHost> {
   const args = ['--import', 'tsx', 'e2e/fixtures/linked-host-main.ts', '--port', String(port), '--db', s.db, '--token', LINKED_TOKEN]
   if (link) args.push('--link', JSON.stringify({ id: MACHINE, name: 'Remote box', port: link.port, token: LINKED_TOKEN }))
   if (opts.hubVersion) args.push('--hub-version', opts.hubVersion)
   // What the host starts (the tool probes `agents.detect` runs, with the home in `s`) is waited for before `s` is removed (#368)
-  const run = hostRun()
-  const child = spawn(process.execPath, args, {
-    cwd: root,
-    env: { ...process.env, CC_DATA_DIR: join(s.dir, 'data'), ...homeEnv(s.home), CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN, CI: '1', ...run.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  let stderr = ''
-  child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`linked host did not become ready\n${stderr}`)), 30_000)
-    child.once('exit', (code) => reject(new Error(`linked host exited (${code}) before it was ready\n${stderr}`)))
-    createInterface({ input: child.stdout! }).on('line', (line) => {
-      try {
-        if ((JSON.parse(line) as { ready?: boolean }).ready) {
-          clearTimeout(timer)
-          resolve()
-        }
-      } catch {
-        // Not the ready line
-      }
-    })
-  })
-  return {
-    port,
-    child,
-    stderr: () => stderr,
-    async kill(signal: NodeJS.Signals = 'SIGTERM') {
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = once(child, 'exit')
-        child.kill(signal)
-        await exited
-      }
-      await run.gone()
-    },
-  }
+  const env = { CC_DATA_DIR: join(s.dir, 'data'), ...homeEnv(s.home), CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN }
+  return { port, ...(await spawnHost(args, env, 'linked host')) }
 }
 
 export type LinkedPair = { hub: LinkedHost; remote: LinkedHost; hubSide: Side; remoteSide: Side; remotePort: number; cleanup(): Promise<void> }
