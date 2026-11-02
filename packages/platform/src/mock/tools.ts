@@ -2,6 +2,9 @@ import { setupOfDetection, type AdapterCapabilities, type ToolName, type ToolSet
 import type { Emit } from './event-bus.js'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
+/** What the ACP-based tools declare on the real host: no role text, subagents or peer messaging */
+const NO_ROLE_TEXT: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'instructionChannel' | 'processModel' | 'builtInSubagents' | 'peerMessaging' | 'roleText'> = { verbosities: [], exclusiveWriter: false, toolDeferral: false, instructionChannel: 'server', processModel: 'per-session', builtInSubagents: false, peerMessaging: false, roleText: false }
+
 /** The agent tools the mock knows: what is detected, their models and capabilities, and the slash command list */
 export class ToolsMock {
   /** Tells the app a tool's setup changed (`tool_setup`) */
@@ -58,9 +61,9 @@ export class ToolsMock {
       ],
       capabilities: { verbosities: ['low', 'medium', 'high'], exclusiveWriter: true, toolDeferral: false, instructionChannel: 'developer', processModel: 'per-session', builtInSubagents: true, peerMessaging: false },
     }],
-    // Antigravity takes no role text on the real host (`CAPABILITIES` in its adapter; `mock-capability-parity.test.ts` holds the two together)
-    // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies this CLI's model and capability data.
-    ['antigravity', { models: [], capabilities: { verbosities: [], exclusiveWriter: false, toolDeferral: false, instructionChannel: 'server', processModel: 'per-session', builtInSubagents: false, peerMessaging: false, roleText: false } }],
+    // Antigravity, Cursor and OpenCode take no role text on the real host (`CAPABILITIES` in each adapter; `mock-capability-parity.test.ts` holds the two together)
+    // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies these CLIs' model and capability data.
+    ...['antigravity', 'cursor-agent', 'opencode'].map((tool): [ToolName, { models: []; capabilities: typeof NO_ROLE_TEXT }] => [tool, { models: [], capabilities: NO_ROLE_TEXT }]),
   ])
 
   firstRegisteredTool(): ToolName {

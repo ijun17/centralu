@@ -23,6 +23,7 @@ import {
   procGone,
   processStartTime,
   procStamp,
+  withoutSeparator,
   PS_ENV,
   readHolder,
   signalExit,
@@ -537,6 +538,18 @@ describe('the runners (real processes)', () => {
     const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()))
     return { child, done, result, exited, stderr: () => err }
   }
+  it('hands the command what follows a -- without the -- itself (#1692)', () => {
+    // A script file, since `node -e` would strip the -- itself and hide the difference
+    const script = join(dir, 'argv.cjs')
+    writeFileSync(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))')
+    const r = spawnSync(process.execPath, ['--import', 'tsx', 'tooling/with-e2e-lock.ts', 'node', script, '--', 'tool-setup'], {
+      cwd: ROOT,
+      env: { ...process.env, E2E_LOCK_FILE: file },
+      encoding: 'utf8',
+    })
+    expect(JSON.parse(r.stdout) as string[]).toEqual(['tool-setup'])
+  }, 60_000 * SLOW)
+
   const logLine = (id: string, what: string) => `require('node:fs').appendFileSync(${JSON.stringify(join(dir, 'log.txt'))}, '${id} ${what}\\n')`
   const win = process.platform === 'win32'
   /**
@@ -779,4 +792,16 @@ describe('the runners (real processes)', () => {
     },
     120_000 * SLOW,
   )
+})
+
+describe('withoutSeparator (#1692)', () => {
+  it('drops the bare -- that pnpm hands on, so a filter after it reaches Playwright', () => {
+    expect(withoutSeparator(['test', '--config', 'c.ts', '--', 'tool-setup'])).toEqual(['test', '--config', 'c.ts', 'tool-setup'])
+  })
+  it('drops only the first, so a second -- still reaches the command', () => {
+    expect(withoutSeparator(['a', '--', 'b', '--', 'c'])).toEqual(['a', 'b', '--', 'c'])
+  })
+  it('leaves other arguments alone', () => {
+    expect(withoutSeparator(['test', '--grep', 'a--b', '--workers=1'])).toEqual(['test', '--grep', 'a--b', '--workers=1'])
+  })
 })

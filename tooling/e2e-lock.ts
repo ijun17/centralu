@@ -73,6 +73,15 @@ export const signalExit = (signal: string | null): number => 128 + (Object.entri
  */
 export const passesSignalOn = (platform: NodeJS.Platform = process.platform): boolean => platform !== 'win32'
 
+/**
+ * The arguments for the command, without the first bare `--`: `pnpm e2e -- tool-setup` hands the `--` on, and Playwright then
+ * read what followed as no filter and ran every spec (#1692).
+ */
+export const withoutSeparator = (args: string[]): string[] => {
+  const at = args.indexOf('--')
+  return at < 0 ? args : args.filter((_, i) => i !== at)
+}
+
 /** How the start time is asked of the OS: the program and its arguments, per platform */
 export function startTimeCommand(pid: number, platform: NodeJS.Platform = process.platform): { file: string; args: string[] } {
   if (platform === 'win32') {

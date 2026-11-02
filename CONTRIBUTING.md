@@ -380,7 +380,7 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 
 - `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
   so it must build on its own;
-- dependency-cruiser's orphans as errors (`pnpm verify` only warns), and every other rule it fails `pnpm depcruise` on (`deps`: a
+- dependency-cruiser's orphans as errors (`pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
   cycle, a layer rule);
 - `pnpm lint` on the files your branch changed (`lint`), with the type-aware rules, allowlists and per-package type-assertion
   ceilings CI uses (the ceilings count the whole repository, a few seconds more). A finding in a file you did not touch is left to CI;

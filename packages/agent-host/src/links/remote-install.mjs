@@ -14,6 +14,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, win32 } from 'node:path'
+import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
@@ -532,7 +533,12 @@ export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(
     if (protocol !== p.protocol) throw new Refusal('dev_protocol', `${protocol} ${p.protocol}`)
     const floor = /(\d+\.\d+\.\d+)/.exec(String(shim.engines?.node ?? ''))?.[1]
     if (floor && !atLeast(process.versions.node, floor)) throw new Refusal('dev_node', `${process.versions.node} ${floor}`)
-    if (!existsSync(join(repo, 'node_modules', 'esbuild'))) throw new Refusal('dev_deps', repo)
+    // Found the way the bundler finds it (its own folder, then up), so a hoisted install passes too
+    try {
+      createRequire(join(repo, 'packages', 'agent-host', 'package.json')).resolve('esbuild')
+    } catch {
+      throw new Refusal('dev_deps', repo)
+    }
     // The next number after every dev build of this release still there, and any a pointer names
     const local = new RegExp(`^${base.replace(/[.+-]/g, '\\$&')}\\.local\\.([1-9]\\d*)$`)
     let names = []

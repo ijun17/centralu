@@ -5,11 +5,11 @@ module.exports = {
     {
       name: 'no-orphans',
       comment: 'A file nobody uses gets deleted. The only exception is something used in a way other than an import.',
-      severity: 'warn',
+      severity: 'error',
       from: {
         orphan: true,
         pathNot: [
-          '\\.d\\.ts$',
+          '\\.d\\.[cm]?ts$',
           'index\\.ts$',
           'main\\.tsx?$',
           // The bridge codex launches **directly** with `node <path>`. Having no import is
