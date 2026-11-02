@@ -24,6 +24,7 @@ import {
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { gitWorktreeRemove } from '../dev-services/git-worktree.js'
+import { branchWasThereKey } from './worktree-sessions.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
 import { withHubMark } from './hub-preset.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
@@ -93,6 +94,7 @@ export type SessionTrashHost = {
   readonly updateApplyConsents: Set<string>
   readonly updateConsents: Set<string>
   readonly worktrees: WorktreeSessions
+  readonly worktreeRoot: string
 }
 
 /**
@@ -473,6 +475,11 @@ export class SessionTrash {
   /** Only one trash operation per session at a time — a purge racing a restore would restore half of a deleted session */
   private readonly trashBusy = new Set<string>()
 
+  /** Whether a restore or a delete for good of this session is under way (#1662: a worktree is not taken from under it) */
+  archiveBusy(sessionId: string): boolean {
+    return this.trashBusy.has(sessionId)
+  }
+
   private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
     // A delete still running counts (#839): the session is in the session archive before its last steps, which would undo a restore
     if (this.trashBusy.has(sessionId) || this.trashing.has(sessionId) || this.host.worktrees.worktreeCleanup.has(sessionId)) {
@@ -671,7 +678,7 @@ export class SessionTrash {
          */
         const path = s.worktree.path
         const repo = record.projectPath
-        await gitWorktreeRemove(repo, path).catch((e: Error) => {
+        await gitWorktreeRemove(repo, path, { worktreeRoot: this.host.worktreeRoot }).catch((e: Error) => {
           if (!existsSync(path)) return
           // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
           if (!existsSync(repo)) {
@@ -692,6 +699,7 @@ export class SessionTrash {
         this.host.forgetUsage(sessionId)
         this.host.restartPolicy.forgetBackground(sessionId)
         this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
+        this.host.store.settings.deleteAppSetting(branchWasThereKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
         await recoveryRemoval.abort().catch((cause: Error) => console.error(`[archive] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))

@@ -58,6 +58,13 @@ import { sleep } from '../timing.js'
  */
 export const STOPPING_WAIT_MS = 10_000
 
+/**
+ * A worktree session started on a branch that was there before it (#1662), by session id: its cleanup keeps that branch,
+ * which is the person's (a pull request's, the trunk). An app setting, so a build before it reads nothing new and the
+ * store needs no step; it goes with the session when it is deleted for good.
+ */
+export const branchWasThereKey = (sessionId: string) => `worktree_branch_was_there:${sessionId}`
+
 /** A branch a new worktree starts on that was there already (#1662): where it starts, and whether a local branch of that name exists */
 type TakenBranch = ForkBase & { sha: string; existing: boolean }
 
@@ -113,6 +120,7 @@ export function worktreeSetupFrame(problems: readonly string[]): string {
  */
 export type WorktreeHost = {
   readonly agentRuns: Map<string, AgentRunWait>
+  archiveBusy: (sessionId: string) => boolean
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   cwdOf: (projectId: string | null) => string
   gitTrust: (projectId: string | null) => { trusted: boolean; }
@@ -221,6 +229,7 @@ export class WorktreeSessions {
       const from = taken && !taken.existing ? taken.ref : forkBase.sha ?? undefined
       worktree = await gitWorktreeAdd(params.cwd, path, branch, from, { trusted: true }, taken?.existing)
       if (forkBase.sha) worktree = { ...worktree, base: forkBase.sha }
+      if (taken?.existing) this.host.store.settings.setAppSetting(branchWasThereKey(id), branch)
       base = forkBase
     } catch (err) {
       const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
@@ -273,6 +282,10 @@ export class WorktreeSessions {
     return { sha: onRemote, ref: there, existing: true, note: `Started on ${there} at ${onRemote.slice(0, 9)}, fetched just now; the local ${branch} was at ${local.slice(0, 9)}, with nothing the remote never had, and was moved to it` }
   }
 
+  private branchWasThere(sessionId: string, branch: string): boolean {
+    return this.host.store.settings.appSetting(branchWasThereKey(sessionId)) === branch
+  }
+
   /** Frees `branch` from the worktree that has it checked out, when that is an archived session's and nothing is lost by it (`takeBranch`) */
   private async freeBranch(cwd: string, projectId: string, branch: string, trunk: string, pushed: string[]): Promise<void> {
     const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
@@ -284,23 +297,32 @@ export class WorktreeSessions {
     const archived = id && isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
     if (!archived) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
     const kept = (why: string) => rpcError(`${where}, the worktree of the archived session "${archived.session.name}", which ${why}. Nothing was removed: restore that session to keep its work, or start on another branch.`)
-    const folder = worktreeFolderState(holder.path)
-    if (typeof folder === 'object') throw kept(`cannot be read (${folder.unreachable})`)
-    if (folder === 'present') {
-      const state = await gitWorktreeDirty(holder.path, this.host.gitTrust(projectId))
-      if (state.unknown) throw kept('may hold uncommitted changes (they could not be read)')
-      if (state.dirty) throw kept(`holds ${state.changedFiles}${state.more ? '+' : ''} uncommitted file${state.changedFiles === 1 ? '' : 's'}`)
-      const head = await gitRevParse(holder.path, 'HEAD')
-      const unpublished = head ? await gitUnpublishedCommits(cwd, head, branch, trunk, pushed) : null
-      if (unpublished === null) throw kept('may hold commits no remote has (it could not be told)')
-      if (unpublished > 0) throw kept(`has ${unpublished} commit${unpublished === 1 ? '' : 's'} that no remote and not the trunk has`)
+    /*
+     * Held across the checks and the removal: the archive refuses a restore or a purge of a session whose worktree is
+     * being removed (`trashOp`), and one already under way is not raced
+     */
+    const sid = archived.session.id
+    if (this.worktreeCleanup.has(sid) || this.host.archiveBusy(sid)) throw kept('is being restored or removed right now')
+    this.worktreeCleanup.set(sid, canonicalPath(holder.path))
+    try {
+      const folder = worktreeFolderState(holder.path)
+      if (typeof folder === 'object') throw kept(`cannot be read (${folder.unreachable})`)
+      if (folder === 'present') {
+        const state = await gitWorktreeDirty(holder.path, this.host.gitTrust(projectId))
+        if (state.unknown) throw kept('may hold uncommitted changes (they could not be read)')
+        if (state.dirty) throw kept(`holds ${state.changedFiles}${state.more ? '+' : ''} uncommitted file${state.changedFiles === 1 ? '' : 's'}`)
+        const head = await gitRevParse(holder.path, 'HEAD')
+        const unpublished = head ? await gitUnpublishedCommits(cwd, head, branch, trunk, pushed) : null
+        if (unpublished === null) throw kept('may hold commits no remote has (it could not be told)')
+        if (unpublished > 0) throw kept(`has ${unpublished} commit${unpublished === 1 ? '' : 's'} that no remote and not the trunk has`)
+      }
+      // Restored between the read above and the mark: it is a session's worktree again, and is not taken
+      if (this.host.meta.has(sid) || !this.host.store.trash.trashedSession(sid)) throw kept('was restored from the archive just now')
+      await gitWorktreeRemove(cwd, holder.path, { worktreeRoot: this.host.worktreeRoot })
+    } finally {
+      this.worktreeCleanup.delete(sid)
     }
-    // Restored while the checks above ran: it is a session's worktree again, and is not taken
-    if (this.host.meta.has(archived.session.id) || !this.host.store.trash.trashedSession(archived.session.id)) {
-      throw rpcError(`${where}, the worktree of "${archived.session.name}", which was restored from the archive just now. Nothing was removed.`)
-    }
-    await gitWorktreeRemove(cwd, holder.path)
-    console.error(`[worktree] removed the archived session ${archived.session.id.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
+    console.error(`[worktree] removed the archived session ${sid.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
   }
 
   /**
@@ -311,9 +333,10 @@ export class WorktreeSessions {
    */
   async discardNewWorktree(cwd: string, worktree: Worktree, projectId: string, keepBranch = false): Promise<string | null> {
     const left: string[] = []
-    await gitWorktreeRemove(cwd, worktree.path).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
-    // A branch that was there before (#1662) is not this host's to take away
-    if (!keepBranch) await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
+    await gitWorktreeRemove(cwd, worktree.path, { worktreeRoot: this.host.worktreeRoot }).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
+    // A branch that was there before (#1662) is not this host's to take away; the worktree's folder is named by the session id
+    if (keepBranch) this.host.store.settings.deleteAppSetting(branchWasThereKey(basename(worktree.path)))
+    else await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
     if (!left.length) return null
     const said = left.join('; ')
     console.error(`[worktree] a worktree made for a session that never started was not removed: ${said}`)
@@ -551,10 +574,11 @@ export class WorktreeSessions {
       const appearedSince = occupied()
       if (appearedSince) return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${appearedSince.error}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       try {
-        await gitWorktreeRemove(cwd, path, true)
+        await gitWorktreeRemove(cwd, path, { unlocked: true, worktreeRoot: this.host.worktreeRoot })
       } catch (e) {
         return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       }
+      if (this.branchWasThere(target.id, branch)) return { ok: true, branch, setAside, note: `Branch ${branch} was kept: it was there before this session started on it.` }
       try {
         await gitBranchDelete(cwd, branch, this.host.gitTrust(target.projectId))
         await clearRecoveredBranchMark(cwd, branch).catch(() => {})
@@ -669,6 +693,7 @@ export class WorktreeSessions {
     if (elsewhere) {
       return { ok: true, branch, setAside, note: `${head} Branch ${branch} was kept: it is checked out at ${elsewhere.path}.` }
     }
+    if (this.branchWasThere(target.id, branch)) return { ok: true, branch, setAside, note: `${head} Branch ${branch} was kept: it was there before this session started on it.` }
     const ahead = await gitBranchAhead(cwd, branch, this.host.trunkOf(target.projectId!) ?? 'HEAD')
     if (ahead === null || ahead > 0) {
       return { ok: true, branch, setAside, note: `${head} Branch ${branch} was kept${ahead ? ` because it has ${ahead} commit${ahead === 1 ? '' : 's'} the trunk lacks` : ''}.` }

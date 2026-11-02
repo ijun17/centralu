@@ -288,28 +288,36 @@ export function pathKey(path: string): string {
  * `--force`).
  *
  * **The host removes the folder, not git (#1655, #1560).** On Windows git deleted through a junction what the junction
- * led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters once it had already
- * dropped its entry and the worktree's `.git` file, leaving a folder that nothing would clean (measured, git 2.47).
- * `removeData` never follows a link and takes long paths. git then drops its entry for the folder that is gone.
+ * led to (a pnpm-style link out of the worktree; one leading to the project took the project and its `.git`), and
+ * stopped at a path past 260 characters once it had already dropped its entry and the worktree's `.git` file, leaving
+ * a folder that nothing would clean (measured, git 2.47). `removeData` never follows a link and takes long paths. git
+ * then drops its entry for the folder that is gone, named as git lists it (a Windows short name it does not match).
  *
- * A folder git no longer lists is what such a removal left part way when it has no `.git` of its own, and is removed
- * the same way; one with its own `.git` is someone else's and stays. A folder that cannot all be removed (a file held
- * open) throws with what was left, and git's entry stays so the removal can be tried again.
+ * Never a folder that holds a checkout git lists (the project, another worktree). A folder git no longer lists is what
+ * such a removal left part way only when it is inside `worktreeRoot` (Centralu's worktrees) and has no `.git` of its
+ * own; anything else unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
+ * and git's entry stays so the removal can be tried again.
  */
-export async function gitWorktreeRemove(repoCwd: string, path: string, unlocked = false): Promise<void> {
+export async function gitWorktreeRemove(
+  repoCwd: string,
+  path: string,
+  { unlocked = false, worktreeRoot }: { unlocked?: boolean; worktreeRoot?: string } = {},
+): Promise<void> {
   const key = pathKey(path)
   const list = await gitWorktreeList(repoCwd)
   const entry = list.find((w) => pathKey(w.path) === key)
   if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
   if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
-  // Not listed: only a leftover outside every checkout git lists, of a repository git can read
-  if (!entry && (list.length === 0 || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
+  const held = list.find((w) => w !== entry && pathKey(w.path).startsWith(`${key}/`))
+  if (held) throw new Error(`${path} holds ${held.path}, which git lists as a checkout; nothing was removed`)
+  const leftover = worktreeRoot !== undefined && key.startsWith(`${pathKey(worktreeRoot)}/`)
+  if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
     throw new Error(`${path} is not a worktree of ${repoCwd}`)
   }
   await removeData(path).catch((e: Error) => {
     throw new Error(`${path} was removed only in part, and what is left stays there: ${e.message}`)
   })
-  if (entry) await git(repoCwd, ['worktree', 'remove', '--force', '--force', path])
+  if (entry) await git(repoCwd, ['worktree', 'remove', '--force', '--force', entry.path])
 }
 
 /**

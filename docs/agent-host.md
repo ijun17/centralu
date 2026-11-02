@@ -667,7 +667,8 @@ has it. A local branch behind the remote is moved to its head when every commit 
 (the remote-tracking ref's reflog, so a rebased pull request counts) or is on the trunk; otherwise the start is refused with
 the count. An archived session's worktree that has the branch checked out is removed when it has no uncommitted change and
 every commit of its own is on a remote or the trunk; any other worktree that has it (a session not archived, the project's
-folder, one of the person's) is never touched, and the refusal names it. A start that fails keeps such a branch.
+folder, one of the person's) is never touched, and the refusal names it. A start that fails keeps such a branch, and so does the session's cleanup later: `worktree_branch_was_there:<session>`, an
+app setting (no store step; a build before it reads nothing new), marks it, and goes when the session is deleted for good.
 The start answer's `notice` names the base commit and what could not be done (a start on a linked machine does not carry it back yet). The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
@@ -851,8 +852,10 @@ the worktree removes the folder and its branch again (#774); what could not be r
 agent's cleanup, a purge, a branch taken over). The host removes the folder (`removeData`: never through a link, long
 paths taken), then git drops its entry. git did the delete before, and on Windows it deleted through a junction what
 the junction led to (a pnpm-style link out of the worktree), and stopped at a path past 260 characters after it had
-already dropped its entry and the `.git` file, so the folder stayed with nothing to clean it. A folder git no longer
-lists and with no `.git` of its own (what such a stop left) is removed the same way; one with its own `.git` is refused.
+already dropped its entry and the `.git` file, so the folder stayed with nothing to clean it (a junction to the project
+took the project with its `.git`). A folder that holds a checkout git lists is never removed. A folder git no longer
+lists is removed the same way only inside the worktree root and with no `.git` of its own (what such a stop left);
+anything else unlisted is refused. git is given the path as it lists it (a Windows short name it does not match).
 A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
 retry; the archive's answer and the purge say so.
 

@@ -477,6 +477,30 @@ describe('worktree sessions', () => {
       expect(git(repo, 'worktree', 'list', '--porcelain')).not.toMatch(/branch refs\/heads\/mine/)
     })
 
+    it("a session's cleanup keeps a branch that was there before it, the trunk included, and removes only its worktree", async () => {
+      git(repo, 'checkout', '-q', '-b', 'elsewhere')
+      for (const branch of ['main', 'pr/kept']) {
+        if (branch !== 'main') git(repo, 'branch', branch, 'main')
+        const tip = git(repo, 'rev-parse', `refs/heads/${branch}`)
+        const s = await start(branch)
+        const r = await wtMgr.worktrees.cleanUpWorktreeChild(wtMgr.listSessions().find((x) => x.id === s.id)!)
+
+        expect(r).toMatchObject({ ok: true, note: expect.stringMatching(/was kept: it was there before/) })
+        expect(git(repo, 'rev-parse', `refs/heads/${branch}`)).toBe(tip)
+        expect(existsSync(s.worktree!.path)).toBe(false)
+      }
+    })
+
+    it("keeps an archived session's worktree with local commits when there is no remote to compare with", async () => {
+      git(repo, 'remote', 'remove', 'origin')
+      const old = await start('local/only')
+      const mine = commit(old.worktree!.path, 'only-here.txt')
+      await wtRpc('agents.deleteSession', { sessionId: old.id })
+
+      await expect(start('local/only')).rejects.toThrow(new RegExp(`archived session "${old.name}".*1 commit that no remote and not the trunk has`))
+      expect(git(old.worktree!.path, 'rev-parse', 'HEAD')).toBe(mine)
+    })
+
     it("never takes a worktree a session not archived works in", async () => {
       const live = await start('pr/live')
 

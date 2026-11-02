@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
@@ -123,9 +124,36 @@ describe('removing a worktree (#1655, #1560)', () => {
     await gitWorktreePrune(repo)
     expect(await listed(path)).toBe(false)
 
-    await gitWorktreeRemove(repo, path)
+    // Only inside Centralu's worktree folder: anywhere else an unlisted folder is not taken for a leftover
+    await expect(gitWorktreeRemove(repo, path)).rejects.toThrow(/not a worktree/)
+    expect(existsSync(path)).toBe(true)
+    await gitWorktreeRemove(repo, path, { worktreeRoot: join(root, 'worktrees') })
     expect(existsSync(path)).toBe(false)
     expect(existsSync(join(root, 'outside', 'keep.txt'))).toBe(true)
+  })
+
+  it('never removes a folder that holds a checkout git lists: the project, with its .git, or a worktree', async () => {
+    const path = join(root, 'worktrees', 'p', 'session-held')
+    await gitWorktreeAdd(repo, path, 'centralu/held', undefined, TRUSTED)
+    writeFileSync(join(path, 'a.txt'), 'not committed\n')
+
+    await expect(gitWorktreeRemove(repo, root, { worktreeRoot: root })).rejects.toThrow(/holds/)
+    await expect(gitWorktreeRemove(repo, join(root, 'worktrees', 'p'), { worktreeRoot: join(root, 'worktrees') })).rejects.toThrow(/holds/)
+    expect(existsSync(join(repo, '.git'))).toBe(true)
+    expect(existsSync(join(repo, 'a.txt'))).toBe(true)
+    expect(existsSync(join(path, 'a.txt'))).toBe(true)
+  })
+
+  // A Windows short name (8.3) for the folder: git lists its long name, and its entry has to go too
+  it.skipIf(process.platform !== 'win32')('removes a worktree named by its short name, git\'s entry included', async (ctx) => {
+    const path = join(root, 'worktrees', 'a-folder-with-a-long-name', 'session-short')
+    await gitWorktreeAdd(repo, path, 'centralu/short', undefined, TRUSTED)
+    const short = execFileSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true }).trim()
+    if (short.toLowerCase() === path.toLowerCase()) ctx.skip()
+
+    await gitWorktreeRemove(repo, short)
+    expect(existsSync(path)).toBe(false)
+    expect(await listed(path)).toBe(false)
   })
 
   it('keeps a folder git does not list that has a .git of its own', async () => {
@@ -133,7 +161,7 @@ describe('removing a worktree (#1655, #1560)', () => {
     fixtureGit(root, ['init', '-q', other])
     writeFileSync(join(other, 'work.txt'), 'someone else\'s')
 
-    await expect(gitWorktreeRemove(repo, other)).rejects.toThrow(/not a worktree/)
+    await expect(gitWorktreeRemove(repo, other, { worktreeRoot: root })).rejects.toThrow(/not a worktree/)
     expect(existsSync(join(other, 'work.txt'))).toBe(true)
   })
 
@@ -145,8 +173,8 @@ describe('removing a worktree (#1655, #1560)', () => {
     mkdirSync(plain)
     writeFileSync(join(plain, 'data.txt'), 'kept')
 
-    await expect(gitWorktreeRemove(repo, inside)).rejects.toThrow(/not a worktree/)
-    await expect(gitWorktreeRemove(plain, join(plain, 'data.txt'))).rejects.toThrow(/not a worktree/)
+    await expect(gitWorktreeRemove(repo, inside, { worktreeRoot: root })).rejects.toThrow(/not a worktree/)
+    await expect(gitWorktreeRemove(plain, join(plain, 'data.txt'), { worktreeRoot: root })).rejects.toThrow(/not a worktree/)
     expect(existsSync(join(inside, 'out.txt'))).toBe(true)
     expect(existsSync(join(plain, 'data.txt'))).toBe(true)
   })
@@ -158,7 +186,7 @@ describe('removing a worktree (#1655, #1560)', () => {
 
     await expect(gitWorktreeRemove(repo, path)).rejects.toThrow(/locked/)
     expect(existsSync(join(path, 'a.txt'))).toBe(true)
-    await gitWorktreeRemove(repo, path, true)
+    await gitWorktreeRemove(repo, path, { unlocked: true })
     expect(existsSync(path)).toBe(false)
   })
 
