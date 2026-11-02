@@ -436,15 +436,9 @@ export function createRpcHandler(
     'mail.reply': async ({ threadId, text, kind }) => {
       return requireMail().reply(threadId, text, kind)
     },
-    'mail.close': async ({ threadId, outcome }) => {
-      return requireMail().close(threadId, outcome)
-    },
-    'mail.reassign': async ({ threadId, sessionId, text }) => {
-      return requireMail().reassign(threadId, sessionId, text)
-    },
-    'mail.unblock': async ({ threadId, n }) => {
-      return requireMail().unblock(threadId, n)
-    },
+    'mail.close': async ({ threadId }) => requireMail().close(threadId),
+    'mail.reassign': async () => requireMail().removed('Giving a thread to another session'),
+    'mail.unblock': async () => requireMail().removed("A thread's blockers"),
     'mail.held': async ({ action, recipient, messageIds }) => {
       return requireMail().held(action, recipient, messageIds)
     },
@@ -681,6 +675,8 @@ export function createRpcHandler(
       } catch {
         // No such project — nothing to clean up
       }
+      // While the project still has its name for the notice its senders get: the mail held for its trust is dropped (§7.4)
+      mail?.projectDeleted(projectId)
       await mgr.deleteProject(projectId)
       if (cwd !== null) {
         terminals?.closeCwd(cwd)
@@ -694,6 +690,8 @@ export function createRpcHandler(
     'projects.setTrusted': async ({ projectId, trusted }) => {
       // The toggle answers at once; the project's idle sessions restart behind it (#663)
       void mgr.setProjectTrusted(projectId, trusted).catch((err) => console.error('[sessions] restarting for a trust change failed:', err))
+      // The trust is written by now: what the project's sessions sent that waited for it goes, in order (§7.4)
+      if (trusted) mail?.trusted(projectId)
       externalApps?.refresh()
       return { ok: true as const }
     },

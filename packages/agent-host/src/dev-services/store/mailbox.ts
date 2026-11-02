@@ -351,6 +351,14 @@ export class MailboxRecords {
     )[0]
   }
 
+  /** The chains moved from the v61 thread `threadId` (§6.3), the newest first: what an old thread's id names in the person's window */
+  movedFrom(threadId: string): string[] {
+    return this.db
+      .prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE legacy_thread = ? GROUP BY root_id ORDER BY MAX(created_at) DESC`)
+      .all(threadId)
+      .map((r) => r.root_id)
+  }
+
   /** Whether a message of `sender` moved from a v61 thread (§6.3) has a row for `recipient`: the old build let it write there */
   movedTo(sender: string, recipient: string): boolean {
     return this.messages(`m.sender = ? AND m.legacy_thread IS NOT NULL AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) LIMIT 1`, sender, recipient).length > 0
@@ -433,6 +441,11 @@ export class MailboxRecords {
     this.update('held = ?', [why], recipient, ids)
   }
 
+  /** No longer held; an unread row waits to be delivered again, whatever was delivered of it while it was held (the person trusted its project, §7.4) */
+  letGo(recipient: string, ids: readonly string[]): void {
+    this.update('held = NULL, delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END, attempt_at = NULL, attempts = 0', [], recipient, ids)
+  }
+
   /** Read, keeping an earlier read time */
   markRead(recipient: string, ids: readonly string[], at: number): number {
     return this.update('read_at = COALESCE(read_at, ?)', [at], recipient, ids)
@@ -451,6 +464,14 @@ export class MailboxRecords {
       ids,
       `held IN ${RECIPIENT_HOLDS}`,
     )
+  }
+
+  /**
+   * The person's Mark done on a chain (§12): each of `ids` with a row to `recipient` is settled `done`, watched or not, unless it was withdrawn or its
+   * sender is gone. A row settled `legacy` or `answered` says done from now: what the person marks is theirs to mark
+   */
+  closeFor(recipient: string, ids: readonly string[], at: number): number {
+    return this.update(`settled = 'done', settled_at = ?`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
   }
 
   /** The person's Dismiss of `uncertain` or `failed` mail: never delivered, held against no one */

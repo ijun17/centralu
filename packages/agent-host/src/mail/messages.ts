@@ -575,10 +575,10 @@ export class MessageService {
   }
 
   /**
-   * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust or the depth has its own way out. The
-   * delivery passes `loop` (a pair's Resume) or `budget` (a session's Resume) for the guards' holds, which the drain judges again
+   * The person says send it: mail held `uncertain` or `failed` goes now, and from the person's window a row held for a session's budget. Mail held for
+   * the project's trust or the depth has its own way out. The delivery passes `budget` (a session's Resume), which the drain judges again
    */
-  resendHeld(recipient: string, ids: readonly string[], why: readonly ('uncertain' | 'failed' | 'loop' | 'budget')[] = ['uncertain', 'failed']): number {
+  resendHeld(recipient: string, ids: readonly string[], why: readonly ('uncertain' | 'failed' | 'budget')[] = ['uncertain', 'failed']): number {
     return this.run(() => {
       const released = this.heldBy(recipient, ids, why)
       const n = this.records.release(recipient, released, this.now())
@@ -608,9 +608,21 @@ export class MessageService {
     this.listeners.emit({ messageId: '', rootId: '', recipients: [PERSON] })
   }
 
-  /** The person says never: held `uncertain` or `failed` mail is left undelivered, and not held against anyone */
-  dismissHeld(recipient: string, ids: readonly string[]): number {
-    return this.run(() => this.records.dismiss(recipient, this.heldBy(recipient, ids, ['uncertain', 'failed'])))
+  /**
+   * The person says never: held mail is left undelivered, and not held against anyone. `uncertain` and `failed` by default; the person's window may
+   * dismiss any hold it shows, and a dismissed answer leaves the question it answers open (D8)
+   */
+  dismissHeld(recipient: string, ids: readonly string[], why: readonly string[] = ['uncertain', 'failed']): number {
+    return this.run(() => {
+      const dismissed = this.heldBy(recipient, ids, why)
+      for (const id of dismissed) this.records.answerDropped(id)
+      const n = this.records.dismiss(recipient, dismissed)
+      for (const id of dismissed) {
+        const m = this.records.message(id)
+        if (m) this.changed(m, [PERSON])
+      }
+      return n
+    })
   }
 
   // ── Trust and the depth hold (§7.4, §7.5) ──
@@ -652,7 +664,9 @@ export class MessageService {
         if (!m) continue
         // Trusted now, the row may still be held for the depth: then it stays held, its question stays open and its asker is told why (§7.4)
         const why = this.reach.holdFor(m, row.recipient)
-        this.records.hold(row.recipient, [m.id], why)
+        // Let go, an unread row is delivered as the mail it is, also one an older build told of quietly while it held it (§6.3)
+        if (why === null) this.records.letGo(row.recipient, [m.id])
+        else this.records.hold(row.recipient, [m.id], why)
         const question = m.replyTo === null ? undefined : this.records.message(m.replyTo)
         if (why === null) {
           if (question) this.records.settle(question.id, m.sender, 'answered', now, m.id)
@@ -696,6 +710,8 @@ export class MessageService {
       const rows = m ? this.records.recipients(messageId).filter((r) => r.held === 'loop') : []
       for (const r of rows) this.records.hold(r.recipient, [messageId], 'released')
       if (m?.replyTo && rows.length > 0) this.records.settle(m.replyTo, m.sender, 'answered', this.now(), m.id)
+      // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
+      if (m && rows.length > 0) this.changed(m, [...rows.map((r) => r.recipient), PERSON])
       return rows.length
     })
   }

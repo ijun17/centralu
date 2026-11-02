@@ -19,10 +19,8 @@ import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
-import { MailService } from './mail/service.js'
 import { MailPerson } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
-import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -395,26 +393,15 @@ const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('orche
 const mailDelivery = hostMailbox.delivery
 hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
 mgr.useMail(hostMailbox.hooks)
-/*
- * The person's side of the mailbox as the window of this build reads it, over the thread tables. Until the person's host methods move to the message
- * service (M3a-person, which lands with this in one release), it is the one reader of the old tables besides the move
- */
-const mail = new MailService(store.mail, {
-  hostId: () => hubSelfId(store),
-  policy: mailRelations({
-    session: (id) => mgr.sessionInfo(id),
-    orchestratorAsks: () => mgr.orchestratorAsks(),
-    ...mgr.mailSeats(() => commandsFor('orchestrator').includes('mail')),
-    inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
-  }),
-})
-const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
+// The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
+const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
   session: (id) => {
     const s = mgr.sessionInfo(id)
     return s ? { name: s.name, state: s.state } : undefined
   },
+  legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
+  projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
 })
-mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

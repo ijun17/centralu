@@ -569,8 +569,8 @@ export class MailDelivery {
   }
 
   /**
-   * The person pressed Resume on a chain whose mail was paused for its turns (`mail.resume`, §12.1): each pair with mail held `loop` in that chain
-   * is counted from now, and what was held goes now. A row held for its depth is held again at drain: only `resumeDepth` lets it go (§7.5)
+   * The person pressed Resume on a chain whose mail was paused (`mail.resume`, §12.1): each pair with mail held `loop` in that chain is counted from
+   * now, and each row held `loop` goes and is not held again, for its pair or its depth (§7.5): the person's word on that chain
    */
   resumeRoot(rootId: string): void {
     const rows = this.records.heldRows().filter((r) => r.held === 'loop' && this.records.message(r.messageId)?.rootId === rootId)
@@ -578,10 +578,10 @@ export class MailDelivery {
       const sender = this.records.message(r.messageId)?.sender
       if (sender) this.turns?.resumePair(r.recipient, sender)
     }
-    this.releaseHeld((r) => rows.some((x) => x.messageId === r.messageId && x.recipient === r.recipient), 'loop')
+    for (const id of new Set(rows.map((r) => r.messageId))) this.service.resumeDepth(id)
   }
 
-  private releaseHeld(which: (r: RecipientRow) => boolean, why: 'loop' | 'budget'): void {
+  private releaseHeld(which: (r: RecipientRow) => boolean, why: 'budget'): void {
     const byRecipient = new Map<string, string[]>()
     for (const r of this.records.heldRows().filter(which)) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), r.messageId])
     for (const [recipient, ids] of byRecipient) this.service.resendHeld(recipient, ids, [why])

@@ -1,100 +1,180 @@
 import { errorMessage, oneLineText, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
-import type { MailRecords, ThreadRow } from '../dev-services/store/mail.js'
+import type { MessageRow } from '../dev-services/store/mail.js'
+import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
-import type { MailService, ThreadView } from './service.js'
+import type { MessageService } from './messages.js'
+import { refuse } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
 export type PersonHost = {
   session(sessionId: string): { name: string; state: string } | undefined
+  /** The last messages of an old thread, read-only: the history of a message moved from it (§6.3, `Store.legacyChain`) */
+  legacyChain(threadId: string): MessageRow[]
+  /** A project's name as the person knows it (`MailReach.projectLabel`) */
+  projectLabel(projectId: string): string
 }
 
 /** How many messages one `mail.thread` returns; `more` says there are further ones */
 const THREAD_PAGE = 100
+/** How many chains the list shows, and how many of the person's newest messages it reads to find them */
+const LIST_CHAINS = 100
+const LIST_SCAN = 1_000
+/** A chain is read whole for the window up to this many messages: its newest ones */
+const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
+const SUBJECT_CHARS = 80
+/** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
+const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
+
+/** A message as the window reads it: a moved one with the thread kind it had, a new one in the window's thread words */
+type Shown = { m: MailRow; seq: number }
 
 /**
- * The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1): what the Inbox lists and shows, and the acts that are
- * the person's. Everything the person writes goes through the same `MailService` a session's post does, as the person: their
- * words are theirs by who is asking (§7.1), and the rules that bind everyone bind this too, apart from the ones that are the
- * person's to be freed of (the person may write in any thread, close it, give it to another session).
+ * The person's side of the mailbox (#1347, docs/plans/mailbox.md §12, M3a-person) over the message tables. The window of this build draws threads;
+ * here a thread is a chain of replies, named by its root message's id, so the window shows what the message service holds and writes through it: the
+ * person's words are theirs by who is asking (§7.1), and go out at once through the same service a session's send does.
  *
  * Parties come back as Centralu names them (the session's name in the sidebar, an app's id), never as a name they gave themselves.
  */
 export class MailPerson {
   constructor(
-    private readonly service: MailService,
-    private readonly records: MailRecords,
-    private readonly delivery: Pick<MailDelivery, 'resumeSession' | 'resumeRoot' | 'answerCrowd' | 'crowdWaiting'>,
+    private readonly service: MessageService,
+    private readonly records: MailboxRecords,
+    private readonly delivery: Pick<MailDelivery, 'resumeSession' | 'resumeRoot' | 'answerCrowd' | 'crowdWaiting' | 'poke'>,
     private readonly host: PersonHost,
   ) {}
 
   list(): { threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number } {
-    const held = this.records.heldReceipts()
+    const heldRows = this.records.heldRows()
     const heldBy = new Map<string, number>()
-    const heldRows: MailHeldRow[] = []
-    for (const r of held) {
-      const message = this.records.message(r.messageId)
-      const thread = message && this.records.thread(message.threadId)
-      if (!message || !thread || r.held === null) continue
-      heldBy.set(thread.id, (heldBy.get(thread.id) ?? 0) + 1)
-      heldRows.push({
-        messageId: message.id,
-        threadId: thread.id,
-        subject: thread.subject,
-        sender: this.party(message.sender),
+    const held: MailHeldRow[] = []
+    for (const r of heldRows) {
+      const m = this.records.message(r.messageId)
+      if (!m || r.held === null) continue
+      heldBy.set(m.rootId, (heldBy.get(m.rootId) ?? 0) + 1)
+      held.push({
+        messageId: m.id,
+        threadId: m.rootId,
+        subject: this.subjectOf(m.rootId),
+        sender: this.party(m.sender),
         recipient: this.party(r.recipient),
-        kind: message.kind,
+        kind: windowKind(m),
         reason: r.held,
-        preview: oneLineText(message.body, PREVIEW_CHARS),
-        since: message.createdAt,
+        preview: oneLineText(m.body, PREVIEW_CHARS),
+        since: m.createdAt,
       })
     }
-    const threads = this.records.inboxOf(PERSON, 100).map(({ thread, unread }) => this.row(thread, unread, heldBy.get(thread.id) ?? 0))
-    return { threads, held: heldRows, waiting: this.delivery.crowdWaiting() }
+    const roots: string[] = []
+    for (const m of this.records.feedOf(PERSON, { limit: LIST_SCAN })) {
+      if (!roots.includes(m.rootId)) roots.push(m.rootId)
+      if (roots.length >= LIST_CHAINS) break
+    }
+    const threads = roots
+      .map((root) => this.row(root, heldBy.get(root) ?? 0))
+      .flatMap((r) => r ?? [])
+      .sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || b.updatedAt - a.updatedAt)
+    return { threads, held, waiting: this.delivery.crowdWaiting() }
   }
 
-  /** A thread with its messages, which the person reads: what is returned is read for them */
+  /** A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it */
   thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
-    const view = this.service.read(threadId, PERSON, {
-      limit: THREAD_PAGE,
-      ...(opts.after !== undefined ? { after: opts.after } : {}),
-      ...(opts.all ? { all: true } : {}),
-      ...(opts.tail !== undefined ? { tail: Math.min(opts.tail, THREAD_PAGE) } : {}),
-      ...(opts.before !== undefined ? { before: opts.before } : {}),
-    })
-    const last = view.messages.at(-1)?.seq
-    // An end of the thread has nothing after it; a page from the start or from a place has
-    const more = opts.tail === undefined && last !== undefined && this.records.messagesAfter(threadId, last, 1).length > 0
-    return this.view(view, more, view.older === true)
+    const root = this.rootOf(threadId)
+    if (root === null) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    const all = this.shown(root)
+    let page: Shown[]
+    if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
+    else if (opts.tail !== undefined || !opts.all) {
+      const upTo = opts.before === undefined ? all : all.filter((s) => s.seq < (opts.before ?? 0))
+      page = upTo.slice(-Math.min(opts.tail ?? THREAD_PAGE, THREAD_PAGE))
+    } else page = all
+    this.records.markRead(PERSON, page.flatMap((s) => (this.records.recipient(s.m.id, PERSON)?.readAt === null ? [s.m.id] : [])), Date.now())
+    const first = page[0]?.seq
+    const last = page.at(-1)?.seq
+    const legacy = this.legacyOf(all[0]?.m)
+    const fromStart = first === undefined || first === all[0]?.seq
+    const messages = [...(fromStart ? legacy : []).map((m, i) => legacyMessage(m, i - legacy.length + 1, (a) => this.party(a))), ...page.map((s) => this.message(s))]
+    return {
+      thread: this.row(root, this.heldIn(root)) ?? this.emptyRow(root),
+      parties: this.partiesOf(all.map((s) => s.m)),
+      blockers: [],
+      messages,
+      more: last !== undefined && all.some((s) => s.seq > last),
+      older: first !== undefined && all.some((s) => s.seq < first),
+      follows: [],
+    }
   }
 
+  /**
+   * The person writes in a chain: an answer to the newest message in it from someone else (to its sender), else a word more to the ones the person's
+   * own newest message went to. A question waits for an answer (D3); an answer or a note does not
+   */
   reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note'): MailThreadView {
-    const posted = this.service.post(threadId, PERSON, { kind, body: text })
-    return this.thread(threadId, { after: posted.message.seq - 1 })
+    const root = this.rootOf(threadId)
+    const chain = root === null ? [] : this.shown(root).map((s) => s.m)
+    const theirs = chain.findLast((m) => m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu')
+    const mine = chain.findLast((m) => m.sender === PERSON)
+    const target = theirs ?? mine
+    if (root === null || !target) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
+    const to = target === theirs ? [target.sender] : this.records.recipients(target.id).map((r) => r.recipient)
+    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question' })
+    const at = this.shown(root).find((s) => s.m.id === sent.message.id)?.seq ?? 1
+    return this.thread(root, { after: at - 1 })
   }
 
-  close(threadId: string, outcome: 'finished' | 'failed' | 'stopped' | 'dropped' = 'finished'): MailThreadRow {
-    const thread = this.service.update(threadId, PERSON, { state: 'done', outcome })
-    return this.row(thread, 0, 0)
+  /**
+   * The person's Mark done or Drop: nothing in the chain waits for them any more, and their own questions in it wait for no answer. Nothing is
+   * withdrawn: what the person sent is still delivered, and a task the person gave is still reported
+   */
+  close(threadId: string): MailThreadRow {
+    const root = this.rootOf(threadId)
+    if (root === null) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    const ids = this.shown(root).map((s) => s.m.id)
+    this.records.closeFor(PERSON, ids, Date.now())
+    for (const id of ids) {
+      const m = this.records.message(id)
+      if (m?.sender === PERSON && m.needsReply) for (const r of this.records.recipients(id)) this.records.settle(id, r.recipient, 'done', Date.now())
+    }
+    this.service.announce()
+    return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
   }
 
-  reassign(threadId: string, sessionId: string, text: string): MailThreadView {
-    this.service.assign(threadId, PERSON, { assignee: this.service.sessionAddress(sessionId), body: text })
-    return this.thread(threadId)
+  /** Giving a thread's work to another session and a thread's blockers went with threads (§12.2) */
+  removed(what: string): never {
+    throw refuse('removed', `${what} went with threads: write to the session instead, or give it work from its own conversation.`)
   }
 
-  unblock(threadId: string, n: number): MailThreadRow {
-    return this.row(this.service.resolveBlocker(threadId, PERSON, n), 0, 0)
-  }
-
+  /**
+   * The person's Release (Send again, Retry) or Dismiss of held rows. A row held for a session's budget goes as the mail it is and is not held again. A
+   * row held for its project's trust goes when the person trusts the project (§7.4): its Release says so. A dismissed answer leaves its question open (D8)
+   */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): { changed: number } {
-    return { changed: action === 'release' ? this.service.resendHeld(recipient, messageIds) : this.service.dismissHeld(recipient, messageIds) }
+    if (action === 'dismiss') return { changed: this.service.dismissHeld(recipient, messageIds, PERSON_HOLDS) }
+    const policy = messageIds.flatMap((id) => (this.records.recipient(id, recipient)?.held === 'policy' ? (this.records.message(id) ?? []) : []))
+    const project = policy[0]?.senderProject
+    if (project) throw refuse('untrusted_project', `${this.host.projectLabel(project)} is not trusted: what its sessions send out of it waits until you trust the project, and then goes in order.`)
+    return { changed: this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget']) }
   }
 
+  /** Resume on a session's paused mail, or on a chain's (an old thread's id names the chains moved from it) */
   resume(target: { sessionId?: string | undefined; threadId?: string | undefined }): void {
     if (target.sessionId !== undefined) this.delivery.resumeSession(target.sessionId)
-    else if (target.threadId !== undefined) this.delivery.resumeRoot(target.threadId)
+    else if (target.threadId !== undefined) for (const root of this.rootsOf(target.threadId)) this.delivery.resumeRoot(root)
+  }
+
+  /** The person trusted a project (§7.4): what its sessions sent that was held for it goes, in order, and the callers refused are told */
+  trusted(projectId: string): void {
+    for (const address of this.service.trustChanged(projectId)) {
+      const party = parseAddress(address)
+      if (party?.kind === 'session') this.delivery.poke(party.sessionId)
+    }
+    this.service.announce()
+  }
+
+  /** A project is deleted: the mail held for its trust is dropped and its senders are told (§7.4) */
+  projectDeleted(projectId: string): void {
+    this.service.dismissProject(projectId)
+    this.service.announce()
   }
 
   /**
@@ -103,6 +183,98 @@ export class MailPerson {
    */
   wake(wake: boolean): void {
     this.delivery.answerCrowd(wake).catch((e: unknown) => console.error(`[mail] waking the sessions failed: ${errorMessage(e)}`))
+  }
+
+  // ── Chains ──
+
+  /** The chain an id names: a message's root, or the newest chain moved from an old thread; null when neither is kept */
+  private rootOf(id: string): string | null {
+    return this.records.message(id)?.rootId ?? this.records.movedFrom(id)[0] ?? null
+  }
+
+  /** Every chain an id names: a message's root, or each chain moved from an old thread */
+  private rootsOf(id: string): string[] {
+    const m = this.records.message(id)
+    return m ? [m.rootId] : this.records.movedFrom(id)
+  }
+
+  /**
+   * The chain's messages the person may read, oldest first, numbered for the window by their place in the whole chain: a message that becomes readable
+   * or stops being so leaves the others' numbers as they were, so the window's `after` misses nothing
+   */
+  private shown(root: string): Shown[] {
+    return this.records
+      .byRoot(root, { limit: CHAIN_CAP })
+      .map((m, i) => ({ m, seq: i + 1 }))
+      .filter((s) => this.readable(s.m))
+  }
+
+  /** The person reads what they sent, what was sent to them, and what is held for them to act on (§5.5, §7.4) */
+  private readable(m: MailRow): boolean {
+    if (m.sender === PERSON) return true
+    return this.records.recipients(m.id).some((r) => (r.recipient === PERSON && !hiddenFromPerson(r)) || isPersonHold(r.held))
+  }
+
+  /** An old thread's messages before the first one moved from it: the chain's history, read-only (§6.3) */
+  private legacyOf(first: MailRow | undefined): MessageRow[] {
+    if (!first?.legacyThread) return []
+    const moved = new Set(this.records.byRoot(first.rootId, { limit: CHAIN_CAP }).map((m) => m.id))
+    const earlier: MessageRow[] = []
+    for (const m of this.host.legacyChain(first.legacyThread)) {
+      if (m.id === first.id || moved.has(m.id)) break
+      earlier.push(m)
+    }
+    return earlier
+  }
+
+  private heldIn(root: string): number {
+    return this.records.heldRows().filter((r) => this.records.message(r.messageId)?.rootId === root).length
+  }
+
+  private subjectOf(root: string): string {
+    const first = this.shown(root)[0]?.m ?? this.records.message(root)
+    return first ? oneLineText(first.body, SUBJECT_CHARS) : root
+  }
+
+  /**
+   * A chain as the window's list row. Done when the person said so (a row to them settled `done`) and nothing in it waits for them or for an answer to
+   * them; open otherwise, so the person may always write in a chain that is not done
+   */
+  private row(root: string, held: number): MailThreadRow | null {
+    const all = this.shown(root).map((s) => s.m)
+    const first = all[0]
+    const last = all.at(-1)
+    if (!first || !last) return null
+    const toPerson = all.flatMap((m) => this.records.recipient(m.id, PERSON) ?? [])
+    const waits =
+      toPerson.some((r) => r.settled === null) ||
+      all.some((m) => m.sender === PERSON && (m.needsReply || m.kind === 'task') && this.records.recipients(m.id).some((r) => r.settled === null))
+    const closed = toPerson.some((r) => r.settled === 'done')
+    const assignee = first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined
+    return {
+      id: root,
+      subject: oneLineText(first.body, SUBJECT_CHARS),
+      state: closed && !waits ? 'done' : 'open',
+      outcome: null,
+      next: null,
+      projectId: first.senderProject,
+      owner: this.party(first.sender),
+      assignee: assignee === undefined ? null : this.party(assignee),
+      unread: toPerson.filter((r) => r.readAt === null && !hiddenFromPerson(r)).length,
+      held,
+      blocked: 0,
+      working: false,
+      createdAt: first.createdAt,
+      updatedAt: last.createdAt,
+      last: { sender: this.party(last.sender), kind: windowKind(last), preview: oneLineText(last.body, PREVIEW_CHARS), at: last.createdAt },
+    }
+  }
+
+  /** A chain whose every message the person may not read (held for them, then let go): a row with nothing in it */
+  private emptyRow(root: string): MailThreadRow {
+    const m = this.records.message(root)
+    const at = m?.createdAt ?? 0
+    return { id: root, subject: m ? oneLineText(m.body, SUBJECT_CHARS) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
   }
 
   // ── Shapes ──
@@ -117,49 +289,50 @@ export class MailPerson {
     return { address, kind: p?.kind ?? 'unknown', sessionId: null, name: null, state: null }
   }
 
-  private row(thread: ThreadRow, unread: number, held: number): MailThreadRow {
-    const last = this.records.lastMessageOf(thread.id)
-    return {
-      id: thread.id,
-      subject: thread.subject,
-      state: thread.state,
-      outcome: thread.outcome,
-      next: thread.next,
-      projectId: thread.projectId,
-      owner: this.party(thread.owner),
-      assignee: thread.assignee === null ? null : this.party(thread.assignee),
-      unread,
-      held,
-      blocked: this.records.blockers(thread.id).filter((b) => b.resolvedAt === null).length,
-      working: thread.state !== 'done' && this.service.turnRunning(thread),
-      createdAt: thread.createdAt,
-      updatedAt: thread.updatedAt,
-      last: last ? { sender: this.party(last.sender), kind: last.kind, preview: oneLineText(last.body, PREVIEW_CHARS), at: last.createdAt } : null,
+  private partiesOf(chain: readonly MailRow[]): MailThreadView['parties'] {
+    const addresses = new Set<string>()
+    for (const m of chain) {
+      addresses.add(m.sender)
+      for (const r of this.records.recipients(m.id)) addresses.add(r.recipient)
     }
+    return [...addresses].filter((a) => parseAddress(a)?.kind === 'session' || parseAddress(a)?.kind === 'app').map((a) => ({ party: this.party(a), role: 'member' }))
   }
 
-  private view({ thread, participants, blockers, messages }: ThreadView, more: boolean, older = false): MailThreadView {
+  private message({ m, seq }: Shown): MailMessage {
     return {
-      thread: this.row(thread, 0, 0),
-      parties: participants.filter((p) => p.leftAt === null).map((p) => ({ party: this.party(p.address), role: p.role })),
-      blockers: blockers.map((b) => ({ n: b.n, kind: b.kind, ref: b.ref, text: b.text, resolved: b.resolvedAt !== null })),
-      messages: messages.map((m): MailMessage => ({
-        id: m.id,
-        seq: m.seq,
-        sender: this.party(m.sender),
-        kind: m.kind,
-        urgent: m.urgent,
-        body: m.body,
-        facts: { ...(m.facts ?? {}) },
-        createdAt: m.createdAt,
-        ...(m.receipts ? { receipts: m.receipts.map((r) => ({ ...r, recipient: this.party(r.recipient) })) } : {}),
-      })),
-      more,
-      older,
-      follows: thread.follows.flatMap((id) => {
-        const f = this.records.thread(id)
-        return f ? [{ id: f.id, subject: f.subject }] : []
-      }),
+      id: m.id,
+      seq,
+      sender: this.party(m.sender),
+      kind: windowKind(m),
+      urgent: m.urgent,
+      body: m.body,
+      facts: { ...m.facts },
+      createdAt: m.createdAt,
+      ...(m.sender === PERSON
+        ? { receipts: this.records.recipients(m.id).map((r) => ({ recipient: this.party(r.recipient), delivered: r.deliveredAt !== null, read: r.readAt !== null, handled: r.settled !== null })) }
+        : {}),
     }
   }
+}
+
+/** The thread word the window shows for a message: a moved one's own (`legacyKind`), else what the message is in the thread words */
+function windowKind(m: MailRow): string {
+  if (typeof m.facts.legacyKind === 'string') return m.facts.legacyKind
+  if (m.kind === 'task') return 'assign'
+  if (m.kind === 'message') return m.needsReply ? 'question' : m.replyTo === null ? 'note' : 'answer'
+  return m.kind
+}
+
+/** An old thread's message, numbered before the chain's first (0, -1, …): history the window shows above it */
+function legacyMessage(m: MessageRow, seq: number, party: (address: string) => MailParty): MailMessage {
+  return { id: m.id, seq, sender: party(m.sender), kind: m.kind, urgent: m.urgent, body: m.body, facts: { ...m.facts }, createdAt: m.createdAt }
+}
+
+function isPersonHold(held: string | null): boolean {
+  return PERSON_HOLDS.some((h) => h === held)
+}
+
+/** A row to the person kept from them: held out (§5.5), withdrawn by its sender, or dismissed */
+function hiddenFromPerson(r: RecipientRow): boolean {
+  return r.held === 'policy' || r.held === 'loop' || r.held === 'dismissed' || r.settled === 'withdrawn' || r.settled === 'gone'
 }
