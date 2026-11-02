@@ -15,7 +15,9 @@ export async function freePort(start = randomInt(HIGH - LOW + 1)): Promise<numbe
   const size = HIGH - LOW + 1
   for (let i = 0; i < size; i++) {
     const port = LOW + ((start + i) % size)
+    // Taken before the probe: a call that starts while this one waits must not pick it too
     if (given.has(port)) continue
+    given.add(port)
     const probe = createServer()
     try {
       await new Promise<void>((resolve, reject) => {
@@ -24,11 +26,11 @@ export async function freePort(start = randomInt(HIGH - LOW + 1)): Promise<numbe
       })
     } catch (e) {
       // In use, or reserved by Windows (Hyper-V, WSL): the next one
+      given.delete(port)
       if (e instanceof Error && 'code' in e && (e.code === 'EADDRINUSE' || e.code === 'EACCES')) continue
       throw e
     }
     await new Promise<void>((resolve) => probe.close(() => resolve()))
-    given.add(port)
     return port
   }
   throw new Error(`No free port in ${LOW}-${HIGH}`)

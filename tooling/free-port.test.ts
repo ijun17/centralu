@@ -28,8 +28,8 @@ describe('freePort', () => {
     expect(await freePort(7)).not.toBe(12007)
   })
 
-  it('never gives one port twice', async () => {
-    const ports = await Promise.all(Array.from({ length: 200 }, () => freePort()))
-    expect(new Set(ports).size).toBe(200)
+  it('never gives one port twice, to calls that run at once and begin at the same place', async () => {
+    const ports = await Promise.all(Array.from({ length: 100 }, () => freePort(3)))
+    expect(new Set(ports).size).toBe(100)
   })
 })
