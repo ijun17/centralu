@@ -153,6 +153,14 @@ export function liveBackgroundTasks(tasks: readonly BackgroundTask[]): Backgroun
 }
 
 /**
+ * A session's own work: what it runs and waits for (a paused report waits for it, a reminder waits for it) — the live tasks without the timers a
+ * tool holds (`/loop`, `CronCreate`). A timer keeps a process awake but is not work: counting it would hold a report or a reminder for good
+ */
+export function workTasks(tasks: readonly BackgroundTask[]): BackgroundTask[] {
+  return liveBackgroundTasks(tasks).filter((t) => !t.timer)
+}
+
+/**
  * Choices an agent presents to a person (AskUserQuestion).
  *
  * **Never truncated.** During dogfooding, this tool call once got cut off partway while flowing

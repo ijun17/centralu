@@ -260,12 +260,16 @@
   {
    "to": 65,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 66,
+   "breaksOlderReaders": false
   }
  ],
- "version": 65,
- "ran": 64,
+ "version": 66,
+ "ran": 65,
  "store": {
-  "userVersion": 65,
+  "userVersion": 66,
   "master": [
    {
     "type": "index",
@@ -338,6 +342,12 @@
     "name": "mail_recipients_by",
     "tbl_name": "mail_recipients",
     "sql": "CREATE INDEX mail_recipients_by      ON mail_recipients(recipient, delivered_at)"
+   },
+   {
+    "type": "index",
+    "name": "mail_recipients_held",
+    "tbl_name": "mail_recipients",
+    "sql": "CREATE INDEX mail_recipients_held ON mail_recipients(held) WHERE held IS NOT NULL"
    },
    {
     "type": "index",
@@ -1039,6 +1049,16 @@
       "seqno": 1,
       "cid": 6,
       "name": "delivered_at"
+     }
+    ]
+   },
+   {
+    "name": "mail_recipients_held",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 8,
+      "name": "held"
      }
     ]
    },

@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 65,
+  "version": 66,
   "deferred": [
    3,
    11,
@@ -13,7 +13,7 @@
   ],
   "minReader": 0
  },
- "userVersion": 65,
+ "userVersion": 66,
  "master": [
   {
    "type": "index",
@@ -86,6 +86,12 @@
    "name": "mail_recipients_by",
    "tbl_name": "mail_recipients",
    "sql": "CREATE INDEX mail_recipients_by      ON mail_recipients(recipient, delivered_at)"
+  },
+  {
+   "type": "index",
+   "name": "mail_recipients_held",
+   "tbl_name": "mail_recipients",
+   "sql": "CREATE INDEX mail_recipients_held ON mail_recipients(held) WHERE held IS NOT NULL"
   },
   {
    "type": "index",

@@ -176,7 +176,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
 
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(26) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623) and v65 (#1684) after it
+    expect(s.migrationsRun).toBe(27) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623), v65 (#1684) and v66 (#1899) after it
     expect(s.messages.searchMessages('zebracorn')).toEqual([])
     expect(s.messages.searchMessages('build the package').map((h) => [h.sessionId, h.seq])).toEqual([['s1', 1]])
     expect(indexRows(s)).toBe(3) // s1's three things said; the session in the session archive has none
@@ -195,7 +195,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     raw.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(26) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623) and v65 (#1684) after it
+    expect(s.migrationsRun).toBe(27) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623), v65 (#1684) and v66 (#1899) after it
     expect(indexRows(s)).toBe(3)
     s.close()
     expect(statSync(file).size).toBe(size)

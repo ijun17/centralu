@@ -25,6 +25,7 @@ import {
   ATTACHMENT_MAX_BASE64,
   type BackgroundTask,
   liveBackgroundTasks,
+  workTasks,
   NormalizedEvent,
   PROTOCOL_VERSION,
   parseClientFrame,
@@ -1144,6 +1145,12 @@ describe("a session's background tasks (#290)", () => {
   it('only running tasks that are activity count — ambient and ended ones do not', () => {
     const list = [task('a'), task('w', { ambient: true }), task('x', { status: 'stopped' })]
     expect(liveBackgroundTasks(list).map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('workTasks leaves out timers and ambient tasks: a timer keeps a process awake but is not work', () => {
+    const list = [task('a'), task('t', { timer: true }), task('w', { ambient: true }), task('x', { status: 'completed' })]
+    expect(workTasks(list).map((t) => t.id)).toEqual(['a'])
+    expect(liveBackgroundTasks(list).map((t) => t.id)).toEqual(['a', 't'])
   })
 
   it('an unknown kind from a newer host reads as other instead of failing the event', () => {

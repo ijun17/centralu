@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration step v65. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 and v66. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -90,6 +90,20 @@ export class StepsV65 extends MigrationRange {
           this.addColumn('mail_turns', 'starter_id', 'TEXT')
           this.addColumn('mail_turns', 'ended_how', 'TEXT')
           this.addColumn('sessions', 'mail_args', 'INTEGER')
+        },
+      },
+      {
+        to: 66,
+        breaksOlderReaders: false,
+        /**
+         * Mail held for the person (docs/plans/mailbox.md §7.4, M2): the Inbox's guidance and the person's trust and Dismiss read every
+         * row with a hold (`heldRows`, `heldPolicy`), and without an index that is a scan of `mail_recipients` at each refresh. The
+         * index holds only the rows that are held, which are few.
+         *
+         * **Expand only (#292's rule).** One index; an older build never names it.
+         */
+        run: () => {
+          this.db.exec(`CREATE INDEX IF NOT EXISTS mail_recipients_held ON mail_recipients(held) WHERE held IS NOT NULL`)
         },
       },
     ]

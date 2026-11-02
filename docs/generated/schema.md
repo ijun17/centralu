@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 65, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 66, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -830,6 +830,7 @@ Added in v65.
 Indexes:
 
 - `mail_recipients_by`: `recipient`, `delivered_at`
+- `mail_recipients_held`: `held`
 - `mail_recipients_open`: `recipient`
 - `mail_recipients_pending`: `recipient`, `due_at`
 - `mail_recipients_untold`: `released_at`
