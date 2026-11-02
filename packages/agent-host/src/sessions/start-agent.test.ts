@@ -629,6 +629,10 @@ describe('starting another agent in the same project', () => {
     const other = w.mgr.startAgent(s, { task: 'another job', wait: false })
     await w.until(() => w.store.children.listAgentStartRequests().length === 2)
     w.mgr.respondApproval(s, requestId, 'deny')
+    // The refusal is told to the caller, and the turn that starts clears the slot the second card had just taken (a card
+    // still standing comes back at the turn's end, #673): it is answered once it is back, not in the tick it was raised
+    await w.until(() => !!handleOf(s)?.sent.length)
+    handleOf(s)!.answer('noted')
     await w.until(() => agentCard(s)?.requestId !== requestId && !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
     expect(await other).toMatchObject({ ok: false })
