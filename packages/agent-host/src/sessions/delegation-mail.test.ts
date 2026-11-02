@@ -8,6 +8,7 @@ import type { MailRow } from '../dev-services/store/mailbox.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let w: CrossWorld
 let m: HostMail
@@ -183,7 +184,7 @@ describe('the turns of a delegated child', () => {
     const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     const [first] = read.tasks(addr(s), child)
-    const turnsOfChild = () => w.store.mailbox.turnsOf(child).map((t) => [t.startedBy, t.messageId, t.outcome])
+    const turnsOfChild = () => turnsOf(w.store, child).map((t) => [t.startedBy, t.messageId, t.outcome])
     expect(turnsOfChild()).toEqual([['caller', first!.id, null]])
     handleOf(child)!.event({ type: 'tool_call', sessionId: child, callId: 'c1', summary: { tool: 'Bash', title: 'ls', paths: [] } })
     handleOf(child)!.answer('done')
@@ -264,7 +265,7 @@ describe('the turn a child’s report starts in its caller', () => {
     vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
     handleOf(child)!.answer('done')
     await w.until(() => (handleOf(parent)?.sent.length ?? 0) === 1)
-    expect(w.store.mailbox.turnsOf(parent).map((t) => [t.startedBy, t.messageId])).toEqual([['report', null]])
+    expect(turnsOf(w.store, parent).map((t) => [t.startedBy, t.messageId])).toEqual([['report', null]])
   })
 })
 

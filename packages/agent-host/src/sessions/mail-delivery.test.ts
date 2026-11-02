@@ -12,6 +12,7 @@ import type { HostMail } from '../mail/host-mail.js'
 import { MAIL_ACCEPT_MS } from './session-events.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let w: ReturnType<typeof managerWorld>
 let m: HostMail
@@ -152,8 +153,8 @@ describe('the turn mail starts (§7.9)', () => {
     handleOf(worker.id).finishTurn()
     await settle()
     expect(m.turns.current(worker.id)).toBeUndefined()
-    expect(w.store.mailbox.turnsOf(worker.id)).toMatchObject([{ startedBy: 'mail', messageId: task.id, starterId: task.id, endedAt: expect.any(Number) }])
-    const outcomes = () => w.store.mailbox.turnsOf(worker.id).map((t) => t.outcome)
+    expect(turnsOf(w.store, worker.id)).toMatchObject([{ startedBy: 'mail', messageId: task.id, starterId: task.id, endedAt: expect.any(Number) }])
+    const outcomes = () => turnsOf(w.store, worker.id).map((t) => t.outcome)
     expect(outcomes()).toEqual(['empty'])
 
     send(PERSON, worker.id, 'second')

@@ -880,10 +880,6 @@ export class MailboxRecords {
     return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurnRecord)
   }
 
-  turnsOf(sessionId: string): TurnRecord[] {
-    return this.db.prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`).all(sessionId).map(toTurnRecord)
-  }
-
   endTurn(sessionId: string, turnSeq: number, at: number, outcome: string): void {
     this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(at, outcome, sessionId, turnSeq)
   }

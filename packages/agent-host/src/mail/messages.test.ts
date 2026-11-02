@@ -93,7 +93,7 @@ describe('sending', () => {
     const plain = w.send(A, { to: [B], text: 'fyi', needsReply: false }).message
     const asked = w.send(A, { to: [B], text: 'q' }).message
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    expect(w.mail.watchedFrom(A).map((r) => r.messageId).sort()).toEqual([asked.id, task.id].sort())
+    expect(w.store.mailbox.watchedFrom(A).map((r) => r.messageId).sort()).toEqual([asked.id, task.id].sort())
     expect(w.mail.watchedTo(B).map((r) => r.messageId)).not.toContain(plain.id)
   })
 

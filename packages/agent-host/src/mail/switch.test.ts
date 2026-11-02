@@ -11,6 +11,7 @@ import { at, hostWorld, NOW } from './host-mail.test-helpers.js'
 import { openBy } from './mail.test-helpers.js'
 import { MailService } from './service.js'
 import { PAIR_TURNS_PER_HOUR } from './rules.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 const A = at('a')
 const B = at('b')
@@ -155,7 +156,7 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
 
   it('keeps that turn’s row, cause and depth: no new mail_turns row, no host-cap count, no depth hop', async () => {
     const { next, request, seq } = await continued()
-    expect(next.store.mailbox.turnsOf('orc')).toEqual([expect.objectContaining({ turnSeq: seq, starterId: request, endedAt: null })])
+    expect(turnsOf(next.store, 'orc')).toEqual([expect.objectContaining({ turnSeq: seq, starterId: request, endedAt: null })])
     expect(next.turns.current('orc')).toMatchObject({ turnSeq: seq, starter: request, messageId: request, asker: A })
     // What the continued turn sends has the original turn's cause: an answer back to the asker keeps depth 0, a word on to another adds the one hop it would have
     next.clock.t += 10
@@ -178,7 +179,7 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
 
   it('without the turn taken up (a stop that did not continue it) the row is closed lost and what is sent has no cause', async () => {
     const { next, request } = await continued(false)
-    expect(next.store.mailbox.turnsOf('orc')[0]).toMatchObject({ outcome: 'lost' })
+    expect(turnsOf(next.store, 'orc')[0]).toMatchObject({ outcome: 'lost' })
     next.clock.t += 10
     expect(next.mail.send(ORC, { to: [], replyTo: request, text: 'late' }).message.causeId).toBeNull()
   })
@@ -378,7 +379,7 @@ describe('a seeded model of delivery, turns and settling', () => {
       for (const s of sentIds) {
         const row = w.row(s.id, at(s.to))
         if (row?.turnSeq == null) continue
-        expect(w.store.mailbox.turnsOf(s.to).some((t) => t.turnSeq === row.turnSeq), `${s.id} names turn ${row.turnSeq}`).toBe(true)
+        expect(turnsOf(w.store, s.to).some((t) => t.turnSeq === row.turnSeq), `${s.id} names turn ${row.turnSeq}`).toBe(true)
       }
       void NOW
     })

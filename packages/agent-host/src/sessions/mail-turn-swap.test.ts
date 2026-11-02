@@ -16,6 +16,7 @@ import type { HostMail } from '../mail/host-mail.js'
 import { SessionManager } from './manager.js'
 import { Adapter, FakeProcess, processes } from './kept-host.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let store: Store
 let root: string
@@ -250,7 +251,7 @@ describe('the turn of a session the keeper kept', () => {
     const { parent, child } = await parentAndChild(a)
     const task = read().tasks(addressOf(parent), child)[0]!
     // The turn is the task's: its work message and its starter
-    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, messageId: task.id, starterId: task.id })])
+    expect(turnsOf(store, child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, messageId: task.id, starterId: task.id })])
     // A turn of a session that is not kept (its process went with the old host)
     store.mailbox.startTurn({ sessionId: 'gone-with-the-old-host', turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: 1 })
     await a.mgr.detachAll()
@@ -259,13 +260,13 @@ describe('the turn of a session the keeper kept', () => {
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // What the delivery does when it starts
     b.m.turns.closeStale()
-    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, outcome: null, messageId: task.id })])
-    expect(store.mailbox.turnsOf('gone-with-the-old-host')).toEqual([expect.objectContaining({ outcome: 'lost' })])
+    expect(turnsOf(store, child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, outcome: null, messageId: task.id })])
+    expect(turnsOf(store, 'gone-with-the-old-host')).toEqual([expect.objectContaining({ outcome: 'lost' })])
     // Read back with its work message and starter (§8.2 step 6)
     expect(b.m.turns.current(child)).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
 
     b.claude.handles.get(child)!.answer('finished under the new host')
-    expect(store.mailbox.turnsOf(child)).toEqual([expect.objectContaining({ startedBy: 'caller', outcome: 'empty', endedAt: expect.any(Number) })])
+    expect(turnsOf(store, child)).toEqual([expect.objectContaining({ startedBy: 'caller', outcome: 'empty', endedAt: expect.any(Number) })])
     expect(b.m.turns.current(child)).toBeUndefined()
     // Its end is the task's: reported once, under the new host
     expect(read().reportsOn(task.id)).toHaveLength(1)
@@ -281,6 +282,6 @@ describe('the turn of a session the keeper kept', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     b.m.turns.closeStale()
-    expect(store.mailbox.turnsOf(child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
+    expect(turnsOf(store, child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
   })
 })

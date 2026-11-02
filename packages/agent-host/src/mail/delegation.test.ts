@@ -10,6 +10,7 @@ import { A, B, ORC, W, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
 import { parseAddress } from './address.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 /** The message world with real turns behind the service's `turn` option */
 function turnWorld() {
@@ -40,7 +41,7 @@ describe('a delegation written down (§9.1)', () => {
     expect(task).toMatchObject({ kind: 'task', sender: A, body: 'Write the export\nand test it', origin: 'start_agent', depth: 0 })
     expect(w.rowOf(task.id, W)).toMatchObject({ deliveredAt: w.clock.t, readAt: w.clock.t, settled: null })
     expect(w.turns.current('w')).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
-    expect(w.store.mailbox.turnsOf('w')[0]).toMatchObject({ messageId: task.id, starterId: task.id })
+    expect(turnsOf(w.store, 'w')[0]).toMatchObject({ messageId: task.id, starterId: task.id })
   })
 
   it('each delegation is its own task; one handed on in the middle of work is caused by that work', () => {

@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { deliveryWorld } from './delivery.test-helpers.js'
 import { A, B, W } from './messages.test-helpers.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let stop: (() => void) | null = null
 afterEach(() => {
@@ -27,7 +28,7 @@ describe('a wake the tool failed after the wait for it ran out', () => {
     w.lates[0]!(new Error('the session was stopped'))
     expect(w.rowOf(task.id, W)).toMatchObject({ deliveredAt: null, readAt: null, held: 'uncertain', turnSeq: null })
     expect(w.notes).toEqual([{ sessionId: 'w', text: expect.stringContaining('may have reached you although the tool reported a failure') }])
-    expect(w.store.mailbox.turnsOf('w')[0]).toMatchObject({ outcome: 'canceled' })
+    expect(turnsOf(w.store, 'w')[0]).toMatchObject({ outcome: 'canceled' })
     await w.advance(60 * 60_000)
     expect(w.to('w')).toHaveLength(1)
   })

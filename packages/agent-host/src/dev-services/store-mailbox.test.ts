@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import { Store } from './store.js'
 import { MailConflict, MailTargetMissing, type MailFacts, type MailboxRecords, type NewMail, type NewRecipient } from './store/mailbox.js'
+import { turnsOf } from './store/mailbox-turns.test-helpers.js'
 
 const NOW = 1_800_000_000_000
 const DAY = 24 * 60 * 60 * 1000
@@ -296,7 +297,7 @@ describe('guards and counts', () => {
       const id = send({ sender: from }, recipient)
       box.markDelivered(recipient, [id], at, turn)
       const sessionId = recipient.slice(recipient.indexOf('/') + 1)
-      if (box.turnsOf(sessionId).some((t) => t.turnSeq === turn)) return
+      if (turnsOf(box, sessionId).some((t) => t.turnSeq === turn)) return
       box.startTurn({ sessionId, turnSeq: turn, messageId: null, starterId: starter === 'person' ? send({ sender: 'person' }, recipient) : id, startedBy: 'mail', startedAt: at })
     }
     deliver(A, B, 6, NOW, 'person')

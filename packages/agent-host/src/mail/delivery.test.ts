@@ -7,6 +7,7 @@ import { MailNotAtRest } from './delivery.js'
 import { deliveryWorld, settle } from './delivery.test-helpers.js'
 import { A, B, C, NOW, ORC, W, X } from './messages.test-helpers.js'
 import { PERSON } from './address.js'
+import { turnsOf as turnRows } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let stop: (() => void) | null = null
 afterEach(() => {
@@ -34,7 +35,7 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     expect(row).toMatchObject({ deliveredAt: w.clock.t, attempts: 1, turnSeq: 1 })
     // Pulled, not inline: a message from a session of the same project is read with the tool
     expect(row.readAt).toBeNull()
-    expect(w.store.mailbox.turnsOf('b')).toEqual([expect.objectContaining({ turnSeq: 1, startedBy: 'mail', starterId: message.id, messageId: null, endedAt: null })])
+    expect(turnRows(w.store, 'b')).toEqual([expect.objectContaining({ turnSeq: 1, startedBy: 'mail', starterId: message.id, messageId: null, endedAt: null })])
   })
 
   it('a burst is one delivery, and nothing is delivered twice', async () => {
@@ -71,7 +72,7 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     w.mail.read(B)
     await w.advance(5_000)
     expect(w.to('b')).toHaveLength(0)
-    expect(w.store.mailbox.turnsOf('b')).toEqual([])
+    expect(turnRows(w.store, 'b')).toEqual([])
   })
 
   it('wakes a session at most every 30 seconds, but not for the person’s words or urgent mail', async () => {
@@ -101,7 +102,7 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     expect(thanks.quiet).toBe(true)
     await w.advance(31_000)
     expect(w.to('a')).toEqual([expect.objectContaining({ input: expect.objectContaining({ quiet: true }) })])
-    expect(w.store.mailbox.turnsOf('a')).toEqual([])
+    expect(turnRows(w.store, 'a')).toEqual([])
     // Asleep: it waits for a wake that carries it
     const w2 = started()
     w2.states.set('a', { kind: 'ready', live: false, quiet: false })
@@ -144,7 +145,7 @@ describe('a delivery that fails', () => {
     const { message } = w.send(A, { to: [B], text: 'x' })
     await w.advance(2_000)
     expect(w.rowOf(message.id, B)).toMatchObject({ attempts: 0, attemptAt: null, held: null })
-    expect(w.store.mailbox.turnsOf('b')).toEqual([expect.objectContaining({ outcome: 'canceled' })])
+    expect(turnRows(w.store, 'b')).toEqual([expect.objectContaining({ outcome: 'canceled' })])
     w.behaviour.fail = null
     w.delivery.poke('b')
     await settle()
@@ -282,7 +283,7 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     w.delivery.start()
     stop = () => w.delivery.stop()
     expect(w.turns.current('orc')).toEqual({ turnSeq: 4, by: 'mail', starter: r.message.id, messageId: r.message.id, asker: A, startedAt: NOW })
-    expect(w.store.mailbox.turnsOf('b')[0]).toMatchObject({ outcome: 'lost' })
+    expect(turnRows(w.store, 'b')[0]).toMatchObject({ outcome: 'lost' })
   })
 })
 
@@ -408,7 +409,7 @@ describe('the host-wide cap (§7.5)', () => {
     const task = w.mail.task(B, A, { text: 'job', origin: 'agent_session', delivered: true })
     w.mail.report(task.id, { outcome: 'finished', body: 'done' })
     await w.advance(31_000)
-    expect(w.store.mailbox.turnsOf('b')).toHaveLength(2)
+    expect(turnRows(w.store, 'b')).toHaveLength(2)
     expect(w.turns.mailStartedSince(0)).toBe(0)
   })
 })

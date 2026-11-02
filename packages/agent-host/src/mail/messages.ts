@@ -467,10 +467,6 @@ export class MessageService {
     return this.records.watchedTo(recipient)
   }
 
-  watchedFrom(sender: string): RecipientRow[] {
-    return this.records.watchedFrom(sender)
-  }
-
   // ── The wake ──
 
   /**
