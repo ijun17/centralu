@@ -548,7 +548,7 @@ describe('the runners (real processes)', () => {
       encoding: 'utf8',
     })
     expect(JSON.parse(r.stdout) as string[]).toEqual(['tool-setup'])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   const logLine = (id: string, what: string) => `require('node:fs').appendFileSync(${JSON.stringify(join(dir, 'log.txt'))}, '${id} ${what}\\n')`
   const win = process.platform === 'win32'
