@@ -9,10 +9,10 @@ import { MachineMenu } from './MachineMenu.jsx'
  * card, the session header (which is also every grid panel's header and the place an approval or question is answered).
  * Nothing for this computer: a tag on every local row would be noise, and the person reads its absence as "here".
  *
- * Kind is shape, urgency is brightness (styles/index.css): a hairline chip in the faint ink, like the merged and PR
- * badges, so it never competes with what is waiting.
+ * Kind is shape, urgency is brightness (styles/index.css): a chip one step lighter than what it stands on (`surface-raised`, edged by `line`; owner, 2026-11-02),
+ * in the faint ink, so it never competes with what is waiting.
  */
-const CHIP = 'shrink-0 truncate rounded-md border border-line px-1 text-2xs leading-body text-ink-faint'
+const CHIP = 'shrink-0 truncate rounded-md border border-line bg-surface-raised px-1 text-2xs leading-body text-ink-faint'
 
 export function MachineTag({ machine, testId, className = '' }: { machine: string | null | undefined; testId?: string; className?: string }) {
   const name = useMachineName(machine)
@@ -41,10 +41,11 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
  * badge's place inside a row that is itself a button (an app row), where the badge stands over it as a button of its
  * own beside the row's.
  */
-// In the project name's own ink, text and border (owner, 2026-10-20): beside a project's changes badge, the faint chip read as one more
-// count. Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
+// In the project name's own ink (owner, 2026-10-20): beside a project's changes badge, the faint chip read as one more
+// count. Its look is the chip's, a fill one step above the sidebar and an edge one step above the fill (owner, 2026-11-02;
+// no white border). Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
 // of the generated CSS, not of the class attribute
-const BADGE = 'shrink-0 truncate rounded-md border border-ink px-1 pb-0.5 pt-px text-2xs leading-none text-ink max-w-24'
+const BADGE = 'shrink-0 truncate rounded-md border border-line bg-surface-raised px-1 pb-0.5 pt-px text-2xs leading-none text-ink max-w-24'
 
 export function MachineBadge({
   machine,

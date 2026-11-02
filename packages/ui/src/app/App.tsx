@@ -281,6 +281,12 @@ export function App({
           <KeptDraftCard />
           <Toast />
           <GlobalKeys />
+          {/*
+            The window's edge: the default hairline, drawn over the frame rather than around it (owner, 2026-11-02). A border
+            on the frame would push the top bar 1px down, off the centre of the native window controls, and shrink the
+            lanes; this takes no room and no pointer. No z-index, so every layer above the page stays above it.
+          */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 border border-line" data-testid="app-edge" />
         </div>
       </ErrorBoundary>
     </PlatformProvider>

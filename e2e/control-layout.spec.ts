@@ -168,3 +168,21 @@ test('the keyboard resizes the sidebar from its handle', async ({ page }) => {
   await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(Math.round(before))
   await expect(page.getByTestId('sidebar-resize')).toHaveAttribute('aria-valuenow', String(Math.round(before)))
 })
+
+// Owner, 2026-11-02: the window has an edge in the default border colour, and it takes no room: the top bar stays at y = 0,
+// where the desktop shell centres the native window controls
+test('The window has a hairline edge that moves nothing', async ({ page }) => {
+  await setup(page)
+  const edge = page.getByTestId('app-edge')
+  const look = await edge.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { width: s.borderTopWidth, color: s.borderTopColor, line: getComputedStyle(document.documentElement).getPropertyValue('--color-line').trim() }
+  })
+  expect(look.width).toBe('1px')
+  expect(look.color).not.toBe('rgba(0, 0, 0, 0)')
+  const win = page.viewportSize()!
+  expect(await edge.boundingBox()).toMatchObject({ x: 0, y: 0, width: win.width, height: win.height })
+  expect((await page.getByTestId('app-header').boundingBox())!.y).toBe(0)
+  // It lets the pointer through to what is under it
+  expect(await edge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none')
+})
