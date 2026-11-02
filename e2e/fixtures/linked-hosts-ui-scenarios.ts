@@ -434,6 +434,7 @@ export function linkedHostsUiTests(): void {
   })
 
   test('a wake the link dropped under leaves no "Could not resume" note once the machine is back: its conversation is read again and nothing wakes it (#1840)', async ({ page }) => {
+    test.skip(process.platform === 'win32', 'the link goes quiet by SIGSTOP to the machine, which Windows does not have')
     test.setTimeout(120_000)
     await withPair({}, async (pair) => {
       const connected = () => expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')

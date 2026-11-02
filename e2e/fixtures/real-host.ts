@@ -84,7 +84,7 @@ export function storedUserLine(store: Store, sessionId: string, text: string): v
   store.messages.appendMessages([message])
 }
 
-export type RealHost = { port: number; child: ChildProcess; kill(signal?: NodeJS.Signals): Promise<void> }
+export type RealHost = { port: number } & SpawnedHost
 
 export async function freePort(): Promise<number> {
   const probe = createServer()
@@ -95,25 +95,48 @@ export async function freePort(): Promise<number> {
 }
 
 export async function startHost(ws: Workspace, port: number): Promise<RealHost> {
+  const argv = ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', String(port), '--db', ws.db, '--token', RECOVERY_TOKEN]
+  const env = { CC_DATA_DIR: join(ws.dir, 'data'), ...homeEnv(ws.home), CC_HOST_ALLOWED_ORIGINS: RECOVERY_UI_ORIGIN }
+  return { port, ...(await spawnHost(argv, env, 'host')) }
+}
+
+export type SpawnedHost = { child: ChildProcess; stderr: () => string; kill(signal?: NodeJS.Signals): Promise<void> }
+
+/**
+ * The hosts this worker started that have not exited yet. A worker that ends on its own (a failed test, a timeout, a run
+ * that is stopped) ends them in `process.on('exit')`: a host left running is orphaned, and one a test stopped with SIGSTOP is
+ * left in state T, which ignores SIGTERM until it is resumed (#1890). A worker that is killed with SIGKILL (Playwright does
+ * that after a stop that takes 5 minutes, or when the runner itself is killed) runs no code, and leaves its hosts running.
+ */
+const running = new Set<ChildProcess>()
+let endsWithWorker = false
+
+/** Resumes a process (a stopped one takes no signal, SIGKILL apart) and then sends it `signal`; Windows has no SIGCONT */
+function resumeAndSignal(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform !== 'win32') child.kill('SIGCONT')
+  child.kill(signal)
+}
+
+/**
+ * Starts `node <argv>` as a host with the given environment and waits for its ready line. The one place a host of an e2e
+ * is started and stopped: `kill` resumes the host first, so a test that stopped it (SIGSTOP, to model a link that went
+ * quiet) and then failed does not leave `cleanup` waiting for an exit that never comes.
+ */
+export async function spawnHost(argv: string[], env: Record<string, string>, what: string): Promise<SpawnedHost> {
   const run = hostRun()
-  const child = spawn(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', String(port), '--db', ws.db, '--token', RECOVERY_TOKEN], {
-    cwd: root,
-    env: {
-      ...process.env,
-      CC_DATA_DIR: join(ws.dir, 'data'),
-      ...homeEnv(ws.home),
-      CC_HOST_ALLOWED_ORIGINS: RECOVERY_UI_ORIGIN,
-      CI: '1',
-      ...run.env,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  const child = spawn(process.execPath, argv, { cwd: root, env: { ...process.env, ...env, CI: '1', ...run.env }, stdio: ['ignore', 'pipe', 'pipe'] })
+  running.add(child)
+  child.once('exit', () => running.delete(child))
+  if (!endsWithWorker) {
+    endsWithWorker = true
+    process.on('exit', () => running.forEach((c) => resumeAndSignal(c, 'SIGKILL')))
+  }
   let stderr = ''
-  child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
+  child.stderr.on('data', (d: Buffer) => (stderr += String(d)))
   await new Promise<void>((resolve, reject) => {
-    const lines = createInterface({ input: child.stdout! })
-    const timer = setTimeout(() => reject(new Error(`host did not become ready\n${stderr}`)), 30_000)
-    child.once('exit', (code) => reject(new Error(`host exited (${code}) before it was ready\n${stderr}`)))
+    const lines = createInterface({ input: child.stdout })
+    const timer = setTimeout(() => reject(new Error(`${what} did not become ready\n${stderr}`)), 30_000)
+    child.once('exit', (code) => reject(new Error(`${what} exited (${code}) before it was ready\n${stderr}`)))
     lines.on('line', (line) => {
       try {
         if ((JSON.parse(line) as { ready?: boolean }).ready) {
@@ -126,12 +149,12 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
     })
   })
   return {
-    port,
     child,
+    stderr: () => stderr,
     async kill(signal: NodeJS.Signals = 'SIGTERM') {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit')
-        child.kill(signal)
+        resumeAndSignal(child, signal)
         await exited
       }
       await run.gone()

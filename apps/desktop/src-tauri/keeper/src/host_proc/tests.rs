@@ -1,6 +1,6 @@
 use super::node::*;
 #[cfg(unix)]
-use crate::os::{pid_alive, probe_login_shell, signal_target};
+use crate::os::{ask_shell, pid_alive, probe_login_shell, signal_target};
 use crate::os::parse_probe_output;
 use crate::start_plan::Os;
 use super::*;
@@ -562,11 +562,14 @@ fn finds_the_node_this_shell_knows() {
     if !Path::new(&shell).exists() {
         return;
     }
-    let Ok(out) = Command::new(&shell).args(["-ilc", "command -v node"]).output() else {
+    // Asked the way the probe asks (`ask_shell`): bounded, no stdin, a session of its own. An interactive shell in the
+    // background group of a terminal's session is stopped (SIGTTOU), and a plain `output()` never returned: under WSL a
+    // full run hung here (#1883).
+    let is_node = |line: &str| Path::new(line.trim()).is_absolute().then(|| line.trim().to_string());
+    let Some(expected) = ask_shell(&shell, "command -v node", std::time::Duration::from_secs(30), is_node) else {
         return;
     };
-    let expected = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if expected.is_empty() || !Path::new(&expected).exists() {
+    if !Path::new(&expected).exists() {
         return;
     }
     assert_eq!(probe_login_shell(), Some(expected.clone()));
