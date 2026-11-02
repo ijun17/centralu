@@ -485,6 +485,31 @@ describe('app grants', () => {
     expect(none.text).toContain('has no remembered answer for "agent:claude"')
   })
 
+  it("asks the app's own machine for its answers, to list and to forget, and names the machine in both lists", async () => {
+    const a = await inner('Alpha', 'helper')
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
+    const asked: { method: string; machine?: string }[] = []
+    mgr.useWindowRpc(async (method, params) => {
+      if (method === 'machines.list') return [{ id: 'm1', name: 'Laptop', sshTarget: 'me@laptop', status: 'connected' }]
+      if (method === 'apps.permissions' || method === 'apps.forgetPermission') asked.push({ method, machine: (params as { machine?: string }).machine })
+      const r = await rpc(method, params)
+      if (method === 'projects.list') return (r as ProjectInfo[]).map((x) => (x.id === a.id ? { ...x, machine: 'm1' } : x))
+      if (method === 'apps.list') return (r as Record<string, unknown>[]).map((x) => (x.projectId === a.id ? { ...x, machine: 'm1' } : x))
+      return r
+    })
+    const orc = await mgr.orchestrator()
+    expect((await run(orc.id, 'list_projects')).text).toContain(`- "Alpha" [${a.id}] on the linked machine "Laptop": `)
+    expect((await run(orc.id, 'list_app_grants')).text).toContain('of the project "Alpha" on the linked machine "Laptop": ')
+    expect(asked).toEqual([{ method: 'apps.permissions', machine: 'm1' }])
+    asked.length = 0
+    const r = await run(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' })
+    expect(r.isError).toBeFalsy()
+    expect(asked).toEqual([
+      { method: 'apps.permissions', machine: 'm1' },
+      { method: 'apps.forgetPermission', machine: 'm1' },
+    ])
+  })
+
   it('revokes a remembered consent at once, with no card', async () => {
     const a = await project('Alpha')
     const b = await project('Beta')

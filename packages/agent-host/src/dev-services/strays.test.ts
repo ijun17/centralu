@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
-import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
+import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, resolveRoots, scanProcesses, stopStrays, type StrayStopDeps } from './strays.js'
+import { KILL_GRACE_MS } from './kill-tree.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { ownProcesses } from '../process.test-helpers.js'
 
@@ -186,8 +187,12 @@ describe('stopStrays', () => {
   })
 
   /*
-   * A real leftover: started by a shell that exits at once, so it is init's child, in a session of its own (no
-   * terminal), working in the project folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
+   * A real leftover: started by a shell that exits at once, in a session of its own (no terminal), working in the project
+   * folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
+   *
+   * Where the orphan goes is the machine's business: init, or a subreaper (WSL's /init session helper, a user systemd, a
+   * container's init), which rule 4 reads as a living owner (#1701). So the scan is the real one and the orphan's parent is
+   * read as init, as it is on a plain Linux box; what is under test is the stop, not where this machine re-parents.
    */
   it.skipIf(!hasPs())('a real leftover that ignores TERM is gone after the grace', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-stray-')))
@@ -202,11 +207,49 @@ describe('stopStrays', () => {
     try {
       await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
       // Not this test's process: the host's descendants are not leftovers
-      expect(await stopStrays([pid], [dir], 999_999)).toEqual({ stopped: 1 })
+      const orphanOfInit: StrayStopDeps = {
+        find: async (roots, selfPid = process.pid, held = []) => {
+          const { rows, cwdOf } = await scanProcesses()
+          return pickStrays(rows.map((r) => (r.pid === pid ? { ...r, ppid: 1 } : r)), cwdOf, resolveRoots(roots), selfPid, held)
+        },
+        kill: (target, signal) => process.kill(target, signal),
+        graceMs: KILL_GRACE_MS,
+      }
+      expect(await stopStrays([pid], [dir], 999_999, [], orphanOfInit)).toEqual({ stopped: 1 })
       await vi.waitFor(() => expect(own.alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
     } finally {
       own.end([pid])
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000 * SLOW)
+
+  /** A `ps` or `lsof` that did not answer is not "no leftovers": it is said on stderr (#1793) */
+  it('says on stderr when a listing could not be read, rather than passing for an empty one', async () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const timedOut = Object.assign(new Error('Command failed: lsof'), { killed: true, signal: 'SIGTERM' })
+      const run = async (file: string) => {
+        if (file === 'ps') return { stdout: '  100     1 ??       node dev.js\n' }
+        throw timedOut
+      }
+      const { rows, cwdOf } = await scanProcesses(run)
+      expect(rows.map((r) => r.pid)).toEqual([100])
+      expect(cwdOf.size).toBe(0)
+      expect(said.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/\[strays\] the working folders could not be read.*leftovers may be missing/)])
+      said.mockClear()
+      await scanProcesses(async () => {
+        throw timedOut
+      })
+      expect(said.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/the process list could not be read/)])
+      // lsof's exit 1 (some process unreadable) is its own answer, not a failure to read
+      said.mockClear()
+      await scanProcesses(async (file) => {
+        if (file === 'ps') return { stdout: '  100     1 ??       node dev.js\n' }
+        throw Object.assign(new Error('exit 1'), { code: 1, stdout: 'p100\nn/work/proj\n' })
+      })
+      expect(said).not.toHaveBeenCalled()
+    } finally {
+      said.mockRestore()
+    }
+  })
 })
