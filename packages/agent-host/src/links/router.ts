@@ -438,6 +438,11 @@ export class Router {
       const { m, r } = a
       out = combine(method, out, r, m.q)
     }
+    // Newest archived first across machines (#1726); a tie keeps this computer's first, then the machines' own order
+    if (method === 'trash.list' && isObj(out) && Array.isArray(out.sessions)) {
+      const at = (t: unknown) => (isObj(t) && typeof t.deletedAt === 'number' ? t.deletedAt : 0)
+      out = { ...out, sessions: (out.sessions as unknown[]).slice().sort((a, b) => at(b) - at(a)) }
+    }
     /*
      * Emptying is an act, not a list (#841 item 4): a machine left out made "the trash is empty" true of the hub alone.
      * Each one not reached is a failure of its own, named, so the report says what stayed.
