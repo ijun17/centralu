@@ -273,6 +273,43 @@ describe('movePendingThreadMail', () => {
     store.close()
   })
 
+  it('the move marks the old receipt read, so the v64 build does not count moved mail as work in hand', () => {
+    const { store, db, ids } = upgraded()
+    expect(store.mail.hasMailInHand(`${HOST}.t_work`, S2)).toBe(true)
+    movePendingThreadMail(db, NOW)
+    expect(store.mail.hasMailInHand(`${HOST}.t_work`, S2)).toBe(false)
+    expect(store.mail.hasMailInHand(ids.thread ?? '', S3)).toBe(false)
+    expect(receipts(db).find((r) => r.message_id === ids.q && r.recipient === S2)?.read_at).toBe(NOW)
+    store.close()
+  })
+
+  it('the move carries the person’s Resend of policy-held mail as released, not held again', () => {
+    const { store, db } = upgraded()
+    const id = `${HOST}.m_resent`
+    store.mail.insertMessage({ id, threadId: `${HOST}.t_work`, sender: S2, kind: 'note', urgent: false, needsOwner: false, wake: null, replyTo: null, body: 'resent', facts: {}, dedupeKey: null, createdAt: NOW - 1000 })
+    store.mail.insertReceipt(id, S3, NOW - 1000)
+    store.mail.setHeld(S3, [id], 'policy')
+    store.mail.releaseHeld(S3, [id], null, NOW - 500)
+    expect(receipts(db).find((r) => r.message_id === id)?.held).toBe('released')
+    movePendingThreadMail(db, NOW)
+    expect(store.mailbox.recipient(id, S3)).toMatchObject({ held: 'released', deliveredAt: null })
+    expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toContain(id)
+    store.close()
+  })
+
+  it('a reply stamped before its target (the clock went back) is still linked to it', () => {
+    const { store, db } = upgraded()
+    const post = (id: string, replyTo: string | null, at: number) => {
+      store.mail.insertMessage({ id, threadId: `${HOST}.t_work`, sender: S2, kind: 'note', urgent: false, needsOwner: false, wake: null, replyTo, body: id, facts: {}, dedupeKey: null, createdAt: at })
+      store.mail.insertReceipt(id, S1, at)
+    }
+    post(`${HOST}.m_first`, null, NOW - 1000)
+    post(`${HOST}.m_back`, `${HOST}.m_first`, NOW - 5000)
+    movePendingThreadMail(db, NOW)
+    expect(store.mailbox.message(`${HOST}.m_back`)).toMatchObject({ replyTo: `${HOST}.m_first`, rootId: `${HOST}.m_first` })
+    store.close()
+  })
+
   it('legacyChain reads an old thread oldest first', () => {
     const { store, db, ids } = upgraded()
     expect(legacyChain(db, ids.thread ?? '', undefined, 50).map((m) => m.id)).toEqual([ids.q, ids.a, ids.n])
@@ -298,6 +335,7 @@ describe('the move is at most once, whatever the old receipts were', () => {
   const HOLDS = [null, null, 'uncertain', 'failed', 'loop', 'budget', 'policy', 'released', 'dismissed'] as const
 
   it('each pending receipt becomes exactly one row, every old receipt read is handled, and a repeat or a crash moves nothing twice', () => {
+    let linked = 0
     for (let seed = 1; seed <= 30; seed++) {
       const random = rng(seed)
       const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)] as T
@@ -308,7 +346,8 @@ describe('the move is at most once, whatever the old receipts were', () => {
         const n = 1 + Math.floor(random() * 12)
         for (let i = 1; i <= n; i++) {
           const id = `${HOST}.m_${String(i).padStart(3, '0')}`
-          const at = random() < 0.1 ? NOW - 200 * DAY : NOW - i
+          // Time goes forward, now and then back (a clock set back), and some messages are past retention
+          const at = random() < 0.1 ? NOW - 200 * DAY : random() < 0.2 ? NOW - 10_000 - i : NOW - 10_000 + i
           const replyTo = i > 1 && random() < 0.5 ? `${HOST}.m_${String(i - 1).padStart(3, '0')}` : null
           store.mail.insertMessage({ id, threadId: 't1', sender: pick([S1, S2, 'centralu', APP]), kind: pick(KINDS), urgent: false, needsOwner: random() < 0.2, wake: pick([null, 'no']), replyTo, body: 'b', facts: {}, dedupeKey: null, createdAt: at })
           for (const to of [S1, S2, S3].filter(() => random() < 0.6)) {
@@ -340,14 +379,22 @@ describe('the move is at most once, whatever the old receipts were', () => {
         expect(second, `seed ${seed}`).toEqual({ messages: 0, recipients: 0 })
         expect(all().filter(isPending), `seed ${seed}`).toEqual([])
         for (const r of moved(db)) expect(r.settled).toBe('legacy')
-        // Each moved message's root is itself, or its moved reply target's root
-        for (const m of rawRows<{ id: string; reply_to: string | null; root_id: string }>(db, `SELECT id, reply_to, root_id FROM mail`)) {
+        // A moved message answers its v61 reply target when that was moved too, and its root is that one's root, or itself
+        const movedIds = new Set(rawRows<{ id: string }>(db, `SELECT id FROM mail`).map((m) => m.id))
+        for (const m of rawRows<{ id: string; reply_to: string | null; root_id: string; old_reply: string | null }>(
+          db,
+          `SELECT m.id, m.reply_to, m.root_id, o.reply_to AS old_reply FROM mail m JOIN mail_messages o ON o.id = m.id`,
+        )) {
+          expect(m.reply_to, `seed ${seed}`).toBe(m.old_reply !== null && movedIds.has(m.old_reply) ? m.old_reply : null)
           const root = rawRows<{ root_id: string }>(db, `SELECT root_id FROM mail WHERE id = ?`, m.reply_to ?? m.id)[0]
           expect(m.root_id, `seed ${seed}`).toBe(m.reply_to === null ? m.id : root?.root_id)
+          if (m.reply_to !== null) linked += 1
         }
       } finally {
         store.close()
       }
     }
+    // The root rule above was checked on replies that were linked, not only on messages that answer nothing
+    expect(linked).toBeGreaterThan(5)
   })
 })

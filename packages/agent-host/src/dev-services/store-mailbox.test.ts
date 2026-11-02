@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import { Store } from './store.js'
-import { MailTargetMissing, type MailboxRecords, type NewMail, type NewRecipient } from './store/mailbox.js'
+import { MailConflict, MailTargetMissing, type MailFacts, type MailboxRecords, type NewMail, type NewRecipient } from './store/mailbox.js'
 
 const NOW = 1_800_000_000_000
 const DAY = 24 * 60 * 60 * 1000
@@ -436,5 +436,121 @@ describe('retention (§6.4)', () => {
     expect([open, undelivered, held, recent, unreadNotice].map(kept)).toEqual([true, true, true, true, true])
     expect(box.recipients(plain)).toEqual([])
     expect(box.sweep(NOW)).toEqual({ messages: 0 })
+  })
+})
+
+describe('what a store must not trust', () => {
+  it('insert refuses a reply its own chain answers, and chain ends on a loop already stored', () => {
+    const { box, send, db } = world()
+    // From another machine, a message can arrive before the one it answers (its root given)
+    const x = box.insert(mail({ sender: A, replyTo: 'h2.m_y', rootId: 'h2.m_root' }), [to(B)]).id
+    expect(() => box.insert(mail({ id: 'h2.m_y', sender: B, replyTo: x, rootId: 'h2.m_root' }), [to(A)])).toThrow(MailConflict)
+    expect(() => box.insert(mail({ id: 'h1.m_self', sender: B, replyTo: 'h1.m_self', rootId: 'h1.m_self' }), [to(A)])).toThrow(expect.objectContaining({ what: 'cycle' }))
+    // A loop written by hand (or by an older or broken writer): the walk stops at its limit
+    const c = send({ sender: A }, B)
+    const d = send({ sender: B, replyTo: c }, A)
+    db.prepare(`UPDATE mail SET reply_to = ? WHERE id = ?`).run(d, c)
+    expect(box.chain(c, 9).map((m) => m.id)).toEqual([d, c, d, c, d, c, d, c, d])
+    db.prepare(`UPDATE mail SET reply_to = id WHERE id = ?`).run(c)
+    expect(box.chain(c, 3)).toHaveLength(3)
+    expect(box.chain(c, 0)).toEqual([])
+  })
+
+  it('insert refuses a taken id and a recipient listed twice with a typed error, writing nothing', () => {
+    const { box, send } = world()
+    const id = send({ sender: A, body: 'first' }, B)
+    expect(() => box.insert(mail({ id, sender: C, body: 'second' }), [to(A)])).toThrow(expect.objectContaining({ name: 'MailConflict', what: 'id', value: id }))
+    expect(box.message(id)?.body).toBe('first')
+    const twice = mail({ sender: A })
+    expect(() => box.insert(twice, [to(B), to(C), to(B)])).toThrow(expect.objectContaining({ what: 'recipient', value: B }))
+    expect(box.message(twice.id)).toBeUndefined()
+  })
+
+  it('insert returns facts as stored and read back, not as given', () => {
+    const { box } = world()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const given = { quiet: 'yes', reason: 'kept' } as unknown as MailFacts
+    const stored = box.insert(mail({ sender: A, facts: given }), [to(B)])
+    expect(stored.facts).toEqual({ reason: 'kept' })
+    expect(stored).toEqual({ ...must(box.message(stored.id)), duplicate: false })
+  })
+
+  it('an unanswered element with a reason this build does not know keeps the element, its reason null', () => {
+    const { box, send, db } = world()
+    const id = send({ sender: 'centralu', kind: 'notice' }, A)
+    db.prepare(`UPDATE mail SET facts = ? WHERE id = ?`).run(JSON.stringify({ unanswered: [{ id: 'x', recipient: B, why: 'moved' }, { id: 'y', recipient: C, why: 'waited' }] }), id)
+    expect(box.message(id)?.facts.unanswered).toEqual([
+      { id: 'x', recipient: B, why: null },
+      { id: 'y', recipient: C, why: 'waited' },
+    ])
+  })
+
+  it('a clarifies that is not a message id is not a clarification, in requestsSince as in facts', () => {
+    const { box, send, db } = world()
+    const id = send({ sender: A }, ORC)
+    db.prepare(`UPDATE mail SET facts = '{"clarifies":null}' WHERE id = ?`).run(id)
+    expect(box.message(id)?.facts.clarifies).toBeUndefined()
+    expect(box.requestsSince([A], ORC, NOW - 1000)).toBe(1)
+  })
+
+  it('byRoot and feedOf before a message that is not stored list nothing, not the first page', () => {
+    const { box, send } = world()
+    const root = send({ sender: A }, B)
+    send({ sender: B, replyTo: root }, A)
+    expect(box.byRoot(root, { limit: 10 })).toHaveLength(2)
+    expect(box.byRoot(root, { before: 'h1.m_gone', limit: 10 })).toEqual([])
+    expect(box.feedOf(A, { before: 'h1.m_gone', limit: 10 })).toEqual([])
+  })
+
+  it('a handoff moves the original’s unread rows that are settled legacy (moved from threads) too', () => {
+    const { box, send, db } = world()
+    const report = send({ sender: 'centralu', kind: 'report' }, A)
+    const readOne = send({ sender: C }, A)
+    box.markRead(A, [readOne], NOW)
+    db.prepare(`UPDATE mail_recipients SET settled = 'legacy', settled_at = ?`).run(NOW)
+    expect(box.moveRows(A, B, 'all')).toEqual([report])
+    expect(box.recipient(report, B)).toMatchObject({ settled: 'legacy', readAt: null })
+    expect(box.recipient(readOne, A)).toBeDefined()
+  })
+
+  it('the per-recipient reads use an index, not a scan of the tables', () => {
+    const { box, send, db } = world()
+    const prepare = db.prepare.bind(db)
+    const used: { sql: string; args: unknown[] }[] = []
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      const stmt = prepare(sql)
+      if (!/^\s*SELECT/i.test(sql)) return stmt
+      return new Proxy(stmt, {
+        get(target, key) {
+          if (key === 'all' || key === 'get') {
+            return (...args: unknown[]) => {
+              used.push({ sql, args })
+              return key === 'all' ? target.all(...args) : target.get(...args)
+            }
+          }
+          const v: unknown = Reflect.get(target, key)
+          return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v
+        },
+      })
+    })
+    const id = send({ sender: A }, B)
+    box.markDelivered(B, [id], NOW, 1)
+    const reads: [string, () => unknown][] = [
+      ['pendingFor', () => box.pendingFor(B, NOW, true)],
+      ['pairTurnsSince', () => box.pairTurnsSince(A, B, NOW - 1000)],
+      ['followUpsTo', () => box.followUpsTo(B, NOW - 1000)],
+      ['feedOf', () => box.feedOf(B, { limit: 10 })],
+    ]
+    for (const [name, read] of reads) {
+      used.length = 0
+      read()
+      expect(used.length, name).toBeGreaterThan(0)
+      for (const u of used) {
+        const plan = prepare(`EXPLAIN QUERY PLAN ${u.sql}`)
+          .all(...u.args)
+          .map((p) => (p as { detail: string }).detail)
+        expect(plan.filter((d) => /^SCAN (m|r|mail|mail_recipients)\b/.test(d)), `${name}: ${plan.join(' | ')}`).toEqual([])
+      }
+    }
   })
 })

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { parseAddress } from '../../mail/address.js'
 import { wakes } from '../../mail/rules.js'
 import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail.js'
-import { factsFrom, type MailFacts, type MailKind } from './mailbox.js'
+import { factsFrom, RECIPIENT_HOLD_WORDS, type MailFacts, type MailKind } from './mailbox.js'
 
 /*
  * The v61 thread tables read by the build that has the v65 ones (docs/plans/mailbox.md §6.3): mail an older build left
@@ -12,8 +12,11 @@ import { factsFrom, type MailFacts, type MailKind } from './mailbox.js'
 /** v61 mail older than this is not moved: retention would not have kept it waiting (§6.4) */
 const MOVE_WITHIN_MS = 180 * 24 * 60 * 60 * 1000
 
-/** v61 holds carried by a move. `policy` is judged again at drain (§7.4); the person's `released` is the same as none */
-const CARRIED_HOLDS = new Set(['uncertain', 'failed', 'loop', 'budget'])
+/**
+ * v61 holds carried by a move: the recipient holds but `policy`, which is judged again at drain (§7.4), and the person's
+ * `released` (sent as it is, never held again)
+ */
+const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS.filter((w) => w !== 'policy'), 'released'])
 
 type PendingSql = MessageSql & {
   r_recipient: string
@@ -39,7 +42,8 @@ function kindOf(m: MessageRow, threadOrigin: string): { kind: MailKind; needsRep
 /**
  * Moves the v61 receipts still pending into the v65 tables, and marks each old one handled, in one transaction (§6.3):
  * delivered or not, a receipt moved is handled in the old tables, so an older build serving again never delivers it, and
- * a second run finds nothing. Pending is: not handled, not dismissed by the person, sent within retention, and either not
+ * a second run finds nothing, and marked read, so the older build's readers of unread mail (`hasMailInHand`, the review
+ * clause of `openChildren`) do not count it as work in hand for good. Pending is: not handled, not dismissed by the person, sent within retention, and either not
  * delivered or an unread `question` or `assign`. Each message is copied once under its own id, its rows settled `legacy`
  * (never awaited). Returns how many messages and rows were written
  */
@@ -54,7 +58,7 @@ export function movePendingThreadMail(db: Database.Database, now: number): { mes
              FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id JOIN mail_threads t ON t.id = m.thread_id
             WHERE r.handled_at IS NULL AND COALESCE(r.held, '') <> 'dismissed' AND m.created_at >= ?
               AND (r.delivered_at IS NULL OR (r.read_at IS NULL AND m.kind IN ('question', 'assign')))
-            ORDER BY m.created_at, m.thread_id, m.seq, r.recipient`,
+            ORDER BY m.thread_id, m.seq, r.recipient`,
         )
         .all(now - MOVE_WITHIN_MS)
       const rootOf = db.prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE id = ?`)
@@ -66,7 +70,9 @@ export function movePendingThreadMail(db: Database.Database, now: number): { mes
         `INSERT OR IGNORE INTO mail_recipients (message_id, recipient, due_at, attempt_at, delivered_at, read_at, held, attempts, last_error, settled, settled_at)
          VALUES (@messageId, @recipient, @dueAt, @attemptAt, @deliveredAt, @readAt, @held, @attempts, @lastError, 'legacy', @now)`,
       )
-      const handled = db.prepare(`UPDATE mail_receipts SET handled_at = ?, delivered_at = COALESCE(delivered_at, ?) WHERE message_id = ? AND recipient = ?`)
+      const handled = db.prepare(
+        `UPDATE mail_receipts SET handled_at = @now, delivered_at = COALESCE(delivered_at, @now), read_at = COALESCE(read_at, @now) WHERE message_id = @id AND recipient = @recipient`,
+      )
       let messages = 0
       let recipients = 0
       for (const p of pending) {
@@ -107,7 +113,7 @@ export function movePendingThreadMail(db: Database.Database, now: number): { mes
           lastError: p.r_last_error,
           now,
         }).changes
-        handled.run(now, now, m.id, p.r_recipient)
+        handled.run({ now, id: m.id, recipient: p.r_recipient })
       }
       return { messages, recipients }
     })

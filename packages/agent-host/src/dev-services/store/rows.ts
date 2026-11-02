@@ -16,3 +16,22 @@ export function pragmaNumber(db: Database.Database, name: string): number {
   if (typeof v !== 'number') throw new Error(`PRAGMA ${name} answered ${typeof v}, not a number`)
   return v
 }
+
+/**
+ * `UPDATE <table> SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <ids>`, the ids passed as one JSON
+ * parameter read with `json_each`. For the per-recipient mail tables (`mail_receipts`, `mail_recipients`); `setArgs`
+ * fill the `?` of `set`. Returns the rows changed
+ */
+export function updateRecipientRows(
+  db: Database.Database,
+  table: string,
+  set: string,
+  setArgs: readonly (string | number | null)[],
+  recipient: string,
+  ids: readonly string[],
+  also?: string,
+): number {
+  return db
+    .prepare(`UPDATE ${table} SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
+    .run(...setArgs, recipient, JSON.stringify(ids)).changes
+}

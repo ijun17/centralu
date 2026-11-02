@@ -30,7 +30,7 @@ export class StepsV65 extends MigrationRange {
          * **Expand only (#292's rule).** Two new tables, three nullable columns and indexes. An older build serving the
          * same store during a swap never names the new tables: it keeps writing the v61 tables, and names its columns in
          * every read and insert of `mail_turns` and `sessions`. Nothing reads the new tables in this build yet (slice M1).
-         * The columns are added only when missing (`PRAGMA table_info`), as v63 does.
+         * The columns are added only when missing (`PRAGMA table_info`), as `v62.ts` does.
          */
         run: () => {
           this.db.exec(`
@@ -81,6 +81,7 @@ export class StepsV65 extends MigrationRange {
               told_at           INTEGER,
               PRIMARY KEY (message_id, recipient)
             );
+            CREATE INDEX IF NOT EXISTS mail_recipients_by      ON mail_recipients(recipient, delivered_at);
             CREATE INDEX IF NOT EXISTS mail_recipients_pending ON mail_recipients(recipient, due_at) WHERE delivered_at IS NULL;
             CREATE INDEX IF NOT EXISTS mail_recipients_open    ON mail_recipients(recipient) WHERE settled IS NULL;
             CREATE INDEX IF NOT EXISTS mail_recipients_untold  ON mail_recipients(released_at) WHERE released_at IS NOT NULL AND told_at IS NULL;

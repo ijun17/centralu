@@ -829,6 +829,7 @@ Added in v65.
 
 Indexes:
 
+- `mail_recipients_by`: `recipient`, `delivered_at`
 - `mail_recipients_open`: `recipient`
 - `mail_recipients_pending`: `recipient`, `due_at`
 - `mail_recipients_untold`: `released_at`

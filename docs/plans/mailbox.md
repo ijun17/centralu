@@ -359,8 +359,15 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     window that waits on the owner's choice, and the choice is made.
 - **D30. Linked machines forward messages by id**, with their `root_id` and `sender_project`. A thread's home host, `home_seq`
   and task-field proposals of old §11.5 to §11.6 are gone (§14).
-- **D31. Retention:** a message is kept while a watched row is unsettled, a row is undelivered or held, for at most 180
-  days; a settled message 30 days; a read notice 14 days. Pins go: they were for threads.
+- **D31. Retention:** a message is kept while a watched row is unsettled and not released, a row is undelivered or
+  held for the person, for at most 180 days; a settled message 30 days; a read notice 14 days. Pins go: they were for
+  threads.
+  - (M1) A released row no longer keeps its message: Centralu stopped waiting on it and told its sender (§10.6), so
+    nothing waits. A row the person dismissed is not held for them, so it keeps nothing either.
+  - (M1, after the M1 review) A trashed session's rows follow the same rules as any other; `purgeParty` deletes them
+    when the trash is emptied. The v61 sweep (`mail-retention.ts`) does not exempt the trash either, and an exemption
+    would make the store match addresses against `sessions.deleted_at`, while a restored session's mail is what any
+    session's mail is after the same time.
 
 ### 1.6 Out of scope here
 
@@ -692,7 +699,7 @@ task is never reminded: its report settles it.
 | `covers` | report | the ids of every task this report settled besides its `reply_to` (§9.3) |
 | `reminder` | notice | 1 or 2: this notice is a reminder (§10) |
 | `of` | notice | the message ids a reminder is about (each one a watched row of the receiver), at most 10 |
-| `unanswered` | notice | `{ id, recipient, why }[]`: the sender's released rows this notice gathers (D25); `why` is `reminders`, `waited`, `working` (2 h passed while its receiver runs its own work), `waiting` (2 h passed while its receiver waits on a session or the person it asked, §10.3), `stopped`, `error` or `gone` |
+| `unanswered` | notice | `{ id, recipient, why }[]`: the sender's released rows this notice gathers (D25); `why` is `reminders`, `waited`, `working` (2 h passed while its receiver runs its own work), `waiting` (2 h passed while its receiver waits on a session or the person it asked, §10.3), `stopped`, `error` or `gone`. A `why` this build does not know reads as null for that element alone (M1) |
 | `answerHeld` | notice | `{ question, answer }`: the answer to the receiver's question is held for the person (S14) |
 | `refused` | notice | `{ tool, target, firstLine, projectId }`: a delegation refused for the sender's untrusted project (§7.4); the record S16 is built from |
 | `trusted` | notice | `{ project, refused: string[] }`: the project is trusted now, and these refused calls may be given again (S16) |
@@ -767,6 +774,7 @@ CREATE TABLE IF NOT EXISTS mail_recipients (
   told_at           INTEGER,
   PRIMARY KEY (message_id, recipient)
 );
+CREATE INDEX IF NOT EXISTS mail_recipients_by      ON mail_recipients(recipient, delivered_at);
 CREATE INDEX IF NOT EXISTS mail_recipients_pending ON mail_recipients(recipient, due_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS mail_recipients_open    ON mail_recipients(recipient) WHERE settled IS NULL;
 CREATE INDEX IF NOT EXISTS mail_recipients_untold  ON mail_recipients(released_at) WHERE released_at IS NOT NULL AND told_at IS NULL;
@@ -824,8 +832,12 @@ so the move never runs during startup. In one transaction:
    handled receipt is done in the v61 build, delivered or not, so it is not moved.)
 2. For each such message, `INSERT OR IGNORE INTO mail` with the mapping below, and its receipt into
    `mail_recipients` with `settled = 'legacy'` (never awaited or reminded, D26).
-3. Set `handled_at = now` on each old receipt read in step 1, and `delivered_at = now` where it was null, so an older
-   build never delivers it again.
+3. Set `handled_at = now` on each old receipt read in step 1, and `delivered_at = now` and `read_at = now` where they
+   were null, so an older build never delivers it again, and its readers of unread mail (`hasMailInHand`, the review
+   clause of `openChildren`) do not count it as work in hand for good (M1 review).
+
+The receipts are read in thread and `seq` order, not by `created_at`: a reply always comes after its target in its
+thread, and a clock set back would otherwise move a reply before the message it answers and lose the link.
 
 That is all. There is no watermark, no re-merge and no background history: a receipt moved is handled in the old
 tables, so nothing in them is pending a second time, and what is not pending stays where it is.
@@ -847,7 +859,8 @@ tables, so nothing in them is pending a second time, and what is not pending sta
 
 For the receipt: `attempt_at`, `delivered_at`, `read_at` as the receipt has them (`read_at = COALESCE(r.read_at,
 r.handled_at)`); `held` only for `uncertain`, `failed`, `loop` and `budget` (an old `policy` hold is re-decided by
-§7.4 at drain).
+§7.4 at drain), and the person's `released` (their Resend of a `policy` or `budget` hold: sent as it is, never held
+again).
 
 **A moved request** (round 5). A moved pending message from a session to the orchestrator is a request by §7.6 like
 any other: settled `legacy` changes what is awaited, not what is work. So it is a work candidate for `pickWork`, its
@@ -865,10 +878,10 @@ within 30 days of `created_at` into `mail` (settled `legacy`), then drops the ta
 
 | What | Kept |
 |---|---|
-| A message with a watched row unsettled, a row undelivered, or a row held | until that changes, at most 180 days |
+| A message with a watched row unsettled and not released, a row undelivered, or a row held for the person (not `released` or `dismissed`) | until that changes, at most 180 days |
 | Any other message | 30 days after `created_at` |
 | A read `notice` (reminders included) | 14 days |
-| A trashed session's rows | while it is in the trash. They go with `purgeSession` |
+| A trashed session's rows | as any other row (M1: no trash exemption, as the v61 sweep; D31). They go with `purgeParty` when the trash is emptied |
 | The v61 tables | read-only history until M7 copies what is within 30 days and drops them |
 
 Plain batched `DELETE`s, as `mail-retention.ts` does today.
@@ -1955,9 +1968,14 @@ semantics. Every method that changes rows runs in one transaction.
   `replyTo`'s stored root, else the message's own id. With `replyTo` not stored and no `rootId`, it throws
   `MailTargetMissing` (the tool refuses first, S9 `unknown_message`; only a forwarded message passes `rootId`). A
   duplicate `(sender, dedupeKey)` returns the stored row with `duplicate: true` instead of throwing (the return type is
-  `StoredMail = MailRow & { duplicate: boolean }`).
-- Reading: `message(id)`, `recipients(id)`, `recipient(id, address)`, `chain(id, limit)` (ancestors, nearest first),
-  `byRoot(rootId, { before?, limit })`, `feedOf(address, { before?, limit })` (to or from the address, newest first),
+  `StoredMail = MailRow & { duplicate: boolean }`). It returns the message as read back, so `facts` are what
+  `factsFrom` reads. A taken id, a recipient listed twice, or a `replyTo` whose chain reaches the new id (possible only
+  with a `rootId` from another machine, or a message answering itself) throws `MailConflict` (`what`: `id`,
+  `recipient` or `cycle`), writing nothing.
+- Reading: `message(id)`, `recipients(id)`, `recipient(id, address)`, `chain(id, limit)` (ancestors, nearest first;
+  the recursive walk itself stops at `limit`, so a loop in a store ends),
+  `byRoot(rootId, { before?, limit })`, `feedOf(address, { before?, limit })` (to or from the address, newest first; a
+  `UNION` of the sender index and `mail_recipients_by`, not a scan). A `before` that is not stored lists nothing,
   `reportsOn(taskId)` (Centralu's reports replying to it, oldest first), `newestTask(sender, recipient)` (unsettled).
 - Delivery (rows `withdrawn` or `gone` are never pending, so drain's skip of them, §8.2 step 1, is the store's):
   `pendingFor(recipient, now, again)`, `dueRecipients()` (waiting mail due or not, as `recipientsWithMail` today;
@@ -1986,11 +2004,12 @@ semantics. Every method that changes rows runs in one transaction.
   - `sameBody(sender, recipient, body, since)`;
   - `requestsSince(senders: readonly string[], orchestrator: string, since)`: messages from those senders with a row
     to the orchestrator address, excluding replies to the orchestrator's needsReply messages or tasks and messages with
-    `facts.clarifies` (§7.6: neither is a request);
+    `facts.clarifies` (§7.6: neither is a request). `clarifies` counts only as a string, as `factsFrom` reads it;
   - `followUpsTo(recipient, since)`: notices with `facts.reminder` or `facts.unanswered`, with `delivered_at`;
   - `releasedUntold(sender)`: needsReply rows of the sender's messages with `released_at` set and `told_at` null;
   - `refusedRecords(projectId)`: the `refused` notices of that project, by caller (§7.4).
-- Handoff and trash: `moveRows(from, to, scope: HandOverScope)` (`from`'s unsettled rows that are watched or unread,
+- Handoff and trash: `moveRows(from, to, scope: HandOverScope)` (`from`'s rows that are watched and unsettled, or
+  unread whether settled or not, so a moved `legacy` row goes too,
   as today's `moveUnreadReceipts` moves every unread receipt, so a child's unread report reaches the heir; with
   `{ recipients }`, only those of mail from these recipients; the heir's existing row wins, and a row of the heir's own
   message stays with `from`; §7.7),

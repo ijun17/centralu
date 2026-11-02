@@ -83,6 +83,12 @@
   },
   {
    "type": "index",
+   "name": "mail_recipients_by",
+   "tbl_name": "mail_recipients",
+   "sql": "CREATE INDEX mail_recipients_by      ON mail_recipients(recipient, delivered_at)"
+  },
+  {
+   "type": "index",
    "name": "mail_recipients_open",
    "tbl_name": "mail_recipients",
    "sql": "CREATE INDEX mail_recipients_open    ON mail_recipients(recipient) WHERE settled IS NULL"

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { isObj } from '../../json-value.js'
 import { parseAddress } from '../../mail/address.js'
 import { parseJson } from './json.js'
+import { oneRow, updateRecipientRows } from './rows.js'
 
 /*
  * Mail without threads (#1684, docs/plans/mailbox.md §5, §6, store step v65): messages addressed to parties, and each
@@ -42,7 +43,8 @@ export const MailFacts = z.looseObject({
   trusted: z.object({ project: z.string(), refused: z.array(z.string()) }).optional(),
   reminder: z.union([z.literal(1), z.literal(2)]).optional(),
   of: z.array(z.string()).max(10).optional(),
-  unanswered: z.array(z.object({ id: z.string(), recipient: z.string(), why: z.enum(RELEASE_WHY) })).optional(),
+  /** A `why` this build does not know reads as null, alone: the element and the list stay */
+  unanswered: z.array(z.object({ id: z.string(), recipient: z.string(), why: z.enum(RELEASE_WHY).nullable().catch(null) })).optional(),
   asker: z.string().optional(),
   handedOver: z.boolean().optional(),
   legacyKind: z.string().optional(),
@@ -105,6 +107,20 @@ export type StoredMail = MailRow & { duplicate: boolean }
 export type PendingRow = { row: RecipientRow; message: MailRow }
 /** One row by its key */
 export type RowKey = { messageId: string; recipient: string }
+
+/**
+ * A message that cannot be stored as given: its id is taken (`id`), it lists a recipient twice (`recipient`), or it
+ * answers a message that answers it, which would make a chain with no root (`cycle`)
+ */
+export class MailConflict extends Error {
+  constructor(
+    readonly what: 'id' | 'recipient' | 'cycle',
+    readonly value: string,
+  ) {
+    super(what === 'id' ? `The message id ${value} is taken` : what === 'recipient' ? `The recipient ${value} is listed twice` : `The message ${value} would answer itself through its chain`)
+    this.name = 'MailConflict'
+  }
+}
 
 /** The reply target is not stored and no root was given: a reply's root cannot be computed (S9 `unknown_message`) */
 export class MailTargetMissing extends Error {
@@ -177,7 +193,9 @@ const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') A
 /** Held for a reason the person acts on */
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
-const RECIPIENT_HOLDS = `('uncertain', 'failed', 'loop', 'budget', 'policy')`
+export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
+/** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
+export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** The ids as one JSON parameter, read with `json_each` */
 const idList = (ids: readonly string[]): string => JSON.stringify(ids)
@@ -198,7 +216,8 @@ export class MailboxRecords {
   /**
    * Stores a message and a row for each recipient. The root is `rootId` when given, else the reply target's stored root,
    * else the message's own id. A duplicate `(sender, dedupeKey)` returns the stored message with `duplicate: true` and
-   * writes nothing
+   * writes nothing. A taken id, a recipient listed twice, or a reply that its own chain answers throws `MailConflict`.
+   * Returns the message as stored and read back (its `facts` as `factsFrom` reads them)
    */
   insert(mail: NewMail, recipients: readonly NewRecipient[]): StoredMail {
     return this.transaction(() => {
@@ -206,6 +225,10 @@ export class MailboxRecords {
         const stored = this.db.prepare<[string, string], MailSql>(`SELECT * FROM mail WHERE sender = ? AND dedupe_key = ?`).get(mail.sender, mail.dedupeKey)
         if (stored) return { ...this.toMail(stored), duplicate: true }
       }
+      if (this.db.prepare(`SELECT 1 FROM mail WHERE id = ?`).get(mail.id)) throw new MailConflict('id', mail.id)
+      const twice = recipients.find((r, i) => recipients.findIndex((x) => x.recipient === r.recipient) !== i)
+      if (twice) throw new MailConflict('recipient', twice.recipient)
+      if (mail.replyTo !== null && this.answersItself(mail.id, mail.replyTo)) throw new MailConflict('cycle', mail.id)
       let rootId = mail.rootId ?? mail.id
       if (mail.rootId === undefined && mail.replyTo !== null) {
         const target = this.db.prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE id = ?`).get(mail.replyTo)
@@ -242,8 +265,25 @@ export class MailboxRecords {
       for (const r of recipients) {
         row.run({ messageId: mail.id, recipient: r.recipient, dueAt: r.dueAt, recipientProject: r.recipientProject ?? null, via: r.via ?? null, deliveredAt: r.deliveredAt ?? null, readAt: r.readAt ?? null, held: r.held ?? null })
       }
-      return { ...mail, rootId, duplicate: false }
+      const stored = oneRow(this.db.prepare<[string], MailSql>(`SELECT * FROM mail WHERE id = ?`).get(mail.id))
+      return { ...this.toMail(stored), duplicate: false }
     })
+  }
+
+  /**
+   * Whether a new message `id` answering `replyTo` would close a loop: `replyTo` is `id` itself, or its chain reaches
+   * `id` (a message from another machine stored before the one it answers, §14). Walks only when something stored
+   * answers `id`; `UNION` ends the walk on a loop already stored
+   */
+  private answersItself(id: string, replyTo: string): boolean {
+    if (replyTo === id) return true
+    if (!this.db.prepare(`SELECT 1 FROM mail WHERE reply_to = ?`).get(id)) return false
+    return !!this.db
+      .prepare(
+        `WITH RECURSIVE up(id) AS (SELECT ? UNION SELECT m.reply_to FROM mail m JOIN up ON m.id = up.id WHERE m.reply_to IS NOT NULL)
+         SELECT 1 FROM up WHERE id = ?`,
+      )
+      .get(replyTo, id)
   }
 
   // ── Reading ──
@@ -261,28 +301,34 @@ export class MailboxRecords {
     return this.rows(`r.message_id = ? AND r.recipient = ?`, messageId, address)[0]
   }
 
-  /** The messages `id` answers, nearest first, at most `limit`: its reply target, that one's, and so on up to the root */
+  /**
+   * The messages `id` answers, nearest first, at most `limit`: its reply target, that one's, and so on up to the root.
+   * The walk itself stops at `limit`, so a loop of replies (refused by `insert`, but a store is not trusted) still ends
+   */
   chain(id: string, limit: number): MailRow[] {
     return this.db
-      .prepare<[string, number], MailSql>(
+      .prepare<{ id: string; limit: number }, MailSql>(
         `WITH RECURSIVE up(id, n) AS (
-           SELECT reply_to, 1 FROM mail WHERE id = ? AND reply_to IS NOT NULL
-           UNION ALL SELECT m.reply_to, up.n + 1 FROM mail m JOIN up ON m.id = up.id WHERE m.reply_to IS NOT NULL
+           SELECT reply_to, 1 FROM mail WHERE id = @id AND reply_to IS NOT NULL AND @limit > 0
+           UNION ALL SELECT m.reply_to, up.n + 1 FROM mail m JOIN up ON m.id = up.id WHERE m.reply_to IS NOT NULL AND up.n < @limit
          )
-         SELECT m.* FROM up JOIN mail m ON m.id = up.id ORDER BY up.n LIMIT ?`,
+         SELECT m.* FROM up JOIN mail m ON m.id = up.id ORDER BY up.n LIMIT @limit`,
       )
-      .all(id, limit)
+      .all({ id, limit })
       .map((r) => this.toMail(r))
   }
 
-  /** The last `limit` messages of a root, or the last before the message `before`, oldest first */
+  /** The last `limit` messages of a root, or the last before the message `before`, oldest first; none when `before` is not stored */
   byRoot(rootId: string, opts: { before?: string; limit: number }): MailRow[] {
     return this.page(`m.root_id = @key`, rootId, opts).reverse()
   }
 
-  /** Messages to or from `address`, newest first, `limit` of them, before the message `before` when given */
+  /**
+   * Messages to or from `address`, newest first, `limit` of them, before the message `before` when given (none when it
+   * is not stored). The two sides are a `UNION` of two index reads (`mail_sender`, `mail_recipients_by`), not a scan
+   */
   feedOf(address: string, opts: { before?: string; limit: number }): MailRow[] {
-    return this.page(`(m.sender = @key OR EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @key))`, address, opts)
+    return this.page(`m.id IN (SELECT id FROM mail WHERE sender = @key UNION SELECT message_id FROM mail_recipients WHERE recipient = @key)`, address, opts)
   }
 
   /** Centralu's reports on a task (replying to it), oldest first */
@@ -402,9 +448,11 @@ export class MailboxRecords {
   undeliver(recipient: string, ids: readonly string[], deliveredAt: number): string[] {
     const where = `recipient = ? AND delivered_at = ? AND (held IS NULL OR held = 'released') AND message_id IN (SELECT value FROM json_each(?))`
     const args: [string, number, string] = [recipient, deliveredAt, idList(ids)]
-    const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_recipients WHERE ${where}`).all(...args).map((r) => r.message_id)
-    this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL WHERE ${where}`).run(...args)
-    return put
+    return this.transaction(() => {
+      const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_recipients WHERE ${where}`).all(...args).map((r) => r.message_id)
+      this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL WHERE ${where}`).run(...args)
+      return put
+    })
   }
 
   /** A delivery that may have gone and may not: held until the person says */
@@ -566,7 +614,7 @@ export class MailboxRecords {
       `SELECT COUNT(*) AS n FROM mail m
         WHERE m.sender IN (SELECT value FROM json_each(@senders)) AND m.kind IN ('message', 'task') AND m.created_at >= @since
           AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @orchestrator)
-          AND NOT (json_valid(m.facts) AND json_type(m.facts, '$.clarifies') IS NOT NULL)
+          AND NOT (json_valid(m.facts) AND COALESCE(json_type(m.facts, '$.clarifies'), '') = 'text')
           AND NOT EXISTS (SELECT 1 FROM mail t JOIN mail_recipients tr ON tr.message_id = t.id AND tr.recipient = m.sender
                            WHERE t.id = m.reply_to AND t.sender = @orchestrator AND (t.needs_reply = 1 OR t.kind = 'task'))`,
       { senders: idList(senders), orchestrator, since },
@@ -604,7 +652,8 @@ export class MailboxRecords {
   // ── Handoff and trash (§7.7) ──
 
   /**
-   * A handoff: `from`'s rows not settled that are watched or unread go to `to`, in `scope`. A row not read is delivered
+   * A handoff: `from`'s rows that are watched and not settled, or not read (settled or not: a moved `legacy` row too),
+   * go to `to`, in `scope`. A row not read is delivered
    * afresh, with the holds about `from`'s delivery let go. When `to` already has a row for the message, or sent it, `to`'s
    * side stays as it is: `from`'s row is deleted, or (for `to`'s own message) left. Returns the ids of the messages moved
    */
@@ -614,7 +663,7 @@ export class MailboxRecords {
       const ids = this.db
         .prepare<{ from: string; to: string; senders: string }, { id: string }>(
           `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-            WHERE r.recipient = @from AND r.settled IS NULL AND (${WATCHED} OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
+            WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
             ORDER BY m.created_at, m.id`,
         )
         .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
@@ -756,9 +805,10 @@ export class MailboxRecords {
     })
   }
 
-  /** Newest first, before the message `before` when given (by time, then id) */
+  /** Newest first, before the message `before` when given (by time, then id); none when `before` is not stored */
   private page(where: string, key: string, opts: { before?: string; limit: number }): MailRow[] {
     const anchor = opts.before === undefined ? undefined : this.message(opts.before)
+    if (opts.before !== undefined && !anchor) return []
     return this.messages(
       `${where} AND (@at IS NULL OR m.created_at < @at OR (m.created_at = @at AND m.id < @id)) ORDER BY m.created_at DESC, m.id DESC LIMIT @limit`,
       { key, at: anchor?.createdAt ?? null, id: anchor?.id ?? '', limit: opts.limit },
@@ -767,9 +817,7 @@ export class MailboxRecords {
 
   /** `UPDATE ... SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <ids>`; returns the rows changed */
   private update(set: string, setArgs: readonly (string | number | null)[], recipient: string, ids: readonly string[], also?: string): number {
-    return this.db
-      .prepare(`UPDATE mail_recipients SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
-      .run(...setArgs, recipient, idList(ids)).changes
+    return updateRecipientRows(this.db, 'mail_recipients', set, setArgs, recipient, ids, also)
   }
 
   private count(sql: string, ...args: unknown[]): number {
