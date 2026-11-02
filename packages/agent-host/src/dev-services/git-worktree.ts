@@ -196,7 +196,21 @@ export async function gitBranchRemote(repoCwd: string, branch: string, remotes?:
  * why not, in words for an answer. It runs the repository's network settings, so a caller fetches for a trusted
  * project only. A prompt no one can answer has nothing to wait on (`cloneEnv`), as for a clone.
  */
-export async function gitFetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs = FORK_FETCH_TIMEOUT_MS): Promise<{ sha: string } | { why: string }> {
+export function gitFetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs = FORK_FETCH_TIMEOUT_MS): Promise<{ sha: string } | { why: string }> {
+  // Starts at once share one fetch (#1488): two fetches of one ref in one repository lose a lock race to each other, and wait twice
+  const flight = `${pathKey(repoCwd)}\n${remote}\n${branch}`
+  const running = fetchesInFlight.get(flight)
+  if (running) return running
+  const fetch = fetchBranch(repoCwd, remote, branch, timeoutMs).finally(() => fetchesInFlight.delete(flight))
+  fetchesInFlight.set(flight, fetch)
+  return fetch
+}
+const fetchesInFlight = new Map<string, Promise<{ sha: string } | { why: string }>>()
+
+/** What git says when it fails on this computer's own repository, not on the remote: it says nothing of the remote, so it is not remembered */
+const LOCAL_FETCH_FAILURE = /cannot lock ref|unable to write|unable to create|unpack-objects|index-pack|permission denied.*\.git|no space left/i
+
+async function fetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs: number): Promise<{ sha: string } | { why: string }> {
   const tracking = `refs/remotes/${remote}/${branch}`
   // A remote that just failed is not asked again for a while (#1488): every start would otherwise wait out the bound
   const key = `${pathKey(repoCwd)}\n${remote}`
@@ -216,8 +230,8 @@ export async function gitFetchBranch(repoCwd: string, remote: string, branch: st
     const f = execFailure(e)
     const said = f.stderr?.trim() || f.message || 'git failed'
     const why = `Could not fetch ${remote} (${said.split('\n')[0]})`
-    // Not when the remote answered that this branch is not there (a new branch): that says nothing of the next one (untranslated, `cloneEnv`)
-    if (!/couldn't find remote ref/i.test(said)) failedFetches.set(key, { at: Date.now(), why })
+    // Not when the remote answered that this branch is not there (a new branch) or this repository failed locally: that says nothing of the next fetch (git's words are untranslated: `LC_ALL` in `runGit`'s env, git-exec.ts)
+    if (!/couldn't find remote ref/i.test(said) && !LOCAL_FETCH_FAILURE.test(said)) failedFetches.set(key, { at: Date.now(), why })
     return { why }
   }
 }

@@ -347,6 +347,14 @@ describe('the base a new worktree forks from (#1484)', () => {
     expect((await resolveForkBase(other, 'main', { trusted: true })).sha).toBe(remoteTip)
   })
 
+  it('starts at once share one fetch, and a reachable remote is not taken for down by their race (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    const answers = await Promise.all([1, 2, 3, 4, 5, 6].map(() => gitFetchBranch(repo, 'origin', 'main')))
+    expect(answers).toEqual(answers.map(() => ({ sha: remoteTip })))
+    // And a later one is not held back by a failure remembered from that round
+    expect(await gitFetchBranch(repo, 'origin', 'main')).toEqual({ sha: remoteTip })
+  })
+
   it('a branch the remote does not have is not a failed remote: the next fetch is still made (#1488)', async () => {
     const { remoteTip } = withRemote()
     const bare = join(root, 'origin.git')

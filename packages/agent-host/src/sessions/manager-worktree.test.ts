@@ -295,6 +295,12 @@ describe('worktree sessions', () => {
     expect(fell.worktreeBase).toContain('Could not fetch origin')
     const notice = events.find((e) => e.type === 'notice' && e.sessionId === fell.id && e.label === 'worktree setup')
     expect(notice && 'text' in notice ? notice.text : '').toBe(fell.worktreeBase)
+    // A branch already here, taken as it is because its remote could not be read: the same notice
+    execFileSync('git', ['branch', 'pr/here'], { cwd: repo })
+    const taken = (await wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'pr/here' })) as SessionInfo & { worktreeBase?: string }
+    expect(taken.worktreeBase).toContain('not compared with a remote')
+    const takenNotice = events.find((e) => e.type === 'notice' && e.sessionId === taken.id && e.label === 'worktree setup')
+    expect(takenNotice && 'text' in takenNotice ? takenNotice.text : '').toBe(taken.worktreeBase)
   })
 
   itSymlink('the session still comes up even if the tree being copied has an unreadable file — the copy failure is logged and said in the session (#167, #841)', async () => {
