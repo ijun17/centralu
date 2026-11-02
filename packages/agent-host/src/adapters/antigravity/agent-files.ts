@@ -9,7 +9,7 @@ import { createInflateRaw } from 'node:zlib'
 import { errorMessage } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { processStartTime } from '../../dev-services/instance-lock.js'
-import { HOST_PLATFORM, type Platform } from '../../os.js'
+import { HOST_PLATFORM, pathsOf, type Platform } from '../../os.js'
 import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from './release.js'
@@ -95,6 +95,27 @@ export function hasSignIn(home: AgyHome): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Where the person's own Antigravity (the desktop app, or Google's `agy` command) lives on `platform`: a path check each,
+ * no process started. Confirmed against Google's pages and users' reports; `*` marks a guess:
+ * - macOS: `/Applications/Antigravity.app` (`~/Applications`*), `~/.local/bin/agy`
+ * - Windows: `%LOCALAPPDATA%\Programs\Antigravity` (the per-user installer; `Antigravity IDE`*), `%ProgramFiles%\Google\Antigravity`,
+ *   `%LOCALAPPDATA%\agy\bin\agy.exe`
+ * - Linux: no installer, a tarball unpacked anywhere; `/usr/share/antigravity`, `/opt/antigravity`* and the `antigravity`
+ *   launcher in `/usr/bin` or `/usr/local/bin` where a package or a person put one, `~/.local/bin/agy`
+ */
+export function agyAppPaths(platform: Platform, env: Readonly<Record<string, string | undefined>>, home: string): string[] {
+  const { join } = pathsOf(platform)
+  const agy = join(home, '.local', 'bin', 'agy')
+  if (platform === 'win32') {
+    const local = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
+    const programs = env.ProgramFiles ?? 'C:\\Program Files'
+    return [join(local, 'Programs', 'Antigravity'), join(local, 'Programs', 'Antigravity IDE'), join(programs, 'Google', 'Antigravity'), join(local, 'agy', 'bin', 'agy.exe')]
+  }
+  if (platform === 'darwin') return ['/Applications/Antigravity.app', join(home, 'Applications', 'Antigravity.app'), agy]
+  return ['/usr/share/antigravity', '/opt/antigravity', '/usr/bin/antigravity', '/usr/local/bin/antigravity', agy]
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

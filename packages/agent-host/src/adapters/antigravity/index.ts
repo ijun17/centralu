@@ -1,11 +1,12 @@
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
-import type { Platform } from '../../os.js'
+import { homedir } from 'node:os'
+import { HOST_PLATFORM, type Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
-import { agyHome, agyPlatformKey, browserFolder, type AgyHome } from './agent-files.js'
+import { agyAppPaths, agyHome, agyPlatformKey, browserFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
@@ -40,7 +41,7 @@ const DESCRIPTOR: ToolDescriptor = {
   login: "Sign in with Google from Antigravity's line in Centralu.",
 }
 
-export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'installIo' | 'signIn' | 'runSignIn' | 'runInstall'>> & {
+export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'appPaths' | 'installIo' | 'signIn' | 'runSignIn' | 'runInstall'>> & {
   dataDir?: string
   platform?: Platform
   arch?: string
@@ -52,7 +53,8 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
   const key = agyPlatformKey(deps.platform, deps.arch)
   const archive = key ? AGY_RELEASE.archives[key] : null
   const home = agyHome(deps.dataDir ?? dataRoot(), AGY_RELEASE.version)
-  const setup = new AgySetup({ home, archive, version: AGY_RELEASE.version, ...deps })
+  const appPaths = agyAppPaths(deps.platform ?? HOST_PLATFORM, process.env, homedir())
+  const setup = new AgySetup({ home, archive, version: AGY_RELEASE.version, appPaths, ...deps })
   return {
     descriptor: DESCRIPTOR,
     capabilities: CAPABILITIES,

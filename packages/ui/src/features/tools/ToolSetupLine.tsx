@@ -95,10 +95,11 @@ export function ToolSetupLine({
       case 'unsupported':
         return `${said.label} is not available on this system. ${v.message}`
       case 'install':
+      case 'install_app_found':
         return (
           <>
             {row(
-              `${said.label} is not installed.`,
+              v.kind === 'install' ? `${said.label} is not installed.` : `${said.label} is installed on ${said.machineName ?? 'this computer'}. Install Centralu's connection to it here.`,
               <Button size="sm" busy={actions.busy} onClick={() => void actions.install()} data-testid={id('install')}>
                 Install
               </Button>,

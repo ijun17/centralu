@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeZip, type ZipSpec } from '../../apps/external/zip.test-helpers.js'
-import { agyPlatformKey, decodedLength, installAgy, isInstalled, realInstallIo, type InstallIo } from './agent-files.js'
+import { agyAppPaths, agyPlatformKey, decodedLength, installAgy, isInstalled, realInstallIo, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, AGY_RELEASE, type AgyArchive } from './release.js'
 import { tempData } from './agent-files.test-helpers.js'
@@ -83,6 +83,20 @@ async function install(zip: Buffer, archive: AgyArchive, served: Served, opts: {
 }
 
 const reasonOf = (e: unknown) => (e instanceof InstallFailure ? e.reason : e)
+
+describe('where the person own Antigravity lives', () => {
+  it('names each system app folder and the agy command, with the separators of that system', () => {
+    expect(agyAppPaths('win32', { LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local', ProgramFiles: 'D:\\PF' }, 'C:\\Users\\me')).toEqual([
+      'C:\\Users\\me\\AppData\\Local\\Programs\\Antigravity',
+      'C:\\Users\\me\\AppData\\Local\\Programs\\Antigravity IDE',
+      'D:\\PF\\Google\\Antigravity',
+      'C:\\Users\\me\\AppData\\Local\\agy\\bin\\agy.exe',
+    ])
+    expect(agyAppPaths('darwin', {}, '/Users/me')).toEqual(['/Applications/Antigravity.app', '/Users/me/Applications/Antigravity.app', '/Users/me/.local/bin/agy'])
+    expect(agyAppPaths('linux', {}, '/home/me')).toContain('/usr/share/antigravity')
+    expect(agyAppPaths('linux', {}, '/home/me')).toContain('/home/me/.local/bin/agy')
+  })
+})
 
 describe('installing the pinned agent', () => {
   it("pins one archive for each platform Google ships, each with a sha256, and the agent's OAuth client with them", () => {

@@ -6,6 +6,7 @@ import { ownerGone, ownerTag, browserFolder } from './agent-files.js'
 import { AgySetup } from './setup.js'
 import { endHosts, exists, fakeInstall, fakeKeychainSignIn, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, tokenPath, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
+import { antigravityProfile } from './index.js'
 
 // The start-up cleanup, as slow as a busy Windows disk makes it (CI on 08be80ba1): every install and sign-in waits for it,
 // so a test that steps the setup by counting ticks would act before the run it means to end had begun
@@ -228,6 +229,32 @@ describe('the setup line against its model', () => {
     const setup = new AgySetup({ home: t.home, archive: null, version: AGY_RELEASE.version, runInstall: async () => void started++ })
     expect(setup.install()).toMatchObject({ state: 'not_installed', failure: { reason: 'unsupported_platform' } })
     expect(started).toBe(0)
+  })
+})
+
+describe('the own Antigravity of the person (an app found, the connection not installed)', () => {
+  const detect = (t: ReturnType<typeof tempData>, appPaths: string[]) =>
+    antigravityProfile({ dataDir: t.dir, platform: 'linux', arch: 'x64', appPaths }).detect()
+
+  it('says so in the setup when one of the app paths is there, and installed stays false', async () => {
+    const t = tempData()
+    data.push(t)
+    const app = inRoot(t.home, 'antigravity-app')
+    folder(app)
+    const found = await detect(t, ['/no/such/antigravity', app])
+    expect(found).toMatchObject({ installed: false, loggedIn: false, setup: { state: 'not_installed', install: 'centralu', appFound: true } })
+  })
+
+  it('says nothing about it when no path is there, or once the connection is installed', async () => {
+    const t = tempData()
+    data.push(t)
+    const app = inRoot(t.home, 'antigravity-app')
+    expect((await detect(t, ['/no/such/antigravity'])).setup).not.toHaveProperty('appFound')
+    folder(app)
+    fakeInstall(t.home)
+    const installed = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version, appPaths: [app] }).current()
+    expect(installed.state).toBe('signed_out')
+    expect(installed).not.toHaveProperty('appFound')
   })
 })
 
