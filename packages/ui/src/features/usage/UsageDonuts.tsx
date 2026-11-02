@@ -424,9 +424,8 @@ export function UsageDonuts() {
 /**
  * One linked machine's donuts and its name on one soft tinted pill (#82): the pill says which donuts are that machine's,
  * so the name inside needs no chip of its own. A fill rather than a border, so it adds no height to the bar's lines.
- * A machine that is not connected shows its state in place of donuts (the sidebar's words for it), and is not asked.
- * One that is connected but has no usable tool says so in the same faint words as this computer would, so a missing
- * group never reads as "this machine has no limits".
+ * A machine that is not connected is left out, and is not asked. One that is connected stays as its name even with no
+ * tool installed (owner, 2026-10-27), so connected never reads as disconnected.
  */
 function MachineGroup({
   machineId,
@@ -442,15 +441,15 @@ function MachineGroup({
   const info = useStore((s) => s.machines[machineId])
   const donuts = useDonutPresence(group.order)
   /*
-   * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected, or has no
-   * tool installed and logged in, is left out rather than drawn as "Offline" or "No agent". Tools will grow (OpenCode
-   * and others) and so will machines; the bar keeps only what the person can use. Settings → Machines still lists
-   * every machine with its state.
+   * A machine that is connected stays in the bar once it has answered (owner, 2026-10-27), so connected never reads as
+   * disconnected: its name alone when no tool is installed there, its name and a donut for each tool installed (a
+   * signed-out one dashed). One that is not connected is left out rather than drawn as "Offline", and so is one not
+   * asked yet: it would otherwise show and then change. Settings → Machines still lists every machine with its state.
    */
-  if (!info || info.status !== 'connected' || (!group.order.length && !donuts.length)) return null
+  if (!info || info.status !== 'connected' || (group.live === null && !donuts.length)) return null
   return (
     <span
-      className="cc-capsule-in ml-2 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
+      className={`cc-capsule-in ml-2 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 ${donuts.length ? 'pr-0.5' : 'pr-1.5'}`}
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -460,7 +459,7 @@ function MachineGroup({
         content={
           <span className="block">
             <span className="block text-ink">{info.name}</span>
-            <span className="mt-1 block text-ink-faint">Usage on this machine</span>
+            {donuts.length > 0 && <span className="mt-1 block text-ink-faint">Usage on this machine</span>}
           </span>
         }
       >

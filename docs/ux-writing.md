@@ -20,8 +20,8 @@ attention from what does need them, and teaches the person to stop reading such 
   wakes it. What stays is what the person would want to know: "Waking session…" while it wakes, and, when it
   could not wake, the reason and Retry (`session/SessionNotes.tsx` `DormantNote`,
   `sidebar/marks/ToolMark.tsx`). The design system's states say the same (design-system.md §10).
-- The same rule is why the top bar keeps its words in tooltips, and why a machine with no usable tool is left
-  out of the usage capsules rather than drawn as "Offline" (design-system.md §6). Settings → Machines still
+- The same rule is why the top bar keeps its words in tooltips, and why a machine that is not connected is left
+  out of the usage capsules rather than drawn as "Offline" (design-system.md §6); a connected one stays, as its name alone when no tool is installed there. Settings → Machines still
   lists every machine with its state, for the person who looks for it.
 
 ### 1.2 Sentence case
