@@ -632,7 +632,13 @@ export class RemoteAgents {
             return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
           }
           // Taken while the turn was still the caller's, it is part of that turn; otherwise the gate has closed on it
-          return this.gateNow(rec).live ? this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId)) : this.wentElsewhere(rec)
+          if (this.gateNow(rec).live) return this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId))
+          /*
+           * Unless its record came and left the turn the caller's (`messageTaken`), and that turn has ended since: its end
+           * was read before this answer (both in one read of a loaded link), and reported
+           */
+          const came = !(this.notesSent.get(rec.sessionId) ?? []).includes(framed)
+          return came && this.whoseOf(rec) === 'caller' ? this.working(rec, true) : this.wentElsewhere(rec)
         }
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }

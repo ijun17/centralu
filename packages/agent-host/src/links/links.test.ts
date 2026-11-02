@@ -3106,8 +3106,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   })
 
   // #1038 review: a note that went in as the turn ended started a turn nobody followed
-  it('follows the turn a note starts when the turn it was meant for ended before it went in', async () => {
-    const { remote, answer, start, agent, reports } = await rig()
+  const noteAfterItsTurn = async (immediate: boolean) => {
+    const { remote, answer, start, agent, reports } = await rig({ remote: { immediate } })
     const call = start({ task: 'a question for you', wait: false })
     await answer('allow')
     const r = await call
@@ -3131,7 +3131,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await note).toMatchObject({ ok: true, state: 'working', reported: true })
     // The turn the note started is the caller's: its end is reported too
     await eventually(() => reports() === 2)
-  })
+  }
+  it('follows the turn a note starts when the turn it was meant for ended before it went in', () => noteAfterItsTurn(false))
+  /*
+   * And one whose turn ends inside the send (a tool that answers at once here; any turn whose end the hub reads before the
+   * send's answer, as a loaded hub does when both come in one read) was said to have gone into another's turn, unreported
+   */
+  it('says the turn a note starts is reported when its end is read before the answer to the send', () => noteAfterItsTurn(true))
 
   // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
   it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
