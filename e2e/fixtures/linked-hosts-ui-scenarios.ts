@@ -433,6 +433,47 @@ export function linkedHostsUiTests(): void {
     })
   })
 
+  test('a wake the link dropped under leaves no "Could not resume" note once the machine is back: its conversation is read again and nothing wakes it (#1840)', async ({ page }) => {
+    test.setTimeout(120_000)
+    await withPair({}, async (pair) => {
+      const connected = () => expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      await connected()
+      const project = ((await hubCall(pair.hub.port, 'projects.list', {})) as { id: string; path: string; machine?: string }[]).find(
+        (p) => p.machine === MACHINE,
+      )!
+      const dormant = (await hubCall(pair.hub.port, 'agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude' })) as { id: string }
+      // Asleep: its host restarted under it
+      await pair.remote.kill('SIGKILL')
+      await restartRemote(pair)
+      await connected()
+      const calls = watchCalls(page)
+      await page.goto('/')
+      await expect(page.getByTestId(`session-row-${dormant.id}`)).toBeVisible()
+      const wakes = () => calls.filter((c) => c.method === 'agents.resumeSession' && c.params.sessionId === dormant.id)
+      const reads = () => calls.filter((c) => c.method === 'messages.load' && c.params.sessionId === dormant.id).length
+
+      await test.step('the wake is out when the link drops: the pane says the machine is away', async () => {
+        // A stopped process keeps its link open and answers nothing, so the wake is still pending when the link goes
+        pair.remote.child.kill('SIGSTOP')
+        await page.getByTestId(`session-row-${dormant.id}`).click({ timeout: 5000 })
+        await page.getByTestId('prompt-input').click({ timeout: 5000 })
+        await expect.poll(() => wakes().length, { timeout: 10_000 }).toBe(1)
+        await pair.remote.kill('SIGKILL')
+        await expect(page.getByTestId('away-note')).toBeVisible({ timeout: 15_000 })
+      })
+
+      await test.step('the machine comes back: the note is gone, the conversation is read again, and nothing is woken', async () => {
+        const readsBefore = reads()
+        await restartRemote(pair)
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 })
+        await expect(page.getByTestId('dormant-note')).toHaveCount(0)
+        await expect.poll(reads).toBeGreaterThan(readsBefore)
+        await page.waitForTimeout(1000)
+        expect(wakes()).toHaveLength(1)
+      })
+    })
+  })
+
   test('versions that differ on one protocol: the machine connects, and the prompt offers to update the older one from here', async ({ page }) => {
     test.setTimeout(120_000)
     // This hub claims a newer release of the same channel, so the machine (APP_VERSION) is the older side

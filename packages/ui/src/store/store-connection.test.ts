@@ -577,6 +577,31 @@ describe('linked machines (#82)', () => {
     expect(useStore.getState().projects[remote.id]?.machine).toBe('box')
   })
 
+  it('a resync clears the wake note of that machine\'s sessions only, and wakes none of them (#1840)', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('mr-local', sessionInfo('mr-local'))
+    mock.sessions.set('box.mr-a', sessionInfo('box.mr-a', { projectId: remote.id, machine: 'box', live: false }))
+    mock.sessions.set('box.mr-lock', sessionInfo('box.mr-lock', { projectId: remote.id, machine: 'box', live: false }))
+    mock.sessions.set('box.mr-gone', sessionInfo('box.mr-gone', { projectId: remote.id, machine: 'box', live: false }))
+    await useStore.getState().attach(mock)
+    useStore.setState({ wakeError: { 'box.mr-a': 'The link dropped before the machine answered', 'box.mr-lock': 'open elsewhere', 'box.mr-gone': 'x', 'mr-local': 'busy' }, wakeLocked: { 'box.mr-lock': true } })
+    // One session of the machine left while it was away: forgetting it must not bring the others' notes back
+    mock.sessions.delete('box.mr-gone')
+
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(useStore.getState().wakeError['box.mr-a']).toBeUndefined())
+    await settle()
+    const st = useStore.getState()
+    expect(st.wakeError['box.mr-lock']).toBe('open elsewhere')
+    expect(st.wakeLocked['box.mr-lock']).toBe(true)
+    expect(st.wakeError['box.mr-gone']).toBeUndefined()
+    expect(st.wakeError['mr-local']).toBe('busy')
+    expect(st.sessions['box.mr-a']!.live).toBe(false)
+    expect(st.resuming['box.mr-a']).toBeUndefined()
+  })
+
   it('a resync keeps that machine\'s sessions a live event created or changed while the list was out', async () => {
     const mock = new MockPlatform()
     mock.machinesList = [box()]
