@@ -668,8 +668,7 @@ front door (`POST /gate/<sessionId>`) under a per-session gate-only key (`ccg1:`
 rights class `gate`, tool-neutral environment names `CC_GATE_URL` and `CC_GATE_TOKEN`. It was built (#1675) and then
 retired with the whole hook path, because Antigravity moves to Google's official ACP agent on the existing ACP adapter
 (#59). The route, the key, the rights class, the method and the hook are gone from the host; the history has the
-design and its security review. What stays of it: a tool that asks through a process of its own, rather than on its
-wire, may still need a Stop to deny every open request first (`GateRequests`).
+design and its security review. Nothing of it stays: `GateRequests` was removed too (#1679).
 
 ## 9. Open questions
 
