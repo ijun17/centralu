@@ -1150,6 +1150,9 @@ export class SessionManager {
         // An adopted process does not announce its CLI version again; its tag says what it was started from (#297)
         m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
+        // Any start that did not take the process (no adapter, no resume, a project gone, a failed re-attach) left it with
+        // nobody to address it: stopped here, once, whatever the refusal (#1720). A host that is leaving hands it on instead
+        if (!r.resumed && !this.lettingGo()) k.process.kill('SIGTERM')
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
         // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached
         if (adopted?.takesOverTurn === false && inTurn(m.state)) this.turnLostInSwap(m)

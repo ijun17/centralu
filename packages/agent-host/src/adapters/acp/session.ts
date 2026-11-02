@@ -13,7 +13,7 @@ import type { ToolStart } from '../core/tool-process.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
@@ -23,6 +23,7 @@ import {
   OpenedSession,
   PromptResult,
   readUpdate,
+  SessionList,
   RequestPermission,
   type PermissionOption,
   type PermissionOutcome,
@@ -275,6 +276,11 @@ class AcpWire implements ToolWire {
         this.opening = resume.externalId
         try {
           OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
+        } catch (err) {
+          // Not the replay of a load any more: the list below is a call of its own
+          this.replaying = false
+          this.opening = null
+          throw await this.goneOr(err, resume.externalId, init.agentCapabilities?.sessionCapabilities?.list !== undefined)
         } finally {
           this.replaying = false
           this.opening = null
@@ -293,6 +299,28 @@ class AcpWire implements ToolWire {
     } catch (err) {
       throw this.openError(err)
     }
+  }
+
+  /**
+   * A refused load, read for what it means (#1676). Cursor keeps a conversation only once a model turn has run, and refuses the
+   * rest as `-32602 Invalid params` though the call is right (measured, 2026.10.22): so the code says nothing. When the agent
+   * lists its conversations, one it does not list is gone, said as `conversation_gone` for the host to answer as it does for any
+   * tool's missing conversation; otherwise the agent's own error stands
+   */
+  private async goneOr(err: unknown, id: string, canList: boolean): Promise<unknown> {
+    if (!(err instanceof RpcError) || !NOT_FOUND_CODES.includes(err.code) || !canList) return err
+    try {
+      let cursor: string | undefined
+      for (let page = 0; page < 20; page++) {
+        const listed = SessionList.parse(await this.conn.request('session/list', { cwd: this.opts.cwd, ...(cursor ? { cursor } : {}) }, 20_000))
+        if (listed.sessions.some((s) => s.sessionId === id)) return err
+        if (!listed.nextCursor) return rpcError(`${this.label} has no record of this conversation`, 'conversation_gone')
+        cursor = listed.nextCursor
+      }
+    } catch {
+      // Not asked, or not answered: the agent's own error stands
+    }
+    return err
   }
 
   private openError(err: unknown): Error {

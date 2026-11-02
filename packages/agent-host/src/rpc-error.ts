@@ -9,9 +9,9 @@ export type RpcError = Error & { code: RpcErrorCode; retryable?: boolean; data?:
 
 /**
  * Codes only the host's own callers read (the manager's approval and question answers, and their tests): a card the
- * agent no longer has. The door sends them as `internal`, so they are named here rather than added to the protocol.
+ * agent no longer has, and a conversation the tool no longer keeps (`session.ts` of an ACP tool; the manager says what it means). The door sends them as `internal`, so they are named here rather than added to the protocol.
  */
-type HostOnlyCode = 'approval_gone' | 'question_gone'
+type HostOnlyCode = 'approval_gone' | 'question_gone' | 'conversation_gone'
 
 export type RpcErrorCode = ProtocolErrorCode | HostOnlyCode
 
