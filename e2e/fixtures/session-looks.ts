@@ -9,13 +9,13 @@ import { addSessionPanels, newSession, setup } from './project-screen.js'
  *   idle       a thin grey line
  *   answering  a light grey (ink-muted) solid line
  *   stopped    a thick white dashed line on grey (error, limited, an unread interruption)
- *   waiting    a thick white solid line on grey (an approval, an open question)
+ *   waiting    a thick white solid line on grey (an open question); an approval has its own fill and a letter in the line's ink
  */
 
 type Look = 'idle' | 'answering' | 'stopped' | 'waiting'
 
 /** Each state that has to show one of the four looks, as the patch the store holds for it */
-const CASES: { name: string; look: Look; patch: Record<string, unknown> }[] = [
+const CASES: { name: string; look: Look; patch: Record<string, unknown>; approval?: true }[] = [
   { name: 'idle', look: 'idle', patch: { state: 'idle' } },
   { name: 'a finished turn (waiting_input)', look: 'idle', patch: { state: 'waiting_input' } },
   { name: 'working', look: 'answering', patch: { state: 'working' } },
@@ -24,7 +24,8 @@ const CASES: { name: string; look: Look; patch: Record<string, unknown> }[] = [
   // The interruption marks the session while its answer is unread; once read (Done, or opening it) the mark goes and Continue stays (#1549)
   { name: 'an unread interruption', look: 'stopped', patch: { state: 'waiting_input', lastSeq: 5, lastReadSeq: 0, interruption: { reason: 'quit', at: 1 } } },
   { name: 'a read interruption', look: 'idle', patch: { state: 'waiting_input', lastSeq: 5, lastReadSeq: 5, interruption: { reason: 'quit', at: 1 } } },
-  { name: 'waiting_approval', look: 'waiting', patch: { state: 'waiting_approval' } },
+  // Its own fill (`mark-waiting`) and the letter in the edge's ink (#1740); a question keeps the grey one
+  { name: 'waiting_approval', look: 'waiting', patch: { state: 'waiting_approval' }, approval: true },
   { name: 'an open question', look: 'waiting', patch: { state: 'idle', pendingQuestions: [{ requestId: 'q-look', questions: [] }] } },
 ]
 
@@ -63,6 +64,7 @@ async function colours(page: Page) {
     clear: 'rgba(0, 0, 0, 0)',
     floor: await token(page, '--color-surface-floor'),
     selected: await token(page, '--color-surface-selected'),
+    markWaiting: await token(page, '--color-mark-waiting'),
     lineStrong: await token(page, '--color-line-strong'),
   }
 }
@@ -109,7 +111,7 @@ export function sessionLookTests() {
         const mark = page.getByTestId(`session-row-${id}`).locator('[data-testid^="tool-mark-"][data-state]')
         const chip = mark.locator('> span')
 
-        for (const { name, look, patch } of CASES) {
+        for (const { name, look, patch, approval } of CASES) {
           await patchSession(page, id, patch)
           const want = LOOKS[look]
           await expect(mark, name).toHaveAttribute('data-look', look)
@@ -120,7 +122,8 @@ export function sessionLookTests() {
           await expect(chip, name).toHaveCSS('border-top-width', want.width)
           await expect(chip, name).toHaveCSS('border-top-style', want.style)
           await expect(chip, name).toHaveCSS('border-top-color', c[want.line])
-          await expect(chip, name).toHaveCSS('background-color', c[want.chip])
+          await expect(chip, name).toHaveCSS('background-color', approval ? c.markWaiting : c[want.chip])
+          if (approval) await expect(chip, name).toHaveCSS('color', c.signal)
           await expectStill(mark)
         }
       })
