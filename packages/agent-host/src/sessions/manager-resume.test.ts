@@ -434,6 +434,22 @@ describe('when the tool cannot find the conversation', () => {
     expect(r.lockedElsewhere).toBe(true)
   })
 
+  /** An ACP tool that cannot list outside a session says it in the failed open (#1676): the same words, with no list asked */
+  it('answers a conversation the tool itself says is gone as it answers one missing from the list', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await m.disposeAll()
+
+    a.failList = true
+    a.failCreate = Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
+    const r = await m.resumeSession(s.id)
+
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toMatch(/has no record of this conversation under .* The history kept here is still readable/)
+    expect(r.lockedElsewhere).toBeUndefined()
+  })
+
   it('forking to continue leaves the original alone and points at the copy', async () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }

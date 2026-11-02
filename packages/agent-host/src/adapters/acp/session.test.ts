@@ -92,6 +92,40 @@ describe('the ACP session against a scripted agent', () => {
     expect(w.peers[0]!.methods()).not.toContain('session/new')
   })
 
+  /**
+   * #1676, measured on Cursor 2026.10.22 (real CLI, Windows): it writes a conversation's store only once a model turn has run, so
+   * a conversation opened but never answered (a turn refused for the account's usage included) is refused by `session/load` as
+   * `-32602 Invalid params` (its data: Session ... not found) while the call's params are right, and `session/list` does not name it
+   */
+  describe('a load the agent refuses for a conversation it does not list', () => {
+    const cursorLike = (listed: string[], nextCursor?: string): PeerScript => (method, params) => {
+      if (method === 'initialize') return { result: { ...INIT_RESULT, agentCapabilities: { ...INIT_RESULT.agentCapabilities, sessionCapabilities: { list: {} } } } }
+      if (method === 'session/load') return { error: { code: -32602, message: 'Invalid params' } }
+      if (method === 'session/list') {
+        const first = (params as { cursor?: string }).cursor === undefined
+        return { result: { sessions: first ? listed.map((sessionId) => ({ sessionId, cwd: '/work' })) : [{ sessionId: 'ses-a', cwd: '/work' }], ...(first && nextCursor ? { nextCursor } : {}) } }
+      }
+      return base(method, params, null as never)
+    }
+
+    it('is a conversation gone, not an invalid call', async () => {
+      const w = world(cursorLike(['ses-other']), { resumeExternalId: SID })
+      await expect(w.start()).rejects.toMatchObject({ code: 'conversation_gone', message: expect.stringMatching(/no record of this conversation/) })
+      expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/load', 'session/list'])
+    })
+
+    it('stays the agent’s own error when it lists the conversation, on a later page too', async () => {
+      const w = world(cursorLike(['ses-other'], 'next'), { resumeExternalId: SID })
+      await expect(w.start()).rejects.toThrow(/Invalid params/)
+    })
+
+    it('stays the agent’s own error when it lists nothing at all to ask', async () => {
+      const w = world((method, params) => (method === 'session/load' ? cursorLike([])(method, params, null as never) : base(method, params, null as never)), { resumeExternalId: SID })
+      await expect(w.start()).rejects.toThrow(/Invalid params/)
+      expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/load'])
+    })
+  })
+
   it('sends the cancel again when the agent goes on with the turn, and the next turn is not taken for stopped', async () => {
     let cancels = 0
     const w = world((method) => {

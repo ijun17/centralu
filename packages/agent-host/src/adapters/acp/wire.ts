@@ -40,6 +40,12 @@ export const OpenedSession = z.looseObject({
 })
 export type OpenedSession = z.infer<typeof OpenedSession>
 
+/** `session/list`: the conversations the agent keeps (only the ids are read), a page at a time */
+export const SessionList = z.looseObject({
+  sessions: z.array(z.looseObject({ sessionId: z.string() })),
+  nextCursor: nullish(z.string()),
+})
+
 export const StopReason = z.enum(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'])
 export type StopReason = z.infer<typeof StopReason>
 

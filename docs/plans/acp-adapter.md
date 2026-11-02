@@ -492,7 +492,11 @@ browser on the person's machine from a background session; a session already log
   dropped too.
 - **A load that fails** with "not found" is the existing "no record of this conversation" error, not a silent
   `session/new`: the person would lose the conversation without being told. Any other failure is an error with the
-  agent's text.
+  agent's text. Cursor says "not found" as `-32602 Invalid params` (measured, 2026.10.22, #1676): it keeps a conversation
+  only once a model turn has run, so one opened and never answered (a turn its account's usage refused included) cannot be
+  loaded after a restart. The code says nothing, so when the agent advertises `session/list` and does not list the id
+  (asked on the same connection, every page), the open fails as `conversation_gone` and the host answers as it does for
+  a conversation missing from a tool's list.
 - **Settings on open:** the answer's `configOptions` give the model the conversation runs with; one that differs from
   the session's is taken as `takeOpenedSettings` (#1369), and the session's model is set with
   `session/set_config_option` when the tool offers a `model` option.

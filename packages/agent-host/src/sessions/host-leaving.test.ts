@@ -200,6 +200,16 @@ describe('a host leaving (#839)', () => {
     expect(claude.created).toHaveLength(1)
   })
 
+  it('a kept process whose start is refused is stopped, whatever the refusal (#1720)', async () => {
+    const id = await asleep()
+    // The tool can no longer resume (a build that dropped it, a project removed meanwhile): the start answers `resumed: false`
+    Object.assign(claude.capabilities, { resume: false })
+    const kept = new FakeProcess()
+    await mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
+    expect(kept.kills).toEqual(['SIGTERM'])
+    expect(claude.created).toHaveLength(1)
+  })
+
   it.each([
     ['a restart (the settings, a proposal)', (id: string) => mgr.restartSession(id)],
     ['a tool switch', (id: string) => mgr.switchTool(id, 'claude-two' as ToolName)],

@@ -971,12 +971,12 @@ export class SessionStarts {
       // A cap applies to this after-the-fact check too — the worst outcome would be holding the real
       // failure reason (err) but losing it because the check itself hung. The same rule as elsewhere:
       // if it cannot be determined, it does not block (false).
-      // A kept process that could not be re-attached has nobody left to address it
-      if (adopt) {
-        adopt.kill('SIGTERM')
-        return { session: m, resumed: false, reason: (err as Error).message }
-      }
-      const gone = await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false)
+      // A kept process that could not be re-attached has nobody left to address it: `adoptKept` stops it
+      if (adopt) return { session: m, resumed: false, reason: (err as Error).message }
+      // The tool said so itself (an ACP tool that does not list the conversation, #1676): no list to ask
+      const gone =
+        (err as { code?: string }).code === 'conversation_gone' ||
+        (await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false))
       if (gone) {
         return { session: m, resumed: false, reason: externalMissingReason(this.host.toolLabel(m.tool), cwd) }
       }
