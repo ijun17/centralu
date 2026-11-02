@@ -173,7 +173,8 @@ const REAL_OS: KillOs = {
   platform: process.platform,
   taskkill: (pid) => {
     const exe = systemTool(['taskkill.exe'])
-    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true })
+    // stderr is kept: the message of a failure says why (`collectOrphansWindows` prints it)
+    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000, windowsHide: true })
   },
 }
 
@@ -415,14 +416,23 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
     console.error(`[agent-host] the process table could not be read (${why}); what process ${root.pid} left running may still run`)
     return []
   }
+  const found = orphansOf(rows, root)
+  // A child of the root that the time window turned away is left running; a sweep that missed one must say why (#1773)
+  const turnedAway = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && !found.includes(r))
+  if (turnedAway.length > 0) {
+    const list = turnedAway.map((r) => `${r.pid} (created ${r.created})`).join(', ')
+    console.error(`[agent-host] process ${root.pid} ran from ${root.spawnedAt} to ${root.exitedAt}; its children created outside that were left alone: ${list}`)
+  }
   const ended: number[] = []
-  for (const r of orphansOf(rows, root)) {
+  for (const r of found) {
     if (r.pid === process.pid) continue // never ourselves
     try {
       os.taskkill(r.pid)
       ended.push(r.pid)
-    } catch {
-      // already gone, or ended by the /T of one before it
+    } catch (e) {
+      // taskkill's 128: no such process, i.e. already gone or ended by the /T of one before it. Anything else left it running
+      const status = typeof e === 'object' && e !== null && 'status' in e ? e.status : undefined
+      if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${root.pid}, could not be ended (status ${String(status)}: ${e instanceof Error ? e.message.replace(/\s+/g, ' ').trim() : 'unknown error'})`)
     }
   }
   return ended

@@ -395,14 +395,27 @@ describe('leftovers of an ended process on Windows', () => {
     expect(ended).toEqual([200])
   })
 
-  it('a taskkill that fails (already ended by the one before it) is not reported and does not stop the rest', async () => {
+  // #1773: a stop that left a process running said nothing, whether taskkill failed or the window turned the process away
+  it('says on stderr which leftover taskkill could not end, not one that was already gone (its 128), and carries on', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const os = {
-      listProcesses: async () => table('200 100 1500\n300 200 1600\n'),
+      listProcesses: async () => table('200 100 1500\n300 100 1600\n400 300 1700\n'),
       taskkill: (pid: number) => {
-        if (pid === 300) throw new Error('ERROR: The process "300" not found.')
+        if (pid === 200) throw Object.assign(new Error('Command failed: taskkill\nERROR: Access is denied.'), { status: 1 })
+        if (pid === 400) throw Object.assign(new Error('Command failed: taskkill'), { status: 128 })
       },
     }
+    expect(await collectOrphansWindows(root, os)).toEqual([300])
+    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 200, left running by 100, could not be ended \(status 1: Command failed: taskkill ERROR: Access is denied\.\)/)])
+    logged.mockRestore()
+  })
+
+  it('says on stderr which children of the root the time window turned away', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const os = { listProcesses: async () => table('200 100 1500\n300 100 5001\n400 100 999\n'), taskkill: () => {} }
     expect(await collectOrphansWindows(root, os)).toEqual([200])
+    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 100 ran from 1000 to 5000.*left alone: 300 \(created 5001\), 400 \(created 999\)/)])
+    logged.mockRestore()
   })
 })
 
