@@ -12,7 +12,7 @@ let limited = false
 const timer = setTimeout(() => {
   limited = true
   if (process.platform === 'win32') {
-    const taskkill = join(process.env.SystemRoot || 'C:\Windows', 'System32', 'taskkill.exe')
+    const taskkill = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe')
     spawn(taskkill, ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => child.kill('SIGKILL'))
   } else {
     try {

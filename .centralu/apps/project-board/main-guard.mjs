@@ -209,7 +209,7 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const hunt = g.hunt ?? null
   const hunted = g.hunted ?? []
   const known = g.known ?? []
-  const ctx = { save, now, renew, act, repo, dir, defaultBranch, probeCommit, known, hunted }
+  const ctx = { save, now, renew, act, repo, dir, defaultBranch, probeCommit, known, hunted, failingLine }
 
   // Green: remembered as the last fully green commit. A hunt is over: the red was not main's for long (a flake), or what it did fixed it
   if (!red) {
@@ -350,7 +350,7 @@ async function finish({ hunt, culprit, how, save, now, act, known, hunted }) {
 
 /** One bisect step: start the probe's run, or read it and halve the range */
 async function stepHunt(ctx) {
-  const { hunt, save, now, renew, act, repo, dir, defaultBranch, probeCommit, known, hunted } = ctx
+  const { hunt, save, now, renew, act, repo, dir, defaultBranch, probeCommit, known, hunted, failingLine } = ctx
   const ended = (record) => save({ hunt: { ...hunt, probe: null, ...record, endedAt: new Date(now).toISOString() }, hunted: [...hunted, hunt.red].slice(-50) })
   const step = nextStep(hunt)
   // The suspect by paths was not the first red commit: bisect what is left, its probes' answers kept
@@ -400,7 +400,38 @@ async function stepHunt(ctx) {
     save({ hunt })
     return { did: 'waiting', sha: probe.sha }
   }
-  await deleteBranch(repo, probe.branch).catch(() => {})
+  const dropBranch = () => deleteBranch(repo, probe.branch).catch(() => {})
+  const unjudged = async (why) => {
+    await dropBranch()
+    const record = await act({ red: hunt, culprit: null, why })
+    if (!record) return { did: 'yielded' }
+    ended(record)
+    return { did: 'unknown' }
+  }
+  // The rerun of a probe's failed jobs (below) is not seen yet: the run still shows the attempt that failed
+  if (probe.rerun && (run.attempt ?? 1) <= probe.rerun.attempt) {
+    if (now - Date.parse(probe.rerun.at) > RERUN_STUCK_MS) return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${probe.rerun.what}, and the rerun asked for at ${probe.rerun.at.slice(11, 16)} UTC has not started. No commit is blamed.`)
+    save({ hunt })
+    return { did: 'waiting', sha: probe.sha }
+  }
+  // A probe that failed in a step that sets the job up, or lost its runner, says nothing about the commit (#1453, as #1435 for main's own
+  // run): rerun its failed jobs once, and when it fails that way again, end the hunt rather than blame a commit for the runner's outage
+  if (!['success', 'cancelled', 'skipped'].includes(run.conclusion)) {
+    const why = await diagnose(repo, run, { failingLine })
+    if (why.kind === 'infrastructure' && !why.shutdown) {
+      const what = infraText(why.names, why.step, why.cause)
+      if (probe.rerun) return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${what}, the same way again after one rerun. No commit is blamed, and nothing was reverted.`)
+      save({ hunt: { ...hunt, probe: { ...probe, rerun: { attempt: run.attempt ?? 1, at: new Date(now).toISOString(), what } } } })
+      try {
+        await rerunRun(repo, run.id, { failedOnly: true })
+      } catch (e) {
+        if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+        return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${what}, and GitHub refused to rerun it: ${e.message} No commit is blamed.`)
+      }
+      return { did: 'rerun', sha: probe.sha }
+    }
+  }
+  await dropBranch()
   if (run.conclusion === 'cancelled' || run.conclusion === 'skipped') {
     // Started again once; cancelled twice, the bisect cannot go on
     if ((probe.tries ?? 1) < 2) {

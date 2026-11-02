@@ -739,7 +739,9 @@ looked into).
   (`firstStepError`, ci.mjs): from its `##[group]Run` line to its `##[error]` line, so the report or
   artifact upload that runs after a failure ("No files were found with the provided path") is never the
   quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
-  A bisect probe that fails in setup is still read as red (#1453).
+  A bisect probe is read the same way (#1453): one that failed in a setup step or lost its runner has its failed jobs rerun once, and
+  when it fails that way again the hunt ends with an issue saying the probe could not be judged, no commit blamed and nothing
+  reverted; a probe that fails in a test step is red.
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
