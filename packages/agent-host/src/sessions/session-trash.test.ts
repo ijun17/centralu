@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { codeIntelligenceKey } from './tool-profiles.js'
+import { branchWasThereKey } from './worktree-sessions.js'
 import type { Store } from '../dev-services/store.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
@@ -158,7 +159,7 @@ describe('purging a session for good', () => {
     const { trash, calls, deleteExternalConversation } = setup(id)
     await trash.purgeSession(id)
     expect(existsSync(dir)).toBe(false)
-    expect(calls).toEqual(['rows', `forgetBackground:${id}`, `setting:${codeIntelligenceKey(id)}`])
+    expect(calls).toEqual(['rows', `forgetBackground:${id}`, `setting:${codeIntelligenceKey(id)}`, `setting:${branchWasThereKey(id)}`])
     expect(deleteExternalConversation).not.toHaveBeenCalled()
   })
 
