@@ -32,6 +32,7 @@ import {
   NEXT_MAX,
   SUBJECT_MAX,
   bodyLimit,
+  cutTask,
   dueAt,
   flowsDown,
   mayEditTask,
@@ -218,9 +219,6 @@ const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly 
 
 /** The task of a thread adopted from a report mark: the words the owner gave were not kept, and the session's conversation has them */
 const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
-
-/** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
-const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
 
 /**
  * How a turn of delegated work ended, told by Centralu to the thread's owner (§6, §8.1). The words of `body` are Centralu's own with the
@@ -1661,9 +1659,7 @@ id: ${sessionIdOf(assignee)}` : ''
     if ((owner.kind !== 'session' && owner.kind !== 'person') || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host, or from the person to one')
     if (caller === input.assignee) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
     if (!THREAD_ORIGINS.includes(input.origin)) throw refuse('bad_value', `unknown origin ${String(input.origin)}`)
-    const limit = bodyLimit('session')
-    const task = input.task.trim()
-    const body = task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
+    const body = cutTask(input.task, bodyLimit('session'))
     if (body === '') throw refuse('empty', 'a task says something')
     return this.run(() => {
       const now = this.now()

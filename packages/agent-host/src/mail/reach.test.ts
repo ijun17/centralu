@@ -3,7 +3,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { A, B, C, ORC, W, X, Y, addr, world } from './messages.test-helpers.js'
-import { PERSON } from './address.js'
+import { PERSON, sessionAddress } from './address.js'
 
 afterEach(() => {
   vi.doUnmock('./rules.js')
@@ -64,6 +64,7 @@ describe('who may write to whom (§7.1)', () => {
     const { mailReach } = await import('./reach.js')
     const app = 'app:hub-aaaaaaaa/p1/board'
     const reach = mailReach({
+      hostId: 'hub-aaaaaaaa',
       session: (id) => (id === 'a' || id === 'b' ? { projectId: 'p1', askedBy: null, here: true, canReadMail: true, host: 'here' } : undefined),
       orchestratorId: () => null,
       orchestratorAsks: () => true,
@@ -163,5 +164,16 @@ describe('what the service reads of a session', () => {
     expect(reach.projectLabel('px')).toBe('Pex')
     expect(reach.projectLabel('p2')).toBe('p2')
     expect(reach.askGroupMembers(A).sort()).toEqual([A, B, W].sort())
+  })
+
+  it('looks up only the sessions of this host: an address on another computer is no session here, whatever its id', () => {
+    const { reach } = world()
+    const other = sessionAddress('hub-bbbbbbbb', 'a')
+    expect(reach.projectOf(other)).toBeNull()
+    expect(reach.labelOf(other)).toBe(other)
+    expect(reach.isOrchestrator(sessionAddress('hub-bbbbbbbb', 'orc'))).toBe(false)
+    expect(reach.mayWrite(A, other)).toBe('elsewhere')
+    expect(reach.mayWrite(PERSON, other)).toBe('elsewhere')
+    expect(reach.mayWrite(other, A)).toBe('gone')
   })
 })

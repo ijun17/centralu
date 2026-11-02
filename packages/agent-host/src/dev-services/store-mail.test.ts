@@ -116,7 +116,7 @@ describe('store step v61: the mailbox tables', () => {
     })
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(5) // v61, then v62 (#1452), v63 (#1492), v64 (#1623) and v65 (#1684)
+    expect(s.migrationsRun).toBe(6) // v61, then v62 (#1452), v63 (#1492), v64 (#1623), v65 (#1684) and v66 (#1899)
     expect(tables(file)).toEqual(expect.arrayContaining(MAIL_TABLES))
     expect(String(s.minReaderVersion)).toBe(floor)
     s.close()

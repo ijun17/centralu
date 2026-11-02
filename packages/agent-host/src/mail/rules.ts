@@ -211,7 +211,12 @@ export function dueAt(now: number, urgent: boolean, fromPerson: boolean): number
 
 // ── Mail without threads (docs/plans/mailbox.md §1, §8.2, §15; M2). The constants of the design are here and nowhere else ──
 
-export const HOUR_MS = 60 * 60_000
+export const MINUTE_MS = 60_000
+export const HOUR_MS = 60 * MINUTE_MS
+/** What `read` with no id returns at most: 10 messages and about 20,000 characters, never half a message (§8.4); a chain back from a message, 9 ancestors */
+export const READ_ITEMS = 10
+export const READ_CHARS = 20_000
+export const READ_CHAIN = 9
 /** Non-reply messages an hour from one session to one other: refused `pair_rate` (D13). Replies are not counted */
 export const PAIR_NEW_PER_HOUR = 5
 export const MAX_RECIPIENTS = 10
@@ -248,6 +253,8 @@ export const REFUSAL_TEXT = {
   unknown_message: (id: string) => `there is no message ${id} you can read; check the id with mail(action="inbox").`,
   own_message: (id: string) => `${id} is your own message; say who it is for with to="…".`,
   recipients: () => `at most ${MAX_RECIPIENTS} recipients.`,
+  not_allowed: () => 'that is not a party that takes mail',
+  withheld: (id: string) => `${id} is a request: its words are shown in the turn it starts, and it is marked done there.`,
   not_yours: (id: string) => `you were not sent ${id} and did not send it.`,
   pair_rate: (name: string) => `you started ${PAIR_NEW_PER_HOUR} conversations with ${name} in the last hour; answer one of its messages instead, or wait.`,
   repeat: (name: string) => `you sent the same text to ${name} less than ${REPEAT_WINDOW_MS / 60_000} minutes ago.`,
@@ -258,9 +265,13 @@ export const REFUSAL_TEXT = {
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,
 } as const
 
-/** What a sender is, from its address: null for text that is not an address */
-export function senderClassOf(address: string): SenderClass | null {
-  return parseAddress(address)?.kind ?? null
+/** The line an over-long task ends with once cut: the full text stays in the session's conversation */
+export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
+
+/** A task's text as the record keeps it (trimmed, and cut at `limit` with `TASK_CUT`): a delegation tool has started the child already, so it is never refused for its length */
+export function cutTask(text: string, limit: number): string {
+  const task = text.trim()
+  return task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
 }
 
 /**
@@ -274,15 +285,16 @@ export function wakesMessage(m: Pick<MailRow, 'facts'>): boolean {
 /**
  * Whether an answer is delivered quietly (D3): it needs no reply, to a message that needed none, and nothing about its sender or its words says the
  * receiver must act. It wakes when it is `urgent`, from the person, from the receiver's parent, or from a session with an unsettled task to the receiver
- * (`owesTask`, which the caller reads with `newestTask`); and an answer to a task or to a `needsReply` message always wakes
+ * (`owesTask`, which the caller reads with `newestTask`); and an answer to a task or to a `needsReply` message always wakes. An answer that is a
+ * request to the orchestrator (`request`, §7.6) is work for it, so it never is quiet: D3 and §7.6 meet here
  */
 export function quietAnswer(
   m: Pick<MailRow, 'kind' | 'sender' | 'needsReply' | 'urgent'>,
   target: Pick<MailRow, 'kind' | 'needsReply'>,
-  receiver: { parent: string | null; owesTask: boolean },
+  receiver: { parent: string | null; owesTask: boolean; request: boolean },
 ): boolean {
   return (
-    m.kind === 'message' && !m.needsReply && !m.urgent && target.kind === 'message' && !target.needsReply &&
+    m.kind === 'message' && !m.needsReply && !m.urgent && !receiver.request && target.kind === 'message' && !target.needsReply &&
     parseAddress(m.sender)?.kind === 'session' && m.sender !== receiver.parent && !receiver.owesTask
   )
 }

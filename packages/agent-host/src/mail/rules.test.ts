@@ -110,10 +110,14 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
 
   describe('quietAnswer (D3)', () => {
     const m = (over: Partial<Pick<MailRow, 'kind' | 'sender' | 'needsReply' | 'urgent'>> = {}) => ({ kind: 'message' as const, sender: A, needsReply: false, urgent: false, ...over })
-    const none = { parent: null, owesTask: false }
+    const none = { parent: null, owesTask: false, request: false }
 
     it('an answer that needs nothing to a message that needed nothing is quiet', () => {
       expect(quietAnswer(m(), { kind: 'message', needsReply: false }, none)).toBe(true)
+    })
+
+    it('is never quiet when the answer is a request to the orchestrator (§7.6)', () => {
+      expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { ...none, request: true })).toBe(false)
     })
 
     it('it wakes when it asks back, is urgent, answers a needsReply message or a task, is the person’s, the parent’s, or from a session that owes the receiver a task', () => {
@@ -122,8 +126,8 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
       expect(quietAnswer(m(), { kind: 'message', needsReply: true }, none)).toBe(false)
       expect(quietAnswer(m(), { kind: 'task', needsReply: false }, none)).toBe(false)
       expect(quietAnswer(m({ sender: PERSON }), { kind: 'message', needsReply: false }, none)).toBe(false)
-      expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { parent: A, owesTask: false })).toBe(false)
-      expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { parent: B, owesTask: true })).toBe(false)
+      expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { ...none, parent: A })).toBe(false)
+      expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { ...none, parent: B, owesTask: true })).toBe(false)
       expect(quietAnswer(m({ kind: 'task' }), { kind: 'message', needsReply: false }, none)).toBe(false)
     })
   })

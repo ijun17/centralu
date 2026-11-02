@@ -199,6 +199,7 @@ export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).joi
 
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
 export const HIDDEN_HOLDS = ['policy', 'loop'] as const
+const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
 
 /** The ids as one JSON parameter, read with `json_each` */
 const idList = (ids: readonly string[]): string => JSON.stringify(ids)
@@ -365,7 +366,7 @@ export class MailboxRecords {
   unreadFor(recipient: string): PendingRow[] {
     return this.withMessages(
       this.rows(
-        `r.recipient = ? AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') AND COALESCE(r.held, '') NOT IN ('policy', 'loop', 'dismissed') ORDER BY m.created_at, m.id`,
+        `r.recipient = ? AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') AND COALESCE(r.held, '') NOT IN (${HIDDEN_SQL}, 'dismissed') ORDER BY m.created_at, m.id`,
         recipient,
       ),
     )
@@ -404,6 +405,11 @@ export class MailboxRecords {
   /** The tool took them, in the turn `turnSeq` started or joined (null: delivered quietly outside a turn) */
   markDelivered(recipient: string, ids: readonly string[], at: number, turnSeq: number | null): void {
     this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
+  }
+
+  /** These delivered rows were delivered in the turn `turnSeq` (the delivery began it after it delivered them) */
+  markTurn(recipient: string, ids: readonly string[], turnSeq: number): void {
+    this.update('turn_seq = ?', [turnSeq], recipient, ids, 'delivered_at IS NOT NULL')
   }
 
   /** Sets why mail waits for the person (`policy`, `loop`, `budget`, `failed`, `uncertain`), or clears it with null */
@@ -599,11 +605,11 @@ export class MailboxRecords {
     return this.count(`SELECT COUNT(*) AS n FROM mail WHERE sender = ? AND created_at >= ?`, sender, since)
   }
 
-  /** Messages from `sender` with a row to `recipient` that answer nothing, since `since` (the pair rate, §7.5) */
+  /** Messages (not tasks, which have their own bounds) from `sender` with a row to `recipient` that answer nothing, since `since` (the pair rate, §7.5) */
   newSince(sender: string, recipient: string, since: number): number {
     return this.count(
       `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-        WHERE m.sender = ? AND r.recipient = ? AND m.reply_to IS NULL AND m.created_at >= ?`,
+        WHERE m.sender = ? AND r.recipient = ? AND m.kind = 'message' AND m.reply_to IS NULL AND m.created_at >= ?`,
       sender,
       recipient,
       since,

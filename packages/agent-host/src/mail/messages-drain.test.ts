@@ -282,9 +282,10 @@ describe('parties that go and parties that take over (§7.7)', () => {
     // Read mail that needs nothing, and the heir's own mail, stay
     expect(w.records.recipient(m4.id, W)).toBeDefined()
     expect(w.records.recipient(m5.id, W)).toBeDefined()
-    // The heir is told of what came to it, not of the row it already had
+    // The heir is told once of what came to it (two rows, one notice), not of the row it already had
     const notices = w.records.pendingFor(B, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
-    expect(notices.map((p) => p.message.dedupeKey)).toEqual([`handover:${B}:${m1.id}`, `handover:${B}:${m2.id}`])
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.message.body).toBe('2 messages addressed to the previous holder were moved to you.')
     expect(notices[0]?.message.facts).toEqual({ quiet: true, handedOver: true })
   })
 
@@ -302,6 +303,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.records.recipient(viaRole.id, ORC)).toBeUndefined()
     expect(w.rowOf(direct.id, ORC).deliveredAt).not.toBeNull()
     expect(w.records.pendingFor(ORC2, w.clock.t + 10_000).map((p) => p.message.kind)).toEqual(['message', 'notice'])
+    expect(w.records.pendingFor(ORC2, w.clock.t + 10_000)[1]?.message.body).toBe('A message addressed to the previous holder was moved to you.')
   })
 })
 

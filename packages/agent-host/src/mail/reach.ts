@@ -11,6 +11,8 @@ export type RefusalReason = MailRefusal
 
 /** What this module asks of the host. A session id is the id the manager knows it by; an address is `session:<host>/<id>` */
 export type ReachHost = {
+  /** This host's id: an address names the computer its session is on, and only the sessions of this one are looked up here */
+  hostId: string
   /** A session: its project, the session that started it, whether it is here (not in the trash or deleted), whether its seat has the `mail` tool, and which computer. Undefined: never here */
   session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere'; name?: string } | undefined
   /** The orchestrator's session id, or null before it exists */
@@ -54,7 +56,7 @@ export type MailReach = {
 export function mailReach(host: ReachHost): MailReach {
   const sessionOf = (address: string) => {
     const party = parseAddress(address)
-    return party?.kind === 'session' ? { id: party.sessionId, info: host.session(party.sessionId) } : undefined
+    return party?.kind === 'session' && party.host === host.hostId ? { id: party.sessionId, info: host.session(party.sessionId) } : undefined
   }
   const untrusted = (projectId: string | null): boolean => (projectId === null ? false : !(host.project(projectId)?.trusted ?? false))
   /** The one test of leaving: an untrusted project's mail or work to a place that is not that project */
@@ -82,6 +84,7 @@ export function mailReach(host: ReachHost): MailReach {
       if (!f || !t) return 'bad_address'
       // Nobody writes to Centralu, and apps take no mail yet
       if (t.kind === 'centralu' || t.kind === 'app') return 'not_allowed'
+      if (t.kind === 'session' && t.host !== host.hostId) return 'elsewhere'
       const receiver = sessionOf(to)
       if (receiver) {
         if (!receiver.info?.here) return 'gone'

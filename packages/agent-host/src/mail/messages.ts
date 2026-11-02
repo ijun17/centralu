@@ -24,10 +24,15 @@ import {
   ASKS_PER_HOUR,
   HOUR_MS,
   MAX_RECIPIENTS,
+  MINUTE_MS,
   PAIR_NEW_PER_HOUR,
+  READ_CHAIN,
+  READ_CHARS,
+  READ_ITEMS,
   REFUSAL_TEXT,
   REPEAT_WINDOW_MS,
   bodyLimit,
+  cutTask,
   depthOf,
   dueAt,
   flowsDownTo,
@@ -130,12 +135,6 @@ export type DrainResult = {
 
 export type MailChange = { messageId: string; rootId: string; recipients: string[] }
 
-const MINUTE = 60_000
-/** A reply's chain on a `read` with an id: at most this many ancestors (§8.4) */
-const CHAIN = 9
-const READ_ITEMS = 10
-const READ_CHARS = 20_000
-
 export class MessageService {
   private readonly now: () => number
   private readonly ulids: UlidMaker
@@ -216,27 +215,26 @@ export class MessageService {
     }
     if (to.length > MAX_RECIPIENTS) throw refuse('recipients', REFUSAL_TEXT.recipients())
 
-    const turn = this.opts.turn?.(sender) ?? null
-    const causeId = turn !== null && turn.by !== 'person' && turn.by !== 'cli' ? turn.starter : null
+    const causeId = this.causeOf(sender)
     const cause = causeId === null ? null : (this.records.message(causeId) ?? null)
     // A clarification: a session's word to the owner of the task its turn is for (§9.7). It is no request
-    const clarifies = cls === 'session' && cause?.kind === 'task' && to.length === 1 && to[0] === cause.sender && this.records.recipient(cause.id, sender) !== undefined ? cause.id : undefined
+    const clarifies = cls === 'session' && cause?.kind === 'task' && to.length === 1 && to[0] === cause.sender ? cause.id : undefined
     // The owner's answer to one is work again: a task from the owner to the one who asked
     const asWork = target !== undefined && this.answersClarification(sender, target, to)
     const kind: MailKind = asWork ? 'task' : 'message'
 
-    for (const r of to) {
+    const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
+    for (const [i, r] of to.entries()) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
-      if (party.kind === 'session' && party.host !== this.opts.hostId) throw refuse('elsewhere', REFUSAL_TEXT.elsewhere(r))
       if (r === sender) throw refuse('bad_value', 'a message is for someone else')
-      const why = this.reach.mayWrite(sender, r, this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
+      const why = this.reach.mayWrite(sender, r, requests[i])
       if (why !== null) throw refuse(why, this.refusalText(why, r))
     }
 
     return this.run(() => {
       const now = this.now()
-      this.guards(sender, cls, to, text, target, clarifies, now)
+      this.guards(sender, cls, to, text, target, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
       const about = cause === null ? [] : this.aboutFollowUp(cause)
@@ -247,7 +245,7 @@ export class MessageService {
       const holds = to.map((r) => this.reach.holdFor({ kind: 'message', sender, senderProject, depth }, r))
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
-        quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined })
+        quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
       const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}) }
 
       const stored = this.put(
@@ -269,13 +267,13 @@ export class MessageService {
   task(sender: string, recipient: string, input: TaskInput): MailRow {
     const from = parseAddress(sender)
     if (!from || from.kind === 'centralu') throw refuse('not_allowed', 'Centralu sends with notice and report')
-    const text = this.checkText(from.kind, input.text)
+    // The delegation tool has started the child already: a long text is cut as the old record cut it, never refused (Q-M2-13)
+    const text = cutTask(input.text, bodyLimit(from.kind))
+    if (text === '') throw refuse('empty', 'a task says something')
     return this.run(() => {
       const now = this.now()
-      const turn = this.opts.turn?.(sender) ?? null
-      const causeId = turn !== null && turn.by !== 'person' && turn.by !== 'cli' ? turn.starter : null
       return this.put(
-        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId, origin: input.origin },
+        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })
@@ -291,7 +289,7 @@ export class MessageService {
         kind: 'notice',
         body: REFUSAL_TEXT.untrusted_project(this.reach.projectLabel(input.projectId), input.target),
         facts: { refused: { ...input, firstLine } },
-        dedupeKey: `refused:${to}:${hash16([input.tool, input.target, input.firstLine])}:${Math.floor(now / MINUTE)}`,
+        dedupeKey: `refused:${to}:${hash16([input.tool, input.target, input.firstLine])}:${Math.floor(now / MINUTE_MS)}`,
         delivered: true,
       }),
     )
@@ -358,6 +356,8 @@ export class MessageService {
       const mine = m.sender === by
       const row = mine ? undefined : this.records.recipient(id, by)
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))
+      // A request is marked done in the turn it starts, where its words are shown (§7.6)
+      if (!mine && this.isRequest(m, by) && m.sender !== this.opts.turn?.(by)?.asker) throw refuse('not_allowed', REFUSAL_TEXT.withheld(id))
       // A task is settled by its report, not by its receiver saying it needs nothing: that would take the report from its owner
       if (!m.needsReply && (m.kind !== 'task' || !mine)) return { settled: 0, how: 'unwatched' }
       if (mine) {
@@ -385,7 +385,8 @@ export class MessageService {
         let chars = 0
         for (const { message } of this.records.unreadFor(reader)) {
           const item = this.item(message, reader, asker)
-          if (item.withheld) continue
+          // Work not delivered yet reaches the session by delivery, which a read here would take it out of (#1683)
+          if (item.withheld || (item.row?.deliveredAt === null && (message.kind === 'task' || this.isRequest(message, reader)))) continue
           if (items.length >= READ_ITEMS || (items.length > 0 && chars + message.body.length > READ_CHARS)) break
           items.push(item)
           chars += message.body.length
@@ -396,13 +397,13 @@ export class MessageService {
       const id = opts.id ?? opts.before ?? ''
       const base = opts.id === undefined ? this.records.message(id) : this.readable(reader, id)
       if (!base) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
-      const chain = this.records.chain(id, CHAIN)
+      const chain = this.records.chain(id, READ_CHAIN)
       const oldest = chain.at(-1) ?? base
-      const missing = oldest.replyTo !== null && chain.length < CHAIN && this.records.message(oldest.replyTo) === undefined
+      const missing = oldest.replyTo !== null && chain.length < READ_CHAIN && this.records.message(oldest.replyTo) === undefined
       const items = [...(missing ? [this.gone(oldest.replyTo ?? '')] : []), ...chain.reverse().map((m) => this.item(m, reader, asker)), ...(opts.id === undefined ? [] : [this.item(base, reader, asker)])]
       const read = opts.id === undefined ? undefined : items.at(-1)
       const marked = read && !read.phantom && !read.withheld && read.row ? this.records.markRead(reader, [base.id], now) : 0
-      return { items, older: !missing && chain.length === CHAIN && oldest.replyTo !== null ? oldest.id : null, marked }
+      return { items, older: !missing && chain.length === READ_CHAIN && oldest.replyTo !== null ? oldest.id : null, marked }
     })
   }
 
@@ -533,14 +534,7 @@ export class MessageService {
 
   /** The delivery began a turn for `recipient` (it called `MailTurns.begin`): the rows it delivered were delivered in that turn */
   turnStarted(recipient: string, messageIds: readonly string[], turnSeq: number): void {
-    this.run(() => {
-      const byTime = new Map<number, string[]>()
-      for (const id of messageIds) {
-        const at = this.records.recipient(id, recipient)?.deliveredAt
-        if (at !== null && at !== undefined) byTime.set(at, [...(byTime.get(at) ?? []), id])
-      }
-      for (const [at, ids] of byTime) this.records.markDelivered(recipient, ids, at, turnSeq)
-    })
+    this.run(() => this.records.markTurn(recipient, messageIds, turnSeq))
   }
 
   /**
@@ -579,7 +573,8 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       const held = this.records.heldPolicy().filter((h) => h.senderProject === projectId)
-      const messages = held.flatMap((h) => this.records.message(h.row.messageId) ?? [])
+      // One message to several recipients is held in several rows: it is dropped, and counted, once
+      const messages = [...new Set(held.map((h) => h.row.messageId))].flatMap((id) => this.records.message(id) ?? [])
       for (const m of messages) if (m.replyTo !== null) this.records.answerDropped(m.id)
       const rows = this.records.deleteHeld(held.map((h) => h.row))
       this.records.deleteRows(this.records.refusedRecords(projectId).map((p) => p.row))
@@ -605,9 +600,14 @@ export class MessageService {
       for (const { row, senderProject } of this.records.heldPolicy()) {
         const m = senderProject === projectId ? this.records.message(row.messageId) : undefined
         if (!m) continue
-        this.records.hold(row.recipient, [m.id], null)
-        if (m.replyTo !== null) this.records.settle(m.replyTo, m.sender, 'answered', now, m.id)
-        pokes.add(row.recipient)
+        // Trusted now, the row may still be held for the depth: then it stays held, its question stays open and its asker is told why (§7.4)
+        const why = this.reach.holdFor(m, row.recipient)
+        this.records.hold(row.recipient, [m.id], why)
+        const question = m.replyTo === null ? undefined : this.records.message(m.replyTo)
+        if (why === null) {
+          if (question) this.records.settle(question.id, m.sender, 'answered', now, m.id)
+          pokes.add(row.recipient)
+        } else if (question) this.answerHeld(question, m, why)
       }
       const refused = this.records.refusedRecords(projectId)
       const byCaller = new Map<string, MailRow[]>()
@@ -698,7 +698,7 @@ export class MessageService {
       // The heir is told of what comes to it, not of a row it already had
       const fresh = plan.filter((p) => this.records.recipient(p.messageId, to) === undefined)
       this.records.moveRows(from, to, scope)
-      for (const p of fresh) this.movedNotice(to, p.messageId)
+      this.movedNotice(to, fresh.map((p) => p.messageId))
       return plan
     })
   }
@@ -715,7 +715,7 @@ export class MessageService {
   roleMoved(from: string, to: string): number {
     return this.run(() => {
       const ids = this.records.moveRole(from, to)
-      for (const id of ids) this.movedNotice(to, id)
+      this.movedNotice(to, ids)
       return ids.length
     })
   }
@@ -773,7 +773,7 @@ export class MessageService {
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
       elsewhere: REFUSAL_TEXT.elsewhere(to),
       orchestrator_asks: REFUSAL_TEXT.orchestrator_asks(),
-      not_allowed: 'that is not a party that takes mail',
+      not_allowed: REFUSAL_TEXT.not_allowed(),
     }
     return text[why] ?? why
   }
@@ -789,7 +789,7 @@ export class MessageService {
   /** Whether `target` is a clarification of a task `owner` gave, and the answer goes to the one who asked (§9.7) */
   private answersClarification(owner: string, target: MailRow, to: readonly string[]): boolean {
     const task = typeof target.facts.clarifies === 'string' ? this.records.message(target.facts.clarifies) : undefined
-    return task?.kind === 'task' && task.sender === owner && to.length === 1 && to[0] === target.sender && this.records.recipient(task.id, target.sender) !== undefined
+    return task?.kind === 'task' && task.sender === owner && to.length === 1 && to[0] === target.sender
   }
 
   /**
@@ -800,23 +800,29 @@ export class MessageService {
     if ((m.kind !== 'message' && m.kind !== 'task') || m.sender === recipient || !this.reach.isOrchestrator(recipient)) return false
     if (parseAddress(m.sender)?.kind !== 'session' || typeof m.facts.clarifies === 'string') return false
     const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
-    return !(target && target.sender === recipient && (target.needsReply || target.kind === 'task') && this.records.recipient(target.id, m.sender))
+    return !(target && target.sender === recipient && (target.needsReply || target.kind === 'task'))
+  }
+
+  /** The message that started `sender`'s turn, when a message did (not the person, not the session itself): what a send in that turn is caused by (§8.2 step 6) */
+  private causeOf(sender: string): string | null {
+    const turn = this.opts.turn?.(sender) ?? null
+    return turn !== null && turn.by !== 'person' && turn.by !== 'cli' ? turn.starter : null
   }
 
   /** The guards of a send, over the store so a restart does not reset them (§7.5) */
-  private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, target: MailRow | undefined, clarifies: string | undefined, now: number): void {
+  private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, target: MailRow | undefined, requests: readonly boolean[], now: number): void {
     for (const r of to) {
       if ((cls === 'session' || cls === 'app') && this.records.sameBody(sender, r, text, now - REPEAT_WINDOW_MS)) throw refuse('repeat', REFUSAL_TEXT.repeat(this.reach.labelOf(r)))
     }
     const limit = postsPerMinute(cls)
-    if (limit !== Infinity && this.records.postsSince(sender, now - MINUTE) >= limit) {
+    if (limit !== Infinity && this.records.postsSince(sender, now - MINUTE_MS) >= limit) {
       throw refuse('rate_limited', `at most ${limit} posts a minute from ${cls === 'app' ? 'an app' : 'a session'}: wait a minute`)
     }
-    for (const r of to) {
+    for (const [i, r] of to.entries()) {
       if (target === undefined && cls === 'session' && parseAddress(r)?.kind === 'session' && this.records.newSince(sender, r, now - HOUR_MS) >= PAIR_NEW_PER_HOUR) {
         throw refuse('pair_rate', REFUSAL_TEXT.pair_rate(this.reach.labelOf(r)))
       }
-      if (this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r)) {
+      if (requests[i]) {
         if (this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) throw refuse('ask_rate', REFUSAL_TEXT.ask_rate())
       }
     }
@@ -837,7 +843,7 @@ export class MessageService {
       kind: 'notice',
       body: `${this.reach.labelOf(answer.sender)} answered your ${question.id} with ${answer.id}, and the answer is held for the person (${reason}). It reaches you if the person lets it through; until then Centralu does not remind ${this.reach.labelOf(answer.sender)} of it.`,
       facts: { quiet: true, answerHeld: { question: question.id, answer: answer.id } },
-      dedupeKey: `answer_held:${question.sender}:${answer.id}`,
+      dedupeKey: `answer_held:${question.sender}:${answer.id}:${why}`,
     })
   }
 
@@ -855,14 +861,14 @@ export class MessageService {
     this.records.markTold(rows, this.now())
   }
 
-  /** A row came to `to` from another holder (a handoff, the role's move): one quiet notice, so it knows why the message is there (key `handover:`) */
-  private movedNotice(to: string, messageId: string): void {
-    if (parseAddress(to)?.kind !== 'session') return
+  /** Rows came to `to` from another holder (a handoff, the role's move): one quiet notice for the move, so it knows why the messages are there (key `handover:`) */
+  private movedNotice(to: string, messageIds: readonly string[]): void {
+    if (messageIds.length === 0 || parseAddress(to)?.kind !== 'session') return
     this.centralu(to, {
       kind: 'notice',
-      body: 'A message addressed to the previous holder was moved to you.',
+      body: messageIds.length === 1 ? 'A message addressed to the previous holder was moved to you.' : `${messageIds.length} messages addressed to the previous holder were moved to you.`,
       facts: { quiet: true, handedOver: true },
-      dedupeKey: `handover:${to}:${messageId}`,
+      dedupeKey: `handover:${to}:${hash16(messageIds)}`,
     })
   }
 
@@ -962,7 +968,7 @@ export class MessageService {
 const isHidden = (row: RecipientRow): boolean => (HIDDEN_HOLDS as readonly string[]).includes(row.held ?? '')
 
 /** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */
-export function hash16(parts: readonly string[]): string {
+function hash16(parts: readonly string[]): string {
   return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 16)
 }
 
@@ -982,7 +988,7 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
 }
 
 /** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */
-export function unansweredText(rows: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string }[]): string {
+function unansweredText(rows: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string }[]): string {
   const lines = rows.map((r) => `- ${r.id} to ${r.name} (${r.recipient}): ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
   return [

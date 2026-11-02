@@ -44,6 +44,7 @@ export function world() {
   ])
   const state = { asks: true }
   const host: ReachHost = {
+    hostId: HOST,
     session: (id) => {
       const s = sessions.get(id)
       return s && { projectId: s.projectId, askedBy: s.askedBy ?? null, here: s.here ?? true, canReadMail: s.canReadMail ?? true, host: 'here', ...(s.name ? { name: s.name } : {}) }

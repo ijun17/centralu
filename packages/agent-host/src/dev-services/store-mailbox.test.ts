@@ -302,11 +302,35 @@ describe('guards and counts', () => {
     expect(box.pairTurnsSince(B, A, NOW - 60 * 60 * 1000)).toBe(3)
   })
 
+  it('held rows are found by their index, not by a scan of the table (v66)', () => {
+    const { db } = world()
+    for (const where of [`r.held = 'policy'`, `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`]) {
+      const plan = db.prepare<[], { detail: string }>(`EXPLAIN QUERY PLAN SELECT r.message_id FROM mail_recipients r WHERE ${where}`).all()
+      expect(plan.map((p) => p.detail).join(' ')).toContain('USING INDEX mail_recipients_held')
+    }
+  })
+
+  it('markTurn writes the turn on delivered rows of the recipient and no others', () => {
+    const { box, send } = world()
+    const delivered = send({ sender: A }, B)
+    const waiting = send({ sender: A }, B)
+    const other = send({ sender: A }, C)
+    box.markDelivered(B, [delivered], NOW, null)
+    box.markDelivered(C, [other], NOW, null)
+    box.markTurn(B, [delivered, waiting, other], 4)
+    expect(box.recipient(delivered, B)).toMatchObject({ turnSeq: 4, deliveredAt: NOW })
+    expect(box.recipient(waiting, B)).toMatchObject({ turnSeq: null, deliveredAt: null })
+    expect(box.recipient(other, C)?.turnSeq).toBeNull()
+  })
+
   it('newSince counts messages that answer nothing; sameBody finds the same text to the same recipient', () => {
     const { box, send } = world()
     const first = send({ sender: A, body: 'hello' }, B)
     send({ sender: A, body: 'again', replyTo: first }, B)
     send({ sender: A, body: 'old', createdAt: NOW - DAY }, B)
+    expect(box.newSince(A, B, NOW - 1000)).toBe(1)
+    // A task is no new conversation: it has its own bounds
+    send({ sender: A, kind: 'task' }, B)
     expect(box.newSince(A, B, NOW - 1000)).toBe(1)
     expect(box.sameBody(A, B, 'hello', NOW - 1000)).toBe(true)
     expect(box.sameBody(A, C, 'hello', NOW - 1000)).toBe(false)

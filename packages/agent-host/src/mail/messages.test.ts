@@ -273,7 +273,7 @@ describe('the one hold (D12)', () => {
     expect(told[0]?.message).toMatchObject({
       sender: 'centralu',
       facts: { quiet: true, answerHeld: { question: q.id, answer: answer.message.id } },
-      dedupeKey: `answer_held:${A}:${answer.message.id}`,
+      dedupeKey: `answer_held:${A}:${answer.message.id}:policy`,
     })
     expect(told[0]?.message.body).toBe(
       `xi answered your ${q.id} with ${answer.message.id}, and the answer is held for the person (Pex is not trusted). It reaches you if the person lets it through; until then Centralu does not remind xi of it.`,
@@ -600,8 +600,9 @@ describe('reading (§8.4)', () => {
     expect(w.mail.read(C).items).toEqual([])
     expect(w.mail.read(ORC).items).toEqual([])
     expect(w.rowOf(request.id, ORC).readAt).toBeNull()
-    // In the asker's turn the words are shown
+    // In the asker's turn the words are shown, once the request was delivered
     w.startTurn(ORC, request.id, { asker: B })
+    w.records.markDelivered(ORC, [request.id], w.clock.t, 1)
     expect(w.mail.read(ORC).items.map((i) => i.message.body)).toEqual(['please look'])
   })
 
@@ -679,7 +680,12 @@ describe('tasks, notices and the feed', () => {
     expect(w.rowOf(queued.id, B)).toMatchObject({ deliveredAt: null, dueAt: w.clock.t })
     const plain = w.mail.task(A, C, { text: 'plain', origin: 'agent_session', delivered: false })
     expect(w.rowOf(plain.id, C)).toMatchObject({ deliveredAt: null, dueAt: w.clock.t + 2_000 })
-    expect(refusedFor(() => w.mail.task(A, B, { text: 'x'.repeat(16_001), origin: 'start_agent', delivered: true }))).toBe('too_long')
+    expect(refusedFor(() => w.mail.task(A, B, { text: '  ', origin: 'start_agent', delivered: true }))).toBe('empty')
+    // The child is running already: a text over the limit is cut as the old record cut it, never refused (Q-M2-13)
+    const long = w.mail.task(A, B, { text: `  ${'x'.repeat(16_001)}  `, origin: 'start_agent', delivered: true })
+    expect(long.body).toHaveLength(16_000)
+    expect(long.body.endsWith('(read_session).]')).toBe(true)
+    expect(w.mail.task(A, B, { text: '  trimmed  ', origin: 'start_agent', delivered: true }).body).toBe('trimmed')
     expect(refusedFor(() => w.mail.task('centralu', B, { text: 'x', origin: 'script', delivered: true }))).toBe('not_allowed')
   })
 
@@ -702,5 +708,101 @@ describe('tasks, notices and the feed', () => {
     expect(next.older).toBe(false)
     // Reading the feed marks nothing
     expect(w.rowOf(ids[0] ?? '', B).readAt).toBeNull()
+  })
+})
+
+describe('what the deep review of #1899 found', () => {
+  it('read with no id leaves undelivered work to the delivery: the owner’s answer to a clarification stays work, and the first report does not cover it', () => {
+    const w = world()
+    const t = w.mail.task(A, W, { text: 'build it', origin: 'start_agent', delivered: true })
+    w.startTurn(W, t.id)
+    const q = w.send(W, { to: [A], text: 'which branch?' }).message
+    const answer = w.send(A, { replyTo: q.id, text: 'main' })
+    expect(answer.asWork).toBe(true)
+    const note = w.send(B, { to: [W], text: 'fyi', needsReply: false }).message
+    w.clock.t += 10_000
+
+    const view = w.mail.read(W)
+    expect(view.items.map((i) => i.message.id)).toEqual([note.id])
+    expect(view.marked).toBe(1)
+    expect(w.rowOf(answer.message.id, W).readAt).toBeNull()
+    expect(w.mail.inbox(W).unread.map((i) => i.message.id)).toEqual([answer.message.id])
+    // It is still delivered as the work of the next turn
+    expect(w.mail.drain(W)).toMatchObject({ workMessage: answer.message.id, messageIds: [answer.message.id] })
+    // The first task's report settles that task only: the answer was not delivered before its turn began
+    w.mail.report(t.id, { outcome: 'finished', body: 'done' })
+    expect(w.rowOf(t.id, W).settled).toBe('reported')
+    expect(w.rowOf(answer.message.id, W).settled).toBeNull()
+  })
+
+  it('read with no id leaves an undelivered request to the orchestrator unread, also in its asker’s turn; once delivered it is read there', () => {
+    const w = world()
+    const request = w.send(B, { to: [ORC], text: 'please look' }).message
+    w.startTurn(ORC, request.id, { asker: B })
+    expect(w.mail.read(ORC)).toMatchObject({ items: [], marked: 0 })
+    expect(w.rowOf(request.id, ORC).readAt).toBeNull()
+    w.records.markDelivered(ORC, [request.id], w.clock.t, 1)
+    expect(w.mail.read(ORC).items.map((i) => i.message.body)).toEqual(['please look'])
+  })
+
+  it('a worker’s answer to an orchestrator message that needed no reply is a request, so it is not quiet and wakes the orchestrator as work', () => {
+    const w = world()
+    const note = w.send(ORC, { to: [W], text: 'carry on', needsReply: false }).message
+    const answer = w.send(W, { replyTo: note.id, text: 'ok' })
+    expect(answer.quiet).toBe(false)
+    expect(answer.message.facts).toEqual({})
+    w.clock.t += 10_000
+    expect(w.mail.drain(ORC)).toMatchObject({ wake: true, workMessage: answer.message.id, asker: W, quieted: [] })
+    // Between two ordinary sessions the same answer is quiet
+    const other = w.send(A, { to: [B], text: 'carry on', needsReply: false }).message
+    expect(w.send(B, { replyTo: other.id, text: 'ok' }).quiet).toBe(true)
+  })
+
+  it('tasks are not new conversations: five tasks to a session do not make its owner’s first plain message pair_rate', () => {
+    const w = world()
+    for (let i = 0; i < 5; i++) w.mail.task(A, W, { text: `task ${i}`, origin: 'agent_session', delivered: false })
+    expect(refusedFor(() => w.send(A, { to: [W], text: 'hello' }))).toBe('NOT REFUSED')
+  })
+
+  it('dismissProject counts a message once, whatever the number of rows it was held in', () => {
+    const w = world()
+    const m = w.send(X, { to: [A, B, C], text: 'to three' }).message
+    expect(w.mail.dismissProject('px')).toEqual({ rows: 3, senders: [X] })
+    const notice = w.records.pendingFor(X, w.clock.t + 10_000)[0]
+    expect(notice?.message.body).toBe(`The person dismissed 1 of your messages that were waiting for project Pex to be trusted (${m.id}). They were not delivered and will not be.`)
+  })
+
+  it('trusting a project does not settle a question whose answer is still held for the depth: it stays held loop, and its asker is told why', () => {
+    const w = world()
+    const q = w.send(A, { to: [X], text: 'what now?' }).message
+    const deep = w.mail.send(C, { to: [X], text: 'x' }).message
+    w.db.prepare(`UPDATE mail SET depth = 4 WHERE id = ?`).run(deep.id)
+    w.startTurn(X, deep.id)
+    const answer = w.send(X, { replyTo: q.id, text: 'the answer' })
+    expect(answer.held).toEqual([{ recipient: A, why: 'policy' }])
+
+    w.projects.set('px', { trusted: true })
+    expect(w.mail.trustChanged('px')).toEqual([])
+    expect(w.rowOf(answer.message.id, A).held).toBe('loop')
+    expect(w.rowOf(q.id, X)).toMatchObject({ settled: null, answerId: answer.message.id })
+    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
+    expect(told).toHaveLength(2)
+    expect(told[0]?.message.body).toContain('Pex is not trusted')
+    expect(told[1]?.message.body).toContain('it is the 5th hop in a row')
+    // The person’s Resume is the way out now
+    expect(w.mail.resumeDepth(answer.message.id)).toBe(1)
+    expect(w.rowOf(q.id, X)).toMatchObject({ settled: 'answered' })
+  })
+
+  it('done on a request outside its asker’s turn is refused; in the turn it starts it settles', () => {
+    const w = world()
+    const request = w.send(B, { to: [ORC], text: 'please look' }).message
+    expect(refusedFor(() => w.mail.done(ORC, request.id))).toBe('not_allowed')
+    expect(w.rowOf(request.id, ORC).settled).toBeNull()
+    w.startTurn(ORC, request.id, { asker: B })
+    expect(w.mail.done(ORC, request.id)).toEqual({ settled: 1, how: 'done' })
+    // The asker may take its own request back
+    const second = w.send(B, { to: [ORC], text: 'and this' }).message
+    expect(w.mail.done(B, second.id)).toEqual({ settled: 1, how: 'withdrawn' })
   })
 })
