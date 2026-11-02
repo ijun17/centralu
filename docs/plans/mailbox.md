@@ -1141,6 +1141,10 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
      2. a needsReply request (the orchestrator only; a task has no `needsReply`);
      3. the rest.
    - At most one task per wake, and for the orchestrator one asker. The other work waits for the next turn.
+   - **Not a wake of the mailbox:** the note an update's stop makes the next host send, to continue a cut turn or to tell a session
+     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host.md §4.8), goes in through
+     `deliverMail` and not through `drain`, so it is not mail-started: no `MailTurns.begin`, no `turn_seq` on any row, and the
+     tool starts the turn it runs on its own, so it is recorded as the CLI's own turn (`turnStarted`, `cli: true`), not as a mail's (#1902).
      Everything else rides along.
    - **Handed on** (§9.4): when no task is picked and the wake carries a `report` whose task's `cause_id` is a task
      to this recipient that is still unsettled, the work message is that cause. The report is then work of the turn

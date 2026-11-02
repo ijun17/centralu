@@ -316,6 +316,18 @@ export class MessageRecords {
     return readRows(raw)
   }
 
+  /**
+   * The input of the tool call a session recorded under `callId` (the `parentCallId` of a background task), whole: the command a
+   * shell was started with. Undefined when the call is not in the conversation or has no input (#1902)
+   */
+  toolCallInput(sessionId: string, callId: string): unknown {
+    const row = this.db
+      .prepare<unknown[], { payload: string }>(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'tool_call' AND json_valid(payload) AND json_extract(payload, '$.callId') = ? ORDER BY seq DESC LIMIT 1`)
+      .get(sessionId, callId)
+    const payload = row ? parseJson(row.payload) : undefined
+    return isObj(payload) && payload.callId === callId ? payload.input : undefined
+  }
+
   nextSeq(sessionId: string): number {
     const row = oneRow(this.db.prepare<unknown[], { m: number }>(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`).get(sessionId))
     return row.m + 1

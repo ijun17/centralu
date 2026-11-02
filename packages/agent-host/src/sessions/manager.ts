@@ -139,8 +139,8 @@ import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
-import { UPDATE_CONTINUE_TEXT } from '../adapters/input-receipts.js'
-import { UPDATE_CONTINUE_LINE } from './interruptions.js'
+import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
+import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
 import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
@@ -340,8 +340,11 @@ export class SessionManager {
   private quitNotices: { sessionId: string; requester: string; swapped?: true }[] = []
   /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
   private quitPersonWork: string[] = []
-  /** Turns a hub's update cut, to continue once the start is done, and who to tell (#1618, `continueCutTurns`) */
-  private updateCuts: { sessionId: string; requester: string | null }[] = []
+  /**
+   * Sessions an update's stop left, to tell once the start is done (#1618, `continueCutTurns`): a turn it cut is continued (`turn`) and
+   * its requester told; a session at rest whose tasks it stopped is woken for the note alone (#1902). `stopped`: what else it ended there
+   */
+  private updateCuts: { sessionId: string; requester: string | null; turn: boolean; stopped: Stopped | null }[] = []
   /**
    * The turns this host continues because an update cut them, and when its start took them up (#1618): said in every hello,
    * for a hub's callers. Taken at the start, before this host answers any hello, so a hub that connects while a Continue is
@@ -521,6 +524,8 @@ export class SessionManager {
     const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
+    /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
+    const stoppedBy = new Map<string, Stopped>()
     const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
     this.updateLists = lists
     for (const s of store.sessions.listSessions()) {
@@ -554,6 +559,8 @@ export class SessionManager {
         this.children.processGone(s.id)
         stoppedByQuit.push(fixed)
       }
+      const stopped = stale ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
+      if (stopped) stoppedBy.set(s.id, stopped)
       if (goesOn) {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
         store.sessions.upsertSession(fixed)
@@ -564,7 +571,7 @@ export class SessionManager {
       }
     }
     // A listed session this start does not find cut by that stop (at rest, gone, or in a later turn) has nothing to continue
-    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id)) this.updateLists?.done(id)
+    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the keeper's processes, and the turns an update cut (#1618) */
     const goingOn = new Set([...(keeperOpts.keptSessions ?? []), ...cutByUpdate.map((s) => s.id)])
     /*
@@ -584,7 +591,12 @@ export class SessionManager {
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })
     }
     // Who is told that the update cut the turn and it goes on (#1618): the same one a quit's notice would go to
-    this.updateCuts = cutByUpdate.map((s) => ({ sessionId: s.id, requester: requesterOf(s) ?? null }))
+    // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
+    const cutIds = new Set(cutByUpdate.map((s) => s.id))
+    this.updateCuts = [
+      ...cutByUpdate.map((s) => ({ sessionId: s.id, requester: requesterOf(s) ?? null, turn: true, stopped: stoppedBy.get(s.id) ?? null })),
+      ...[...stoppedBy].filter(([id]) => !cutIds.has(id)).map(([id, stopped]) => ({ sessionId: id, requester: null, turn: false, stopped })),
+    ]
     // A card the previous host left standing over a kept process closes back into its rest here too (#428)
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     // A turn that ended while the old host let go is told as such (#1186), once the start is done, as a quit's is
@@ -1185,17 +1197,22 @@ export class SessionManager {
    * as a kept process that could not be re-attached does (`turnLostInSwap`): idle, marked stopped, its report or its
    * requester told. Each is taken once: the list is emptied first, and its id leaves the file once its Continue was sent
    * or its loss reported (`UpdateResumeLists.done`), not before, so a host stopped in between leaves it for the next.
+   *
+   * The note also says what else the stop ended in the session: its background tasks and the cards that waited for the person
+   * (`updateNote`, #1902). A session at rest whose tasks it stopped is woken for the note alone: that is a continue of the
+   * update, not a turn a message or mail started (docs/plans/mailbox.md §8.2), so it goes in through `deliverMail` and not the
+   * mailbox's delivery, and a session the person woke first takes it into the turn they started.
    */
   private async continueCutTurns(): Promise<void> {
     const cuts = this.updateCuts
     this.updateCuts = []
-    const continued = new Set(cuts.map((c) => c.sessionId))
+    const continued = new Set(cuts.filter((c) => c.turn).map((c) => c.sessionId))
     await Promise.all(
-      cuts.map(async ({ sessionId, requester }) => {
+      cuts.map(async ({ sessionId, requester, turn, stopped }) => {
         const m = this.meta.get(sessionId)
         // Leaving before it went in: still listed, for the host that starts next
         if (this.disposing || this.handingOver) return
-        if (!m || !inTurn(m.state)) {
+        if (!m || (turn && !inTurn(m.state))) {
           // Gone, or stopped by the person before its Continue went in: nothing to continue
           this.restartPolicy.continuingTurns.delete(sessionId)
           this.notContinued(sessionId)
@@ -1206,12 +1223,18 @@ export class SessionManager {
           // Not sent once this host is leaving (a second update's stop while the session wakes): the host after it sends the one
           await this.events.deliverMail(
             sessionId,
-            { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
+            { text: updateNote(turn, stopped), quiet: false, line: turn ? UPDATE_CONTINUE_LINE : UPDATE_TASKS_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
             { leaving: () => this.handingOver || this.disposing, atRest: () => true },
           )
         } catch (e) {
           if (this.disposing || this.handingOver || this.meta.get(sessionId) !== m) return
           this.restartPolicy.continuingTurns.delete(sessionId)
+          if (!turn) {
+            // Nothing was cut: the agent is not told which tasks the update stopped, and the log says so
+            console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(e)})`)
+            this.updateLists?.done(sessionId)
+            return
+          }
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
           this.turnLostInSwap(m)
           this.notContinued(sessionId)
@@ -2554,7 +2577,15 @@ export class SessionManager {
      * their last output written (below), each with the last row of its conversation then: the mark the next start
      * continues it by. A list of its own, beside any an earlier stop left (turns this host had not continued yet)
      */
-    const cut = this.stoppingForUpdate && this.keeperOpts.updateResume ? cutTurns({ sessions: this.listSessions(), terminals: 0, commandRuns: 0 }) : []
+    const sessions = this.stoppingForUpdate && this.keeperOpts.updateResume ? this.listSessions() : []
+    const cut = cutTurns({ sessions, terminals: 0, commandRuns: 0 })
+    /*
+     * And what else the stop ends in them (#1902): the background tasks their processes hold, with the command of the call that
+     * started each, and the cards that wait for the person. Read here, before the processes go: the tool reports each task gone
+     * as its process ends, and the store's record of them is emptied at the next start. Idle sessions count: a dev server
+     * outlives the turn that started it.
+     */
+    const stopped = stoppedAtUpdate(sessions, (id, callId) => this.store.messages.toolCallInput(id, callId))
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
     for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
@@ -2566,8 +2597,10 @@ export class SessionManager {
     await Promise.allSettled([...this.adapters.values()].map((a) => a.settle?.()))
     // Closed once the processes are down, so their last deltas grow the open rows instead of opening new ones (#213)
     for (const id of [...this.record.streams.keys()]) this.record.closeStream(id)
-    if (cut.length && this.keeperOpts.updateResume) {
-      recordUpdateCut(this.keeperOpts.updateResume, cut.map((id) => ({ id, seq: this.store.messages.nextSeq(id) - 1 })))
+    if ((cut.length || stopped.length) && this.keeperOpts.updateResume) {
+      // One mark for both, read now: the processes are down and their last rows written, which the next start's reading must find
+      const mark = (id: string) => this.store.messages.nextSeq(id) - 1
+      recordUpdateCut(this.keeperOpts.updateResume, cut.map((id) => ({ id, seq: mark(id) })), stopped.map((x) => ({ ...x, seq: mark(x.id) })))
     }
     // Stamped after dispose finishes (see the comment on stampExternalSynced). Never stamped on a
     // crash — stamping the current time when the actual moment of death is unknown could swallow

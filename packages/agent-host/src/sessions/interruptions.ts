@@ -111,3 +111,6 @@ export function interruptionWords(i: Interruption): string {
 
 /** The line the conversation shows where that note went in */
 export const UPDATE_CONTINUE_LINE = 'Centralu was updated during this turn, which stopped it; Centralu continued it on the new version.'
+
+/** The line where a session at rest was told the update stopped its background tasks (#1902) */
+export const UPDATE_TASKS_LINE = 'Centralu was updated, which stopped background work of this session; Centralu told the agent so it can start again what it needs.'

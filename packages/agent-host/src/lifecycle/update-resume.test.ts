@@ -148,7 +148,7 @@ describe('the turns an update cut, in the data folder', () => {
     expect(parseUpdateResume(JSON.stringify({ v: 1, ids: ['s1'] }))).toBe('other')
     expect(parseUpdateResume('{"v":1,')).toBe('torn')
     const turns = [{ id: 's1', seq: 1 }, { id: 7, seq: 1 }, { id: '../x y', seq: 1 }, { id: 's2', seq: -1 }, { id: 's3', seq: 1.5 }, { id: 's4' }, null, { id: 's5', seq: 0 }]
-    expect(parseUpdateResume(JSON.stringify({ v: 1, turns }))).toEqual([{ id: 's1', seq: 1 }, { id: 's5', seq: 0 }])
+    expect(parseUpdateResume(JSON.stringify({ v: 1, turns }))).toEqual({ turns: [{ id: 's1', seq: 1 }, { id: 's5', seq: 0 }], stopped: [] })
   })
 
   it('a folder it cannot write in or read from loses the lists, never the stop or the start, and says why', () => {
