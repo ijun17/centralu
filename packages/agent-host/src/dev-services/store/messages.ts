@@ -322,8 +322,8 @@ export class MessageRecords {
    */
   toolCallInput(sessionId: string, callId: string): unknown {
     const row = this.db
-      .prepare<unknown[], { payload: string }>(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'tool_call' AND instr(payload, ?) > 0 ORDER BY seq DESC LIMIT 1`)
-      .get(sessionId, JSON.stringify(callId))
+      .prepare<unknown[], { payload: string }>(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'tool_call' AND json_valid(payload) AND json_extract(payload, '$.callId') = ? ORDER BY seq DESC LIMIT 1`)
+      .get(sessionId, callId)
     const payload = row ? parseJson(row.payload) : undefined
     return isObj(payload) && payload.callId === callId ? payload.input : undefined
   }

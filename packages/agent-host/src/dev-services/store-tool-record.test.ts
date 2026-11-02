@@ -232,6 +232,8 @@ describe('the call a background task came from (#1902)', () => {
       ts: seq,
     })
     s.messages.appendMessages([row(1, 'call-1', { command: 'one' }), row(2, 'call-10', { command: 'ten' }), row(3, 'call-2', undefined)])
+    // A later call whose input only mentions that id (a field of its input) does not take the command away
+    s.messages.appendMessages([row(4, 'call-5', { after: 'call-1' })])
     expect(s.messages.toolCallInput('s1', 'call-1')).toEqual({ command: 'one' })
     expect(s.messages.toolCallInput('s1', 'call-10')).toEqual({ command: 'ten' })
     expect(s.messages.toolCallInput('s1', 'call-2')).toBeUndefined()

@@ -3652,8 +3652,8 @@ the person's Continue would.
   a paragraph per thing the stop ended (the tasks to restart or drop, the card the person did not refuse); a session at
   rest whose tasks the stop ended is **woken for the note alone** and told only that. Both go in through `deliverMail`, the
   one door of #1618: the wake of a session at rest is a continue of the update, not a turn a message or mail started
-  (mailbox.md §8.2: the mailbox's delivery and `MailTurns.begin` are not involved), so a turn it starts has no starter and
-  counts nothing against a sender's budget. A session the person already woke takes the note into their turn (quiet). The
+  (mailbox.md §8.2: the mailbox's delivery and `MailTurns.begin` are not involved), the tool starts that turn on its own, so it is recorded as the CLI's own turn of the person's work (`turnStarted`:
+  `by: 'work'`, `cli: true`; `beginOther`), with no mail behind it, and counts nothing against a sender's budget. A session the person already woke takes the note into their turn. The
   agent decides what to restart: nothing is rerun by Centralu. The deny text a closed card is released with
   (`Session closed`) does not reach the model (measured: the CLI writes its own result for a tool call whose process
   ended), so the note is the one channel for the card, and it is the same for every tool; an older host reads `turns` only

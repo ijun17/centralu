@@ -21,7 +21,7 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
     expect(out).toEqual([
       {
         id: 'a',
-        approvals: 0,
+        approvals: false,
         questions: [],
         tasks: [
           { kind: 'shell', description: 'task t1', command: 'npm run dev' },
@@ -42,15 +42,17 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
         backgroundTasks: [task('t', { description: long })],
       }),
     ])
-    expect(out[0]!.approvals).toBe(1)
+    expect(out[0]!.approvals).toBe(true)
     expect(out[0]!.questions[0]!.length).toBeLessThan(600)
     expect(out[0]!.tasks[0]!.description.length).toBeLessThan(600)
   })
 
   it('is read back whole from the list, and an entry another build wrote in another shape is skipped, not guessed', () => {
-    const entry = { id: 's1', seq: 3, tasks: [{ kind: 'shell', description: 'd', command: 'c' }, { kind: 'surprise', description: 'd' }, { description: 'no kind' }], approvals: 2, questions: ['q', 4] }
-    expect(readStopped(entry)).toEqual({ id: 's1', seq: 3, tasks: [{ kind: 'shell', description: 'd', command: 'c' }], approvals: 1, questions: ['q'] })
+    const entry = { id: 's1', seq: 3, tasks: [{ kind: 'shell', description: 'd', command: 'c' }, { kind: 'surprise', description: 'd' }, { description: 'no kind' }], approvals: true, questions: ['q', 4] }
+    expect(readStopped(entry)).toEqual({ id: 's1', seq: 3, tasks: [{ kind: 'shell', description: 'd', command: 'c' }], approvals: true, questions: ['q'] })
     expect(readStopped({ id: 's1', seq: -1 })).toBeNull()
+    // Only a true is an approval that waited
+    expect(readStopped({ id: 's1', seq: 3, approvals: 1 })).toMatchObject({ approvals: false })
     expect(readStopped('s1')).toBeNull()
     const text = JSON.stringify({ v: 1, turns: [{ id: 'a', seq: 1 }], stopped: [entry, { id: '../bad id', seq: 1 }] })
     expect(parseUpdateResume(text)).toMatchObject({ turns: [{ id: 'a', seq: 1 }], stopped: [{ id: 's1' }] })
@@ -60,7 +62,7 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
 
   it('a stop that ended only tasks still writes a list; a session is taken by its mark, and the list goes once all it names are dealt with', () => {
     const f = memoryUpdateFolder()
-    recordUpdateCut(f, [{ id: 'a', seq: 2 }], [{ id: 'a', seq: 2, tasks: [], approvals: 1, questions: [] }, { id: 'b', seq: 5, tasks: [{ kind: 'shell', description: 'd' }], approvals: 0, questions: [] }])
+    recordUpdateCut(f, [{ id: 'a', seq: 2 }], [{ id: 'a', seq: 2, tasks: [], approvals: true, questions: [] }, { id: 'b', seq: 5, tasks: [{ kind: 'shell', description: 'd' }], approvals: false, questions: [] }])
     const lists = new UpdateResumeLists(f)
     expect([...lists.ids()].sort()).toEqual(['a', 'b'])
     expect(lists.stoppedOf('b', 5)).toMatchObject({ id: 'b' })
@@ -70,7 +72,7 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
     lists.done('b')
     expect(f.files.size).toBe(0)
     const only = memoryUpdateFolder()
-    recordUpdateCut(only, [], [{ id: 'z', seq: 1, tasks: [{ kind: 'shell', description: 'd' }], approvals: 0, questions: [] }])
+    recordUpdateCut(only, [], [{ id: 'z', seq: 1, tasks: [{ kind: 'shell', description: 'd' }], approvals: false, questions: [] }])
     expect(only.files.size).toBe(1)
     const none = memoryUpdateFolder()
     recordUpdateCut(none, [], [])
@@ -79,7 +81,7 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
 })
 
 describe("Centralu's note after an update (#1902)", () => {
-  const stopped = { id: 's', seq: 1, tasks: [{ kind: 'shell' as const, description: 'Dev server', command: 'npm run dev\nrm -rf x' }, { kind: 'agent' as const, description: 'Review' }], approvals: 0, questions: [] }
+  const stopped = { id: 's', seq: 1, tasks: [{ kind: 'shell' as const, description: 'Dev server', command: 'npm run dev\nrm -rf x' }, { kind: 'agent' as const, description: 'Review' }], approvals: false, questions: [] }
 
   it('a cut turn keeps the sentence the Continue always had; a session at rest is told only what stopped', () => {
     expect(updateNote(true, null)).toBe(UPDATE_CONTINUE_TEXT)
@@ -92,7 +94,7 @@ describe("Centralu's note after an update (#1902)", () => {
   })
 
   it('names the cards the update closed and says the person did not refuse them', () => {
-    const note = updateNote(true, { ...stopped, tasks: [], approvals: 1, questions: ['Sushi or ramen?'] })
+    const note = updateNote(true, { ...stopped, tasks: [], approvals: true, questions: ['Sushi or ramen?'] })
     expect(note.startsWith(UPDATE_CONTINUE_TEXT)).toBe(true)
     expect(note).toContain('The update closed the permission card of your pending tool call. The person did not refuse it, whatever its result says.')
     expect(note).toContain('Ask again if you still need the answer:\n- "Sushi or ramen?"')

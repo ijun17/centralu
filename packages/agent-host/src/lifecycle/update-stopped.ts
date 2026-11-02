@@ -11,7 +11,7 @@ import { isObj } from '../json-value.js'
 export type StoppedTask = { kind: BackgroundTaskKind; description: string; command?: string }
 
 /** One session as the stop left it: `seq` is the last row of its conversation then, the mark the turns are continued by */
-export type Stopped = { id: string; seq: number; tasks: StoppedTask[]; approvals: number; questions: string[] }
+export type Stopped = { id: string; seq: number; tasks: StoppedTask[]; approvals: boolean; questions: string[] }
 
 const MAX_TASKS = 20
 const MAX_QUESTIONS = 5
@@ -36,7 +36,7 @@ export function stoppedAtUpdate(sessions: readonly SessionInfo[], inputOf: (sess
       return { kind: t.kind, description: clip(t.description, MAX_TEXT), ...(command ? { command } : {}) }
     })
     const questions = s.pendingQuestions.flatMap((p) => p.questions.map((q) => clip(q.question, MAX_TEXT))).slice(0, MAX_QUESTIONS)
-    const approvals = s.pendingApproval ? 1 : 0
+    const approvals = !!s.pendingApproval
     if (tasks.length || questions.length || approvals) out.push({ id: s.id, tasks, approvals, questions })
   }
   return out
@@ -56,7 +56,7 @@ export function readStopped(o: unknown): Stopped | null {
     })
   }
   const questions = Array.isArray(o.questions) ? (o.questions as unknown[]).filter((q): q is string => typeof q === 'string').slice(0, MAX_QUESTIONS).map((q) => clip(q, MAX_TEXT)) : []
-  const approvals = typeof o.approvals === 'number' && o.approvals > 0 ? 1 : 0
+  const approvals = o.approvals === true
   return { id: o.id, seq: o.seq, tasks, approvals, questions }
 }
 

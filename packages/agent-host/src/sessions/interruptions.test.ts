@@ -901,6 +901,72 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
     await eventually(() => f.files.size === 0)
   })
 
+  it('a host that starts to leave while the idle session wakes sends it no note, and the list stays for the next host, which sends it (#1902 review)', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id } = await withDevServer(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    // The tool is slow to start the process: a second update's stop begins meanwhile, and lists nothing (no process yet)
+    let release: (() => void) | undefined
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.sessionId === id) await new Promise<void>((r) => (release = r))
+      return create(opts, emit)
+    }
+    await eventually(() => release !== undefined)
+    expect(f.ids()).toEqual([id])
+    const stopping = stopForUpdate(b)
+    release!()
+    await stopping
+    expect(sentTo(b, id)).toHaveLength(0)
+    expect(f.ids()).toEqual([id])
+    const c = host({ updateResume: f })
+    await eventually(() => sentTo(c, id).length === 1)
+    expect(sentTo(c, id)[0]).toContain('- shell command: "npm run dev -- --port 4000"')
+    await eventually(() => f.files.size === 0)
+  })
+
+  it('a session the stop left in a turn that no list continues is a quit, as before: reset, marked stopped, and not woken for the note', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id } = await withDevServer(a)
+    await a.mgr.send(id, 'and now something else')
+    await stopForUpdate(a)
+    // The list names the tasks but not this turn (a person's stop took it, or another build wrote the list)
+    const [name, text] = [...f.files.entries()][0]!
+    f.files.set(name, JSON.stringify({ ...JSON.parse(text), turns: [] }))
+    const b = host({ updateResume: f })
+    expect(info(b, id)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await startNoticesRan()
+    expect(sentTo(b, id)).toHaveLength(0)
+    expect(b.claude.handles.has(id)).toBe(false)
+    expect(f.files.size).toBe(0)
+  })
+
+  it('an idle session that cannot be woken for the note is left at rest, not marked as quit; the list goes', async () => {
+    const f = memoryUpdateFolder()
+    const a = host({ updateResume: f })
+    const { id } = await withDevServer(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    const create = b.claude.createSession.bind(b.claude)
+    let tried = 0
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.sessionId === id) {
+        tried++
+        throw new Error('its conversation is gone there')
+      }
+      return create(opts, emit)
+    }
+    await eventually(() => f.files.size === 0)
+    // It was woken for the note, once, and the wake failed
+    expect(tried).toBe(1)
+    expect(info(b, id).state).toBe('waiting_input')
+    expect(info(b, id).interruption ?? null).toBeNull()
+    expect(sentTo(b, id)).toHaveLength(0)
+  })
+
   it('lists only a session holding something, and only for an update: an empty one and a quit list nothing', async () => {
     const f = memoryUpdateFolder()
     const a = host({ updateResume: f })

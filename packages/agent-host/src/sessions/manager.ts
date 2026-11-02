@@ -524,8 +524,8 @@ export class SessionManager {
     const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
-    /** Sessions at rest whose background tasks an update's stop ended (#1902): woken once the start is done, to be told */
-    const wokenByUpdate: { id: string; stopped: Stopped }[] = []
+    /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
+    const stoppedBy = new Map<string, Stopped>()
     const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
     this.updateLists = lists
     for (const s of store.sessions.listSessions()) {
@@ -560,7 +560,7 @@ export class SessionManager {
         stoppedByQuit.push(fixed)
       }
       const stopped = stale ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
-      if (stopped && !goesOn) wokenByUpdate.push({ id: s.id, stopped })
+      if (stopped) stoppedBy.set(s.id, stopped)
       if (goesOn) {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
         store.sessions.upsertSession(fixed)
@@ -571,7 +571,7 @@ export class SessionManager {
       }
     }
     // A listed session this start does not find cut by that stop (at rest, gone, or in a later turn) has nothing to continue
-    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !wokenByUpdate.some((w) => w.id === id)) this.updateLists?.done(id)
+    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the keeper's processes, and the turns an update cut (#1618) */
     const goingOn = new Set([...(keeperOpts.keptSessions ?? []), ...cutByUpdate.map((s) => s.id)])
     /*
@@ -591,9 +591,11 @@ export class SessionManager {
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })
     }
     // Who is told that the update cut the turn and it goes on (#1618): the same one a quit's notice would go to
+    // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
+    const cutIds = new Set(cutByUpdate.map((s) => s.id))
     this.updateCuts = [
-      ...cutByUpdate.map((s) => ({ sessionId: s.id, requester: requesterOf(s) ?? null, turn: true, stopped: lists?.stoppedOf(s.id, s.lastSeq) ?? null })),
-      ...wokenByUpdate.map((w) => ({ sessionId: w.id, requester: null, turn: false, stopped: w.stopped })),
+      ...cutByUpdate.map((s) => ({ sessionId: s.id, requester: requesterOf(s) ?? null, turn: true, stopped: stoppedBy.get(s.id) ?? null })),
+      ...[...stoppedBy].filter(([id]) => !cutIds.has(id)).map(([id, stopped]) => ({ sessionId: id, requester: null, turn: false, stopped })),
     ]
     // A card the previous host left standing over a kept process closes back into its rest here too (#428)
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
@@ -1221,7 +1223,7 @@ export class SessionManager {
           // Not sent once this host is leaving (a second update's stop while the session wakes): the host after it sends the one
           await this.events.deliverMail(
             sessionId,
-            { text: updateNote(turn, stopped), quiet: !turn && inTurn(m.state), line: turn ? UPDATE_CONTINUE_LINE : UPDATE_TASKS_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
+            { text: updateNote(turn, stopped), quiet: false, line: turn ? UPDATE_CONTINUE_LINE : UPDATE_TASKS_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
             { leaving: () => this.handingOver || this.disposing, atRest: () => true },
           )
         } catch (e) {
