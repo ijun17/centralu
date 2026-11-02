@@ -23,6 +23,7 @@ import {
   procGone,
   processStartTime,
   procStamp,
+  withoutSeparator,
   PS_ENV,
   readHolder,
   signalExit,
@@ -779,4 +780,13 @@ describe('the runners (real processes)', () => {
     },
     120_000 * SLOW,
   )
+})
+
+describe('withoutSeparator (#1692)', () => {
+  it('drops the bare -- that pnpm hands on, so a filter after it reaches Playwright', () => {
+    expect(withoutSeparator(['test', '--config', 'c.ts', '--', 'tool-setup'])).toEqual(['test', '--config', 'c.ts', 'tool-setup'])
+  })
+  it('leaves other arguments alone', () => {
+    expect(withoutSeparator(['test', '--grep', 'a--b', '--workers=1'])).toEqual(['test', '--grep', 'a--b', '--workers=1'])
+  })
 })

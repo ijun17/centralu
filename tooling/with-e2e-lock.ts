@@ -18,9 +18,10 @@
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { acquireLock, passesSignalOn, signalExit, trackChild, type Held } from './e2e-lock.js'
+import { acquireLock, passesSignalOn, signalExit, trackChild, withoutSeparator, type Held } from './e2e-lock.js'
 
-const [program, ...args] = process.argv.slice(2)
+const [program, ...rest] = process.argv.slice(2)
+const args = withoutSeparator(rest)
 if (program !== 'playwright' && program !== 'node') {
   console.error('usage: with-e2e-lock.ts playwright <playwright arguments> | with-e2e-lock.ts node <node arguments>')
   process.exit(2)

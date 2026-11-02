@@ -58,7 +58,7 @@ function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: st
     'packaging/npm/centralu/bin/centralu.mjs': fakeServe('', { fromPackage: true, installInfo: INSTALL_INFO }),
     'packaging/npm/centralu/bin/serve.mjs': SERVE_SHIM,
     // Installed dependencies, which git ignores
-    'node_modules/esbuild/package.json': '{}',
+    'packages/agent-host/node_modules/esbuild/package.json': '{}',
   }
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true })
@@ -154,7 +154,7 @@ describe('remote-install.mjs: a dev build from a commit (#1036)', () => {
     expect(refusal(() => build(setup({ base: '0.0.0-dev' })))).toBe('dev_base')
     rmSync(root, { recursive: true, force: true })
     const bare = setup()
-    rmSync(join(bare.repo, 'node_modules'), { recursive: true })
+    rmSync(join(bare.repo, 'packages', 'agent-host', 'node_modules'), { recursive: true })
     expect(refusal(() => build(bare))).toMatch(/^dev_deps /)
   })
 

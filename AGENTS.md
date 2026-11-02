@@ -21,6 +21,7 @@ behind each line live in the linked documents.
 |---|---|
 | Everything that has to pass | `pnpm verify` (lint, dependency rules, types, tests); CI runs it too |
 | UI scenarios | `CI=1 pnpm e2e` (waits if another run holds the machine's lock and says who; `tooling/e2e-lock.ts`) |
+| One UI spec or filter | `CI=1 pnpm e2e tool-setup` (same lock; a filter after `--` reaches Playwright too) |
 | UI scenarios as CI runs them (one engine at a time) | `CI=1 E2E_BROWSER=webkit pnpm e2e` (or `=chromium`) |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
