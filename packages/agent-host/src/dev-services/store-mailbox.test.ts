@@ -554,3 +554,83 @@ describe('what a store must not trust', () => {
     }
   })
 })
+
+describe('what the message service reads (M2)', () => {
+  it('unreadFor lists what a recipient may read and has not, delivered or not, and leaves out what is held out, withdrawn, gone or read', () => {
+    const { box, send } = world()
+    const plain = send({ sender: A }, B)
+    const delivered = send({ sender: C }, B)
+    const read = send({ sender: A }, B)
+    const policy = send({ sender: A }, B)
+    const loop = send({ sender: A }, B)
+    const uncertain = send({ sender: A }, B)
+    const withdrawn = send({ sender: A, needsReply: true }, B)
+    const gone = send({ sender: A, needsReply: true }, B)
+    const elsewhere = send({ sender: A }, C)
+    box.markDelivered(B, [delivered], NOW, 1)
+    box.markRead(B, [read], NOW)
+    box.hold(B, [policy], 'policy')
+    box.hold(B, [loop], 'loop')
+    box.markUncertain(B, [uncertain])
+    box.settle(withdrawn, B, 'withdrawn', NOW)
+    box.settle(gone, B, 'gone', NOW)
+    expect(box.unreadFor(B).map((p) => p.row.messageId)).toEqual([plain, delivered, uncertain])
+    expect(box.unreadFor(B)[0]?.message.id).toBe(plain)
+    expect(box.unreadFor(C).map((p) => p.row.messageId)).toEqual([elsewhere])
+    expect(box.unreadFor('session:h1/nobody')).toEqual([])
+  })
+
+  it('postsSince counts what a sender sent since, of any kind, to anyone', () => {
+    const { box, send } = world()
+    send({ sender: A, createdAt: NOW - 120_000 }, B)
+    send({ sender: A, createdAt: NOW - 30_000 }, B, C)
+    send({ sender: A, createdAt: NOW - 1_000, kind: 'task' }, C)
+    send({ sender: B, createdAt: NOW - 1_000 }, A)
+    expect(box.postsSince(A, NOW - 60_000)).toBe(2)
+    expect(box.postsSince(A, NOW - 200_000)).toBe(3)
+    expect(box.postsSince(B, NOW - 60_000)).toBe(1)
+    expect(box.postsSince('session:h1/nobody', 0)).toBe(0)
+  })
+
+  it('movable lists what moveRows moves, and moves nothing', () => {
+    const { box, send } = world()
+    const watched = send({ sender: A, needsReply: true }, B)
+    const unreadNote = send({ sender: C }, B)
+    const readNote = send({ sender: A }, B)
+    const settled = send({ sender: A, needsReply: true }, B)
+    const own = send({ sender: C, needsReply: true }, B)
+    box.markRead(B, [readNote], NOW)
+    box.settle(settled, B, 'done', NOW)
+    box.markRead(B, [settled], NOW)
+    // Watched and unsettled, or unread; not what is read and needs nothing, not what is settled and read, and not mail from the heir itself
+    expect(box.movable(B, ORC, 'all')).toEqual([watched, unreadNote, own])
+    expect(box.movable(B, C, 'all')).toEqual([watched])
+    expect(box.movable(B, ORC, { recipients: [C] })).toEqual([unreadNote, own])
+    expect(box.recipient(watched, B)).toBeDefined()
+    const preview = box.movable(B, ORC, 'all')
+    expect(box.moveRows(B, ORC, 'all')).toEqual(preview)
+  })
+
+  it('deleteRows deletes the rows named and each message left with none, and no other', () => {
+    const { box, send } = world()
+    const both = send({ sender: A }, B, C)
+    const only = send({ sender: A }, B)
+    expect(box.deleteRows([{ messageId: both, recipient: B }, { messageId: only, recipient: B }, { messageId: only, recipient: C }])).toBe(2)
+    expect(box.message(only)).toBeUndefined()
+    expect(box.message(both)).toBeDefined()
+    expect(box.recipients(both).map((r) => r.recipient)).toEqual([C])
+  })
+
+  it('refusedRecords lists the records of one project, or of every project when none is given', () => {
+    const { box } = world()
+    const refused = (projectId: string, caller: string) =>
+      box.insert(mail({ sender: 'centralu', kind: 'notice', facts: { refused: { tool: 'start_agent', target: 't', firstLine: 'x', projectId } } }), [to(caller)]).id
+    const one = refused('p1', A)
+    const two = refused('p2', B)
+    const three = refused('p1', C)
+    box.insert(mail({ sender: 'centralu', kind: 'notice', facts: { quiet: true } }), [to(A)])
+    expect(box.refusedRecords('p1').map((p) => p.message.id)).toEqual([one, three])
+    expect(box.refusedRecords().map((p) => p.message.id).sort()).toEqual([one, two, three].sort())
+    expect(box.refusedRecords('p9')).toEqual([])
+  })
+})

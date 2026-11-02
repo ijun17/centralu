@@ -197,6 +197,9 @@ export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'budget', 'p
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
+/** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
+export const HIDDEN_HOLDS = ['policy', 'loop'] as const
+
 /** The ids as one JSON parameter, read with `json_each` */
 const idList = (ids: readonly string[]): string => JSON.stringify(ids)
 
@@ -358,6 +361,16 @@ export class MailboxRecords {
     )
   }
 
+  /** What `recipient` may read and has not, due or not and delivered or not, with its message, oldest first: not what is held out (a phantom, §5.5), withdrawn or gone (`mail read` with no id, the Inbox; §8.4) */
+  unreadFor(recipient: string): PendingRow[] {
+    return this.withMessages(
+      this.rows(
+        `r.recipient = ? AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') AND COALESCE(r.held, '') NOT IN ('policy', 'loop', 'dismissed') ORDER BY m.created_at, m.id`,
+        recipient,
+      ),
+    )
+  }
+
   /**
    * The recipients with mail waiting to be delivered, due or not: whom the delivery sweep looks at. `nextDue` says when
    * one not due yet is
@@ -491,6 +504,17 @@ export class MailboxRecords {
     })
   }
 
+  /** Rows that have served (the refused records of a project that was trusted or dismissed, §7.4): deleted, and each message left with no row */
+  deleteRows(rows: readonly RowKey[]): number {
+    return this.transaction(() => {
+      const del = this.db.prepare(`DELETE FROM mail_recipients WHERE message_id = ? AND recipient = ?`)
+      let n = 0
+      for (const r of rows) n += del.run(r.messageId, r.recipient).changes
+      this.dropOrphans(rows.map((r) => r.messageId))
+      return n
+    })
+  }
+
   // ── Settling and waiting ──
 
   /** Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). Returns how many */
@@ -570,6 +594,11 @@ export class MailboxRecords {
 
   // ── Guards and counts ──
 
+  /** Messages `sender` sent since `since`: the post rate (§7.5), read from `mail_sender` */
+  postsSince(sender: string, since: number): number {
+    return this.count(`SELECT COUNT(*) AS n FROM mail WHERE sender = ? AND created_at >= ?`, sender, since)
+  }
+
   /** Messages from `sender` with a row to `recipient` that answer nothing, since `since` (the pair rate, §7.5) */
   newSince(sender: string, recipient: string, since: number): number {
     return this.count(
@@ -638,13 +667,13 @@ export class MailboxRecords {
     return this.rows(`m.sender = ? AND m.needs_reply = 1 AND r.released_at IS NOT NULL AND r.told_at IS NULL ORDER BY m.created_at, m.id, r.recipient`, sender)
   }
 
-  /** The records of delegations refused for `projectId` (§7.4), each with the caller it went to, oldest first */
-  refusedRecords(projectId: string): PendingRow[] {
+  /** The records of delegations refused for `projectId` (§7.4), or for every project when none is given, each with the caller it went to */
+  refusedRecords(projectId?: string): PendingRow[] {
     return this.withMessages(
       this.rows(
-        `m.sender = 'centralu' AND m.kind = 'notice' AND json_valid(m.facts) AND json_extract(m.facts, '$.refused.projectId') = ?
+        `m.sender = 'centralu' AND m.kind = 'notice' AND json_valid(m.facts) AND json_extract(m.facts, '$.refused.projectId') IS NOT NULL AND (@project IS NULL OR json_extract(m.facts, '$.refused.projectId') = @project)
          ORDER BY r.recipient, m.created_at, m.id`,
-        projectId,
+        { project: projectId ?? null },
       ),
     )
   }
@@ -659,15 +688,7 @@ export class MailboxRecords {
    */
   moveRows(from: string, to: string, scope: HandOverScope): string[] {
     return this.transaction(() => {
-      const inScope = scope === 'all' ? '1' : `m.sender IN (SELECT value FROM json_each(@senders))`
-      const ids = this.db
-        .prepare<{ from: string; to: string; senders: string }, { id: string }>(
-          `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-            WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
-            ORDER BY m.created_at, m.id`,
-        )
-        .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
-        .map((r) => r.id)
+      const ids = this.movable(from, to, scope)
       this.db
         .prepare(
           `UPDATE OR IGNORE mail_recipients SET recipient = @to, turn_seq = NULL,
@@ -682,6 +703,19 @@ export class MailboxRecords {
       this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
       return ids
     })
+  }
+
+  /** The ids of the messages a handoff would move, in the order sent: what `moveRows` moves, read only (the archive's preview, §7.7) */
+  movable(from: string, to: string, scope: HandOverScope): string[] {
+    const inScope = scope === 'all' ? '1' : `m.sender IN (SELECT value FROM json_each(@senders))`
+    return this.db
+      .prepare<{ from: string; to: string; senders: string }, { id: string }>(
+        `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
+          ORDER BY m.created_at, m.id`,
+      )
+      .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
+      .map((r) => r.id)
   }
 
   /**

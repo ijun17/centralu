@@ -1179,7 +1179,14 @@ defers when it is reached.
    ```
 
    `about` is the messages of `facts.of` or `facts.unanswered` (the caller loads them). A `task`, a `report` and
-   Centralu's notices are written with depth 0.
+   Centralu's notices are written with depth 0. The person's word resets the depth (D9, §10.10): `depthOf` returns 0
+   for a cause whose sender is the person, so the orchestrator relaying the person's word to a worker is a pair, not a
+   hop (the snippet above, read literally, would give 1; M2 builds D9's sentence and §10.10's trace).
+
+   **A turn resumed after a restart or an update is not mail-started** (owner, 2026-11-02; remote stop and continue,
+   #1626; a requirement of the switch stack, M3a-host). It writes no `mail_turns` row, so it does not count toward the
+   host cap (`HOST_MAIL_TURNS_PER_HOUR`) or the loop guard, and it adds no depth hop. The original turn's row, if
+   there is one, keeps its `starter_id`, so what the resumed turn sends has the cause the original turn had.
 
 ### 8.3 The wake frame (`buildMessageFrame`, at drain time)
 
@@ -2068,28 +2075,35 @@ a copy of a store from before the step starts, and its log shows step 65 ran.
   false to a `message` with `needs_reply = 0`, not `urgent`, whose sender is neither `receiver.parent` nor the sender of
   an unsettled task to the receiver, `owesTask`, which `send` reads with `newestTask`), and the new refusal reasons (S9, S15's `untrusted_project`).
 - In protocol `entities/sessions.ts`: `workTasks(tasks)` (§10.1). Nothing calls it yet but its test.
-- Tests: `messages.test.ts`, `messages-drain.test.ts`, `reach.test.ts`, `frame-messages.test.ts`, and a
-  `workTasks` case in the protocol's sessions test.
+- In `store/mailbox.ts` (M1's file, additions only; Q-M2-3): `unreadFor`, `postsSince`, `movable`, `deleteRows`, `HIDDEN_HOLDS`, and
+  `refusedRecords` without a project.
+- Tests: `messages.test.ts`, `messages-drain.test.ts`, `reach.test.ts`, `frame-messages.test.ts`, with their helper
+  `messages.test-helpers.ts`, cases in `rules.test.ts` and `store-mailbox.test.ts`, and a `workTasks` case in the protocol's
+  sessions test.
 
 **Types** (in `messages.ts` unless named)
 
 ```ts
 // reach.ts
 export type ReachHost = {
-  session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere' } | undefined
+  session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere'; name?: string } | undefined
   orchestratorId(): string | null
-  orchestratorAsks(): boolean                 // relations.ts:84-87
+  orchestratorAsks(): boolean                 // true: sessions may write requests to it (relations.ts:84-87 returned the reason they may not, Q-M2-2)
   appCalledBy(app: string, session: string): boolean
-  project(projectId: string): { trusted: boolean } | undefined   // §7.2; undefined: unknown here
+  project(projectId: string): { trusted: boolean; name?: string } | undefined   // §7.2; undefined: unknown here
   askGroupMembers(address: string): string[]  // the session addresses of its group, as relations.ts groups today
 }
 export type MailReach = {
-  mayWrite(from: string, to: string): RefusalReason | null
+  mayWrite(from: string, to: string, asRequest?: boolean): RefusalReason | null   // asRequest (default true) false: no orchestrator_asks (Q-M2-1)
   untrusted(projectId: string | null): boolean                             // §7.2, the one rule
   holdFor(m: Pick<MailRow, 'kind' | 'sender' | 'senderProject' | 'depth'>, recipient: string, released?: boolean): 'policy' | 'loop' | null   // §7.4; 'policy' first, then 'loop' above MAX_DEPTH unless released (the person's Resume)
   refusesDelegation(callerId: string, target: { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }): string | null   // §7.4: the untrusted project id, or null
   isOrchestrator(address: string): boolean
   askGroupMembers(address: string): string[]
+  projectOf(address: string): string | null      // what the service reads of a session, so it never reaches into ReachHost
+  parentOf(address: string): string | null        // the address of the session that started it (askedBy)
+  labelOf(address: string): string                // its name, else its address (Q-M2-5)
+  projectLabel(projectId: string): string         // its name, else its id
 }
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
 export type SendInput = {
@@ -2105,14 +2119,16 @@ export type TurnReport = {
   error?: string; reason?: string; paused?: number; waitingOn?: number; personNote?: boolean
 }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
-export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held' }
+export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true }   // withheld: a request's words are for its asker's turn (Q-M2-4)
 export type ReadView = { items: ReadItem[]; older: string | null; marked: number }
 export type InboxView = {
   needReply: ReadItem[]; unread: ReadItem[]
   waiting: { row: RecipientRow; message: MailRow }[]; held: { row: RecipientRow; message: MailRow; why: 'policy' | 'loop' }[]
 }
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean }
-export type MailCalls = { read(id?: string): string; answer(id: string): string; done(id: string): string; inbox(): string; sessions(): string }
+export type MailCalls = { read(id?: string): string; answer(id: string): string; done(id: string): string; inbox(): string; sessions(): string }   // frame.ts calls it MessageCalls while the old MailCalls exists; M3c renames
+export type QuietReason = 'budget'
+export type HoldReason = 'policy' | 'loop'
 export type DrainResult = {
   text: string; messageIds: string[]; inline: string[]; pointed: string[]; wake: boolean; immediate: boolean
   needsReply: boolean; line: string; quieted: { messageId: string; reason: QuietReason }[]
@@ -2121,7 +2137,8 @@ export type DrainResult = {
 ```
 
 `DrainOptions` keeps today's fields (`again`, `skip`, `quiet`, `holdBack`). `holdBack` and `quiet` receive
-`(message, row)`, with no thread.
+`(message, row)`, with no thread. `buildMessageFrame(items, calls, budget)` and `MessageFrameItem` (its id field is `messageId`, as the
+old item's, so both builders share one fitting loop) are in `frame.ts`.
 
 **`MessageService`**
 
@@ -2221,6 +2238,34 @@ calls `MessageService` except its tests.
 2. No product file imports `messages.ts` or `reach.ts` yet.
 3. The frame's header lines are byte-identical to today's (a test compares them with `buildMailFrame`'s).
 4. Every constant of this design is in `mail/rules.ts` and nowhere else.
+
+**Design questions** (found while building M2; none changes a decision of §1, so each has the choice made, to be confirmed
+or overruled by the orchestrator or the owner)
+
+| # | Question | Choice made |
+|---|---|---|
+| Q-M2-1 | `mayWrite(from, to)` has no message, but `orchestrator_asks` is about requests only (§7.6; `relations.ts:84-90` exempts a worker's reply in a thread the orchestrator opened) | `mayWrite` takes an optional third argument `asRequest` (default true). The service passes false for an answer to the orchestrator's `needsReply` message or task and for a clarification, and judges a stored message the same way at drain |
+| Q-M2-2 | `ReachHost.orchestratorAsks(): boolean` against today's `manager.orchestratorAsks(): string \| null`, which returns the reason sessions may *not* ask | true means sessions may ask. The sentence is `REFUSAL_TEXT.orchestrator_asks` in `rules.ts` (the manager's, copied; M3c deletes the manager's) |
+| Q-M2-3 | M1's `MailboxRecords` lacks what M2 reads: the post rate, the unread mail of `read` and `inbox`, the handoff preview, deleting the refused records, and every project's refused records for `heldByProject` | `postsSince`, `unreadFor`, `movable` (the select `moveRows` uses), `deleteRows`, `refusedRecords()` without a project, and `HIDDEN_HOLDS`, added to `store/mailbox.ts` with tests; additions only |
+| Q-M2-4 | `ReadItem` cannot say that a request's words are for its asker's turn only (§7.6, "words flow up") | `withheld: true` with the body left out. `read` with no id skips such a request and leaves it unread, since marking it read would take it out of delivery and strand it (#1683); `read` with an id shows the header. §7.6's "marking it done there is refused" is not built: S9 has no reason or sentence for it, and M3b's tool can refuse on `withheld` |
+| Q-M2-5 | S3, S13, S14, S16 and S9's `pair_rate` and `repeat` say `<name>` and `<project>`, and `ReachHost` has no names | optional `name` on the `session()` and `project()` answers; sentences use it, or the address or project id without. M3b's `resolveTo` fills it |
+| Q-M2-6 | D8 lists `answered` for every watched row, a task included | only a `needsReply` message is settled by an answer. An answer to a task settles nothing (its report does, D3: a task is not a reply watch), or a worker's "on it" would settle the task and its report would be `closed` untold. For the same reason `done` by a task's receiver is `unwatched`; its sender's `done` withdraws it |
+| Q-M2-7 | §8.2's `depthOf` snippet gives 1 for person → orchestrator → worker, and D9 and §10.10 say the person's word resets and that trace is depth 0 | `depthOf` returns 0 for a cause whose sender is the person |
+| Q-M2-8 | S9 says `rate: as today`; today's reason word is `rate_limited` | `rate_limited` stays; no new word |
+| Q-M2-9 | §7.5 does not say who `pair_rate` counts | non-reply messages from a session to a session (the orchestrator too), not to the person and not from an app. A clarification is a non-reply and counts |
+| Q-M2-10 | A send to several recipients where one is refused | the whole send is refused, nothing is written. The thread era skipped members that could not be reached |
+| Q-M2-11 | `DrainResult.line` and the inline header have no sentence in §15 (today's say "in N threads") | the line is `✉ <n> message(s), from <relation words>`; the inline header is today's without the thread: `Message <id> from <relation> (<kind>); the person wrote it:` |
+| Q-M2-12 | The `handedOver` notice (§5.4, §6.5) has no body in §15 | one line, "A message addressed to the previous holder was moved to you.", quiet; posted for each row a handoff or the role's move brings to a session that did not have it. The owner's wording is needed |
+| Q-M2-13 | `task()` with a text over the body limit: the old record cut it with a sentence that §15 does not have | refused `too_long`; M3a decides how a delegation tool shortens a text |
+| Q-M2-14 | `wakesMessage(m)` "(`facts.quiet` and the kind)": v61's `wakes()` depended on the kind and the app's flags | M1's adoption already folds `wakes()` into `facts.quiet`, so `wakesMessage` is `!facts.quiet` and takes only `facts`; the apps slice sets `quiet` on the posts that must not wake (a kind rule here would hold back an adopted app notice that was waking) |
+| Q-M2-15 | The relation word "a task the receiver sent, and its recipient answers" | a message whose `reply_to` is a task the receiver sent, tried after the parent and child words |
+| Q-M2-16 | S9 has `unknown_message` and `not_yours` for one situation | `send id=` of a message the caller cannot read is `unknown_message` (§11.1); `done` on a message the caller was not sent and did not send is `not_yours` |
+| Q-M2-17 | `mailCalls(1, …)`: version 1 has no `sessions` action | it is told the version-2 call |
+| Q-M2-18 | "The answer is held" for an answer to several recipients | the answer is held when any row of it is; its quiet notice (S14) goes to the question's sender |
+| Q-M2-19 | "Held" in §5.5 (a held row reads as a phantom) | held `policy` or `loop`: the rows its recipient was not told of. A row held `budget` (told of, kept for the person) or `uncertain` or `failed` is readable |
+| Q-M2-20 | `partyGone` gathers the sender's notice, and D24 says a sender's follow-up budget bounds notices | `partyGone` posts it at once; M5 puts the budget in front of the sweep's notices |
+| Q-M2-21 | `task(…, delivered: true)` | the row is written read as well as delivered: its words went whole, and an unread delivered row would be pointed at again |
+| Q-M2-22 | S2's reminder frame is in §15 but its builder is not in M2's list | not built; M5 |
 
 ### M3a. The host runs on messages, with the old tool surface (two PRs: M3a-host, M3a-person)
 
