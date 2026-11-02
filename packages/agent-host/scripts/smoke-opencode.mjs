@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openHost } from './host-client.mjs'
-import { agentProcesses, processes } from './smoke-processes.mjs'
+import { ownAgents } from './smoke-processes.mjs'
 
 const DATA = mkdtempSync(join(tmpdir(), 'cc-opencode-data-'))
 const DB = join(DATA, 'store.db')
@@ -76,23 +76,8 @@ function openCodeError() {
   return said ? `; OpenCode logged: ${said.slice(0, 200)}` : ''
 }
 
-/**
- * The `opencode acp` processes of this run still running: the descendants of a host it started, read while that host
- * runs (a killed host's children keep its pid as their parent's), and those seen before; its host watch is not one
- * (`agentProcesses`). Never another on the machine
- */
-const ours = new Set()
-function acpPidsOf(hostPid) {
-  const all = processes()
-  const tree = new Set([String(hostPid)])
-  for (let grew = true; grew; ) {
-    grew = false
-    for (const p of all) if (tree.has(p.ppid) && !tree.has(p.pid)) (tree.add(p.pid), (grew = true))
-  }
-  for (const p of agentProcesses(all, (cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))) if (tree.has(p.pid)) ours.add(p.pid)
-  const alive = new Set(all.map((p) => p.pid))
-  return [...ours].filter((pid) => alive.has(pid))
-}
+/** The `opencode acp` processes of this run still running (`ownAgents`); its host watch is not one */
+const acpPidsOf = ownAgents((cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))
 
 const c1 = await open()
 

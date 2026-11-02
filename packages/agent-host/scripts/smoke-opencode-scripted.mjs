@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { openHost } from './host-client.mjs'
-import { agentProcesses, processes } from './smoke-processes.mjs'
+import { ownAgents } from './smoke-processes.mjs'
 
 const TOOL = 'opencode'
 /** A turn that has not ended by then waits on something nobody answers (an ask inside a subagent, #1565 case E) */
@@ -100,7 +100,6 @@ const put = (base, files = {}) => {
 
 /** The hosts this run started: a run that fails part way stops them, and their agents, as it exits */
 const hosts = []
-const ours = new Set()
 process.on('exit', () => {
   for (const host of hosts) {
     const agents = acpPidsOf(host.pid)
@@ -119,18 +118,8 @@ const stop = (pids) => {
   }
 }
 
-/** The `opencode acp` processes of this run still running: a host's descendants, read while it runs, and those seen before */
-function acpPidsOf(hostPid) {
-  const all = processes()
-  const tree = new Set([String(hostPid)])
-  for (let grew = true; grew; ) {
-    grew = false
-    for (const p of all) if (tree.has(p.ppid) && !tree.has(p.pid)) (tree.add(p.pid), (grew = true))
-  }
-  for (const p of agentProcesses(all, (cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))) if (tree.has(p.pid)) ours.add(p.pid)
-  const alive = new Set(all.map((p) => p.pid))
-  return [...ours].filter((pid) => alive.has(pid))
-}
+/** The `opencode acp` processes of this run still running (`ownAgents`) */
+const acpPidsOf = ownAgents((cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))
 
 /** Which scripted tool a card is for, read from what it names */
 const toolOfCard = (card) => {

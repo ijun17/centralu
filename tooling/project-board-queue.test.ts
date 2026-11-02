@@ -1608,14 +1608,15 @@ const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; 
 
 /**
  * Steps the queue until `ok` holds: each merge_queue read is one poll (FAST), so nothing is waited for by the clock. At most
- * `most` of them; `ms` (20 s) only bounds a step that hangs.
+ * `most` of them. A poll is a call that runs the guard or a batch, many processes of its own: under load one takes 30 s or
+ * more, so a time limit across the polls ended a wait for a state that was on its way (#1571). A step that hangs ends in the
+ * test's own limit.
  */
-async function until(ok: (q: any) => boolean, what: string, ms = 20_000, most = 400) {
-  const end = Date.now() + ms * SLOW
+async function until(ok: (q: any) => boolean, what: string, most = 400) {
   for (let n = 0; ; n++) {
     const q = (await call('merge_queue', { all: true })).data
     if (ok(q)) return q
-    if (n >= most || Date.now() > end) throw new Error(`not after ${n + 1} polls: ${what}: ${JSON.stringify(q)}`)
+    if (n >= most) throw new Error(`not after ${n + 1} polls: ${what}: ${JSON.stringify(q)}`)
   }
 }
 /** `n` more polls of the queue (each 100 ms later on its clock), for a test that checks nothing more happens */
@@ -2262,8 +2263,6 @@ const batchState = (patch: Gh = {}) =>
 const batchesOnDisk = () => (queueOnDisk().batches ?? []) as any[]
 const batchEvents = () => (queueOnDisk().events as { kind: string; text: string }[]).filter((e) => e.kind === 'batch').map((e) => e.text)
 const short2 = (w: any[]) => w.slice(0, 2).join(' ')
-/** A batch is many gh calls, each a process of its own: wait on events, with bounds generous for a loaded machine. */
-const BATCH_WAIT_MS = 90_000
 
 // --- Conflicts (#1182): real git, a bare repository standing for GitHub's --------------------------
 
@@ -2853,8 +2852,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState())
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land', BATCH_WAIT_MS)
-    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end')
     expect(writes().map(short2)).toEqual([
       'branch queue/batch-1',
       `merge-into ${A}`,
@@ -2906,7 +2905,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land on their own', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land on their own')
     const order = writes().map(short2)
     expect(order.slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
     expect(order).not.toContain('rerun-failed 950')
@@ -2926,8 +2925,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ mainDrift: true }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'stopped', 'the batch to stop', BATCH_WAIT_MS)
-    await until(() => writes().some((w) => short2(w) === 'rerun 902'), "#78's own run to be rerun", BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'stopped', 'the batch to stop')
+    await until(() => writes().some((w) => short2(w) === 'rerun 902'), "#78's own run to be rerun")
     const order = writes().map(short2)
     expect(order).toContain('merge 77')
     expect(order).not.toContain('merge 78')
@@ -2946,7 +2945,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
     await morePolls(4)
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
     expect(queueOnDisk().batchOff.reason).toContain("does not have 'workflow_dispatch' trigger")
@@ -2964,14 +2963,14 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
     const readAt = (q: any, pr: number) => q.queue.find((i: any) => i.pr === pr).updatedAt as string
     for (const [first, last] of [
       [77, 78],
       [78, 77],
     ] as const) {
       // The view that shows the state is the one asserted on
-      const q = await until((x) => readAt(x, last) > readAt(x, first), `#${last} to be read after #${first}`, BATCH_WAIT_MS)
+      const q = await until((x) => readAt(x, last) > readAt(x, first), `#${last} to be read after #${first}`)
       expect(q.queue.map((i: any) => i.pr)).toEqual([77, 78])
     }
   })
@@ -2980,7 +2979,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ conflicts: [B] }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
     await morePolls(6)
     // Without marking it, the same two were batched again after their next poll, and conflicted again
     expect(batchesOnDisk()).toHaveLength(1)
@@ -2992,7 +2991,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ refs: ['refs/heads/queue/batch-1'] }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start', BATCH_WAIT_MS)
+    await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start')
     expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-2', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-2'])
     expect(writes().map(short2)).not.toContain('delete queue/batch-1')
     expect(batchEvents().filter((t) => t.includes('queue/batch-1 could not be made'))).toHaveLength(1)
@@ -3002,7 +3001,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ mainError: true }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'error', 'the batch to end in errors', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'error', 'the batch to end in errors')
     await morePolls(4)
     expect(writes().map(short2)).toEqual([])
     // Not batched again on those heads, batch after batch
@@ -3014,7 +3013,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
     // The cancel call fails (a rate limit pauses the queue): the run is on the batch's list all the same
-    await until(() => queueOnDisk().pause?.kind === 'rate', 'the pause', BATCH_WAIT_MS)
+    await until(() => queueOnDisk().pause?.kind === 'rate', 'the pause')
     expect(batchesOnDisk()[0].cancelled.map((c: any) => [c.pr, c.run, c.suite])).toEqual([[77, 901, 5001]])
   })
 
@@ -3022,7 +3021,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     runtime(batchState({ mergeErrors: [B] }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
     await morePolls(6)
     expect(batchesOnDisk()).toHaveLength(1)
     expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
@@ -3060,7 +3059,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 79, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'landing' || batchesOnDisk()[0]?.state === 'done', 'the batch to pass', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'landing' || batchesOnDisk()[0]?.state === 'done', 'the batch to pass')
     const order = writes().map(short2)
     expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${C}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
     // Its own run is left to run, and it is not batched again on that head
@@ -3098,8 +3097,8 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
   it('lands a pull request whose own run was the quick tier through a batch of one, never from that run', async () => {
     runtime(tieredState(), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
-    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end')
     // Its own run had finished: nothing to cancel, and it lands on the head the batch tested
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', `status ${SHA}`, 'merge 77', 'delete feat/b77', 'delete queue/batch-1'])
     expect(writes().find((w) => w[0] === 'status')).toEqual(['status', SHA, 'success', 'merge-queue', 'Passed the full tier of CI in queue/batch-1'])
@@ -3139,7 +3138,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       expect(writes()).toEqual([])
       expect(batchesOnDisk()).toEqual([])
       patchGh((st) => (st.prs['77'] = ghPr(77, { title: FITS })))
-      await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+      await until((x) => stateOf(x) === 'merged', 'the merge')
       expect(writes().map(short2)).toContain('branch queue/batch-1')
       expect(writes().map(short2)).toContain('merge 77')
       expect(gh().prs['77'].headRefOid).toBe(SHA)
@@ -3218,7 +3217,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       TIERS,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(writes().map(short2)).toContain('merge 77')
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
   })
@@ -3244,7 +3243,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       TIERS,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(writes().map(short2)).toContain('merge 77')
   })
 
@@ -3274,7 +3273,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     )
     // Five queued in a row (a batch starts at four here, so none goes alone before the rest are queued)
     for (const n of prs) await call('queue_merge', { pr: n, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to land', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to land')
     const order = writes().map(short2)
     expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${H(77)}`, `merge-into ${H(78)}`, `merge-into ${H(79)}`, `merge-into ${H(80)}`, 'dispatch queue/batch-1', 'cancel 978'])
     // One run for the four; each lands as its own squash, in order; the fifth waits for the next batch
@@ -3306,7 +3305,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', '#77 to land and #78 to need attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', '#77 to land and #78 to need attention')
     expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([
       [[77, 78], 'failed'],
       [[77], 'done'],
@@ -3336,7 +3335,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       TIERS,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     await morePolls(4)
     const q = await call('merge_queue', { all: true })
     expect(q.data.queue[0].reason).toMatchObject({ kind: 'failed', job: { name: 'windows tests', id: '60002' } })
@@ -3364,7 +3363,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       TIERS,
     )
     await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
-    const q = await until((x) => stateOf(x) === state, state, BATCH_WAIT_MS)
+    const q = await until((x) => stateOf(x) === state, state)
     if (state === 'merged') expect(writes().map(short2)).toContain('close 76')
     else {
       expect(q.queue[0].reason.kind).toBe('lower-failed')
@@ -3375,7 +3374,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
   it('lands after the fast tier (#1259): the batch asks for the quick tier and lands from it, its full tier skipped', async () => {
     runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000, 'success', 'skipped') } } } }), FAST_LAND)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
     expect(writes().map(short2)).toContain('merge 77')
   })
@@ -3419,7 +3418,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       REAL_QUICK,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(writes().map(short2)).toContain('merge 77')
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
   })
@@ -3466,7 +3465,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       REAL_QUICK,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(writes().map(short2)).not.toContain('merge 77')
   })
 
@@ -3478,14 +3477,14 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
   it('still lands nothing from a red batch on the fast tier', async () => {
     runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure', 'skipped') } } } }), FAST_LAND)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(writes().map(short2)).not.toContain('merge 77')
   })
 
   it('lands nothing from a batch whose run did not run the full tier', async () => {
     runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000, 'success', 'skipped') } } } }), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(notices().at(-1)!.text).toContain('passed without running the full tier')
     expect(writes().map(short2)).not.toContain('merge 77')
     expect(batchesOnDisk().map((b) => b.state)).toEqual(['dropped'])
@@ -3505,7 +3504,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the full run to land and the fork to need attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the full run to land and the fork to need attention')
     expect(writes().map(short2)).toEqual(['merge 77', 'delete feat/unbatched'])
     expect(batchesOnDisk()).toEqual([])
     expect(notices().find((e) => e.text.includes('#78'))!.text).toContain("ran only the quick tier of CI")
@@ -3531,8 +3530,8 @@ describe('the merge queue batches a pull request again when main moved under its
   it('tests a batch of one again on the new main, with no alone mark and no message, and lands it', async () => {
     runtime(oneState({ ...movesAt(1), 'dispatch:queue/batch-2': { runs: { [ONE]: [runOf(2)] }, checks: { [ONE]: fullChecks(6002) } } }), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
-    await until(() => batchesOnDisk().length === 2 && batchesOnDisk()[1].state === 'done', 'the second batch to end', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    await until(() => batchesOnDisk().length === 2 && batchesOnDisk()[1].state === 'done', 'the second batch to end')
     expect(batchesOnDisk().map((b) => [b.branch, b.members.map((m: any) => m.pr), b.state])).toEqual([
       ['queue/batch-1', [77], 'stopped'],
       ['queue/batch-2', [77], 'done'],
@@ -3562,7 +3561,7 @@ describe('the merge queue batches a pull request again when main moved under its
   it('tests it again at most three times on one head, then tells its session as before, once', async () => {
     runtime(oneState({ ...movesAt(1), ...movesAt(2), ...movesAt(3), ...movesAt(4) }), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS * 2)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     await morePolls(4)
     expect(batchesOnDisk().map((b) => [b.branch, b.state])).toEqual([
       ['queue/batch-1', 'stopped'],
@@ -3601,8 +3600,8 @@ describe('the merge queue batches a pull request again when main moved under its
       { ...TIERS, PROJECT_BOARD_QUEUE_BATCH_MIN: '3' },
     )
     for (const n of [77, 78, 79]) await call('queue_merge', { pr: n, owner: 'tester' })
-    await until((x) => [77, 78, 79].every((n) => stateOf(x, n) === 'merged'), 'all three to land', BATCH_WAIT_MS * 2)
-    await until(() => batchesOnDisk()[1]?.state === 'done', 'the second batch to end', BATCH_WAIT_MS)
+    await until((x) => [77, 78, 79].every((n) => stateOf(x, n) === 'merged'), 'all three to land')
+    await until(() => batchesOnDisk()[1]?.state === 'done', 'the second batch to end')
     expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([
       [[77, 78, 79], 'stopped'],
       [[78, 79], 'done'],
@@ -3657,7 +3656,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     // The shards are still running when CI first reads the run
     runtime(state(reports(6000, { e2e: null }), { batchFiles: ['docs/a.md', 'packages/ui/src/App.tsx'] }, null), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run')
     expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'full', everything: 'false' } }])
     await morePolls(6)
     // Required and awaited: nothing lands while the shards run
@@ -3668,7 +3667,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
       s.runs[ONE] = [batchRun('success')]
       s.checks[ONE] = reports(6000)
     })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(batchEvents().some((t) => t.includes('CI started on batch-c, to run the full tier: it changes the screen (packages/ui/src/App.tsx).'))).toBe(true)
     expect(batchEvents().some((t) => t.includes('passed CI (run 950, the full tier)'))).toBe(true)
     expect(writes().find((w) => w[0] === 'status')).toEqual(['status', SHA, 'success', 'merge-queue', 'Passed the full tier of CI in queue/batch-1'])
@@ -3680,7 +3679,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   it('waits for the run to be completed when every check has reported, instead of dropping the batch', async () => {
     runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'] }, null), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run')
     await morePolls(6)
     expect(batchesOnDisk()).toHaveLength(1)
     expect(batchesOnDisk()[0]).toMatchObject({ state: 'ci', tier: 'full' })
@@ -3691,7 +3690,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     patchGh((s) => {
       s.runs[ONE] = [batchRun('success')]
     })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched).toHaveLength(1)
     expect(told()).toEqual([])
   })
@@ -3701,7 +3700,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   it('does not take the stand-in of a left-out shard for the shard that was to run, though it reports success under its name', async () => {
     runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'], standIns: ['e2e (chromium 1/1)'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(writes().map(short2)).not.toContain('merge 77')
     expect(told()).toHaveLength(1)
     expect(told()[0]!.text).toContain('not every heavy job (e2e (webkit *), e2e (chromium *)) was reported, succeeded and ran its scenarios (the step pnpm e2e (shard *))')
@@ -3710,7 +3709,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   it('lands a batch that changes nothing the UI scenarios see from the fast tier, as before, saying so', async () => {
     runtime(state(reports(6000, { full: false }), { batchFiles: ['docs/a.md', 'tooling/x.test.ts', 'packages/ui/src/App.test.tsx', '.centralu/apps/project-board/queue.mjs'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
     expect(batchesOnDisk()[0]).toMatchObject({ tier: 'quick', tierWhy: 'it changes nothing the UI scenarios see (4 files)' })
     expect(batchEvents().some((t) => t.includes('to run the fast tier: it changes nothing the UI scenarios see (4 files).'))).toBe(true)
@@ -3726,14 +3725,14 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   ])('counts %s as a change to the screen', async (_what, batchFiles) => {
     runtime(state(reports(6000), { batchFiles }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched[0].inputs).toEqual({ tier: 'full', everything: 'false' })
   })
 
   it('does not land a batch that changes the screen from a run where a heavy job was skipped, or never reported: it tells the session', async () => {
     runtime(state(reports(6000, { e2e: 'skipped' }), { batchFiles: ['packages/ui/src/App.tsx'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(writes().map(short2)).not.toContain('merge 77')
     expect(told()).toHaveLength(1)
     expect(told()[0]!.text).toContain('its batch of one ran the full tier and ended without landing it: batch queue/batch-1: its run passed, but not every heavy job (e2e (webkit *), e2e (chromium *)) was reported, succeeded and ran its scenarios (the step pnpm e2e (shard *)), and it changes the screen (packages/ui/src/App.tsx), so nothing lands from it.')
@@ -3743,7 +3742,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     const quickWorkflow = ['jobs:', ...['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)'].flatMap((n, i) => [`  j${i}:`, `    name: ${n}`]), ''].join('\n')
     runtime(state(reports(6000, { full: false }), { batchFiles: ['packages/ui/src/App.tsx'], workflow: quickWorkflow }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(writes().map(short2)).not.toContain('merge 77')
     expect(told()[0]!.text).toContain('its run passed without running the full tier (the "full tier" check did not pass), and nothing lands from less (it changes the screen (packages/ui/src/App.tsx))')
   })
@@ -3751,7 +3750,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   it('tells the session which tier a batch of one failed in', async () => {
     runtime(state(reports(6000, { e2e: 'failure' }), { batchFiles: ['packages/ui/src/App.tsx'], logs: { '60006': 'FAIL e2e window.spec.ts > opens the window\nError: expected 1 window' } }, 'failure'), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'attention', 'attention')
     expect(told()).toHaveLength(1)
     expect(told()[0]!.text).toContain('#77 failed alone in batch queue/batch-1, a run of the full tier on main at main0')
     expect(writes().map(short2)).not.toContain('merge 77')
@@ -3764,7 +3763,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   ])('runs the heavy jobs for a batch it cannot judge: %s', async (_what, patch: Gh, why) => {
     runtime(state(reports(6000), { batchFiles: ['docs/a.md'], ...patch }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched[0].inputs).toEqual({ tier: 'full', everything: 'false' })
     expect(batchesOnDisk()[0].tierWhy).toContain(why)
   })
@@ -3772,7 +3771,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   it('keeps running the full tier for every batch under ci.landTier full, and asks for nothing more', async () => {
     runtime(state(reports(6000), { batchFiles: ['docs/a.md'] }), { ...TIERS, PROJECT_BOARD_CI_SCREEN: JSON.stringify(SCREEN) })
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched[0].inputs).toBeNull()
     expect(batchesOnDisk()[0]).toMatchObject({ tier: 'full', tierWhy: null })
   })
@@ -4028,7 +4027,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       ]),
     })
     await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit', 60_000)
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2, how: expect.stringMatching(/touches the paths of keeper e2e \(linux\), confirmed: the full tier passed on the commit before it and failed on it/) })
     expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual([probe(c1), probe(c2)])
     expect(issues()[0]!.title).toBe('Main is red since #82 fix(desktop): change 82')
@@ -4044,7 +4043,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       on: answers([[c1, 'failure', 991]]),
     })
     await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit', 60_000)
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1, how: expect.stringContaining('bisected') })
     expect(guardOnDisk().hunt.refuted).toContain('touches the paths of keeper e2e (linux)')
     expect(issues()[0]!.title).toBe('Main is red since #81 feat(ui): change 81')
@@ -4059,7 +4058,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       { PROJECT_BOARD_QUEUE_PROBE_MS: '300' },
     )
     await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'giving up', 60_000)
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'giving up')
     expect(guardOnDisk().hunt.culprit ?? null).toBe(null)
     expect(issues()[0]!.body).toContain("(a bisect step) had not finished after")
     // The first probe, the middle of three: the first commit
@@ -4096,7 +4095,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       },
     })
     await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect')
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3, how: expect.stringContaining('bisected') })
     expect(gh().dispatched).toEqual([
       { ref: probe(c2), inputs: { tier: 'full' } },
@@ -4608,7 +4607,7 @@ describe('the main guard with overlapping failures, and when it acts again (#125
     expect(guardOnDisk().known).toEqual([{ sha: a, subject: 'feat(ui): change 81 (#81)', pr: 600 }])
     // #82's run fails while that is under way: not dropped, the next hunt, with #81 out of the candidates
     patchGh((s) => (s.branchRuns.main = [mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
-    await until(() => guardOnDisk().hunt?.red === c && guardOnDisk().hunt?.endedAt, 'the second culprit', 60_000)
+    await until(() => guardOnDisk().hunt?.red === c && guardOnDisk().hunt?.endedAt, 'the second culprit')
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c, how: expect.stringContaining('bisected') })
     // Its commit was probed without #81: a commit on #82 with #81's change taken out
     const probeBranch = `queue/bisect-${c.slice(0, 12)}`
@@ -4769,7 +4768,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     // A draft, which GitHub and every version of the queue refuse to merge: only this queue lands it
     expect(gh().prs['600']).toMatchObject({ isDraft: true, mergeStateStatus: 'DRAFT' })
     // Landed by the queue's own path: a batch of the quick tier, the squash, the branch deleted, the session told
-    await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 600) === 'merged', 'the record to land')
     expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
     expect(writes().map(short2)).toEqual(expect.arrayContaining(['merge 600', 'delete docs/guide']))
     const merge = writes().find((w) => w[0] === 'merge')!
@@ -5080,7 +5079,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     integrateRuntime(repo, 'docs/guide', patch)
     await call('integrate', handOver('docs/guide'))
     // The poll that turns it back says why at once; the next one may say what it lands from instead
-    const q = await until((x) => writes().some((w) => w[0] === 'draft' && w[1] === '600') && (!reason || stateOf(x, 600) === 'attention'), 'the record to be a draft again', BATCH_WAIT_MS)
+    const q = await until((x) => writes().some((w) => w[0] === 'draft' && w[1] === '600') && (!reason || stateOf(x, 600) === 'attention'), 'the record to be a draft again')
     const order = writes().map(short2).filter((w) => /^(ready|merge|draft) 600$/.test(w))
     expect(order).toEqual(merge ? ['ready 600', 'merge 600', 'draft 600'] : ['ready 600', 'draft 600'])
     expect(gh().prs['600']).toMatchObject({ state: 'OPEN', isDraft: true })
@@ -5140,7 +5139,7 @@ describe('the queue judges an integrated change again on each new head and befor
       s.prs['600'].headRefOid = code
       passes(s, code)
     })
-    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 600) === 'attention', 'attention')
     const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
     expect(item.reason.kind).toBe('tier')
     expect(item.reason.text).toContain(`#600 was handed over with integrate as an auto-tier change, but at ${code.slice(0, 7)} its tier is now light, from packages/ui/src/x.ts (no rule names it).`)
@@ -5164,7 +5163,7 @@ describe('the queue judges an integrated change again on each new head and befor
     rules.rules.find((r: any) => r.id === 'docs').tier = 'deep'
     pushTo(repo, 'main', { '.centralu/tiers.json': `${JSON.stringify(rules, null, 2)}\n` })
     patchGh((s) => passes(s, head))
-    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 600) === 'attention', 'attention')
     // It was batched on the poll's judgment of its head, and stopped at the squash
     expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
     expect(writes().map(short2)).not.toContain('merge 600')
@@ -5201,7 +5200,7 @@ describe('the queue judges an integrated change again on each new head and befor
     await until((x) => {
       if (!gh().runs[more]) patchGh((s) => passes(s, more)) // set again until it holds, as above
       return stateOf(x, 600) === 'merged'
-    }, 'the record to land', BATCH_WAIT_MS)
+    }, 'the record to land')
     expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: more, tier: 'auto' })
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
   })
@@ -5217,7 +5216,7 @@ describe('the queue judges an integrated change again on each new head and befor
       s.prs['600'].labels = [{ name: 'tier:auto' }, { name: 'tier:deep' }]
       passes(s, head)
     })
-    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    await until((x) => stateOf(x, 600) === 'attention', 'attention')
     const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
     expect(item.reason.kind).toBe('tier')
     expect(item.reason.text).toContain('#600 was handed over with integrate, but it is labelled tier:deep')
