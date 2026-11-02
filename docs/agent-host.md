@@ -3564,6 +3564,19 @@ the person's Continue would.
   ended), so the note is the one channel for the card, and it is the same for every tool; an older host reads `turns` only
   and ignores `stopped`. Codex's child agents are tasks of kind `agent` with a description and no command; an ACP tool
   reports no tasks, but its open cards are told the same way.
+- **Terminals and Run commands the stop ended** (#1902 part B). Before this, they vanished with no event: `terminal.list` and
+  `commands.state` were empty after the restart. They are not a session's, so they have no conversation mark and a list of their
+  own (`recordUpdateEnded`, lifecycle/update-resume.ts; the shapes are in lifecycle/update-ended.ts), written by the stopping host in
+  its first step (`recordEnded` in `stopPlan`, before the shells are killed: no await comes before the kill). Only what opening them
+  again needs is kept, and nothing a shell printed or a person typed: per terminal its project (the one whose folder it is in), folder
+  and size (`TerminalService.snapshot`); per running Run command its project, folder and command (`CommandRunner.runningSnapshot`).
+  The next host takes the list whole, once, before it listens (`UpdateResumeLists.takeEnded`, `restartEnded`). Each terminal comes
+  back as a **fresh shell in the same folder** (same project, same size; named by its place, as ever) with an empty screen and
+  nothing typed into it, and each Run command that was running **starts again**, its log opening with one line saying why
+  (`RUN_RESTARTED_LINE`). What ran inside a terminal is not run again and not offered: the owner chose that (2026-11, #1908). So
+  the person sees their terminal tabs back with an empty prompt, and their Run commands running again with that log line; there is
+  no new element. A terminal or run whose project is gone or whose folder is missing is skipped and said in the log. A list is never
+  taken twice. A rollback to a host from before this reads `turns` and leaves the rest.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that

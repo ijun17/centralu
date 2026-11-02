@@ -56,6 +56,8 @@ import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
+import { recordUpdateEnded } from './lifecycle/update-resume.js'
+import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -421,6 +423,15 @@ if (held) {
   terminals.adopt(held.kept.terminals)
   commandRuns.adopt(held.kept.runs)
 }
+/** The project whose folder this is, if any (#1902): a terminal is asked for by project */
+const projectOfCwd = (cwd: string): string | null => store.projects.listProjects().find((p) => mgr.cwdOfProject(p.id) === cwd)?.id ?? null
+// The terminals and Run commands a linked hub's update ended come back (#1902), before any screen asks for them
+restartEnded(mgr.takeUpdateEnded(), {
+  cwdOf: (projectId, cwd) => (projectId !== null && projectOfCwd(cwd) === projectId && existsSync(cwd) ? cwd : null),
+  terminals,
+  runs: commandRuns,
+  log: (line) => console.error(line),
+})
 /*
  * The update check is done by **the host** — not by the launcher (issue #43).
  *
@@ -798,6 +809,14 @@ let stopActivity: () => void = () => {}
 const shutdown = new Shutdown({
   plan: (mode, handOver) =>
     stopPlan(mode, handOver, {
+      recordEnded: () => {
+        if (!updateResume || !mgr.stoppingForUpdateNow()) return
+        try {
+          recordUpdateEnded(updateResume, { terminals: terminals.snapshot(projectOfCwd), runs: commandRuns.runningSnapshot(projectOfCwd) })
+        } catch (err) {
+          console.error(`[agent-host] could not list the terminals and commands an update ends: ${errorMessage(err)}`)
+        }
+      },
       handOverViews: () => {
         try {
           const n = recordViewHandover(store.settings, views, inlineViews)

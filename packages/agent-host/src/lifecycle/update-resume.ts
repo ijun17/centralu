@@ -1,5 +1,6 @@
 import { errorMessage } from '@cc/protocol'
 import { sleepSync } from '../timing.js'
+import { clipEnded, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
@@ -23,6 +24,10 @@ import { readStopped, type Stopped } from './update-stopped.js'
  * the cards that waited for the person (`update-stopped.ts`), under the same mark. The next host tells the agent in a note,
  * and wakes a session at rest for it. An older host reads `turns` only and leaves the rest.
  *
+ * **The terminals and Run commands the stop ended** (#1902 part B) are listed by the same host, in its first step and in a list of
+ * its own (`recordUpdateEnded`): they are no session's, so no mark applies; the first start after it takes them whole
+ * (`UpdateResumeLists.takeEnded`) and the list goes.
+ *
  * **A list that cannot be read at the start** is tried again a few times when it is held (`EBUSY`, a virus scanner that
  * opened the file just written; `READ_TRIES`), each failure said. One still unreadable stays where it is for a later start,
  * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
@@ -44,7 +49,7 @@ const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 export type CutTurn = { id: string; seq: number }
 
 /** What one stop lists: the turns it cut, and what else it ended in sessions (#1902) */
-export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[] }
+export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended }
 
 /** The data folder, as the hosts reach the lists in it: their names, each one's text (null once gone), a new one, a removal */
 export type UpdateResumeFolder = {
@@ -95,7 +100,7 @@ export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
   }
   const listedStopped: unknown[] = 'stopped' in o && Array.isArray(o.stopped) ? o.stopped : []
   const stopped = listedStopped.map(readStopped).filter((x): x is Stopped => x !== null && ID.test(x.id))
-  return { turns: turns.slice(0, MAX_TURNS), stopped: stopped.slice(0, MAX_TURNS) }
+  return { turns: turns.slice(0, MAX_TURNS), stopped: stopped.slice(0, MAX_TURNS), ended: readEnded(o) }
 }
 
 /**
@@ -111,6 +116,20 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
     folder.add(`${JSON.stringify({ v: 1, turns, stopped })}\n`)
   } catch (err) {
     console.error(`[agent-host] the turns this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
+  }
+}
+
+/**
+ * Writes the terminals and Run commands this stop ends, as a list of its own (#1902). Never fatal, as `recordUpdateCut` is: they
+ * are then lost as they always were
+ */
+export function recordUpdateEnded(folder: UpdateResumeFolder, ended: Ended): void {
+  if (!ended.terminals.length && !ended.runs.length) return
+  try {
+    folder.add(`${JSON.stringify({ v: 1, turns: [], stopped: [], ...clipEnded(ended) })}
+`)
+  } catch (err) {
+    console.error(`[agent-host] the terminals and commands this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
   }
 }
 
@@ -167,6 +186,23 @@ export class UpdateResumeLists {
   /** Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then */
   cut(id: string, lastSeq: number): boolean {
     return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq))
+  }
+
+  /** The terminals and Run commands the stops listed, once: the lists that held them go, and a second call finds none */
+  takeEnded(): Ended {
+    const taken: Ended = { terminals: [], runs: [] }
+    for (const [name, l] of [...this.lists]) {
+      if (!l.ended.terminals.length && !l.ended.runs.length) continue
+      taken.terminals.push(...l.ended.terminals)
+      taken.runs.push(...l.ended.runs)
+      // Kept in the list a session also names (the sessions' own entry), emptied here, so it cannot be taken twice
+      this.lists.set(name, { ...l, ended: { terminals: [], runs: [] } })
+      if (!l.turns.length && !l.stopped.length) {
+        this.lists.delete(name)
+        this.removeList(name)
+      }
+    }
+    return taken
   }
 
   /** What a stop ended in this session besides a turn (#1902), when its conversation still ends where it did then: the same mark */
