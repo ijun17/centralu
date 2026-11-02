@@ -93,7 +93,12 @@ export function normalize(q) {
       ? q.items
           .filter((i) => i && Number.isInteger(i.pr) && typeof i.repo === 'string')
           .map((i) => {
-            const it = { ...i, lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [], reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {} }
+            const it = {
+              ...i,
+              lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [],
+              reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {},
+              queueCancelled: Array.isArray(i.queueCancelled) ? i.queueCancelled.filter((c) => c && Number.isInteger(c.run)) : [],
+            }
             // In a batch that is no longer running (an older file, a batch dropped by hand): its own again
             if (it.batch != null && !running.has(it.batch)) delete it.batch
             return it

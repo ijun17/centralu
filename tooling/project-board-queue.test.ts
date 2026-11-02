@@ -441,7 +441,12 @@ describe('what the merge queue decides for one poll', () => {
     const pull = { id: 2, run_attempt: 1, event: 'pull_request', head_branch: 'feat/queue', status: 'completed', conclusion: 'failure', created_at: '2026-10-17T08:00:00Z', workflow_id: 7 }
     expect(latestRuns([push, pull], pr).map((r: { id: number }) => r.id)).toEqual([2])
     expect(latestRuns([push], pr).map((r: { id: number }) => r.id)).toEqual([1])
-    expect(normalize({ items: [{ repo: R, pr: 1, state: 'ci' }] }).items[0]).toMatchObject({ lowers: [], reruns: {} })
+    expect(normalize({ items: [{ repo: R, pr: 1, state: 'ci' }] }).items[0]).toMatchObject({ lowers: [], reruns: {}, queueCancelled: [] })
+    // A hand-edited list of the runs the queue cancelled (#1527) reads as one, and a poll on it does not throw
+    const edited = normalize({ items: [{ repo: R, pr: 77, state: 'ci', head: SHA, queueCancelled: 'run 900' }, { repo: R, pr: 78, state: 'ci', queueCancelled: [null, { run: 900, attempt: 2 }] }] }).items
+    expect(edited.map((i: { queueCancelled: unknown }) => i.queueCancelled)).toEqual([[], [{ run: 900, attempt: 2 }]])
+    const cancelled = checksOf([check('verify', 'cancelled'), check('windows tests', 'success')])
+    expect(decideCi({ item: edited[0], pr: openPr(), checks: cancelled, runs: [run('cancelled')], defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', kind: 'cancelled' } })
   })
 
   /*

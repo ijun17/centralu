@@ -230,8 +230,8 @@ export function markBatchless(q, repo, prs, alone = null) {
 /** Ends a batch: every member not landed goes back to its own CI. `why`: for a batch of one's member (releaseMembers). */
 export function endBatch(q, b, state, { at, batchless = true, why = null } = {}) {
   releaseMembers(q, b, b.members.slice(b.landed ?? 0).map((m) => m.pr), { at, batchless, why })
-  // Why it ended, for its line: "stopped" alone said nothing (#1527)
-  if (why) b.why = why
+  // Why it ended, for its line: "stopped" alone said nothing (#1527). The line names the batch already
+  if (why) b.why = why.replace(/^batch \S+:? /i, '')
   b.state = state
   b.updatedAt = at
   b.endedAt = at

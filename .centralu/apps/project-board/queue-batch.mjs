@@ -515,7 +515,7 @@ async function landNext(b, ctx) {
         delete it.batchless
       }
     }
-    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', then: d.subject ? fixable : undefined })
+    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', why: `batch ${b.branch} stopped before ${n}: ${d.text}.`, then: d.subject ? fixable : undefined })
   }
   if (d.do === 'wait') {
     save((fq, fb) => Object.assign(fb, d.patch ?? {}, { lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('waiting')).toISOString() }))

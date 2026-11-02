@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { MOVED_CAP, activeBatch } from '../.centralu/apps/project-board/batch.mjs'
+import { MOVED_CAP, activeBatch, batchLine } from '../.centralu/apps/project-board/batch.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { GitHubError } from '../.centralu/apps/project-board/github.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
@@ -698,6 +698,8 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     expect(item.reason.text).toMatch(/stopped before #2: GitHub says BLOCKED/)
     // Each batch's line says why it stopped
     expect(r.q.batches.map((b: { why?: string }) => b.why)).toEqual([expect.stringMatching(/BLOCKED/), expect.stringMatching(/BLOCKED/)])
+    // The branch and what landed once each: the reason is stored without them
+    expect(batchLine(r.q.batches[0], ref)).toBe('Batch queue/batch-1: #1, #2 — ended (stopped), landed 1 of 2: stopped before #2: GitHub says BLOCKED (a rule asks for something the batch does not give) for #2.')
   })
 
   // The cap: with something landing on main every tick, no batch can land, and each pull request is stopped again and again.
