@@ -1,7 +1,7 @@
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { MessageKind, ThreadState } from '../dev-services/store/mail.js'
+import type { MessageKind } from '../dev-services/store/mail.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 
@@ -12,9 +12,6 @@ import { PERSON, parseAddress } from './address.js'
 
 /** What a sender is, from its address */
 export type SenderClass = 'session' | 'app' | 'person' | 'centralu'
-
-/** What a sender is in a thread. `person` and `centralu` are not roles in it: they have the powers of their class */
-export type Standing = 'person' | 'centralu' | 'owner' | 'assignee' | 'member'
 
 /** Why a call was refused, for the caller to act on (the message says it in words) */
 const REFUSALS = [
@@ -84,64 +81,6 @@ export const ASKS_PER_HOUR = 5
 /** The same words from the same sender in the same thread within this long are one post (§7.9) */
 export const REPEAT_WINDOW_MS = 10 * 60_000
 
-export const SUBJECT_MAX = 200
-export const NEXT_MAX = 300
-export const MAX_BLOCKERS = 5
-
-/**
- * Whether a sender may post a kind (§3.2 and §9.4). `assign` is the owner's act on a thread (`MailService.assign`) and
- * `event` is Centralu's alone, so neither is a kind a plain post may carry
- */
-export function mayPostKind(sender: SenderClass, standing: Standing, kind: MessageKind): string | null {
-  switch (kind) {
-    case 'event':
-      return sender === 'centralu' ? null : 'only Centralu writes an event'
-    case 'assign':
-      return 'work is given with assign, not posted'
-    case 'notice':
-      return sender === 'app' || sender === 'centralu' ? null : 'a notice comes from an app or from Centralu'
-    case 'report':
-      return sender === 'centralu' || standing === 'assignee' ? null : 'only the assignee reports on a thread'
-    case 'question':
-    case 'answer':
-    case 'note':
-      return null
-    default:
-      return `unknown kind ${String(kind)}`
-  }
-}
-
-/** The states a party may set with `mail update` (§3.3): the owner and the person any, the assignee the four of its own */
-export function settableStates(standing: Standing): readonly ThreadState[] {
-  if (standing === 'centralu' || standing === 'person' || standing === 'owner') return ['open', 'running', 'review', 'blocked', 'done']
-  if (standing === 'assignee') return ['running', 'review', 'blocked', 'done']
-  return []
-}
-
-/** May this party change the task's other fields (next step, links, subject, blockers)? */
-export function mayEditTask(standing: Standing): boolean {
-  return standing !== 'member'
-}
-
-/** What a thread goes back to when its last blocker is resolved: `running` if a turn of it is going, else `open` (§3.3) */
-export function stateAfterUnblocked(turnGoing: boolean): ThreadState {
-  return turnGoing ? 'running' : 'open'
-}
-
-/** Whether a post by this party sends a `review` thread back to `running`: the owner or the person sends more (§3.3) */
-export function reopensReview(standing: Standing, kind: MessageKind): boolean {
-  return (standing === 'owner' || standing === 'person') && (kind === 'note' || kind === 'question' || kind === 'answer')
-}
-
-/**
- * Words that flow down (§7.3): an assign, note or answer from the thread's owner, a session, to its assignee, and anything
- * from the person. An app's words never do, whatever its place in the thread
- */
-export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean, recipientIsAssignee: boolean, kind: MessageKind): boolean {
-  if (senderIsPerson) return true
-  return senderIsOwnerSession && recipientIsAssignee && (kind === 'assign' || kind === 'note' || kind === 'answer')
-}
-
 /**
  * Whether a message wakes a receiver at rest (§3.2, §9.5). Mail from a session, the person or Centralu does; an app's notice does
  * not unless the app marked it `needsOwner` (or asked for it), and an app can ask for no wake at all. An `event` is never mail
@@ -168,27 +107,6 @@ export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' 
 /** How long a thread's mail may wait behind other threads' before it comes first (§5, §7.10): a question 5 minutes, anything else 15 */
 export const HOLD_QUESTION_MS = 5 * 60_000
 export const HOLD_OTHER_MS = 15 * 60_000
-
-/** One due message in a thread of the receiver's work, as far as choosing the thread goes */
-export type WorkCandidate = {
-  threadId: string
-  /** The person's words, or urgent mail: they decide (§7.1) */
-  decides: boolean
-  question: boolean
-  /** When the message fell due */
-  dueAt: number
-}
-
-/**
- * The one thread of the receiver's work that a wake carries (§5, §6): `pickWork` over the threads' due mail, the question class being a
- * thread with a question. M3c deletes it with the threads (docs/plans/mailbox.md §8.2 step 3)
- */
-export function pickWorkThread(candidates: readonly WorkCandidate[], now: number): string | null {
-  return pickWork(
-    candidates.map((c) => ({ key: c.threadId, decides: c.decides, needsReply: c.question, dueAt: c.dueAt })),
-    now,
-  )
-}
 
 export const DEBOUNCE_MS = 2_000
 

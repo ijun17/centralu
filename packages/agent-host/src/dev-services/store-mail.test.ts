@@ -93,6 +93,16 @@ function doneThread(m: MailRecords, id: string, ago: number, over: Partial<NewTh
   return m.updateThread(id, { state: 'done', outcome: 'finished', doneAt: NOW - ago, stateSince: NOW - ago }, NOW - ago, true)
 }
 
+/** A turn as the v64 build recorded it in `mail_turns`, and its end: plain SQL, as that build wrote it */
+const oldTurn = (s: Store, t: { sessionId: string; turnSeq: number; threadId: string | null; startedBy: string; startedAt: number }) =>
+  dbOf(s).prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, started_by, started_at) VALUES (?, ?, ?, ?, ?)`).run(t.sessionId, t.turnSeq, t.threadId, t.startedBy, t.startedAt)
+const endOldTurn = (s: Store, sessionId: string, turnSeq: number, at: number, outcome: string) =>
+  dbOf(s).prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(at, outcome, sessionId, turnSeq)
+const turnSeqs = (s: Store, sessionId: string) =>
+  (dbOf(s).prepare(`SELECT turn_seq FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`).all(sessionId) as { turn_seq: number }[]).map((t) => t.turn_seq)
+/** Receipt fields as the v64 build set them */
+const setReceipts = (s: Store, recipient: string, ids: readonly string[], set: string, ...args: unknown[]) =>
+  dbOf(s).prepare(`UPDATE mail_receipts SET ${set} WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(...args, recipient, JSON.stringify(ids))
 const count = (s: Store, table: string, where = '1=1') => (dbOf(s).prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get() as { n: number }).n
 
 describe('store step v61: the mailbox tables', () => {
@@ -370,8 +380,8 @@ describe('a session purged from the session archive (§4.1)', () => {
     s.mail.putParticipant(tid(1), gone, 'assignee', NOW)
     const m = message(s.mail, tid(1), { kind: 'assign', sender: stays, recipients: [gone] })
     const back = message(s.mail, tid(1), { kind: 'report', sender: gone, recipients: [stays] })
-    s.mail.startTurn({ sessionId: 'gone', turnSeq: 1, threadId: tid(1), startedBy: 'mail', startedAt: NOW })
-    s.mail.startTurn({ sessionId: 'stays', turnSeq: 1, threadId: null, startedBy: 'person', startedAt: NOW })
+    oldTurn(s, { sessionId: 'gone', turnSeq: 1, threadId: tid(1), startedBy: 'mail', startedAt: NOW })
+    oldTurn(s, { sessionId: 'stays', turnSeq: 1, threadId: null, startedBy: 'person', startedAt: NOW })
     // A session whose id merely ends the same way is not it, and neither is a session of another host with its id (slice 4)
     sessionRow(s, 'not-gone')
     s.mail.putParticipant(tid(1), `session:${HOST}/not-gone`, 'member', NOW)
@@ -440,9 +450,9 @@ describe('the indexes v61 makes now, so that no later step has to', () => {
     expect(plan(s, `SELECT 1 FROM mail_turns WHERE thread_id = ? AND ended_at IS NULL LIMIT 1`, 'x')).toContain('mail_turns_open')
     s.mail.insertThread(thread(tid(1)), NOW)
     expect(s.mail.hasOpenTurn(tid(1))).toBe(false)
-    s.mail.startTurn({ sessionId: 's1', turnSeq: 1, threadId: tid(1), startedBy: 'mail', startedAt: NOW })
+    oldTurn(s, { sessionId: 's1', turnSeq: 1, threadId: tid(1), startedBy: 'mail', startedAt: NOW })
     expect(s.mail.hasOpenTurn(tid(1))).toBe(true)
-    s.mail.endTurn('s1', 1, NOW + 1, 'finished')
+    endOldTurn(s, 's1', 1, NOW + 1, 'finished')
     expect(s.mail.hasOpenTurn(tid(1))).toBe(false)
   })
 
@@ -495,10 +505,10 @@ describe('retention takes the write lock before it reads (L10)', () => {
 
 describe('retention of turns (§4.1)', () => {
   const turn = (s: Store, session: string, seq: number, threadId: string | null, ended: boolean) => {
-    s.mail.startTurn({ sessionId: session, turnSeq: seq, threadId, startedBy: threadId ? 'caller' : 'person', startedAt: NOW - 1000 + seq })
-    if (ended) s.mail.endTurn(session, seq, NOW, 'acted')
+    oldTurn(s, { sessionId: session, turnSeq: seq, threadId, startedBy: threadId ? 'caller' : 'person', startedAt: NOW - 1000 + seq })
+    if (ended) endOldTurn(s, session, seq, NOW, 'acted')
   }
-  const seqs = (s: Store, session: string) => s.mail.turnsOf(session).map((t) => t.turnSeq)
+  const seqs = turnSeqs
 
   it('a turn of no thread goes once a later one of the session has ended; the latest ended one, a running one and a thread’s turns stay', () => {
     const s = new Store()
@@ -542,9 +552,9 @@ describe('receipt updates touch only the rows their condition names', () => {
 
   it('releasing held mail changes only held mail, and releasing it twice changes nothing the second time', () => {
     const { s, ids, row } = receipts()
-    s.mail.markAttempt('r', ids, NOW)
-    s.mail.setHeld('r', [ids[0]!], 'failed')
-    s.mail.setHeld('r', [ids[2]!], 'released')
+    setReceipts(s, 'r', ids, 'attempt_at = ?, attempts = attempts + 1', NOW)
+    setReceipts(s, 'r', [ids[0]!], 'held = ?', 'failed')
+    setReceipts(s, 'r', [ids[2]!], 'held = ?', 'released')
     expect(s.mail.releaseHeld('r', ids, null, NOW + 1)).toBe(1)
     expect(row(ids[0]!)).toMatchObject({ held: null, attempts: 0, dueAt: NOW + 1 })
     expect(row(ids[1]!)).toMatchObject({ held: null, attempts: 1, dueAt: NOW })

@@ -5,8 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { at, hostWorld } from './host-mail.test-helpers.js'
-import { openBy } from './mail.test-helpers.js'
-import { MailService } from './service.js'
+import { oldThread } from './v61.test-helpers.js'
 
 const A = at('a')
 const B = at('b')
@@ -81,8 +80,9 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
 
   it('a legacy thread id names the newest message moved from that thread that the caller was sent', () => {
     const w = world()
-    const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
-    const { message, thread } = openBy(old, { by: A, kind: 'question', subject: 'about #12', body: 'still open?', members: [B] })
+    const message = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
+    const thread = { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07' }
+    oldThread(w.store, { id: thread.id, owner: A, subject: 'about #12', at: w.clock.t }, [{ id: message.id, sender: A, kind: 'question', body: 'still open?', receipts: [{ recipient: B }] }])
     w.store.movePendingThreadMail(w.clock.t, () => null)
     w.clock.t += 10
     w.run('b', { action: 'reply', thread: thread.id, text: 'yes' })

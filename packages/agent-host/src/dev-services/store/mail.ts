@@ -130,8 +130,6 @@ export type PendingMail = { receipt: ReceiptRow; message: MessageRow; thread: Th
 
 export type InboxRow = { thread: ThreadRow; unread: number }
 
-export type TurnRow = { sessionId: string; turnSeq: number; threadId: string | null; startedBy: string; startedAt: number; endedAt: number | null; outcome: string | null }
-
 /** The member of `list` that `value` is, or `fallback` for a word this build does not know */
 function oneOf<T extends string>(list: readonly T[], value: string | null | undefined, fallback: T): T {
   return list.find((x) => x === value) ?? fallback
@@ -189,20 +187,6 @@ export type MessageSql = {
   facts: string
   dedupe_key: string | null
   created_at: number
-}
-
-type TurnSql = {
-  session_id: string
-  turn_seq: number
-  thread_id: string | null
-  started_by: string
-  started_at: number
-  ended_at: number | null
-  outcome: string | null
-}
-
-function toTurn(r: TurnSql): TurnRow {
-  return { sessionId: r.session_id, turnSeq: r.turn_seq, threadId: r.thread_id, startedBy: r.started_by, startedAt: r.started_at, endedAt: r.ended_at, outcome: r.outcome }
 }
 
 type ReceiptSql = {
@@ -680,53 +664,6 @@ export class MailRecords {
   }
 
   /**
-   * Whether `recipient` has mail in the thread it has not taken: not read (handling reads it too), delivered or not, and not held back for the person.
-   * Mail in hand is work in hand: the owner or the person sent more into a thread that was in review, and the session has not got to it. Events have no receipt
-   */
-  hasMailInHand(threadId: string, recipient: string): boolean {
-    return (
-      this.db
-        .prepare<[string, string], { one: number }>(
-          `SELECT 1 AS one FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-            WHERE m.thread_id = ? AND r.recipient = ? AND r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') LIMIT 1`,
-        )
-        .get(threadId, recipient) !== undefined
-    )
-  }
-
-  /** The mailboxes that have mail waiting (not read, handled, delivered or held): who the delivery sweep looks at */
-  recipientsWithMail(): string[] {
-    return this.db
-      .prepare<[], { recipient: string }>(
-        `SELECT DISTINCT recipient FROM mail_receipts
-          WHERE delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
-      )
-      .all()
-      .map((r) => r.recipient)
-  }
-
-  /** Written, and committed, before a delivery is tried (§7.6.1): a host that dies after it and before `markDelivered` leaves a delivery that may have gone */
-  markAttempt(recipient: string, messageIds: readonly string[], now: number): void {
-    this.updateReceipts('attempt_at = ?, attempts = attempts + 1', [now], recipient, messageIds)
-  }
-
-  /** The tool took them (§7.6.2–4): delivered, and read for those whose words went in whole. A failed attempt's error is forgotten */
-  markDelivered(recipient: string, messageIds: readonly string[], readIds: readonly string[], now: number): void {
-    this.updateReceipts('delivered_at = ?, last_error = NULL', [now], recipient, messageIds)
-    this.markRead(recipient, readIds, now)
-  }
-
-  /** These messages are read and handled for `recipient`: they were put in a thread for the record, and nothing is to wake it for them */
-  markHandledIds(recipient: string, messageIds: readonly string[], now: number): void {
-    this.updateReceipts('read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)', [now, now], recipient, messageIds)
-  }
-
-  /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
-  setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
-    this.updateReceipts('held = ?', [held], recipient, messageIds)
-  }
-
-  /**
    * The person's answer to held mail: sent now, or never (`dismissed`). Only mail held for a reason that needs them. Sent now,
    * mail that was held back from waking a session (`policy`, `budget`) goes as the mail it is and is not held again (`released`)
    */
@@ -777,24 +714,6 @@ export class MailRecords {
   /** Whether a turn of the thread is going: what a cleared blocker restores `running` from (§3.3). Uses `mail_turns_open` */
   hasOpenTurn(threadId: string): boolean {
     return !!this.db.prepare<[string], { one: number }>(`SELECT 1 AS one FROM mail_turns WHERE thread_id = ? AND ended_at IS NULL LIMIT 1`).get(threadId)
-  }
-
-  startTurn(t: Omit<TurnRow, 'endedAt' | 'outcome'>): void {
-    this.db
-      .prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, started_by, started_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(t.sessionId, t.turnSeq, t.threadId, t.startedBy, t.startedAt)
-  }
-
-  /** The turns recorded for the session, oldest first */
-  turnsOf(sessionId: string): TurnRow[] {
-    return this.db
-      .prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`)
-      .all(sessionId)
-      .map(toTurn)
-  }
-
-  endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {
-    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(now, outcome, sessionId, turnSeq)
   }
 
   // ── Retention (§4.4) ──

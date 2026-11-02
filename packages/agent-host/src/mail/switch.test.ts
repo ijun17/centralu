@@ -8,8 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
 import { reportRecorder } from './delegation.js'
 import { at, hostWorld, NOW } from './host-mail.test-helpers.js'
-import { openBy } from './mail.test-helpers.js'
-import { MailService } from './service.js'
+import { oldThread, type OldReceipt } from './v61.test-helpers.js'
 import { PAIR_TURNS_PER_HOUR } from './rules.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
@@ -32,9 +31,10 @@ const started = (w: ReturnType<typeof hostWorld>) => {
 const dbOf = (w: ReturnType<typeof hostWorld>) => (w.store as unknown as { db: Database.Database }).db
 
 /** An older build's question to `b` in a thread, still pending in the v61 tables */
-function oldQuestion(w: ReturnType<typeof hostWorld>, body = 'Is #12 still open?') {
-  const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
-  return openBy(old, { by: A, kind: 'question', subject: 'about #12', body, members: [B] }).message
+function oldQuestion(w: ReturnType<typeof hostWorld>, body = 'Is #12 still open?', receipt: Partial<OldReceipt> = {}) {
+  const q = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F01', threadId: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F01' }
+  oldThread(w.store, { id: q.threadId, owner: A, subject: 'about #12', at: w.clock.t }, [{ id: q.id, sender: A, kind: 'question', body, receipts: [{ recipient: B, ...receipt }] }])
+  return q
 }
 const oldReceipt = (w: ReturnType<typeof hostWorld>, id: string) =>
   dbOf(w).prepare<[string, string], { handled_at: number | null; delivered_at: number | null }>(`SELECT handled_at, delivered_at FROM mail_receipts WHERE message_id = ? AND recipient = ?`).get(id, B)
@@ -80,11 +80,12 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
 
   it('an answer delivered and not read yet is still unread after the switch, by the inbox and by its old thread', async () => {
     const w = hostWorld()
-    const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
-    const q = openBy(old, { by: A, kind: 'question', subject: 'colour', body: 'Which colour?', members: [B] }).message
-    w.store.mail.markDelivered(B, [q.id], [q.id], w.clock.t)
-    const answer = old.post(q.threadId, B, { kind: 'answer', body: 'Purple.', replyTo: q.id }).message
-    w.store.mail.markDelivered(A, [answer.id], [], w.clock.t)
+    const q = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F02', threadId: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F02' }
+    const answer = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F03' }
+    oldThread(w.store, { id: q.threadId, owner: A, subject: 'colour', at: w.clock.t }, [
+      { id: q.id, sender: A, kind: 'question', body: 'Which colour?', receipts: [{ recipient: B, deliveredAt: w.clock.t, readAt: w.clock.t }] },
+      { id: answer.id, sender: B, kind: 'answer', body: 'Purple.', replyTo: q.id, receipts: [{ recipient: A, deliveredAt: w.clock.t }] },
+    ])
     started(w)
     expect(w.tool.run('a', { action: 'inbox' }).text).toContain(`unread    ${answer.id}`)
     expect(w.tool.run('a', { action: 'read' }).text).toContain('Purple.')
@@ -93,8 +94,7 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
 
   it('a question read and not answered can be answered after the switch by its old thread id', async () => {
     const w = hostWorld()
-    const q = oldQuestion(w)
-    w.store.mail.markDelivered(B, [q.id], [q.id], w.clock.t)
+    const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, readAt: w.clock.t })
     started(w)
     expect(w.tool.run('b', { action: 'reply', thread: q.threadId, text: 'Yes, still open.' }).text).not.toContain('unknown_message')
     await w.advance(2_000)
@@ -104,8 +104,8 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
 
   it('an untrusted project’s old request to the orchestrator stays held for the person, as the same request on this build is', async () => {
     const w = hostWorld()
-    const old = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t })
-    const ask = openBy(old, { by: X, kind: 'assign', subject: 'please', body: 'OLD-ASK delete the branch', assignee: ORC }).message
+    const ask = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F04' }
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F04', owner: X, subject: 'please', at: w.clock.t }, [{ id: ask.id, sender: X, kind: 'assign', body: 'OLD-ASK delete the branch', receipts: [{ recipient: ORC }] }])
     started(w)
     await w.advance(60_000)
     expect(w.to('orc').map((d) => d.input.text).join('\n')).not.toContain('OLD-ASK')
@@ -117,10 +117,8 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     const w = hostWorld()
     const app = 'app:hub-aaaaaaaa/p1/board'
     const thread = 'hub-aaaaaaaa.t_app'
-    w.store.mail.insertThread({ id: thread, home: 'hub-aaaaaaaa', projectId: 'p1', subject: 'ci', origin: 'app', depth: 0, parentId: null, follows: [], state: 'open', owner: B, assignee: app, next: null, links: {} }, w.clock.t)
     const id = 'hub-aaaaaaaa.m_app'
-    w.store.mail.insertMessage({ id, threadId: thread, sender: app, kind: 'report', urgent: false, needsOwner: false, wake: null, replyTo: null, body: 'CI is green on #12', facts: {}, dedupeKey: null, createdAt: w.clock.t })
-    w.store.mail.insertReceipt(id, B, w.clock.t)
+    oldThread(w.store, { id: thread, owner: B, projectId: 'p1', subject: 'ci', origin: 'app', at: w.clock.t }, [{ id, sender: app, kind: 'report', body: 'CI is green on #12', receipts: [{ recipient: B }] }])
     started(w)
     await w.advance(2_000)
     expect(w.row(id, B)?.deliveredAt).not.toBeNull()
@@ -129,12 +127,9 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
 
   it('mail an older build held for the person after telling its recipient of it is moved still held: the move releases nothing', () => {
     const w = hostWorld()
-    const q = oldQuestion(w)
-    w.store.mail.markDelivered(B, [q.id], [], w.clock.t)
-    w.store.mail.setHeld(B, [q.id], 'budget')
-    const note = openBy(new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => w.clock.t }), { by: X, kind: 'note', subject: 'fyi', body: 'A note.', members: [B] }).message
-    w.store.mail.markDelivered(B, [note.id], [], w.clock.t)
-    w.store.mail.setHeld(B, [note.id], 'policy')
+    const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, held: 'budget' })
+    const note = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F05' }
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F05', owner: X, subject: 'fyi', at: w.clock.t }, [{ id: note.id, sender: X, kind: 'note', body: 'A note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'policy' }] }])
     started(w)
     expect(w.row(q.id, B)).toMatchObject({ held: 'budget' })
     expect(w.row(note.id, B)).toMatchObject({ held: 'policy' })
