@@ -73,6 +73,15 @@ describe('what the Inbox lists', () => {
     expect(store.mail.inboxOf(PERSON)).toHaveLength(2)
   })
 
+  it('cuts the list at the same threads every time when the ones around the cut changed at the same moment', () => {
+    const { mail, store } = setup()
+    // A fixed clock: every thread has the same time, so only the tiebreak decides which are kept
+    const ids = [1, 2, 3, 4].map((n) => openBy(mail, { by: S1, kind: 'question', subject: `Q${n}`, body: 'q', members: [PERSON] }).thread.id)
+    const cut = store.mail.inboxOf(PERSON, 2).map((r) => r.thread.id)
+    expect(cut).toEqual([...ids].sort().reverse().slice(0, 2))
+    expect(store.mail.inboxOf(PERSON, 2).map((r) => r.thread.id)).toEqual(cut)
+  })
+
   it('says a turn of the thread is going, so the Inbox asks before Drop or Mark done stops it (3.10); never for a thread that is done', () => {
     const { mail, person } = setup()
     const { thread } = openBy(mail, { by: S1, kind: 'assign', subject: 'Land #12', body: 'please', assignee: S2 })

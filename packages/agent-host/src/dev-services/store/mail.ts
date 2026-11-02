@@ -518,7 +518,7 @@ export class MailRecords {
                          AND (r.held IS NULL OR r.held <> 'dismissed')) AS unread
            FROM mail_threads t JOIN mail_participants p ON p.thread_id = t.id AND p.address = ? AND p.left_at IS NULL
           WHERE t.state <> 'done' OR unread > 0
-          ORDER BY (unread > 0) DESC, t.updated_at DESC LIMIT ?`,
+          ORDER BY (unread > 0) DESC, t.updated_at DESC, t.id DESC LIMIT ?`,
       )
       .all(address, address, limit)
     return rows.map((r) => ({ thread: toThread(r), unread: r.unread }))
