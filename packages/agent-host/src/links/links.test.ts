@@ -1928,7 +1928,7 @@ process.exit(127)
     })
     expect(await u.call('machines.probe', { sshTarget: 'laptop' })).toMatchObject({ sshTarget: 'laptop', reachable: true, os: 'posix' })
     await expect(u.call('machines.probe', { sshTarget: '-oProxyCommand=x' })).rejects.toThrow(/Not an ssh target/)
-  })
+  }, 30_000 * SLOW)
 })
 
 describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () => {
