@@ -661,6 +661,13 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk as the remote has it (#1484, `resolveForkBase`): the trunk is fetched (bounded, trusted projects only) and the
 child forks from `origin/<trunk>`, never from the checkout's HEAD, which may be any branch; with no remote, a failed or timed-out fetch, or an
 untrusted project it forks from the newer of the local trunk and the remote-tracking ref last fetched, and with no trunk found at all from HEAD.
+A branch asked for that is already there (#1662, a pull request's handed to a new session; `WorktreeSessions.takeBranch`)
+is not forked: the worktree starts on it as the remote has it, fetched (trusted projects only), tracking it when only the remote
+has it. A local branch behind the remote is moved to its head when every commit of its own was on the remote at some point
+(the remote-tracking ref's reflog, so a rebased pull request counts) or is on the trunk; otherwise the start is refused with
+the count. An archived session's worktree that has the branch checked out is removed when it has no uncommitted change and
+every commit of its own is on a remote or the trunk; any other worktree that has it (a session not archived, the project's
+folder, one of the person's) is never touched, and the refusal names it. A start that fails keeps such a branch.
 The start answer's `notice` names the base commit and what could not be done (a start on a linked machine does not carry it back yet). The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
@@ -3711,10 +3718,8 @@ per `CALL_WINDOW_MS` (15 s); a call inside the window is answered at once with t
 reach the machine through `linkedSessions` (`start_agent`, `ask_project` and `create_session` through their project lookup, but
 only for the machine the act needs: `start_agent`'s `machine`, or the one a project name, qualified id or `machine/name` points to
 (`projects(need)`); a lookup never waits on another machine, nor on an attempt to one, with one exception (#1547): a bare name that matches no project at all (not on this computer, not on a machine that is up, not in any machine's mirror, which is empty after a restart and cannot know a project made since) tries every machine that is down, within the same bound (`ProjectNeed.anyDown`, asked by `ask_project` and `create_session` after their first lookup found nothing; the machines that are up are not asked again, their rows are the first answer, `prior`), and only then answers "No project named" (`create_session`: "No such project"), naming the machines it could not ask. A machine is waited for once per its call window (`callWindowMs`, 15 s) that way, counted from the guess whether it started an attempt or only joined one under way: a call inside the window joins the wait if it is still going, or is answered at once, without joining an attempt under way as `reachForCall` would. A name qualified with a machine or hub is answered by the first lookup alone, and the machines that did not answer stand as it held them. `create_session` names a project by the same match as `ask_project` (`matchProjects`: id, exact name, `machine/name`, the name in any case), over this computer and the machines, and says which machines it could not ask; a qualified name speaks only of its own machine (`awayFor`, which tells a machine's id from a bare name by the machines the lookup saw, `ProjectLookup.machines`, not by their projects), and the name is trimmed as `ask_project` trims it. The answer waits for the slowest of the down machines, since a same name on another one would make the choice ambiguous. A name qualified with a machine or hub never widens to the others; `agent_session`, a send to or a read of one
-of its sessions) and the router's calls that come from no socket (no `ctx`: an agent's, an app view's);
-a socket's calls (a window's, a hub's, a script's) start nothing, they poll. A refusal tells only the person where Connect is:
-a call from their window (a full socket that shows their cards, `RpcContext.window`) or an app view (#1143); a hub, a script,
-an app and an agent read the agent's sentence. Not for a machine that waits for the person, one whose host the person stopped
+of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
+a window's own calls start nothing, they poll. Not for a machine that waits for the person, one whose host the person stopped
 there, one at `versions_differ` or `updating`, or one held by an operation. What a child there reported meanwhile is read once the
 link is up again. A parent waiting on a child whose turn is running is
 told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask

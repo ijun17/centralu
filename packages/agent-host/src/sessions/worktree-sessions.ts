@@ -1,6 +1,6 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { lstatSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
@@ -20,6 +20,7 @@ import type { SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn, sessionBusy } from '../idle.js'
 import { gitSummary, gitRevParse } from '../dev-services/git.js'
+import { gitWrite } from '../dev-services/git-write.js'
 import {
   gitBranchDelete,
   gitWorktreeAdd,
@@ -34,6 +35,9 @@ import {
   gitBranchAhead,
   gitUnpublishedCommits,
   gitWorktreeDirty,
+  gitBranchRemote,
+  gitFetchBranch,
+  gitRemoteTips,
 } from '../dev-services/git-worktree.js'
 import {
   copyTree,
@@ -53,6 +57,9 @@ import { sleep } from '../timing.js'
  * tool at once, and its turn's end comes a moment later. Past it the worktree stays, said as such.
  */
 export const STOPPING_WAIT_MS = 10_000
+
+/** A branch a new worktree starts on that was there already (#1662): where it starts, and whether a local branch of that name exists */
+type TakenBranch = ForkBase & { sha: string; existing: boolean }
 
 /**
  * Whether a worktree folder is there, gone, or cannot be judged (#715). Gone means `lstat` failed with ENOENT and
@@ -143,7 +150,7 @@ export class WorktreeSessions {
   async createWorktree(
     params: { cwd: string; projectId: string; askedBy?: string; worktreeBranch?: string; worktreeBase?: string },
     id: string,
-  ): Promise<{ worktree: Worktree; setupProblems: string[]; base: ForkBase }> {
+  ): Promise<{ worktree: Worktree; setupProblems: string[]; base: ForkBase; branchWasThere: boolean }> {
     let worktree: Worktree
     let base: ForkBase
     const summary = await gitSummary(params.cwd, this.host.gitTrust(params.projectId))
@@ -202,13 +209,17 @@ export class WorktreeSessions {
     // The baseline for merge detection (#69): the point where the branch forked off. Without it, a
     // freshly created branch would read as "merged" for no reason other than being an ancestor of
     // the trunk.
+    let taken: TakenBranch | null = null
     try {
       // Inside: a repository git refuses to read throws here first (`isRepo`, #841), and is a worktree that could not be made
-      const forkBase: ForkBase = asked && askedSha
+      taken = requested ? await this.takeBranch(params.cwd, params.projectId, branch) : null
+      const forkBase: ForkBase = taken ?? (asked && askedSha
         ? { sha: askedSha, ref: asked, note: `Forked from ${asked}, as asked, at ${askedSha.slice(0, 9)}` }
-        : await resolveForkBase(params.cwd, trunk, { trusted: this.host.projectTrusted(params.projectId) })
+        : await resolveForkBase(params.cwd, trunk, { trusted: this.host.projectTrusted(params.projectId) }))
       if (!asked && forkBase.ref === 'HEAD') console.error(`[worktree] forking from HEAD: ${forkBase.note}`)
-      worktree = await gitWorktreeAdd(params.cwd, path, branch, forkBase.sha ?? undefined, { trusted: true })
+      // Only on the remote: made from its remote-tracking ref by name, so the new branch tracks it
+      const from = taken && !taken.existing ? taken.ref : forkBase.sha ?? undefined
+      worktree = await gitWorktreeAdd(params.cwd, path, branch, from, { trusted: true }, taken?.existing)
       if (forkBase.sha) worktree = { ...worktree, base: forkBase.sha }
       base = forkBase
     } catch (err) {
@@ -221,10 +232,71 @@ export class WorktreeSessions {
     try {
       setupProblems = await this.provisionWorktree(params.cwd, worktree, params.projectId)
     } catch (err) {
-      const left = await this.discardNewWorktree(params.cwd, worktree, params.projectId)
+      const left = await this.discardNewWorktree(params.cwd, worktree, params.projectId, taken?.existing)
       throw rpcError(`Could not set up the worktree: ${(err as Error).message}${left ? ` (${left})` : ''}`)
     }
-    return { worktree, setupProblems, base }
+    return { worktree, setupProblems, base, branchWasThere: taken?.existing === true }
+  }
+
+  /**
+   * A branch asked for that is already here or on the remote (#1662): a pull request's, handed to a new session. The
+   * worktree starts on it as the remote has it, instead of `-b` failing on it ("already exists") or forking a second
+   * branch of that name from the trunk. null when the branch is new, which forks as before.
+   *
+   * What holds the branch is freed only when nothing is lost by it, and otherwise refused with the reason:
+   *   - checked out in an archived session's worktree: that worktree is removed when it has no uncommitted change and
+   *     every commit of its own is on a remote or the trunk (as `deleteHubChild` asks);
+   *   - checked out anywhere else (a session not archived, the project's folder, a worktree of the person's): refused;
+   *   - a local branch behind the remote is moved to the remote's head; one with commits the remote lacks is refused.
+   * Without a remote to read (none, or the fetch failed) the local branch is taken as it is, and the note says why.
+   */
+  private async takeBranch(cwd: string, projectId: string, branch: string): Promise<TakenBranch | null> {
+    const remote = await gitBranchRemote(cwd, branch)
+    const fetched = !remote ? { why: 'this repository has no remote' }
+      : !this.host.projectTrusted(projectId) ? { why: "the project is not trusted, and a fetch runs the repository's network settings" }
+      : await gitFetchBranch(cwd, remote, branch)
+    const onRemote = 'sha' in fetched ? fetched.sha : null
+    const there = `${remote}/${branch}`
+    const local = await gitRevParse(cwd, `refs/heads/${branch}`)
+    if (!local) return onRemote ? { sha: onRemote, ref: there, existing: false, note: `Started on ${there} at ${onRemote.slice(0, 9)}, fetched just now` } : null
+    // Every commit of the branch's that ever was on the remote, or is on the trunk, is not lost by moving it or by removing a worktree
+    const trunk = this.host.trunkOf(projectId) ?? 'HEAD'
+    const pushed = remote ? await gitRemoteTips(cwd, remote, branch) : []
+    const unpushed = onRemote && onRemote !== local ? await gitUnpublishedCommits(cwd, local, branch, trunk, pushed) : 0
+    if (unpushed !== 0) {
+      throw rpcError(`The local ${branch} has ${unpushed ?? 'an unknown number of'} commit(s) that ${there} does not, so it was not moved to ${there}. Push or remove them, then start again.`)
+    }
+    await this.freeBranch(cwd, projectId, branch, trunk, pushed)
+    if (!onRemote) return { sha: local, ref: branch, existing: true, note: `Started on the local ${branch} at ${local.slice(0, 9)}, not compared with a remote: ${'why' in fetched ? fetched.why : ''}` }
+    if (onRemote === local) return { sha: local, ref: branch, existing: true, note: `Started on ${branch} at ${local.slice(0, 9)}, as ${there} has it` }
+    await gitWrite(cwd, ['branch', '--force', branch, onRemote])
+    return { sha: onRemote, ref: there, existing: true, note: `Started on ${there} at ${onRemote.slice(0, 9)}, fetched just now; the local ${branch} was at ${local.slice(0, 9)}, with nothing the remote never had, and was moved to it` }
+  }
+
+  /** Frees `branch` from the worktree that has it checked out, when that is an archived session's and nothing is lost by it (`takeBranch`) */
+  private async freeBranch(cwd: string, projectId: string, branch: string, trunk: string, pushed: string[]): Promise<void> {
+    const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
+    if (!holder) return
+    const where = `${branch} is checked out at ${holder.path}`
+    const id = pathKey(dirname(holder.path)) === pathKey(join(this.host.worktreeRoot, projectId)) ? basename(holder.path) : null
+    const live = id ? this.host.meta.get(id) : undefined
+    if (live) throw rpcError(`${where}, the worktree of the session "${live.name}". Delete that session first, or start on another branch.`)
+    const archived = id && isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
+    if (!archived) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    const kept = (why: string) => rpcError(`${where}, the worktree of the archived session "${archived.session.name}", which ${why}. Nothing was removed: restore that session to keep its work, or start on another branch.`)
+    const folder = worktreeFolderState(holder.path)
+    if (typeof folder === 'object') throw kept(`cannot be read (${folder.unreachable})`)
+    if (folder === 'present') {
+      const state = await gitWorktreeDirty(holder.path, this.host.gitTrust(projectId))
+      if (state.unknown) throw kept('may hold uncommitted changes (they could not be read)')
+      if (state.dirty) throw kept(`holds ${state.changedFiles}${state.more ? '+' : ''} uncommitted file${state.changedFiles === 1 ? '' : 's'}`)
+      const head = await gitRevParse(holder.path, 'HEAD')
+      const unpublished = head ? await gitUnpublishedCommits(cwd, head, branch, trunk, pushed) : null
+      if (unpublished === null) throw kept('may hold commits no remote has (it could not be told)')
+      if (unpublished > 0) throw kept(`has ${unpublished} commit${unpublished === 1 ? '' : 's'} that no remote and not the trunk has`)
+    }
+    await gitWorktreeRemove(cwd, holder.path)
+    console.error(`[worktree] removed the archived session ${archived.session.id.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
   }
 
   /**
@@ -233,10 +305,11 @@ export class WorktreeSessions {
    * Centralu's own setup wrote there (copies of project files, the setup command's output), and no agent ever ran in
    * it. Returns what was left, in words, or null when both went; never throws, as it runs on a failure already thrown.
    */
-  async discardNewWorktree(cwd: string, worktree: Worktree, projectId: string): Promise<string | null> {
+  async discardNewWorktree(cwd: string, worktree: Worktree, projectId: string, keepBranch = false): Promise<string | null> {
     const left: string[] = []
     await gitWorktreeRemove(cwd, worktree.path).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
-    await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
+    // A branch that was there before (#1662) is not this host's to take away
+    if (!keepBranch) await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
     if (!left.length) return null
     const said = left.join('; ')
     console.error(`[worktree] a worktree made for a session that never started was not removed: ${said}`)
