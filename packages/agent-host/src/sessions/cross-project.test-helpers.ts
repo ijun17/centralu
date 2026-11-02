@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, InputObserver, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 import { SessionManager } from './manager.js'
 
 /**
@@ -146,12 +147,9 @@ export async function crossWorld(): Promise<CrossWorld> {
    * is registered, untrusted, which ask_project allows (the card says so); a test that needs it trusted says so.
    */
   mgr.setProjectTrusted(caller.id, true)
-  const until = async (ok: () => boolean, ms = 2000) => {
-    const end = Date.now() + ms
-    while (!ok()) {
-      if (Date.now() > end) throw new Error('timed out')
-      await new Promise((r) => setTimeout(r, 5))
-    }
+  // The shared wait: its limit scales by SLOW as the test limits do, and a failure says what was still wrong (#845)
+  const until = async (ok: () => boolean, ms?: number) => {
+    await eventually(ok, ms)
   }
   return {
     mgr,
