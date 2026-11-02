@@ -39,6 +39,7 @@ export { inlineFrameShown, inlineViewsFromHistory, registerPinnedFrame } from '.
 import { eventActions } from './events/index.js'
 import { layoutActions } from './layout.js'
 export {
+  CENTER_FLOOR,
   PANEL_DEFAULT,
   PANEL_MAX,
   PANEL_MIN,

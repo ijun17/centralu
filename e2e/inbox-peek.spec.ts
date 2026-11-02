@@ -39,10 +39,12 @@ test('a turn that finished is written out in the capsule for 5 s, then folds bac
   await expect(peek(page)).not.toHaveAttribute('data-open')
 
   await finish(page, away)
+  // The line is written in a commit that may land after the call returns (WebKit), and the frame that opens it is asked
+  // for in that commit: the clock moves only once the text is in, or the frame is asked for after the clock has stopped
+  await expect(peek(page)).toHaveText(`${await nameOf(page, away)} finished`)
   // The line grows on the next frame
   await page.clock.runFor(50)
   await expect(peek(page)).toHaveAttribute('data-open', 'true')
-  await expect(peek(page)).toHaveText(`${await nameOf(page, away)} finished`)
   await expect(page.getByTestId('notice')).toHaveCount(0)
   await expect(page.getByTestId('notices')).toHaveCount(0)
 
@@ -78,9 +80,10 @@ test('a notice that arrived while the window was behind is written out when the 
   await expect(peek(page)).not.toHaveAttribute('data-open')
 
   await page.evaluate(() => (window as any).__store.setState({ appFocused: true }))
+  // Written before the clock moves, as in the first scenario
+  await expect(peek(page)).toHaveText(`${await nameOf(page, shown)} finished · 1 more`)
   await page.clock.runFor(50)
   await expect(peek(page)).toHaveAttribute('data-open', 'true')
-  await expect(peek(page)).toHaveText(`${await nameOf(page, shown)} finished · 1 more`)
   await page.clock.runFor(5_200)
   await expect(peek(page)).not.toHaveAttribute('data-open')
 })

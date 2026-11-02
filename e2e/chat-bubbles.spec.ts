@@ -153,3 +153,37 @@ test("the conversation's scrollbar is drawn over its content, and the native one
   expect(thumb.x + thumb.width).toBeLessThanOrEqual(box.x + box.width + 1)
   expect(thumb.x).toBeGreaterThan(box.x + box.width - 20)
 })
+
+/**
+ * A heading that opens a piece of the answer bubble keeps its top margin inside the bubble (#1706). The piece has no
+ * top padding of its own once it runs on from the one above (`mid`, `last`), so the heading's margin used to collapse
+ * through the piece and out of it: the bubble's fill started at the heading's top edge and a hole of the page's
+ * colour stood between it and the piece above.
+ */
+test('a heading that opens a bubble piece has its room inside the bubble and leaves no hole above it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  await page.evaluate((s) => {
+    const store = (window as any).__store
+    const para = 'Some paragraph text that goes on for a while and wraps. '.repeat(8)
+    const items = [
+      { kind: 'user', seq: 1, text: 'question' },
+      { kind: 'assistant', seq: 2, text: para },
+      { kind: 'assistant', seq: 3, text: `## 1. A heading first\n\n${para}` },
+      { kind: 'assistant', seq: 4, text: para },
+    ]
+    store.setState({ chat: { ...store.getState().chat, [s]: items } })
+  }, sid)
+  await expect(page.locator('[data-bubble]')).toHaveCount(3)
+  await expect(page.getByTestId('chat-stream')).not.toHaveAttribute('data-settling', /.*/)
+  // No hole between the pieces, and the heading stands a margin down from the bubble's top edge
+  await expect
+    .poll(() =>
+      page.locator('[data-bubble]').evaluateAll((els) => {
+        const [first, mid] = els.map((el) => el.getBoundingClientRect())
+        const heading = els[1]!.querySelector('h2')!.getBoundingClientRect()
+        return { gap: Math.abs(Math.round(mid!.top - first!.bottom)), roomAtLeast12: heading.top - mid!.top >= 12 }
+      }),
+    )
+    .toEqual({ gap: 0, roomAtLeast12: true })
+})

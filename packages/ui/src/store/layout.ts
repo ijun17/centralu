@@ -40,6 +40,13 @@ export const SIDEBAR_DEFAULT = 240
 export const CENTER_MIN = 360
 
 /**
+ * The width the conversation lane keeps when the window is narrower than the two side lanes' widths allow (#1561): the
+ * lanes give way before it does (the sidebar down to SIDEBAR_MIN, the evidence panel to nothing). Real pixels, like the
+ * lanes' own minimums. Lower than CENTER_MIN, which is how much a drag leaves it while there is room to leave.
+ */
+export const CENTER_FLOOR = 300
+
+/**
  * Clamps to the width that can actually fit inside the window.
  *
  * Why `zoom` is needed (for overall text size): the layout width is in zoom coordinates, while
