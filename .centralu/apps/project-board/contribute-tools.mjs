@@ -15,6 +15,8 @@ import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarn
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
+import { findItem } from './queue.mjs'
+import { readQueue } from './queue-driver.mjs'
 import { freshCache } from './cache.mjs'
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
@@ -146,7 +148,12 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   if (problems.length) return refusal('Not opened:', problems, { warnings })
   // Stacked on another pull request: that one is a lower now, and a stack's lowers are drafts (#1066)
   const lower = target === info.defaultBranch ? null : ((await prsWithHead(r, target)).find((p) => p.state === 'OPEN') ?? null)
-  const lowerLine = (done) => `${done ? 'Turned' : 'Would turn'} ${refOf(r, lower.number)}, which this one is stacked on, into a draft: a stack's lower pull requests run no CI, since its top's run and the merge queue's batch prove the stack (CONTRIBUTING.md).`
+  // One the merge queue holds lands as itself, and the queue never merges a draft it did not make: it stays ready (#1673)
+  const queued = lower && !lower.isDraft && inQueue(r, lower.number)
+  const lowerLine = (done) =>
+    queued
+      ? `${refOf(r, lower.number)}, which this one is stacked on, is in the merge queue, so it stays ready and lands on its own; once it has, move this one onto ${info.defaultBranch} with rebase_stack.`
+      : `${done ? 'Turned' : 'Would turn'} ${refOf(r, lower.number)}, which this one is stacked on, into a draft: a stack's lower pull requests run no CI, since its top's run and the merge queue's batch prove the stack (CONTRIBUTING.md).`
   if (dryRun)
     return linesAnswer(`Ready to open "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''} (dry run, nothing sent).${lower && !lower.isDraft ? ` ${lowerLine(false)}` : ''}`, [['warnings', 'Warnings:', warnings]], { ok: true, body: filled.body })
   // A call cancelled while it waited for its turn opens nothing
@@ -168,8 +175,8 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
       warnings.push(`${e?.message ?? e} Add the label yourself: gh pr edit ${pr.number} --add-label ${labels.join(',')}.`)
     }
   }
-  let stacked = ''
-  if (lower && !lower.isDraft) {
+  let stacked = queued ? ` ${lowerLine(false)}` : ''
+  if (lower && !lower.isDraft && !queued) {
     try {
       await markDraft(r, lower.number)
       stacked = ` ${lowerLine(true)}`
@@ -178,7 +185,16 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
       warnings.push(`${e.message} Turn it into a draft yourself (gh pr ready ${lower.number} --undo): a lower runs no CI as a draft.`)
     }
   }
-  return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}${labelled}${stacked}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url, ...(labelled ? { labels } : {}), ...(stacked ? { drafted: lower.number } : {}) })
+  return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}${labelled}${stacked}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url, ...(labelled ? { labels } : {}), ...(stacked && !queued ? { drafted: lower.number } : {}) })
+}
+
+/** Whether this machine's merge queue holds the pull request (as itself or a stack's top); a queue file that does not read holds nothing. */
+function inQueue(repo, number) {
+  try {
+    return findItem(readQueue(centralu.dataDir), repo, number) !== null
+  } catch {
+    return false
+  }
 }
 
 /** The branches of the open pull requests under `base`, oldest first: the rest of the stack. */
@@ -344,7 +360,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans and the other dependency-cruiser errors, lint on the changed files, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name> (deep when pre-pr is skipped or answers none); then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
+        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans and the other dependency-cruiser errors, lint on the changed files, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name> (deep when pre-pr is skipped or answers none); then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066); one the merge queue holds stays ready, as the queue never merges a draft it did not make, and the answer says to restack the new one with rebase_stack once it lands (#1673).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),

@@ -211,7 +211,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   is rerun** (below, "Reruns"): a cancelled run once per head and failed jobs once per head (`gh api
   …/rerun`, `…/rerun-failed-jobs`), written down before asking and counted as done only once its
   attempt number moves; a test or build failure, GitHub refusing the rerun, failing again or cancelled
-  again → attention, naming the job and its first failing line. No run on a head
+  again → attention, naming the job and its first failing line. A run the queue cancelled itself
+  for a batch (written on the item as `queueCancelled`, that run at that attempt, when the batch
+  builds) is no failure: back on its own CI it is rerun every time, under its own `reruns.queue`,
+  and uses up none of the head's reruns (#1527). No run on a head
   for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
   job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
   clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
@@ -309,6 +312,8 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   with nothing naming the runner; also when the run's conclusion is `cancelled` because CI cancelled
   the rest after it. The attention text names the job, the step, and (as before) its first failure
   line from the job's log; for a cancelled run it says CI cancelled the rest (fail fast).
+- **The queue's own cancel** (rerun each time, #1527): a member's run a batch cancelled when it was
+  built, at that attempt; otherwise as any cancelled run (a failed job in it is still real).
 - **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
   its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
   minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
@@ -569,7 +574,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
 - The watch command does not say "Nothing left queued" while a batch with the owner's pull requests
   still has its end to do (`watchState`); it waits for it, and its notice.
 - `merge_queue` lists running batches first, `batch` on each member, and `batches`; the screen tags a
-  member "batch N". Batch events are for the screen, not a session; a member's merge is its owner's
+  member "batch N". A batch that ended keeps why (`why`, written by `endBatch`), and its line says it
+  after "ended (stopped)" (#1527). Batch events are for the screen, not a session; a member's merge is its owner's
   news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
   red and split, the default branch moved, dispatch refused, a conflict).
@@ -915,7 +921,10 @@ and refuses with every reason at once, sending nothing.
   call cancelled while waiting for its turn opens nothing either.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
-  build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
+  build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure. One this
+  machine's merge queue holds (`findItem` on its file, as itself or a stack's top) stays ready
+  (#1673): the queue never merges a draft it did not make, so drafting it would stall it. The answer
+  says so, and that the new one moves onto the default branch with `rebase_stack` once it landed.
 - **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,
   a type from the conventions' table, lowercase scope and description, no trailing period, the
   subject's length in characters), a blank second line, and the public text rules. Body lines past

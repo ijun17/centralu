@@ -93,7 +93,12 @@ export function normalize(q) {
       ? q.items
           .filter((i) => i && Number.isInteger(i.pr) && typeof i.repo === 'string')
           .map((i) => {
-            const it = { ...i, lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [], reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {} }
+            const it = {
+              ...i,
+              lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [],
+              reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {},
+              queueCancelled: Array.isArray(i.queueCancelled) ? i.queueCancelled.filter((c) => c && Number.isInteger(c.run)) : [],
+            }
             // In a batch that is no longer running (an older file, a batch dropped by hand): its own again
             if (it.batch != null && !running.has(it.batch)) delete it.batch
             return it
@@ -322,7 +327,7 @@ export function handoffReason({ item, pr, files = [], why, ref, instruction = nu
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */
 export function resetFor(item, head) {
   if (item.head === head) return {}
-  return { head, reruns: {}, failures: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null, fullDispatch: null }
+  return { head, reruns: {}, failures: {}, queueCancelled: [], noCiSince: null, missingSince: null, uncleanSince: null, required: null, fullDispatch: null }
 }
 
 /**
@@ -336,7 +341,9 @@ export function resetFor(item, head) {
  * The rerun policy (the owner, 2026-10-19): a real failure (a job failed in a step: a test or a
  * build) is never rerun and needs attention at once, also in a run CI cancelled because of it (fail
  * fast). Only an infrastructure failure is rerun, once per head: a run cancelled with no failed job,
- * a job that hit its timeout, a lost runner, a job on project.json's known-flaky list.
+ * a job that hit its timeout, a lost runner, a job on project.json's known-flaky list. A run the queue
+ * cancelled itself for a batch (`subject.queueCancelled`, that run at that attempt) is no failure at all:
+ * it is rerun each time, and uses up no rerun of the head (#1527).
  */
 export function decideRun({ subject, head, checks, runs = [], failures = {}, now, n }) {
   const at = new Date(now).toISOString()
@@ -354,7 +361,8 @@ export function decideRun({ subject, head, checks, runs = [], failures = {}, now
     const why = runFailure(bad, failures, failedJobs)
     const job = why.job ?? firstJob
     const cause = CAUSE_TEXT[why.cause] ?? why.cause
-    const kind = bad.conclusion === 'cancelled' ? 'cancelled' : 'failed'
+    const ours = (subject.head === head ? (subject.queueCancelled ?? []) : []).some((c) => c.run === bad.id && c.attempt === (bad.attempt ?? 1))
+    const kind = bad.conclusion !== 'cancelled' ? 'failed' : ours ? 'queue' : 'cancelled'
     const done = reruns[kind]
     // GitHub refused the rerun (a run too old, a permission): asking again would only fail again
     if (done?.error && done.run === bad.id && bad.attempt <= done.attempt) return rerunRefused(n, bad.id, done.error)
@@ -367,16 +375,16 @@ export function decideRun({ subject, head, checks, runs = [], failures = {}, now
     if (why.real)
       return attention(
         'failed',
-        `${n}: ${jobText(job)} failed at ${short(head)} with ${cause}${why.step ? ` (step "${why.step}")` : ''}${kind === 'cancelled' ? `, and CI cancelled the rest of run ${bad.id} (fail fast)` : ''}. The queue reruns only infrastructure failures. Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
+        `${n}: ${jobText(job)} failed at ${short(head)} with ${cause}${why.step ? ` (step "${why.step}")` : ''}${kind !== 'failed' ? `, and CI cancelled the rest of run ${bad.id} (fail fast)` : ''}. The queue reruns only infrastructure failures. Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
         { job },
       )
-    if (!done) {
+    if (!done || kind === 'queue') {
       const failedOnly = kind === 'failed'
       return {
         state: 'ci',
         action: { type: 'rerun', runId: bad.id, failedOnly, kind },
         patch: { reruns: { ...reruns, [kind]: { run: bad.id, attempt: bad.attempt, at } } },
-        event: `${n}: run ${bad.id} ${kind === 'cancelled' ? `was cancelled (${cause}${why.job ? `: ${jobText(why.job)}` : ''}); rerunning it` : `failed (${jobText(job)}: ${cause}); rerunning its failed jobs`} once for ${short(head)}.`,
+        event: `${n}: run ${bad.id} ${kind === 'queue' ? 'was cancelled by the merge queue for a batch; rerunning it' : kind === 'cancelled' ? `was cancelled (${cause}${why.job ? `: ${jobText(why.job)}` : ''}); rerunning it once` : `failed (${jobText(job)}: ${cause}); rerunning its failed jobs once`} for ${short(head)}.`,
       }
     }
     if (kind === 'cancelled')
