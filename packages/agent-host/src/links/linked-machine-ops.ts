@@ -620,7 +620,7 @@ export class LinkedMachine extends LinkedMachineConnection {
       answers: (version, ms) =>
         new Promise<boolean>((resolve) => {
           const waiter = (v: string | null) => {
-            if (v !== version) return
+            if (version !== null && v !== version) return
             clearTimeout(timer)
             this.helloWaiters.delete(waiter)
             resolve(true)

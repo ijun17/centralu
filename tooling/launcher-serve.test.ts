@@ -2253,6 +2253,22 @@ describe('asking the host on the port without handing the token to anyone else (
     }
   }, 90_000 * SLOW)
 
+  /*
+   * #1903: a host that took the folder's lock and then hung before it listened. Nothing answers on the port, so the
+   * probe alone said "not running" and signalled nothing; the version started next then failed on the lock this one
+   * keeps. The lock names it and says serve started it, so it is stopped by that pid.
+   */
+  it('a host that holds the lock but never listened is stopped by the pid its lock names', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const holder = lockHolderProcess(d, 'serve')
+    const stopped = await cli(d, ['--stop'])
+    expect(stopped.line.stop).toMatchObject({ ok: true, wasRunning: true, how: POSIX ? 'signal' : 'ended' })
+    await holder.exited
+    expect(holder.alive()).toBe(false)
+  }, 90_000 * SLOW)
+
   // On Windows no signal reaches the launcher, so the host is ended and the launcher goes with it (#1723)
   it('a real serve that kept its old key through --rotate-token is still stopped, and nothing else is signalled', async () => {
     const d = tempDir()

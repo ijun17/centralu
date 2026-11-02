@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderPid, readServePid } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, lockHolderPid, readServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
@@ -20,9 +20,10 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * one still there afterwards is ended.
  *
  * Only the processes serve.pid and host.lock name, and only while they agree with each other and the host answered
- * with this folder's token: a stale pid is never signalled. And only a host `serve` started (`startedByServe`, #1722):
- * a lock held by the app's or the keeper's host is theirs, whatever answers on the port, so `--stop` says whose it is
- * and leaves it.
+ * with this folder's token, or nothing answers on the port while the process host.lock names is the one that wrote it
+ * (`lockHolderIsAlive`, #1903: a host that took the lock and hung before it listened): a stale pid is never signalled.
+ * And only a host `serve` started (`startedByServe`, #1722): a lock held by the app's or the keeper's host is theirs,
+ * whatever answers on the port, so `--stop` says whose it is and leaves it.
  *
  * `{ ok, wasRunning, how?, message? }`, the `--stop` line's `stop`. With `ifIdle` (#1224, the hand-over) the host stops only
  * when nothing runs there, and `{ ok: false, busy: true }` says it did not. `forUpdate` (#1618): a hub's update stops it, and
@@ -38,7 +39,9 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const own = { token: state.token, proofKey: state.proofKey }
   const probe = () => probeHost({ port, ...own, protocolVersion: installed })
   const first = await probe()
-  if (!heldHere(first, dataDir, undefined, state.port != null)) {
+  // Took the lock, then never listened (#1903): nothing to ask, and it keeps the folder from the next host until ended
+  const silent = !first.running && !first.unproven && startedByServe(dataDir) && lockHolderIsAlive(dataDir)
+  if (!silent && !heldHere(first, dataDir, undefined, state.port != null)) {
     // The folder is held, but not by a serve (#1722): the app's or the keeper's host, whatever answered on the port
     const other = foreignHolder(dataDir)
     const whose = other ? `. It belongs to another Centralu host (pid ${other.pid}), ${holderWho(other.by)}; not stopping it` : ''
@@ -53,7 +56,7 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const launcherPid = mayKill && launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, ifIdle, forUpdate })
+  let asked = silent ? { ok: false, message: 'it holds the folder but does not answer on its port' } : await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, ifIdle, forUpdate })
   if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, ...own, protocolVersion: asked.protocolVersion, ifIdle, forUpdate })
   // `ifIdle` and it has work running (#1224): it was left as it is
   if (asked.busy) return { ok: false, wasRunning: true, busy: true, message: asked.message }

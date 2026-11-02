@@ -120,7 +120,7 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
         const deadline = Date.now() + (o.checkMs ?? ms)
         for (;;) {
           const now = await lineThere(tunnel, spec, target).catch(() => null)
-          if (now?.hostRunning && now.version === version) return true
+          if (now?.hostRunning && (version === null || now.version === version)) return true
           if (Date.now() > deadline) return false
           await sleep(1_000)
         }

@@ -67,8 +67,8 @@ export type HostControl = {
   hold: () => void | Promise<void>
   /** `centralu serve --detach` there, through the lookup (which reads `current`) */
   start: () => Promise<void>
-  /** Whether a host answering as `version` said hello within `ms`; the link reconnects for it */
-  answers: (version: string, ms: number) => Promise<boolean>
+  /** Whether a host answering as `version` (null: any) said hello within `ms`; the link reconnects for it */
+  answers: (version: string | null, ms: number) => Promise<boolean>
   /** `count`: what a `wait_idle` or `wait_open` step waits for (#1579) */
   step: (step: UpdateStep, count?: number) => void
 }
@@ -188,8 +188,9 @@ async function startOrRestore(c: HostControl, to: InstalledVersion, from: Instal
 
 /**
  * After a failed switch to `to`: the end of its log, the pointers as they were, the old host started
- * again. Always rejects, with what happened and where the machine is now. `restore`: the store is put back as it was
- * before `to` (a dev build) first opened it, which it may have migrated past what the old version reads (#1036)
+ * again and its hello waited for (#1903). Always rejects, with what happened and where the machine is now. `restore`: the
+ * store is put back as it was before `to` (a dev build) first opened it, which it may have migrated past what the old
+ * version reads (#1036)
  */
 async function putBack(
   c: HostControl,
@@ -207,7 +208,11 @@ async function putBack(
     await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
     await setPointers(c, to, was.current, was.previous)
     if (restore && was.current) await restoreStore(c, was.current)
-    if (was.running) await c.start()
+    if (was.running) {
+      await c.start()
+      // Back only once it said hello (#1903): a start that went through can still leave no host that answers
+      if (!(await c.answers(was.current?.version ?? null, CHECK_MS))) throw new Error(`it did not answer within ${CHECK_MS / 1000} s either`)
+    }
   } catch (err) {
     throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}.${log}`)
   }
