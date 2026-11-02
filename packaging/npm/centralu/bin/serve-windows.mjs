@@ -70,6 +70,16 @@ export function windowsArg(arg) {
 }
 
 /**
+ * The command line WMI is given to run `args` in a WSL distro: `wsl.exe` reads its own options from the line, and takes a
+ * quote round the distro or the user as part of the name, so it starts nothing (measured: `-d "Ubuntu"` ran no command
+ * where `-d Ubuntu` did, #1716). Those two are bare, which `wslDistro` and `wslUser` allow, as are the options; what
+ * `--exec` runs is quoted as any Windows command line is
+ */
+export function wslCommandLine({ distro, user, cwd, execPath, args }) {
+  return ['wsl.exe', '-d', wslDistro(distro), '-u', wslUser(user), '--cd', windowsArg(cwd), '--exec', ...[execPath, ...args].map(windowsArg)].join(' ')
+}
+
+/**
  * The first line of a script run by Windows PowerShell 5.1: its own module path. Started from
  * PowerShell 7 (pwsh, a `DefaultShell` of it, a CI runner), 5.1 inherits pwsh's `PSModulePath`, whose
  * first folder holds 7.x copies of the built-in modules that 5.1 cannot load: `Invoke-CimMethod` and

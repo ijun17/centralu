@@ -607,8 +607,8 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
 
   it('inside WSL with no way to Windows PowerShell, it says so instead of writing anything', async () => {
     const h = home()
-    const r = await autostart({ env: { WSL_DISTRO_NAME: 'Ubuntu' }, home: h, platform: 'linux', how: 'task', interop: () => true, user: 'me', cliPath: null, action: 'on', run: runner().run })
-    // This machine has no Windows drive mounted, which is what the lookup reads
+    // No Windows drive mounted, which is what the lookup reads: said here, as a WSL distro with C: mounted would find PowerShell (#1716)
+    const r = await autostart({ env: { WSL_DISTRO_NAME: 'Ubuntu' }, home: h, platform: 'linux', how: 'task', interop: () => true, mounts: () => '', user: 'me', cliPath: null, action: 'on', run: runner().run })
     expect(r.line).toMatchObject({ ok: false, how: 'task', message: 'Windows PowerShell is not reachable from this WSL distro' })
   })
 })

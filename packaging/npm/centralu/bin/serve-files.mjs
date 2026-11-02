@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
 import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
 import { parseLinkPublicKey } from './serve-keys.mjs'
+import { windowsPowershell } from './serve-windows.mjs'
 
 /**
  * The file in the data folder that holds the host's key, the full credentials' verifiers and the port, mode 0600.
@@ -594,18 +595,21 @@ export function foreignHolder(dataDir) {
  * Whether the process `host.lock` names is the one that wrote it (#838 review): alive, and started when the lock says
  * (`ps -o lstart`, as the host writes it, `instance-lock.ts`). A lock left by a host that died, whose pid another
  * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
- * start time (its host found no `ps`) or a system without `ps` (Windows) cannot be told apart, so it does not count.
+ * start time and no `at` (its host found no `ps`) cannot be told apart, so it does not count. Windows has no `ps` and its
+ * host records no start time (#1723), only `at`, when it took the folder: the process that wrote the lock was created by
+ * then, and one given its number afterwards was created later.
  */
-export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
-  let holder
-  try {
-    holder = parseLockHolder(readFileSync(join(dataDir, 'host.lock'), 'utf8'))
-  } catch {
-    return false
-  }
-  if (!holder || !holder.started || !isAlive(holder.pid)) return false
-  return startOf(holder.pid) === holder.started
+export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
+  const holder = lockHolder(dataDir)
+  if (!holder || !isAlive(holder.pid)) return false
+  if (holder.started) return startOf(holder.pid) === holder.started
+  if (holder.at === undefined) return false
+  const created = createdAt(holder.pid)
+  return created !== null && created <= holder.at + CREATED_BY_SLACK_MS
 }
+
+/** The clocks of Node and Windows differ a little: a process created this much after the lock was written still wrote it */
+const CREATED_BY_SLACK_MS = 2000
 
 /**
  * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
@@ -616,7 +620,7 @@ function parseLockHolder(text) {
     const v = JSON.parse(text)
     if (!Number.isInteger(v?.pid) || v.pid <= 0) return null
     const by = v.by === 'app' || v.by === 'keeper' || v.by === 'serve' ? v.by : null
-    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(by ? { by } : {}) }
+    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(Number.isFinite(v.at) ? { at: v.at } : {}), ...(by ? { by } : {}) }
   } catch {
     return null
   }
@@ -635,7 +639,22 @@ export function processStartTime(pid) {
   }
 }
 
-/** Who `host.lock` names as the data folder's owner, `{ pid, started, by? }`, or null */
+/**
+ * When a pid's process was created, as milliseconds since the epoch, on Windows (PowerShell; the same asking as the e2e
+ * runner's lock); null elsewhere, or when it cannot be told (a process of another account)
+ */
+export function processCreatedAt(pid) {
+  if (process.platform !== 'win32') return null
+  try {
+    const out = execFileSync(windowsPowershell('wmi', process.env), ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    const ms = Number(out.trim())
+    return Number.isFinite(ms) && ms > 0 ? ms : null
+  } catch {
+    return null
+  }
+}
+
+/** Who `host.lock` names as the data folder's owner, `{ pid, started, by?, at? }`, or null */
 export function lockHolder(dataDir) {
   try {
     return parseLockHolder(readFileSync(join(dataDir, 'host.lock'), 'utf8'))
