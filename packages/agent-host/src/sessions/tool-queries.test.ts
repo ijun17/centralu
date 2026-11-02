@@ -71,6 +71,17 @@ describe("a tool's models", () => {
     expect(reads).toBe(2)
   })
 
+  it('reads again when the clock moved back after a list was kept, not trusting a kept time from the future', async () => {
+    vi.setSystemTime(10_000_000)
+    await queries.listModels('claude')
+    expect(reads).toBe(1)
+    vi.setSystemTime(1_000_000)
+    answer = async () => [m('b')]
+    // The kept list is stale, so it is read again (modelsWithin answers the old list meanwhile; listModels waits for the new)
+    expect(await queries.listModels('claude')).toEqual({ supported: true, models: [m('b')] })
+    expect(reads).toBe(2)
+  })
+
   it('a tool that cannot list says so', async () => {
     const none = new ToolQueries({ adapters: new Map([['codex', {} as AgentAdapter]]) } as unknown as ToolQueriesHost)
     expect(await none.listModels('codex')).toEqual({ supported: false, reason: 'codex does not support listing models', models: [] })

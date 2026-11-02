@@ -143,7 +143,7 @@ export class ToolQueries {
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
+    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
@@ -242,7 +242,7 @@ export class ToolQueries {
     }
 
     const hit = this.modelCache.get(tool)
-    if (hit && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
+    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
 
     try {
       const models = await withTimeout(this.fetchModels(tool, adapter), 15_000)
@@ -267,7 +267,7 @@ export class ToolQueries {
     const adapter = this.host.adapters.get(tool)
     if (!adapter?.listModels) return null
     const hit = this.modelCache.get(tool)
-    const stale = !hit || Date.now() - hit.at >= 5 * 60_000
+    const stale = !hit || isFromTheFuture(hit.at, Date.now()) || Date.now() - hit.at >= 5 * 60_000
     if (hit && !stale && !fresh) return { models: hit.models, cached: true }
     const failedAt = this.modelFailures.get(tool)
     const failedRecently = failedAt !== undefined && !isFromTheFuture(failedAt, Date.now()) && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
