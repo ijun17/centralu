@@ -277,9 +277,18 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
         }
         for (const [id, p] of theirs) if (!nextProjects[id]) nextProjects[id] = p
       }
+      const forgotten = forgetSessions(st, gone)
+      /*
+       * A wake that failed while the link was dropping (#1840) leaves a note about the link: with the link back it is
+       * cleared, and the conversation is read again below. Nothing wakes it; the composer taking the keyboard or a message
+       * does, as for any asleep session. A session locked elsewhere keeps its note: the link did not cause it.
+       */
+      const base = forgotten.wakeError ?? st.wakeError
+      const wakeError = Object.fromEntries(Object.entries(base).filter(([id]) => !ofMachine(sessions[id] ?? {}) || st.wakeLocked[id]))
       return {
         sessions,
-        ...forgetSessions(st, gone),
+        ...forgotten,
+        wakeError,
         projects: nextProjects,
         workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
       }
