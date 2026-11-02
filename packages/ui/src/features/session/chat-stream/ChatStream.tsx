@@ -12,6 +12,7 @@ import { ActivityRow } from './ActivityRow.jsx'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
 import { useChatScroll } from './useChatScroll.js'
+import { EDGE_FADE_PX, useEdgeFade } from './useEdgeFade.js'
 import { answerEnds as answerEndsOf, bubbleOf, dayBreaks as dayBreaksOf, joinsNext, type BubblePart } from './answerBubble.js'
 import { forgetUnlistedSizes, rowKeys, writeScroll } from '../scroll.js'
 
@@ -219,6 +220,9 @@ export function ChatStream({
     return () => cancelAnimationFrame(f)
   }, [sessionId, fadeIn])
 
+  // The edges where more conversation lies beyond them fade, so a line the edge cuts reads as scrolling (#1706)
+  const fade = useEdgeFade(scrollRef, stickToBottom, [virtualizer.getTotalSize(), bottomPad, bottomPeek, yieldSpace, pending, questions.length, working])
+
   // Where a new day begins, and which bubble ends an answer and carries its time (answerBubble.ts)
   const dayBreaks = useMemo(() => dayBreaksOf(chat), [chat])
   const answerEnds = useMemo(() => answerEndsOf(chat), [chat])
@@ -360,6 +364,9 @@ export function ChatStream({
 
         {working && <ActivityRow sessionId={sessionId} activity={activity} />}
       </div>
+      {/* Under the pinned question (z-10) and the thumb, over the rows; they take no pointer, so selecting and scrolling pass through */}
+      <div ref={fade.top} className="cc-edge-fade-top" style={{ height: EDGE_FADE_PX }} aria-hidden data-testid="chat-fade-top" />
+      <div ref={fade.bottom} className="cc-edge-fade-bottom" style={{ height: EDGE_FADE_PX }} aria-hidden data-testid="chat-fade-bottom" />
       {/*
         The skeleton stands over the list, not in it, from the moment history is asked for until the list has settled
         where it opens (owner, 2026-10-18). In the list it vanished as the rows arrived, and the list then stayed hidden
@@ -368,7 +375,7 @@ export function ChatStream({
       */}
       {((reading && !gaveUp) || settling) && (
         <div
-          className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-4"
+          className="pointer-events-none absolute inset-0 z-[6] overflow-hidden px-4 pt-4"
           data-testid="chat-skeleton-cover"
         >
           <ChatSkeleton late />
