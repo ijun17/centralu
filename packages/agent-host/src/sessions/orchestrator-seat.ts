@@ -1,5 +1,6 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
+import { tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -352,7 +353,7 @@ export function orchestratorToolsFor(
       }
       // Found only from the mirror: refused now, rather than a create sent over a link that did not answer a list
       const away = remote[0]?.away
-      if (away) return { ok: false, error: `${remote[0]!.name} [${remote[0]!.id}] is on ${remote[0]!.machine}, which ${awayPhrase(away)}. Try again once its link is back.` }
+      if (away) return { ok: false, error: `${remote[0]!.name} [${remote[0]!.id}] is on ${remote[0]!.machine}, which ${awayPhrase(away)}. ${tryAgainAfter(away)}` }
       /*
        * The new session never runs with more than this seat's own permissions, and its first message is this seat's,
        * not the person's (#838). It used to be `normal` whatever the seat ran under and stored as if the person had

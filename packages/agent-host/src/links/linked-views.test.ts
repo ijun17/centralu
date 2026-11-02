@@ -250,6 +250,15 @@ describe('the hub serves a linked machine’s app views (plan §11)', () => {
     expect((await get(`http://127.0.0.1:${h.port}/${HUB_SECRET}/views/${id}/?host=${encodeURIComponent(HOST_ORIGIN)}`)).status).toBe(404)
   })
 
+  // #1143: a view is the person's, though the hub asks for its document with no window's context
+  it('a machine the person disconnected: the view tells the person where to connect it', async () => {
+    const remote = machine({ 'p1/board ui://board/main': { html: '<p>b</p>' } })
+    const id = `m1.${remote.views.open(BOARD, 'ui://board/main').instanceId}`
+    const h = await hub(Object.assign(remote.m, { reachable: false, waitsForPerson: true }))
+    const err = await h.views.frame({ app: HUB_BOARD, instanceId: id, hostOrigin: HOST_ORIGIN }).catch((e: unknown) => e)
+    expect(err).toMatchObject({ message: `${remote.m.name} is not connected. Connect it in Settings → Machines, then try again.`, data: { machine: 'm1' } })
+  })
+
   it('a machine on a Centralu from before this says what would fix it', async () => {
     const remote = machine({})
     remote.m.answer = () => {

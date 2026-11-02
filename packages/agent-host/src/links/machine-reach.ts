@@ -28,3 +28,6 @@ export const windowAwaySentence = (m: Away, tail: Tail): string =>
 
 /** How a refusal about a machine that is `away` (its reason, as `awayPhrase` reads it) ends: a machine that waits for the person is not waited for */
 export const tryAgainAfter = (away: string): string => (away === NOT_CONNECTED ? 'Try again once the person has connected it.' : 'Try again once its link is back.')
+
+/** A call an agent made, refused because `machine` is `away`: what did not happen (`so`), and when to try again (#1143) */
+export const awayRefusal = (machine: string, away: string, so: string): string => `${machine} ${awayPhrase(away)}, so ${so}. ${tryAgainAfter(away)}`

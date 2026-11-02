@@ -17,7 +17,7 @@ import { rpcError } from '../rpc-error.js'
  */
 
 /** Which window's connection a call came in on (transport/server.ts). Passed to the hub's own handler, never forwarded */
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; window?: true }
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 /** One linked machine, as the router needs it (linked-machine-connection.ts implements it) */
@@ -89,9 +89,12 @@ export class MachineUnreachableError extends Error {
   readonly code = 'internal'
   readonly retryable = true
   readonly data: { machine: string; reason: 'unreachable' }
-  constructor(machine: RoutedMachine, forWindow: boolean) {
-    // The sentence `linked-sessions.ts` gives the model (#1341, #1532): a machine the person disconnected says to connect it
-    super((forWindow ? windowAwaySentence : awaySentence)(machine, 'this works again once its link is back'))
+  /**
+   * The sentence `linked-sessions.ts` gives the model (#1341, #1532): a machine the person disconnected says to connect it.
+   * The person reads the window's (`RpcContext.window`, #1143); a hub, a script, an app or an agent reads the model's
+   */
+  constructor(readonly machine: RoutedMachine, forPerson: boolean) {
+    super((forPerson ? windowAwaySentence : awaySentence)(machine, 'this works again once its link is back'))
     this.data = { machine: machine.id, reason: 'unreachable' }
   }
 }
@@ -158,12 +161,12 @@ export class Router {
 
   private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {
     /*
-     * A call with no window behind it (`ctx` absent: an agent's, through the host's own use of the router) needs the machine
-     * and tries to connect it (#1532). A window's call (`ctx` given) never does: it polls and re-reads whatever is on screen,
-     * and the person has Connect for it
+     * A call with no socket behind it (`ctx` absent: an agent's, through the host's own use of the router) needs the machine
+     * and tries to connect it (#1532). A socket's call (`ctx` given) never does: a window polls and re-reads whatever is on
+     * screen, and the person has Connect for it. Only the person's own window is told where Connect is (`RpcContext.window`)
      */
     if (!m.reachable && ctx === undefined) await m.reachForCall?.()
-    if (!m.reachable) throw new MachineUnreachableError(m, ctx !== undefined)
+    if (!m.reachable) throw new MachineUnreachableError(m, ctx?.window === true)
     return m.call(method, params)
   }
 

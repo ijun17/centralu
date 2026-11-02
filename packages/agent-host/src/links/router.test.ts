@@ -934,20 +934,23 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
   })
 
   describe('a machine the person disconnected (#1341)', () => {
-    it('tells a window where to connect it, not that its link comes back', async () => {
+    const refusal = (ctx?: Parameters<Router['handle']>[2]) => {
       const { router, m1 } = rig()
       m1.reachable = false
       m1.waitsForPerson = true
-      const refusal = await router.handle('agents.interrupt', { sessionId: 'm1.s' }, { client: 1 }).catch((e: Error) => e.message)
-      expect(refusal).toBe('Machine m1 is not connected. Connect it in Settings → Machines, then try again.')
-    })
+      return router.handle('agents.interrupt', { sessionId: 'm1.s' }, ctx).catch((e: Error) => e.message)
+    }
+    const toAgent = 'Machine m1 is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect), then try again'
 
     it('tells an agent to ask the person, in the words linked-sessions gives it', async () => {
-      const { router, m1 } = rig()
-      m1.reachable = false
-      m1.waitsForPerson = true
-      const refusal = await router.handle('agents.interrupt', { sessionId: 'm1.s' }).catch((e: Error) => e.message)
-      expect(refusal).toBe('Machine m1 is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect), then try again')
+      expect(await refusal()).toBe(toAgent)
+    })
+
+    // #1143: only the person's own window; a socket that is not it (a hub linked to this one, a script, an app) is told what an agent is
+    it('tells the person’s window where to connect it, not that its link comes back, and any other socket what it tells an agent', async () => {
+      expect(await refusal({ client: 1, rights: 'full', window: true })).toBe('Machine m1 is not connected. Connect it in Settings → Machines, then try again.')
+      expect(await refusal({ client: 1, rights: 'full', label: 'hub:Desk' })).toBe(toAgent)
+      expect(await refusal({ client: 2, rights: 'limited', label: 'ci runner', covered: true })).toBe(toAgent)
     })
   })
 })

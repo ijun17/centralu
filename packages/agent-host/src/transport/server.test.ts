@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
 import { connect as tcpConnect, type Socket } from 'node:net'
-import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
+import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, SHOWS_HOST_REQUESTS, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
@@ -587,24 +587,31 @@ describe('RPC round trip', () => {
     expect(gone).toEqual([...of('from-a'), ...of('from-b')])
   })
 
-  it('says with which rights a call came in, and what the program called itself in its hello (#1405, §8.1)', async () => {
-    const seen: { rights?: string; label?: string | null }[] = []
-    const { port } = await start(async (_m: string, _p: unknown, ctx?: { rights?: string; label?: string | null }) => {
-      seen.push({ rights: ctx?.rights, label: ctx?.label })
+  // And whether the person's window made it (#1143): a full socket that shows their cards; a hub holds a full credential too, and shows none
+  it('says with which rights a call came in, what the program called itself in its hello, and whether it is the window (#1405, §8.1)', async () => {
+    const seen: { rights?: string; label?: string | null; window?: true }[] = []
+    const { port } = await start(async (_m: string, _p: unknown, ctx?: { rights?: string; label?: string | null; window?: true }) => {
+      seen.push({ rights: ctx?.rights, label: ctx?.label, ...(ctx?.window ? { window: ctx.window } : {}) })
       return {}
     })
-    const script = connect(port)
-    const window = connect(port)
-    const silent = connect(port)
-    await Promise.all([script.open(), window.open(), silent.open()])
-    script.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION, client: 'ci runner' })
-    window.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    const [script, window, hub, silent] = [connect(port), connect(port), connect(port), connect(port)]
+    await Promise.all([script.open(), window.open(), hub.open(), silent.open()])
+    script.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION, client: 'ci runner', shows: [SHOWS_HOST_REQUESTS] })
+    window.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, shows: [SHOWS_HOST_REQUESTS] })
+    hub.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, client: 'hub' })
     silent.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION })
-    for (const c of [script, window, silent]) c.send({ kind: 'rpc', id: 'r', method: 'sessions.list', params: {} })
-    await Promise.all([script, window, silent].map((c) => c.wait(() => c.frames.some((f) => f.kind === 'res'))))
-    expect(seen).toEqual(expect.arrayContaining([{ rights: 'limited', label: 'ci runner' }, { rights: 'full', label: null }, { rights: 'limited', label: null }]))
-    expect(seen).toHaveLength(3)
-    for (const c of [script, window, silent]) c.ws.close()
+    for (const c of [script, window, hub, silent]) c.send({ kind: 'rpc', id: 'r', method: 'sessions.list', params: {} })
+    await Promise.all([script, window, hub, silent].map((c) => c.wait(() => c.frames.some((f) => f.kind === 'res'))))
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        { rights: 'limited', label: 'ci runner' },
+        { rights: 'full', label: null, window: true },
+        { rights: 'full', label: 'hub' },
+        { rights: 'limited', label: null },
+      ]),
+    )
+    expect(seen).toHaveLength(4)
+    for (const c of [script, window, hub, silent]) c.ws.close()
   })
 
   it('returns the result', async () => {
