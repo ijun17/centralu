@@ -401,6 +401,7 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   },
   legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
   projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
+  untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty

@@ -13,6 +13,8 @@ export type PersonHost = {
   legacyChain(threadId: string): MessageRow[]
   /** A project's name as the person knows it (`MailReach.projectLabel`) */
   projectLabel(projectId: string): string
+  /** Whether the project is not trusted (`MailReach.untrusted`, §7.2) */
+  untrusted(projectId: string): boolean
 }
 
 /** How many messages one `mail.thread` returns; `more` says there are further ones */
@@ -88,7 +90,8 @@ export class MailPerson {
       const upTo = opts.before === undefined ? all : all.filter((s) => s.seq < (opts.before ?? 0))
       page = upTo.slice(-Math.min(opts.tail ?? THREAD_PAGE, THREAD_PAGE))
     } else page = all
-    this.records.markRead(PERSON, page.flatMap((s) => (this.records.recipient(s.m.id, PERSON)?.readAt === null ? [s.m.id] : [])), Date.now())
+    // Read for the person: every window's list hears it
+    if (this.records.markRead(PERSON, page.flatMap((s) => (this.records.recipient(s.m.id, PERSON)?.readAt === null ? [s.m.id] : [])), Date.now()) > 0) this.service.announce()
     const first = page[0]?.seq
     const last = page.at(-1)?.seq
     const legacy = this.legacyOf(all[0]?.m)
@@ -106,13 +109,14 @@ export class MailPerson {
   }
 
   /**
-   * The person writes in a chain: an answer to the newest message in it from someone else (to its sender), else a word more to the ones the person's
+   * The person writes in a chain: an answer to the newest message in it sent to them by someone else (to its sender), else a word more to the ones the person's
    * own newest message went to. A question waits for an answer (D3); an answer or a note does not
    */
   reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note'): MailThreadView {
     const root = this.rootOf(threadId)
     const chain = root === null ? [] : this.shown(root).map((s) => s.m)
-    const theirs = chain.findLast((m) => m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu')
+    // Only what was sent to the person is theirs to answer: a message held for them to act on is not
+    const theirs = chain.findLast((m) => m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu' && this.records.recipient(m.id, PERSON) !== undefined)
     const mine = chain.findLast((m) => m.sender === PERSON)
     const target = theirs ?? mine
     if (root === null || !target) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
@@ -150,10 +154,13 @@ export class MailPerson {
    */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): { changed: number } {
     if (action === 'dismiss') return { changed: this.service.dismissHeld(recipient, messageIds, PERSON_HOLDS) }
-    const policy = messageIds.flatMap((id) => (this.records.recipient(id, recipient)?.held === 'policy' ? (this.records.message(id) ?? []) : []))
-    const project = policy[0]?.senderProject
-    if (project) throw refuse('untrusted_project', `${this.host.projectLabel(project)} is not trusted: what its sessions send out of it waits until you trust the project, and then goes in order.`)
-    return { changed: this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget']) }
+    const projects = new Set(messageIds.flatMap((id) => (this.records.recipient(id, recipient)?.held === 'policy' ? (this.records.message(id)?.senderProject ?? []) : [])))
+    // A project trusted since (its trust's release did not reach these rows): what it holds goes now, in order
+    for (const p of projects) if (!this.host.untrusted(p)) this.trusted(p)
+    const changed = this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget'])
+    const still = [...projects].find((p) => this.host.untrusted(p))
+    if (still !== undefined) throw refuse('untrusted_project', `${this.host.projectLabel(still)} is not trusted: what its sessions send out of it waits until you trust the project, and then goes in order.`)
+    return { changed }
   }
 
   /** Resume on a session's paused mail, or on a chain's (an old thread's id names the chains moved from it) */
@@ -171,10 +178,15 @@ export class MailPerson {
     this.service.announce()
   }
 
-  /** A project is deleted: the mail held for its trust is dropped and its senders are told (§7.4) */
-  projectDeleted(projectId: string): void {
-    this.service.dismissProject(projectId)
+  /** A project was deleted: the mail held for its trust is dropped and its senders are told, naming it as it was named (§7.4) */
+  projectDeleted(projectId: string, name: string): void {
+    this.service.dismissProject(projectId, name)
     this.service.announce()
+  }
+
+  /** The project's name now, for `projectDeleted` once it is gone */
+  projectName(projectId: string): string {
+    return this.host.projectLabel(projectId)
   }
 
   /**
@@ -199,13 +211,13 @@ export class MailPerson {
   }
 
   /**
-   * The chain's messages the person may read, oldest first, numbered for the window by their place in the whole chain: a message that becomes readable
-   * or stops being so leaves the others' numbers as they were, so the window's `after` misses nothing
+   * The chain's messages the person may read, in the order they were stored, each numbered for the window by its own row number: a message that comes,
+   * goes or stops being readable leaves the others' numbers as they were, so the window's `after` misses nothing
    */
   private shown(root: string): Shown[] {
     return this.records
-      .byRoot(root, { limit: CHAIN_CAP })
-      .map((m, i) => ({ m, seq: i + 1 }))
+      .numbered(root, CHAIN_CAP)
+      .map(({ m, n }) => ({ m, seq: n }))
       .filter((s) => this.readable(s.m))
   }
 

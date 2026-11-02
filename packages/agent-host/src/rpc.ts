@@ -675,9 +675,10 @@ export function createRpcHandler(
       } catch {
         // No such project — nothing to clean up
       }
-      // While the project still has its name for the notice its senders get: the mail held for its trust is dropped (§7.4)
-      mail?.projectDeleted(projectId)
+      // Its name before it goes, for the notice the senders of its held mail get once it is gone (§7.4)
+      const name = mail?.projectName(projectId)
       await mgr.deleteProject(projectId)
+      if (name !== undefined) mail?.projectDeleted(projectId, name)
       if (cwd !== null) {
         terminals?.closeCwd(cwd)
         commands?.stopCwd(cwd)

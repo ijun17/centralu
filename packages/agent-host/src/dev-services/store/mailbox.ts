@@ -330,6 +330,17 @@ export class MailboxRecords {
   }
 
   /**
+   * The last `limit` messages of a root in the order they were stored, each with its row number in `mail`: a number that
+   * stays the message's own while others of the chain come and go, what the person's window pages by (§12)
+   */
+  numbered(rootId: string, limit: number): { m: MailRow; n: number }[] {
+    return this.db
+      .prepare<[string, number], MailSql & { n: number }>(`SELECT * FROM (SELECT rowid AS n, * FROM mail WHERE root_id = ? ORDER BY rowid DESC LIMIT ?) ORDER BY n`)
+      .all(rootId, limit)
+      .map((r) => ({ m: this.toMail(r), n: r.n }))
+  }
+
+  /**
    * Messages to or from `address`, newest first, `limit` of them, before the message `before` when given (none when it
    * is not stored). The two sides are a `UNION` of two index reads (`mail_sender`, `mail_recipients_by`), not a scan
    */

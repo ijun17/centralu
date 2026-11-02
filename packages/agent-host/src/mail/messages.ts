@@ -617,6 +617,8 @@ export class MessageService {
       const dismissed = this.heldBy(recipient, ids, why)
       for (const id of dismissed) this.records.answerDropped(id)
       const n = this.records.dismiss(recipient, dismissed)
+      // Never delivered now, so nothing waits on it: its sender's wait for an answer or a report ends
+      for (const id of dismissed) this.records.settle(id, recipient, 'withdrawn', this.now())
       for (const id of dismissed) {
         const m = this.records.message(id)
         if (m) this.changed(m, [PERSON])
@@ -631,7 +633,7 @@ export class MessageService {
    * The person dismissed what an untrusted project sent out (or the project was deleted): its `policy` rows are deleted, with their messages when no row
    * is left, the questions answers among them held open again (D8), and the refused records of its delegations go. Each sender is told once (S13)
    */
-  dismissProject(projectId: string): { rows: number; senders: string[] } {
+  dismissProject(projectId: string, label = this.reach.projectLabel(projectId)): { rows: number; senders: string[] } {
     return this.run(() => {
       const now = this.now()
       const held = this.records.heldPolicy().filter((h) => h.senderProject === projectId)
@@ -644,7 +646,7 @@ export class MessageService {
       for (const m of messages) dropped.set(m.sender, [...(dropped.get(m.sender) ?? []), m.id])
       for (const [sender, ids] of dropped) {
         if (parseAddress(sender)?.kind !== 'session') continue
-        this.centralu(sender, { kind: 'notice', body: droppedText(ids, this.reach.projectLabel(projectId)), facts: {}, dedupeKey: `dropped:${sender}:${projectId}:${now}` })
+        this.centralu(sender, { kind: 'notice', body: droppedText(ids, label), facts: {}, dedupeKey: `dropped:${sender}:${projectId}:${now}` })
       }
       for (const m of messages) this.changed(m, [PERSON])
       return { rows, senders: [...dropped.keys()] }
@@ -708,7 +710,11 @@ export class MessageService {
     return this.run(() => {
       const m = this.records.message(messageId)
       const rows = m ? this.records.recipients(messageId).filter((r) => r.held === 'loop') : []
-      for (const r of rows) this.records.hold(r.recipient, [messageId], 'released')
+      // Let go as unread mail to deliver, also a row an older build told of quietly while it held it (§6.3), and never held again
+      for (const r of rows) {
+        this.records.letGo(r.recipient, [messageId])
+        this.records.hold(r.recipient, [messageId], 'released')
+      }
       if (m?.replyTo && rows.length > 0) this.records.settle(m.replyTo, m.sender, 'answered', this.now(), m.id)
       // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
       if (m && rows.length > 0) this.changed(m, [...rows.map((r) => r.recipient), PERSON])

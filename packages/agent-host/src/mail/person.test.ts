@@ -30,6 +30,7 @@ function ready(w: ReturnType<typeof hostWorld>) {
     session: (id) => ({ name: id, state: 'idle' }),
     legacyChain: (threadId) => w.store.legacyChain(threadId, undefined, 100),
     projectLabel: (projectId) => w.reach.projectLabel(projectId),
+    untrusted: (projectId) => w.reach.untrusted(projectId),
   })
   return { ...w, person }
 }
@@ -165,5 +166,78 @@ describe('the window reads and writes no thread table', () => {
   it("giving a thread to another session and a thread's blockers are refused: they went with threads", () => {
     const w = ready(hostWorld())
     expect(refusedFor(() => w.person.removed('Giving a thread to another session'))).toBe('removed')
+  })
+})
+
+describe('the window against chains that change while it is open', () => {
+  it('a message that leaves the chain keeps the numbers of the others, so the window reads the next one after its last', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON, X], text: 'first' }).message
+    w.clock.t += 10
+    // In the chain and readable to the person while it is held for Pex's trust
+    const held = w.mail.send(X, { to: [], text: 'held for Pex', replyTo: q.id }).message
+    expect(w.person.thread(q.id, { tail: 100 }).messages.map((m) => m.id)).toEqual([q.id, held.id])
+    w.clock.t += 10
+    const mine = w.person.reply(q.id, 'second', 'note').messages.at(-1)
+    // It leaves the chain (the project's held mail dismissed), then the next one comes
+    w.service.dismissProject('px')
+    w.clock.t += 10
+    const third = w.mail.send(A, { to: [PERSON], text: 'third', replyTo: q.id }).message
+    expect(held.rootId).toBe(q.id)
+    expect(w.person.thread(q.id, { after: mine?.seq ?? 0 }).messages.map((m) => m.id)).toEqual([third.id])
+  })
+
+  it('reading a chain tells every window: the list is read again', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'unread' }).message
+    const heard: string[] = []
+    w.service.onChange((c) => heard.push(...c.recipients))
+    w.person.thread(q.id, { tail: 100 })
+    expect(heard).toContain(PERSON)
+  })
+})
+
+describe('held mail the window lets go or drops, more cases', () => {
+  it('a row an older build held loop after telling its recipient of it goes on Resume as mail to deliver', async () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(8), owner: A, projectId: 'p1', at: w.clock.t - 1_000 }, [{ id: mid(8), sender: A, kind: 'note', body: 'told loop', receipts: [{ recipient: B, held: 'loop', deliveredAt: w.clock.t - 900 }] }])
+    const { person, ...rest } = ready(w)
+    person.resume({ threadId: mid(8) })
+    await rest.advance(2_000)
+    expect(bodies(w, 'b')).toContain(mid(8))
+  })
+
+  it('a dismissed question waits for no answer any more', () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(9), owner: A, projectId: 'p1', at: w.clock.t - 1_000 }, [{ id: mid(9), sender: A, kind: 'question', body: 'failed q', receipts: [{ recipient: B, held: 'failed' }] }])
+    const { person } = ready(w)
+    w.clock.t += 10
+    const fresh = w.mail.send(A, { to: [B], text: 'a new question' }).message
+    w.store.mailbox.hold(B, [fresh.id], 'failed')
+    expect(person.held('dismiss', B, [fresh.id])).toEqual({ changed: 1 })
+    expect(w.store.mailbox.watchedFrom(A).map((r) => r.messageId)).not.toContain(fresh.id)
+  })
+
+  it("Release on a row held for a project trusted since lets the project's held mail go", async () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(10), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', receipts: [{ recipient: B, held: 'policy' }] }])
+    const r = ready(w)
+    w.store.projects.setProjectTrusted('px', true)
+    expect(() => r.person.held('release', B, [mid(10)])).not.toThrow()
+    await r.advance(2_000)
+    expect(bodies(w, 'b')).toContain(mid(10))
+  })
+
+  it("a deleted project's held mail is dropped after it is gone, and its senders are told its name", () => {
+    const w = hostWorld()
+    oldThread(w.store, { id: tid(11), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(11), sender: X, kind: 'note', body: 'held', receipts: [{ recipient: B, held: 'policy' }] }])
+    const r = ready(w)
+    const name = r.person.projectName('px')
+    dbOf(w).prepare(`DELETE FROM projects WHERE id = 'px'`).run()
+    r.person.projectDeleted('px', name)
+    expect(w.store.mailbox.message(mid(11))).toBeUndefined()
+    expect(w.store.mailbox.feedOf(X, { limit: 5 }).map((m) => m.body).join('\n')).toContain('Pex')
   })
 })
