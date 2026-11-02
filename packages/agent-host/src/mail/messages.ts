@@ -435,10 +435,10 @@ export class MessageService {
     const asker = this.opts.turn?.(reader)?.asker ?? null
     const messageOf = (row: RecipientRow) => this.records.message(row.messageId)
     const needReply = this.records
-      .watchedTo(reader)
+      .unansweredTo(reader)
       .flatMap((row) => {
         const m = messageOf(row)
-        return m?.kind === 'message' && m.needsReply && row.answerId === null && !isHidden(row) ? [m] : []
+        return m?.kind === 'message' && !isHidden(row) ? [m] : []
       })
       .map((m) => this.item(m, reader, asker))
     const listed = new Set(needReply.map((i) => i.message.id))
@@ -457,7 +457,7 @@ export class MessageService {
     return { needReply, unread, waiting, held }
   }
 
-  /** The messages to or from `address`, newest first, as the address reads them (the person's Inbox feed). Marks nothing */
+  /** The messages to or from `address`, newest first, as the address reads them (the person's Inbox feed, M6's `mail.inbox`, §12.2). Marks nothing */
   feed(address: string, opts: { before?: string; limit: number }): { items: ReadItem[]; older: boolean } {
     const found = this.records.feedOf(address, { ...(opts.before === undefined ? {} : { before: opts.before }), limit: opts.limit + 1 })
     return { items: found.slice(0, opts.limit).map((m) => this.item(m, address, null)), older: found.length > opts.limit }
@@ -492,7 +492,9 @@ export class MessageService {
         this.records.markRead(recipient, [message.id], now)
         continue
       }
-      const why = this.reach.holdFor(message, recipient, row.held === 'released') ?? opts.holdBack?.(message, row)
+      // A row an older build's person released goes as it is: never held again (§6.3)
+      const releasedBefore = row.held === 'released' && message.facts.releasedTo?.includes(recipient) === true
+      const why = (releasedBefore ? null : this.reach.holdFor(message, recipient, row.held === 'released')) ?? opts.holdBack?.(message, row)
       if (why) {
         heldBack.push({ messageId: message.id, reason: why })
         continue

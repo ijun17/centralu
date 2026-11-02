@@ -48,6 +48,8 @@ export const MailFacts = z.looseObject({
   asker: z.string().optional(),
   handedOver: z.boolean().optional(),
   legacyKind: z.string().optional(),
+  /** The recipients an older build's person released a moved message to: never held again for them (§6.3) */
+  releasedTo: z.array(z.string()).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
@@ -537,12 +539,16 @@ export class MailboxRecords {
 
   // ── Settling and waiting ──
 
-  /** Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). Returns how many */
+  /**
+   * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). Returns how many
+   */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
         `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
-          WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient) AND settled IS NULL
+          WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
+            AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,
       )
       .run({ messageId, recipient, how, at, answerId: answerId ?? null }).changes
@@ -550,12 +556,12 @@ export class MailboxRecords {
 
   /** The recipient's answer is held for the person: the row keeps it and stays open (D8) */
   answerHeld(messageId: string, recipient: string, answerId: string): void {
-    this.db.prepare(`UPDATE mail_recipients SET answer_id = ? WHERE message_id = ? AND recipient = ? AND settled IS NULL`).run(answerId, messageId, recipient)
+    this.db.prepare(`UPDATE mail_recipients SET answer_id = ? WHERE message_id = ? AND recipient = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId, messageId, recipient)
   }
 
   /** A held answer was dismissed: the rows it was to settle are open again. Returns how many */
   answerDropped(answerId: string): number {
-    return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND settled IS NULL`).run(answerId).changes
+    return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId).changes
   }
 
   /** Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5) */
@@ -593,6 +599,11 @@ export class MailboxRecords {
       `session:%/${childId}`,
     )[0]
     return task ? this.handedOn(task.id) : []
+  }
+
+  /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
+  unansweredTo(recipient: string): RecipientRow[] {
+    return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
   }
 
   /** The watched rows to `recipient` not settled */
@@ -782,13 +793,14 @@ export class MailboxRecords {
 
   /**
    * The orchestrator's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
-   * replaced), watched and not settled or not delivered, go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
+   * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
    * message ids moved
    */
   moveRole(to: string): string[] {
     return this.transaction(() => {
       const rows = this.rows(
-        `r.recipient <> ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING})) ORDER BY m.created_at, m.id`,
+        `r.recipient <> ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING}) OR (r.settled = 'legacy' AND r.read_at IS NULL))
+          ORDER BY m.created_at, m.id`,
         to,
       )
       const move = this.db.prepare(

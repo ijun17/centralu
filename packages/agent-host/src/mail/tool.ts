@@ -45,8 +45,8 @@ export type MailToolHost = {
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the orchestrator (§7.6) */
   askerOf(sessionId: string): AskerFacts | undefined
-  /** The last messages of an old thread, read-only: the history of a message moved from it (§6.3, `Store.legacyChain`) */
-  legacyChain(threadId: string): MessageRow[]
+  /** What `reader` was shown of an old thread before a message moved from it, read-only (§6.3, `Store.legacyChainFor`) */
+  legacyChain(threadId: string, messageId: string, reader: string): MessageRow[]
   now?: () => number
 }
 
@@ -211,7 +211,7 @@ export class MailTool {
 
   /** The earlier messages of the thread a moved message came from, read-only (§6.3), each quoted under its sender */
   private legacy(me: string, threadId: string, moved: string): string[] {
-    const earlier = this.host.legacyChain(threadId).filter((m) => m.id !== moved)
+    const earlier = this.host.legacyChain(threadId, moved, me)
     if (earlier.length === 0) return []
     return [
       `Earlier, in thread ${threadId} (kept from before Centralu's mail had no threads):`,
@@ -247,7 +247,8 @@ export class MailTool {
 
   private replyState(i: ReadItem): string {
     const row = i.row
-    if (!row || row.settled === null) return row?.answerId ? `your answer ${row.answerId} is held for the person` : 'not answered yet'
+    // A question moved from an older build waits as any other does
+    if (!row || row.settled === null || row.settled === 'legacy') return row?.answerId ? `your answer ${row.answerId} is held for the person` : 'not answered yet'
     if (row.settled === 'answered') return `answered by ${row.answerId ?? 'you'}`
     if (row.settled === 'done') return 'you marked it done'
     if (row.settled === 'withdrawn') return 'withdrawn by its sender'

@@ -67,6 +67,12 @@ describe('a task the old paths no longer owe (§9.5 step 2)', () => {
     waiting.take()
     expect(waiting.rowOf(t3.id, W).settled).toBeNull()
 
+    const queued = setup()
+    const t6 = queued.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    queued.store.children.addQueuedRequest({ id: 'q1', sessionId: 'w', callerSessionId: 'a', via: 'agent_session', text: 'more', queuedAt: queued.clock.t })
+    queued.take()
+    expect(queued.rowOf(t6.id, W).settled).toBeNull()
+
     const gone = setup({ w: undefined as unknown as AdoptedSession })
     const t4 = gone.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     gone.take()

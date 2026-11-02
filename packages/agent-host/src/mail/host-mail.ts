@@ -144,7 +144,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     mailArgs: () => 1,
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
-    legacyChain: (threadId) => store.legacyChain(threadId, undefined, 9),
+    legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
   })
   const owedOld = (sender: string, recipient: string): boolean => {
     const owner = parseAddress(sender)

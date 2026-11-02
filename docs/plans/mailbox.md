@@ -315,7 +315,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   - A `task` row is never released: it covers only while it is unsettled (and, until M8, still owed by the old paths),
     because a task that runs long is working, not unanswered.
 - **D26. Mail moved from threads is never reminded or awaited** (settled `legacy`). An update must not wake a crowd
-  of sessions over questions from before it.
+  of sessions over questions from before it. A moved question still shows its recipient that it waits for a reply (Q-M3a-32).
 
 ### 1.5 Tools, store, the person
 
@@ -2495,6 +2495,10 @@ orchestrator or the owner)
 | Q-M3a-17 | A handoff that keeps the original: the original's task to a moved child is from the original, and the child's report goes to the successor | The report finds no task from the successor and is `none` (the old path tells the successor); the next ready settles the task, since no old path owes it to the original. Nothing is lost; the task row lags one ready |
 | Q-M3a-18 | `pair_rate` (5 new conversations an hour per pair) is reached before `ask_rate` (5 requests an hour per group) by one session alone | Kept as written: `ask_rate` bounds a group of sessions, `pair_rate` one session |
 | Q-M3a-19 | The host-wide cap's wait (§7.5) against the 30 s sweep, which tries every mailbox with due mail | The sweep still looks (a cheap drain); the log line that the mail waits is written once per wait, not on every look |
+| Q-M3a-30 | A session's request to the orchestrator that an older build left pending when the orchestrator is trashed: moved to a recipient that is gone | The move sends a row to the role (`via = 'orchestrator'`) when its recipient is the old thread's assignee, is not its owner, and is the central orchestrator or a trashed one (`sessions.is_orchestrator`); `moveRole` takes a moved row that is unread, held or not, so the next orchestrator gets it and judges the hold again. A trashed project orchestrator assigned a session's thread would be taken for the central one: no build sent it requests |
+| Q-M3a-31 | A task an older build had pending for a session trashed there (its giver was told the session was gone) | Moved settled `gone`, so a restored session is never handed it |
+| Q-M3a-32 | A moved question its recipient read and did not answer (settled `legacy`, D26) against the agent's `inbox` and `read` | It is listed as waiting for a reply and reads "not answered yet", as on the older build: `inbox` lists needsReply rows with no answer, settled or `legacy`; an answer or a done settles a `legacy` row (`answered`, `done`). It is still never reminded (D26). The old thread above a moved message shows only what the reader sent or was delivered unheld, before that message (`legacyChainFor`) |
+| Q-M3a-33 | A row the person released on the older build (`released`) from a project still not trusted | Never held again (§6.3): the move records the recipients on the message (`facts.releasedTo`), and the drain exempts those rows from the one hold, as it exempts any `released` row from the depth |
 
 **M3a-host lands only with M3a-person.** M3a-host is not merged alone: it lands in one merge with M3a-person stacked
 on it (the stack is forward-fix only). Between the two, the person's side runs on the old tables (Q-M3a-1), and these
