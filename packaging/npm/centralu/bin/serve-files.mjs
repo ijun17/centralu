@@ -597,19 +597,17 @@ export function foreignHolder(dataDir) {
  * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
  * start time and no `at` (its host found no `ps`) cannot be told apart, so it does not count. Windows has no `ps` and its
  * host records no start time (#1723), only `at`, when it took the folder: the process that wrote the lock was created by
- * then, and one given its number afterwards was created later.
+ * then, and one given its number afterwards was created later. No slack: both times come from one clock, and the host
+ * writes `at` well after its process was created. An `at` in the future (a clock set back since) proves nothing.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
   const holder = lockHolder(dataDir)
   if (!holder || !isAlive(holder.pid)) return false
   if (holder.started) return startOf(holder.pid) === holder.started
-  if (holder.at === undefined) return false
+  if (holder.at === undefined || holder.at > Date.now()) return false
   const created = createdAt(holder.pid)
-  return created !== null && created <= holder.at + CREATED_BY_SLACK_MS
+  return created !== null && created <= holder.at
 }
-
-/** The clocks of Node and Windows differ a little: a process created this much after the lock was written still wrote it */
-const CREATED_BY_SLACK_MS = 2000
 
 /**
  * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
@@ -646,7 +644,7 @@ export function processStartTime(pid) {
 export function processCreatedAt(pid) {
   if (process.platform !== 'win32') return null
   try {
-    const out = execFileSync(windowsPowershell('wmi', process.env), ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    const out = execFileSync(windowsPowershell('wmi', process.env), ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', timeout: 10_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
     const ms = Number(out.trim())
     return Number.isFinite(ms) && ms > 0 ? ms : null
   } catch {

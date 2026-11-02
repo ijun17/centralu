@@ -2344,9 +2344,17 @@ describe('the folder’s host on a system with no ps', () => {
     lock(d, { pid: process.pid, started: null, at, by: 'serve' })
     const noPs = () => null
     expect(lockHolderIsAlive(d, noPs, () => at - 5_000)).toBe(true)
-    expect(lockHolderIsAlive(d, noPs, () => at + 1_000)).toBe(true)
-    // Created later: the host that wrote the lock died and its number went to another process
+    expect(lockHolderIsAlive(d, noPs, () => at)).toBe(true)
+    // Created later, however little: the host that wrote the lock died and its number went to another process
+    expect(lockHolderIsAlive(d, noPs, () => at + 1)).toBe(false)
+    expect(lockHolderIsAlive(d, noPs, () => at + 1_000)).toBe(false)
     expect(lockHolderIsAlive(d, noPs, () => at + 60_000)).toBe(false)
+    // A lock written in the future (a clock set back since) proves nothing, whenever the process was created
+    for (const future of [Date.now() + 3_600_000, 1e20]) {
+      lock(d, { pid: process.pid, started: null, at: future, by: 'serve' })
+      expect(lockHolderIsAlive(d, noPs, () => 0)).toBe(false)
+    }
+    lock(d, { pid: process.pid, started: null, at, by: 'serve' })
     // Cannot be told when it was created, or when the lock was written
     expect(lockHolderIsAlive(d, noPs, () => null)).toBe(false)
     lock(d, { pid: process.pid, started: null, by: 'serve' })
@@ -2363,6 +2371,10 @@ describe('the folder’s host on a system with no ps', () => {
     const d = tempDir()
     lock(d, { pid: process.pid, started: null, at: Date.now(), by: 'serve' })
     expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    // A stale lock naming this live process, written before it was created: not its host, so `--stop` leaves it alone
+    lock(d, { pid: process.pid, started: null, at: created! - 1_000, by: 'serve' })
+    expect(lockHolderIsAlive(d)).toBe(false)
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
   })
 
   it.skipIf(!POSIX)('knows nothing of a creation time where ps tells the start', () => {
