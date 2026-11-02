@@ -1,13 +1,13 @@
 # Mail without threads (#1347, #1684)
 
-> **Status: proposed, round 4, 2026-11-02.** It replaces the thread design of 2026-10-20 (this file before round 1, in
+> **Status: proposed, round 5, 2026-11-02.** It replaces the thread design of 2026-10-20 (this file before round 1, in
 > git history). Written against main at `9fb7c778b`. The owner decided on #1684 (comment of 2026-11-02) that **threads
 > are removed**, and on 2026-11-02 that **a reply is watched only when the sender asks for one** (`needsReply`), that
 > **every session may send to every session**, with one hold only: **a message from a session of an untrusted
 > project to a party outside it waits until the person trusts the project, and a delegation out of it is refused**
 > (project trust is the one gate; round 4 dropped the provenance label), that the reminder's "at rest" rule stands and is to be checked in real use, and that the Inbox is **option
-> B**; and that a new message needs a reply by default while an answer does not. Rounds 1 to 3 had reviews; §1.7
-> to §1.9 list each finding and what was done with it.
+> B**; and that a new message needs a reply by default while an answer does not. Rounds 1 to 4 had reviews; §1.7
+> to §1.10 list each finding and what was done with it.
 >
 > §1 lists every choice made here, each with the alternative not taken. §2 holds what is left to the owner. §16 is the
 > build plan: each slice is written so that a session given this file and that one slice can build it without design
@@ -61,9 +61,13 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     it rides the receiver's next wake). "Thanks" → "you're welcome" thus ends at the "thanks" without a turn. It hides
     nothing the receiver needs: the receiver's own message asked for nothing, the sender said its answer asks for
     nothing, the text is delivered all the same, and S4 tells the sender it did not wake the receiver and to send
-    with `needsReply=true` when the receiver must act. The cost is a forgotten flag: the text waits for the
-    receiver's next wake instead of starting one. An answer to a `needsReply` message, to a task or from the person
-    always wakes.
+    with `needsReply=true` when the receiver must act. An answer to a `needsReply` message, to a task or from the
+    person always wakes. **So does an `urgent` answer, and an answer whose sender is the receiver's parent
+    (`askedBy`) or has an unsettled task to the receiver (`newestTask(sender, receiver)`)** (round 5): a worker's "starting
+    Y" note answered with "stop, Y breaks Z" by the one who gave it the work wakes it. The rule is one function,
+    `rules.ts` `quietAnswer(m, target, receiver)`. The remaining cost: a correction from any other party (a peer, an
+    owner whose task is settled and who is not the parent) sent without `urgent` or `needsReply=true` waits for the
+    receiver's next wake instead of starting one; S4 tells its sender so at send time.
   - The field is named `needsReply` in the tool, the protocol and the frame, and `needs_reply` in the store.
   - Most messages are now watched, so the reminder's budget is shared with the sender's notices and the notices are
     gathered per sender (D24, D25, §10.4).
@@ -193,6 +197,9 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     The person's words and Centralu's reports are never deferred and do not count. **A session with fewer than
     `HOST_SHARE = 10` mail-started turns in the hour is never deferred either**, so one chatty pair cannot starve the
     orchestrator or a quiet worker; only the sessions over their share wait.
+  - What counts is the turn's starter's sender, not its kind: a turn started by a task from a session, an owner's
+    answer to a clarification stored as a task (§9.7) included, counts toward the host's 120 and the recipient's share;
+    the same answer given by the person in the Inbox is the person's words and counts toward neither (round 5).
   - **New conversations:** at most 5 an hour per ordered pair. A message that is not a reply is a new conversation.
     This is the owner's "5 new threads an hour per pair" (#1455) re-keyed.
   - **Requests to the orchestrator:** 5 an hour per asker group. The one-open-request rule is **dropped** (#1683). A
@@ -263,16 +270,22 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     session", and for an ACP tool nothing will.
   - *Not taken:* reusing the delivery's "ready" (`manager.ts:1025-1042`). It wakes a session with running background
     work, which is right for new mail and wrong for a nudge.
-- **D23. A session is spared a reminder while it waits on something it asked after R came in** (§10.3; orchestrator,
-  round 4, taking the fresh review's rule). A needsReply row R to S is **covered** while S has a watched row X, open
-  and not held or released, of a message or task S sent **after R was delivered**. R is open only until it is released
-  2 hours after delivery (D25), so that is also the most a cover lasts. There is no session graph and no turn
-  matching.
-  - In a chain A → B → C, B asked C after A's message came in, so B is covered and C is reminded. In a cycle, the
-    session that asked last holds the inner question uncovered, so it is reminded, and the inner answer unblocks the
-    outer one.
-  - The price: a wait S started after R on something unrelated also spares R, for at most the 2 hours R stays open.
-    Then R's sender is told S is waiting on another session (S3). It never reminds a session that visibly waits.
+- **D23. A session is spared a reminder while it waits on something it asked about R's work after R came in**
+  (§10.3; round 5, the fresh review's M5). A needsReply row R to S is **covered** while S has a watched row X, open
+  and not held or released, of a message or task S sent **after R was delivered**, whose cause (D9) is **the starter
+  of R's delivery turn** (`mail_turns.starter_id` of R's `turn_seq`), **or null** (a turn S started itself, or the
+  person did). R is open only until it is released 2 hours after delivery (D25), so that is also the most a cover
+  lasts. There is no session graph.
+  - In a chain A → B → C, B asked C in the turn A's message started, so B is covered and C is reminded. In a cycle,
+    the session that asked last holds the inner question uncovered, so it is reminded, and the inner answer unblocks
+    the outer one. R arrives, S starts a background job, and the CLI's own turn after it asks C: that turn has no
+    cause, so R is covered (round 3's case, kept).
+  - The price: a wait S started in R's delivery turn, or in a turn of its own or the person's after R, also spares R
+    when it is about something else, for at most the 2 hours R stays open. Work S gives in a later turn another
+    message started does not: a busy orchestrator that keeps delegating for other askers is reminded of the
+    clarification it holds, and the worker is not told a false "waiting on another session".
+  - *Not taken:* any watched row sent after R (round 4). Every new message is watched (D3) and every task covers, so
+    a busy session was almost never reminded (§1.10 M5-4).
   - *Not taken:* cover by the turn R was delivered or read in (round 3). It reminded S while it waited: R arrives in
     turn 7, S starts a background job, and the CLI's own turn 8 asks C (§1.9 G6).
   - *Not taken:* the waiting graph of rounds 1 and 2 (one session per end or cycle, a depth-8 search). It spared S for
@@ -321,6 +334,18 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     and a `mailed` report would have to become a mark again: about 150 lines and their tests, in M1 and M2, for a path
     used only if the stack fails after release. The stack lands as one, gated on one release, with real-surface
     checks of a swap both ways (M3a).
+  - **A rollback across that release is refused** (round 5; RVMAIL3). `rollback_machine` and the person's
+    `machines.rollback` go one step back on a linked machine, and from the stack's release to the one before they would
+    strand that machine's mail as above, silently. So `rollbackCrossesMailSwitch(current, previous)`
+    (`links/mail-switch.ts`) is true when `current` is at or after `MAIL_SWITCH_VERSION` and `previous` is before it
+    (`isNewerVersion`, `protocol/src/semver.ts:27`), and both callers refuse with S17 before any card:
+    `LinkedMachineOps.rollback()` (`links/linked-machine-ops.ts:380-383`, the one path both reach) and the tool's
+    pre-card check (`sessions/machine-flow.ts:268-273`), so no card is raised for a step that cannot run. About 15
+    product lines and a test each. A forward update stays the way out. A person who installs an older release by hand
+    is not stopped; that is the forward-fix case above. *Not taken:* naming the loss on the card and letting the
+    rollback run: the person would trade undelivered mail for a version, with no way to see which mail.
+    `MAIL_SWITCH_VERSION` is set by the M3a-host PR to the release the stack is gated on (§16), and the release check
+    of that PR confirms it.
   - *Not taken:* keeping `mail_messages` with a dummy `thread_id`. The column is `NOT NULL` with `UNIQUE (thread_id,
     seq)` (`migrations/v58.ts:167-184`). An older build's drain would meet messages with no thread row, and the
     contract step would be a heavy table rebuild.
@@ -349,6 +374,10 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   - **relay through a trusted session:** a trusted session that read an untrusted project's text (a session's words
     by `read_session` or `agent_session`, an `ask_project` answer, `recall`, a file, a handoff's note, a fork's copied
     conversation) can send it on by mail or a task, unheld; the receiver sees the sender, not the origin;
+  - **a report's `answer` from a session of an untrusted project** that a trusted session delegated to: delegating
+    into an untrusted project is allowed (D12 holds only what leaves it), and reports are never held, so the child's
+    final words (`facts.answer`, §9.3) reach the owner unheld. The owner chose that child; the words are quoted as the
+    child's;
   - the CLI's own file tools reading another project's folder, and folders or worktrees two projects share;
   - the person pasting another project's text;
   - MCP servers a CLI loads by itself, and a web page or other outside text a tool fetches;
@@ -491,6 +520,24 @@ was rejected.
 | O17 | (orchestrator) migration: forward-fix or a cheap down-move; §6.3 after the swap commits; M7 and pre-M8 stores; clear marks; old `reply` question | Done: forward-fix (K6), §6.3 (G10), M7 step 2, K1, K7 |
 | O18 | (orchestrator) contradictions: M3b and M6 defaults, §1.7, S3, S13, S14, `covering()`, the unanswered key, `linked-reports.ts:320` | Done (K10, K11, G11 to G13, G15) |
 
+### 1.10 The reviews of round 4, finding by finding
+
+Two reviews of `2d3ce65d6` (RVMAIL's recheck and RVMAIL3's fresh review), as the orchestrator listed them. Both found
+round 4 ready for M1. Nothing was rejected.
+
+| # | Finding | Done |
+|---|---|---|
+| M5-1 | (M1) `requestsSince` counts clarifications, which have no reply target, as requests | Fixed: it leaves out `facts.clarifies` (M1, §7.5) |
+| M5-2 | (M2, M3a) `resumeDepth` clears the hold, so drain holds the row `loop` again at once | Fixed: Resume sets `held = 'released'`, and `holdFor` and the guards skip `loop` for it, as `delivery.ts:510` does today (§7.4, §7.5, §8.2 step 2) |
+| M5-3 | Nits: `holdFor`'s answer for a row both `policy` and depth-held; does a clarification's answer stored as a task count toward the share of 10 | `policy` first; once trusted, the next drain holds it `loop` (§7.4). It counts when a session gave it; given by the person it counts toward nothing (D13) |
+| M5-4 | (M5) The cover by any watched row sent after R spares busy sessions almost always; a busy orchestrator is never reminded of a clarification and the worker is told a false "waiting" | Fixed: X covers R only when its cause is the starter of R's delivery turn, or null; round 3's background-job case stays covered (D23, §10.3, rows 20, 21, 24, 46, 51; M5 tests) |
+| M5-5 | (M1) a turn started by a plain reply loses its starter across a restart or swap | Fixed: `mail_turns.starter_id`, written by `begin`, read by `current` (§6.1, §6.2, §8.2 step 6) |
+| M5-6 | (switch stack) `rollback_machine` across the stack's release strands that machine's mail silently | Fixed: refused before any card, with S17 (wording in Q2, §12.4); about 15 lines (D28, §6.2, M3a-host) |
+| M5-7 | (M2) a quiet answer can hide a correction | Fixed: an `urgent` answer, and one from the receiver's parent or from a session with an open task to it, always wakes; the remaining cost is stated (D3, row 52) |
+| M5-8 | Minor: §1.6 lacks a report's `answer` from a child of an untrusted project | Added (§1.6) |
+| M5-9 | Minor: M7 step 2 needs the host id | `MigrationHost.hostId()`, from the key `hubSelfId` reads, moved to `store-keys.ts` (M7) |
+| M5-10 | Minor: does a moved `legacy` pending request count as a request turn's work | Yes: asker, cards and the read gate apply; its end settles nothing more (§6.3) |
+
 ## 2. Questions for the owner
 
 Decided on 2026-11-02 and recorded here: **Q1** the Inbox is option B (§12.3); **Q3** no task state in mail (D20);
@@ -500,8 +547,8 @@ untrusted project (D12); **`needsReply` defaults to true for a new message and f
 named again on trust** (D12, Q7 (b)). Left:
 
 1. **Q2. Person-visible wording.** Each item has a proposal in §12.4: the guidance to trust a project whose mail is
-   held (it names refused delegations too), the host-wide cap's line, the "needs a reply" toggle, and option B's
-   rows.
+   held (it names refused delegations too), the host-wide cap's line, the "needs a reply" toggle, option B's rows,
+   and (round 5) the refusal of a linked machine's rollback across the mail switch (S17).
    Recommended: the proposals as written. One effect to know: until M7 copies the last 30 days, the new Inbox feed
    shows no mail from before the switch; an old thread is reached only by opening a moved message (its chain reads the
    thread, `legacyChain`, §6.3).
@@ -576,7 +623,7 @@ These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, 
 | Work message | The task (or, for the orchestrator, the request) whose turn a turn is |
 | Request | A message from a session to the orchestrator that is not a reply to the orchestrator's own needsReply message or task, and not a clarification (§7.6) |
 | Clarification | A message from a session to the owner of the task its turn is for; the owner's answer to it is a task (§9.7) |
-| Cover | A row R to S is covered while S has a watched row, open, not held or released, that it sent after R was delivered (D23, §10.3) |
+| Cover | A row R to S is covered while S has a watched row, open, not held or released, that it sent after R was delivered, caused by the starter of R's delivery turn or by nothing (D23, §10.3) |
 | Released | A needsReply row Centralu stopped watching for its recipient, and whose sender is told (D25); `released_at` |
 | At rest (for a reminder) | §10.1 |
 | Address | As today (`mail/address.ts`): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, `centralu`. The tool also takes the words `orchestrator`, `parent` and `person`, a session id, or a session name that names exactly one session |
@@ -725,6 +772,9 @@ CREATE INDEX IF NOT EXISTS mail_recipients_open    ON mail_recipients(recipient)
 CREATE INDEX IF NOT EXISTS mail_recipients_untold  ON mail_recipients(released_at) WHERE released_at IS NOT NULL AND told_at IS NULL;
 -- mail_turns gains the turn's work message; thread_id is written NULL from M3a on and stays until M7
 ALTER TABLE mail_turns ADD COLUMN message_id TEXT;   -- guarded by PRAGMA table_info, as v63 does
+-- the message that started the turn (the work message, else the wake's first item, the person's words included;
+-- NULL for a turn the session started itself): cause_id of what the turn sends, and the cover's key (§8.2 step 6, §10.3), across a restart
+ALTER TABLE mail_turns ADD COLUMN starter_id TEXT;   -- guarded the same way
 -- how the turn ended: 'stopped' (by the person), 'error', or NULL; read by the release rule (§10.3), written from M5
 ALTER TABLE mail_turns ADD COLUMN ended_how TEXT;    -- guarded the same way
 -- the tool schema a session's process was spawned with: 2 from M3b on; NULL reads as 1 (§11.3, M7b)
@@ -746,10 +796,12 @@ older or newer build must be able to write a word the other does not know. The r
   marks each old receipt handled in the same transaction (§6.3). An older build that serves again later sees them
   handled and does not deliver them; the newer build delivers them when it is active again. Mail is at most once, as
   today. A rollback that never returns leaves the few messages pending at the switch undelivered, and everything
-  written in the new tables since: the switch stack is forward-fix only after its first `ready` (D28, §16).
+  written in the new tables since: the switch stack is forward-fix only after its first `ready` (D28, §16). A linked
+  machine's rollback across the stack's release is refused (D28, S17).
 - **The newer build moves what an older build left pending** (§6.3) after every `ready`, before delivery starts.
-- **`mail_turns`:** the older build writes `thread_id`. The newer one writes `message_id` and leaves `thread_id` NULL.
-  Each reads only its own column. `turnStartedBy` already reads an unknown starter safely (`turns.ts:27`).
+- **`mail_turns`:** the older build writes `thread_id`. The newer one writes `message_id` and `starter_id` and leaves
+  `thread_id` NULL. Each reads only its own columns; a turn the older build began has `starter_id` NULL, so its sends
+  have no cause (depth 0) and it covers by the null-cause clause only (§10.3). `turnStartedBy` already reads an unknown starter safely (`turns.ts:27`).
 - **Report marks:** the older build reports by its own paths; the newer build settles what they no longer owe at
   `ready` (§9.5).
 - **The window.** The protocol only grows: new methods (§12.2), `mail_changed` gains optional `messageId` and
@@ -794,6 +846,13 @@ tables, so nothing in them is pending a second time, and what is not pending sta
 For the receipt: `attempt_at`, `delivered_at`, `read_at` as the receipt has them (`read_at = COALESCE(r.read_at,
 r.handled_at)`); `held` only for `uncertain`, `failed`, `loop` and `budget` (an old `policy` hold is re-decided by
 §7.4 at drain).
+
+**A moved request** (round 5). A moved pending message from a session to the orchestrator is a request by §7.6 like
+any other: settled `legacy` changes what is awaited, not what is work. So it is a work candidate for `pickWork`, its
+sender is the turn's asker, and the request cards and the read gate apply, since mail grants nothing whatever its
+age. Its row is already settled, so the turn's end (`requestTurnEnded`) settles nothing more, it is never reminded,
+and the asker gets S12 as for any request turn. `requestsSince` counts it by its `created_at`, as stored. A moved
+pending `assign` that became a `task` is work the same way, and its report is the old path's (D18).
 
 **History.** `mail read id=X` and `mail.chain` on a message with `legacy_thread` show its thread's earlier messages
 from the v61 tables, read-only (`MailboxRecords.legacyChain(threadId, before, limit)`, the only v61 reader besides
@@ -880,6 +939,12 @@ row held, so S4's held line and S14 are written then) **and again at drain** (§
 go once P is trusted. An answer to a clarification (§9.7) is stored as a task but goes through `holdFor` as a
 `message`.
 
+**Both, and after Resume** (round 5). When a row is both, `holdFor` returns `policy`: trust is decided first, and
+Resume is not offered on a `policy` row. Once P is trusted, the next drain finds the depth and holds it `loop`. A row
+the person resumed (§7.5) has `held = 'released'`; `holdFor(m, recipient, released = row.held === 'released')`
+skips `loop` for it, as today's `holdBack` skips a released receipt (`delivery.ts:510`), so drain does not hold it
+again. `policy` is read live even then.
+
 | Case | Held? |
 |---|---|
 | A session of untrusted P → a session of P | no: within one project |
@@ -948,7 +1013,7 @@ message.
 
 | Guard today | Keep? | Becomes | Why |
 |---|---|---|---|
-| — (new, F3) | **add** | **Cascade depth:** a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` is held `loop`. **Only the person's Resume lets it go**: `mail.resume { messageId }` (M3a-person; `MessageService.resumeDepth(messageId)`, which clears the hold and settles the question it answers), shown in the Inbox as a held row with Resume (M6). The person's word in its sender makes that sender's later sends start at depth 0; it does not let the held row go. Its sender is told with S4's depth line, and its asker, when it is an answer, with S14 | A ring or fan-out that never repeats a pair passes the pair guard; a pair's back-and-forth is the pair guard's |
+| — (new, F3) | **add** | **Cascade depth:** a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` is held `loop`. **Only the person's Resume lets it go**: `mail.resume { messageId }` (M3a-person; `MessageService.resumeDepth(messageId)`, which sets `held = 'released'` on its `loop` rows, so neither `holdFor` nor the guards' `holdBack` holds them again (§7.4), and settles the question it answers), shown in the Inbox as a held row with Resume (M6). The person's word in its sender makes that sender's later sends start at depth 0; it does not let the held row go. Its sender is told with S4's depth line, and its asker, when it is an answer, with S14 | A ring or fan-out that never repeats a pair passes the pair guard; a pair's back-and-forth is the pair guard's |
 | — (new, F3) | **add** | **Host-wide:** `HOST_MAIL_TURNS_PER_HOUR = 120` mail-started turns in the last hour across this host, counted from `mail_turns` (`MailTurns.mailStartedSince(since)`, which counts turns whose starter is a message from a session or a Centralu follow-up, not the person's words or a report). Over it, the delivery defers a wake that would start a turn, **except** when the wake carries the person's words or a Centralu report, or its recipient had fewer than `HOST_SHARE = 10` mail-started turns in the hour (`MailTurns.mailStartedSince(since, sessionId)`). A deferred row stays due, quiet mail still rides along, and the next attempt is when the recipient's oldest counted turn of the hour leaves the window. The person gets one Centralu notice (`facts.hostCap`) per hour while it applies, shown in the feed (wording Q2) | A bound no per-pair or per-session guard gives, and one pair cannot starve the orchestrator: each session keeps its share |
 | Loop guard: 20 mail-started turns an hour per **thread**, no word from the person (`turns.ts:230`) | **keep, re-keyed** | per **unordered session pair**: turns of A started by B's mail plus turns of B started by A's mail, counted by `MailboxRecords.pairTurnsSince(a, b, since)` (M1) since the latest of 1 hour ago, the person's last word to either (a person turn in `mail_turns` or a message from `person`), and the pair's Resume. Over 20, mail between the two is held `loop` | Two agents answering each other must not run up usage unseen. The pair is what a thread stood for |
 | Token guard: 200,000 new input tokens an hour, or 3 empty mail-started turns in a row, per session (`turns.ts:69-75`) | **keep** | unchanged. Reminder turns are mail-started and count | Not about threads |
@@ -956,7 +1021,7 @@ message.
 | Identical repeats within 10 minutes (`REPEAT_WINDOW_MS`) | **keep, re-keyed** | per (sender, recipient, body): refused `repeat` | |
 | Per-pair new threads, 5 an hour (owner, #1455) | **keep, re-keyed** | 5 **non-reply** messages an hour per ordered pair: refused `pair_rate`. Replies are not counted | A message that is not a reply is what a new thread was |
 | One open request to the orchestrator per group (`checkAsk`, `service.ts:1819`) | **drop** | — | #1683: a report is not a second request, and the gate stranded it |
-| 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
+| 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
 | Request turns: every non-read step raises the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message | Mail grants nothing |
 | The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **keep, re-keyed** | "a mail thread other than its own request" becomes "a message the asker was not party to" | Unchanged in spirit (#1516) |
 | Mail never answers a card, never passes for the person, grants nothing (old §9.2) | **keep** | unchanged: the frame, quoted bodies, the held `card` state | Not about threads |
@@ -1047,7 +1112,8 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
    - mail whose sender may no longer write (§7.1);
    - a reminder notice whose `of` rows are all settled (marked read, never delivered).
 2. **Holds:** `reach.holdFor` (§7.4) holds a row `policy` or `loop` (depth) (or clears an old `policy` hold the
-   person's trust now lets go), and the guards' `holdBack` (`loop`, per pair) and `quiet` (`budget`), as today.
+   person's trust now lets go), and the guards' `holdBack` (`loop`, per pair) and `quiet` (`budget`), as today. A row
+   with `held = 'released'` (the person's Resume) is not held `loop` or `budget` again; `policy` still applies (§7.4).
 3. **The work pick** (`pickWork(candidates, now)`, `rules.ts`, replacing `pickWorkThread`, `rules.ts:178-200`).
    - Work candidates: for a session that is not the orchestrator, its `task` rows; for the orchestrator, its requests
      (§7.6), grouped by asker. Nothing else is work.
@@ -1081,7 +1147,8 @@ never calls `MailTurns`. Before a wake that would start a turn, the delivery che
 defers when it is reached.
 
 6. **What a turn's sends record** (D9; this step and D9 are one rule, `rules.ts` `depthOf`). `MailTurns.current(
-   sessionId)` gives `{ turnSeq, by, starter }`. A message or task the session sends in that turn gets `cause_id =
+   sessionId)` gives `{ turnSeq, by, starter }`, read from the turn's row (`mail_turns.starter_id`, M1), so a restart
+   or a swap mid-turn keeps the cause and the depth. A message or task the session sends in that turn gets `cause_id =
    starter` (null when `by` is the person or the session itself), and for a `message`:
 
    ```ts
@@ -1331,14 +1398,19 @@ A remindable row R to S (§10.2) is **covered** while S has a **covering row** X
 sent, such that
 
 - X's message was created after R was delivered (`X.created_at > R.delivered_at`);
+- X was sent about R's work: `X.cause_id` is null (a turn S or the person started), or equals the starter of the
+  turn R was delivered in (`mail_turns.starter_id` where `session_id` is S and `turn_seq = R.turn_seq`). A row with
+  `turn_seq` null, or whose turn has no `starter_id` (written by an older build), is covered only by an X with
+  `cause_id` null;
 - X is watched and open: a needsReply message's row, unsettled and not released, or a task's row, unsettled (until
   M8, only while `oldOwes(S, X.recipient)` is true, read live);
 - X is not held.
 
 R stays remindable only until it is released (below), 2 hours after its delivery at most, so that is also the most a
-cover spares it. The query is one index lookup over `mail_sender (sender, created_at)`:
+cover spares it. The query is one primary-key read of `mail_turns` and one index lookup over `mail_sender (sender,
+created_at)`:
 `MailboxRecords.covering(r: RecipientRow, owes: (owner: string, child: string) => boolean): RecipientRow | null`.
-Nothing about any other session is read: there is no session graph, no cycle rule, no search and no turn matching.
+Nothing about any other session is read: there is no session graph, no cycle rule and no search.
 
 **S gets a reminder** when S is at rest (§10.1) and has been for `graceMs`, S has at least one remindable row that is
 not covered, and the caps of §10.4 allow it. The reminder lists only the rows that are not covered.
@@ -1361,18 +1433,25 @@ comes when it comes.
 
 The cases:
 
-- **A chain A → B → C.** A's message R1 reaches B; then B asks C (R2). R1 is covered at B by R2. C holds R2 uncovered
-  and is reminded. When C answers, B's next turn answers A. If C runs a 2.5-hour job, A is told at 2 hours that B is
-  waiting on another session, not that it has no answer.
-- **A cycle.** A asks B (R1). After R1 reaches B, B asks A (R2). R1 is covered at B by R2. A sent R1 before R2 reached
-  it, so R1 does not cover R2: A is reminded of R2, the inner question, and its answer lets B answer R1.
-- **Waiting on the person.** S asked the person after R came in: R is covered until it is released at 2 hours, and
-  R's sender is told S is waiting (`waiting`).
-- **Waiting on a task.** S gave work with `start_agent` after R came in: R is covered while the task is owed.
-- **A background job, then a question.** R arrives; S starts a background job; the CLI's own turn after it asks C.
-  R is covered from that question on (round 3's turn matching reminded S here).
-- **Unrelated waits after R.** S asks someone about something else after R came in: R is covered too, for at most
-  the 2 hours R stays open (D23's price). An unrelated question sent **before** R covers nothing.
+- **A chain A → B → C.** A's message R1 starts B's turn; in it B asks C (R2, cause R1). R1 is covered at B by R2. C
+  holds R2 uncovered and is reminded. When C answers, B's next turn answers A. If C runs a 2.5-hour job, A is told at
+  2 hours that B is waiting on another session, not that it has no answer.
+- **A cycle.** A asks B (R1). R1 starts B's turn, and B asks A (R2, cause R1). R1 is covered at B by R2. A sent R1
+  before R2 reached it, so R1 does not cover R2: A is reminded of R2, the inner question, and its answer lets B
+  answer R1.
+- **Waiting on the person.** S asked the person in R's turn: R is covered until it is released at 2 hours, and R's
+  sender is told S is waiting (`waiting`).
+- **Waiting on a task.** S gave work with `start_agent` in R's turn: R is covered while the task is owed.
+- **A background job, then a question.** R arrives; S starts a background job; the CLI's own turn after it (no
+  cause) asks C. R is covered from that question on (round 3's turn matching reminded S here).
+- **R rides along.** R arrives while S works on task T (R joins T's turn): what S sends in that turn has cause T, the
+  starter, so it covers R; what S sends in a later turn that task U started (cause U) does not.
+- **A busy orchestrator.** A worker's clarification R reaches the orchestrator and starts its turn, or rides along in
+  asker 1's request turn. The orchestrator's tasks in later request turns of other askers have other causes and cover
+  nothing, so R is reminded, and at 2 hours the worker is told `waited`, not a false `waiting`.
+- **Unrelated waits.** S asks someone about something else in R's turn, or in a turn of its own or the person's after
+  R: R is covered too, for at most the 2 hours R stays open (D23's price). A question sent **before** R, or in a later
+  turn another message started, covers nothing.
 - **Linked work.** `sendLinked` writes no mail row until §14, so linked work covers nothing: S is reminded at rest and
   can say it waits (one turn). Accepted until §14.
 
@@ -1465,11 +1544,11 @@ are subject to §10.4's caps. Columns A and N are "no" on every row; they are ke
 | 17 | own work ended, no turn follows (stopped, or the tool starts none) | as 7, `since` = the work's end | as 7 | no | no | the 60 s settle reports |
 | 18 | adopted process, background work not known yet (at most 2 h) | no (`own_work_unknown`) | no | no | no | no |
 | 19 | an ACP tool (Cursor, OpenCode, Antigravity) at rest | as 7 | as 7 | no | no | no |
-| 20 | after R came in, it sent a needsReply message still open | no: covered; at 2 h released, the sender told it is waiting (`waiting`) | the same | no | no | no |
-| 21 | after R came in, it gave a task still owed | no: covered; at 2 h released (`waiting`) | the same | no | no | no |
+| 20 | after R came in, in R's turn or a turn with no cause (§10.3), it sent a needsReply message still open | no: covered; at 2 h released, the sender told it is waiting (`waiting`) | the same | no | no | no |
+| 21 | after R came in, in R's turn or a turn with no cause, it gave a task still owed | no: covered; at 2 h released (`waiting`) | the same | no | no | no |
 | 22 | in a cycle, holds the inner question (it sent nothing after that message came in) | R1 / R2 | R1 / R2 | no | no | no |
 | 23 | in a cycle, holds the outer question and asked after it came in | no: covered | no: covered | no | no | no |
-| 24 | after R came in, it asked the person | no: covered; at 2 h released (`waiting`), the sender told | the same | no | no | no |
+| 24 | after R came in, in R's turn or a turn with no cause, it asked the person | no: covered; at 2 h released (`waiting`), the sender told | the same | no | no | no |
 | 25 | every covering row is settled or released before R's 2 h | as 7 from then | as 7 | no | no | no |
 | 26 | its only wait is linked work (`sendLinked`) | as 7: linked work writes no row until §14 | as 7 | no | no | no |
 | 27 | asleep, last turn ended under 50 minutes ago | R1 / R2 (resumes it) | R1 / R2 | no | no | no |
@@ -1491,11 +1570,13 @@ are subject to §10.4's caps. Columns A and N are "no" on every row; they are ke
 | 43 | R is a plain note the sender sent with `needsReply` left true | as 7; S2 tells it to close it with `done` | as 7 | no | no | no |
 | 44 | the message is an answer sent with the default (`needsReply` false) | — (column N): never reminded | — | no | no | no |
 | 45 | the message is an answer sent with `needsReply=true` (asking back) | as 7 | as 7 | no | no | no |
-| 46 | an unrelated needsReply message it sent after R came in is open | no: covered (D23's price); at 2 h released (`waiting`) | the same | no | no | no |
+| 46 | an unrelated needsReply message it sent after R came in, in R's turn or a turn with no cause, is open | no: covered (D23's price); at 2 h released (`waiting`) | the same | no | no | no |
 | 47 | it answered R, and the answer is held (`policy` or depth `loop`) | no: not remindable, not released; R's sender gets S14 | the same | no | no | no |
 | 48 | R is a clarification of S's own task (§9.7), to the owner S | as 7 (it is a needsReply message like any) | as 7 | no | no | its answer, when it comes, is a task: as T |
 | 49 | the orchestrator's request turn on R ended | — (R is settled `reported`, §7.6) | — | no | no | no |
 | 50 | R is an answer that needs nothing to S's message that needed nothing (quiet, D3) | — (column N): delivered quiet, never reminded | — | no | no | no |
+| 51 | after R came in, its only open watched rows were sent in later turns other messages started (another asker's request, another task) | as 7: they cover nothing (§10.3); at 2 h released `waited` or `working`, never `waiting` | as 7 | no | no | no |
+| 52 | R is a quiet-shaped answer that is `urgent`, or from S's task owner or parent (D3) | — (column N): it wakes S as any mail, and is never reminded | — | no | no | no |
 
 M5's `reminder-rule.test.ts` has one case per row (50).
 
@@ -1696,6 +1777,7 @@ you". The other layouts of round 1 (A by counterpart, C by chain) are in git his
 | The "needs a reply" mark and the person's toggle | — | `needs a reply` beside a message; the toggle under the box, on by default for a new message and off for an answer (D3) |
 | The host-wide cap's feed line (§7.5) | — | `Mail between sessions started 120 turns in the last hour; more wait until the hour has room.` |
 | The guidance when delegations were refused too | — | `… <n> messages from its sessions wait, and <m> tasks were refused (to <names>). Trusting the project lets the messages through, in order, and tells the sessions they can give the tasks again.` |
+| A linked machine's rollback across the mail switch (D28, S17), in Settings' error line and the tool's answer | — | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
 | The archive tool's description (`tool-definitions.ts:320`) | "unfinished mail threads it is assigned or owns" | "mail it has not answered or that waits for its report" |
 
 ## 13. Apps, the merge queue, watches, the task board
@@ -1757,6 +1839,7 @@ names. Each call is written in its version-2 form; a version-1 process is told t
 | S14 | The notice to an asker whose answer is held (D8), quiet, key `answer_held:` (§6.5) | `<name> answered your <id> with <answer id>, and the answer is held for the person (<project> is not trusted / it is the 5th hop in a row). It reaches you if the person lets it through; until then Centralu does not remind <name> of it.` |
 | S15 | A delegation tool's refusal (§7.4), as `Refused (untrusted_project): …` | `Refused (untrusted_project): your project <project> is not trusted, so work you give outside it (to <target>) waits for the person to trust <project>. Nothing was started. Centralu shows the person how, and tells you when <project> is trusted; give it again then.` |
 | S16 | The notice to a caller on trust (§7.4), key `trusted:` (§6.5) | `<project> is trusted now. The calls refused for it can be given again: <tool> to <target> ("<first line>"), …` (at most 10, then `and <n> more`) |
+| S17 | `rollback_machine`'s and `machines.rollback`'s refusal across the mail switch (D28); person-visible too, so Q2 | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
 
 ## 16. Slices
 
@@ -1809,7 +1892,7 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 - `store.ts`: `readonly mailbox: MailboxRecords`.
 - `store-migrations.golden.json` and `store-migrations-swap.golden.json`.
 - `docs/domain-model.md` §2.5 "Where it is stored": `mail` and `mail_recipients`, and the `mail_turns.message_id`
-  line. `schema-doc.test.ts` checks them.
+  and `starter_id` lines. `schema-doc.test.ts` checks them.
 - `docs/stored-shapes.md`: the `mail.facts` keys (§5.4).
 
 **Types** (in `mailbox.ts`)
@@ -1881,7 +1964,8 @@ semantics. Every method that changes rows runs in one transaction.
   `released_at` set is left alone), `markTold(rows, at)`.
 - Cover: `covering(r: RecipientRow, owes: (owner: string, child: string) => boolean): RecipientRow | null` (the one
   signature, also in §10.3): a row of a message whose sender is `r.recipient`, with `created_at > r.deliveredAt`,
-  watched, unsettled, not held, not released, and for a task row `owes(sender, row.recipient)`.
+  `cause_id` null or equal to `mail_turns.starter_id` of (`r.recipient`'s session, `r.turnSeq`), watched, unsettled,
+  not held, not released, and for a task row `owes(sender, row.recipient)`.
 - Guards and counts:
   - `newSince(sender, recipient, since)`: messages from `sender` with a row to `recipient`, `reply_to IS NULL`,
     `created_at >= since`;
@@ -1891,7 +1975,8 @@ semantics. Every method that changes rows runs in one transaction.
     AND r.delivered_at >= @since`;
   - `sameBody(sender, recipient, body, since)`;
   - `requestsSince(senders: readonly string[], orchestrator: string, since)`: messages from those senders with a row
-    to the orchestrator address, excluding replies to the orchestrator's needsReply messages or tasks (§7.6);
+    to the orchestrator address, excluding replies to the orchestrator's needsReply messages or tasks and messages with
+    `facts.clarifies` (§7.6: neither is a request);
   - `followUpsTo(recipient, since)`: notices with `facts.reminder` or `facts.unanswered`, with `delivered_at`;
   - `releasedUntold(sender)`: needsReply rows of the sender's messages with `released_at` set and `told_at` null;
   - `refusedRecords(projectId)`: the `refused` notices of that project, by caller (§7.4).
@@ -1906,7 +1991,7 @@ the v61 tables are untouched. The step only adds.
 
 | Name | Sets up and asserts | Fails on main |
 |---|---|---|
-| `v65 creates the mailbox tables and mail_turns.message_id` | a v64 store migrates. Tables, indexes, column; the golden matches | yes |
+| `v65 creates the mailbox tables and mail_turns.message_id and starter_id` | a v64 store migrates. Tables, indexes, columns; the golden matches | yes |
 | `an older build's mail queries run on a v65 store` | the swap golden pattern: v64's statements against the migrated store | yes (new golden) |
 | `the move copies each pending thread message once with its id and marks the old receipt handled` | a thread with assign, question, answer, note, report, notice and event, some pending: kinds, `needs_reply`, `legacy_thread`, `facts.legacyKind`; the old receipts have `handled_at` and `delivered_at` | yes |
 | `the move keeps a quiet report quiet and an app's needsOwner` | `wake = 'no'` → `facts.quiet`; `needs_owner = 1` → `facts.needsOwner` | yes |
@@ -1914,7 +1999,7 @@ the v61 tables are untouched. The step only adds.
 | `the move leaves history and mail past retention alone` | a delivered old message and a 200-day-old pending one: neither copied | yes |
 | `moved undelivered rows stay pending; old policy holds are not carried` | `pendingFor` lists them; `held` null where the receipt had `policy` | yes |
 | `legacyChain reads an old thread oldest first` | | yes |
-| `covering finds a watched row sent after the row was delivered, and not one sent before, settled, held or released` | | yes |
+| `covering finds a watched row sent after the row was delivered with the delivery turn's starter or no cause as its cause, and not one sent before, with another cause, settled, held or released` | a `mail_turns` row with `starter_id`; a row with `turn_seq` null is covered by a null cause only | yes |
 | `markReleased writes once, and releasedUntold lists a row until markTold` | | yes |
 | `the root is the reply target's root` | three replies in a row share the first's id. A missing target throws `MailTargetMissing`; with `rootId` given it stores | yes |
 | `chain walks back and stops at the root` | `chain(id, 9)` order and limit | yes |
@@ -1947,8 +2032,9 @@ a copy of a store from before the step starts, and its log shows step 65 ran.
 - In `mail/rules.ts`: `PAIR_NEW_PER_HOUR = 5`, `MAX_RECIPIENTS = 10`, `HOLD_UNTRUSTED_OUT = true`, `MAX_DEPTH = 4`,
   `HOST_MAIL_TURNS_PER_HOUR = 120`, `HOST_SHARE = 10`, `REMINDER` (§10.4), `depthOf(...)` (§8.2 step 6),
   `pickWork(candidates, now)` (§8.2 step 3), `flowsDownTo(...)` (§8.2 step 4), `wakesMessage(m)` (`facts.quiet` and
-  the kind; replaces `wakes`), `quietAnswer(m, target)` (D3: an answer with `needsReply` false to a `message` with
-  `needs_reply = 0`), and the new refusal reasons (S9, S15's `untrusted_project`).
+  the kind; replaces `wakes`), `quietAnswer(m, target, receiver: { parent: string | null; owesTask: boolean })` (D3: an answer with `needsReply`
+  false to a `message` with `needs_reply = 0`, not `urgent`, whose sender is neither `receiver.parent` nor the sender of
+  an unsettled task to the receiver, `owesTask`, which `send` reads with `newestTask`), and the new refusal reasons (S9, S15's `untrusted_project`).
 - In protocol `entities/sessions.ts`: `workTasks(tasks)` (§10.1). Nothing calls it yet but its test.
 - Tests: `messages.test.ts`, `messages-drain.test.ts`, `reach.test.ts`, `frame-messages.test.ts`, and a
   `workTasks` case in the protocol's sessions test.
@@ -1968,7 +2054,7 @@ export type ReachHost = {
 export type MailReach = {
   mayWrite(from: string, to: string): RefusalReason | null
   untrusted(projectId: string | null): boolean                             // §7.2, the one rule
-  holdFor(m: Pick<MailRow, 'kind' | 'sender' | 'senderProject' | 'depth'>, recipient: string): 'policy' | 'loop' | null   // §7.4; 'loop' above MAX_DEPTH
+  holdFor(m: Pick<MailRow, 'kind' | 'sender' | 'senderProject' | 'depth'>, recipient: string, released?: boolean): 'policy' | 'loop' | null   // §7.4; 'policy' first, then 'loop' above MAX_DEPTH unless released (the person's Resume)
   refusesDelegation(callerId: string, target: { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }): string | null   // §7.4: the untrusted project id, or null
   isOrchestrator(address: string): boolean
   askGroupMembers(address: string): string[]
@@ -2035,7 +2121,7 @@ class MessageService {
   dismissProject(projectId: string): { rows: number; senders: string[] }   // §7.4 Dismiss and projects.delete; S13 once per sender; drops refused records
   trustChanged(projectId: string): string[]                           // §7.4; lets held rows go, posts S16 per caller; returns recipients to poke
   requestTurnEnded(orchestrator: string, asker: string, turnSeq: number): number   // §7.6: settles that turn's request rows 'reported'
-  resumeDepth(messageId: string): number                              // §7.5: lets a depth-held message go; settles the question it answers (D8)
+  resumeDepth(messageId: string): number                              // §7.5: held 'loop' → 'released' (never re-held loop at drain); settles the question it answers (D8)
   heldByProject(): { projectId: string; count: number; refused: number; recipients: string[] }[]
   partyGone(address: string): void
   handOver(from: string, to: string, scope: HandOverScope): HandedOverMessage[]
@@ -2069,10 +2155,13 @@ calls `MessageService` except its tests.
 - `refused writes a delivered, read record; trustChanged posts one S16 per caller listing them and deletes them`
 - `a new message is sent with needsReply true unless false is given; an answer with false unless true is given`
 - `an answer that needs nothing to a message that needed nothing is delivered quiet; to a needsReply message it wakes`
+- `such an answer wakes when urgent, from the receiver's parent, or from a session with an unsettled task to it` (round 5)
+- `holdFor returns policy before loop; a row released by resumeDepth is not held loop again at drain, and is still held policy while its project is untrusted`
+- `a clarification is not counted by requestsSince`
 - `depthOf: an answer back to the cause's sender keeps the depth; a send on to another party adds 1; a task, a report or no cause gives 0; a reminder or sender notice adds nothing`
 - `a message with depth 5 is held loop, and the person's word in its sender does not let it go`
 - `an answer that is held leaves the question open with answer_id, is not remindable, tells the asker once quietly; let go it settles; dismissed it reopens`
-- `covering: a row is covered by a watched row sent after it was delivered, not by one sent before`
+- `covering: a row is covered by a watched row sent after it was delivered, caused by the starter of its delivery turn or by nothing; not by one sent before, nor by one a later turn's other starter caused`
 - `trustChanged lets go the rows held for that project, in the order sent`
 - `dismissProject deletes the project's held rows, and their messages when no row is left, notices each sender once, and drops refused records`
 - `a report is never held`
@@ -2134,7 +2223,7 @@ and passes on its own; the stack lands together.
   - When an orchestrator's request turn ends, `service.requestTurnEnded(orchestrator, asker, turnSeq)` (§7.6), at the
     turn's end, beside the request report the old path sends (`askedReportBody`).
 - **`mail/turns.ts`.**
-  - `begin(sessionId, { workMessage, starter }): number` (the turn's seq), `current(sessionId): TurnNow | undefined`
+  - `begin(sessionId, { workMessage, starter }): number` (the turn's seq; writes `message_id` and `starter_id`), `current(sessionId): TurnNow | undefined`
     (§8.2 step 6, with `startedAt`), `mailStartedSince(since, sessionId?): number` (turns whose starter is a message
     from a session or a Centralu follow-up), `attach(sessionId, messageId, owner)`,
     `messageOf(sessionId)` (replaces `threadOf`), `lastEnded(sessionId): { by: TurnStartedBy; endedAt: number;
@@ -2153,6 +2242,9 @@ and passes on its own; the stack lands together.
   (`sessions/start-agent-flow.ts`, the target project), `agent_session send` and `send_to_session` (the target
   session, `sessions/agent-session-actions.ts`), `ask_project` (`sessions/ask-project-flow.ts`, the asked project),
   and the linked paths through `sendLinked` (`orchestrator-seat.ts:381`, `:645`, target `linked`).
+- **A rollback across the mail switch** (D28): `links/mail-switch.ts` with `MAIL_SWITCH_VERSION` and
+  `rollbackCrossesMailSwitch(current, previous)`; `LinkedMachineOps.rollback()` (`linked-machine-ops.ts:380-383`) and
+  `machine-flow.ts`'s `rollback` case (`:268-273`, before `this.ask`) refuse with S17.
 - **`mail/delegation.ts`.** As §9.1 to §9.3 and §9.6. `closingRecorder`, the thread parts of `answerRecorder` and
   `finishRecorder` go. `reportRecorder` returns `ReportedAs` per §9.3's table.
 - **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5.
@@ -2216,6 +2308,10 @@ export type MailToolHost = {
 - ✗ `a worker's question to its owner is no request; the owner's answer is work, and its turn is reported to the owner` (§9.7, end to end with `start_agent`)
 - ✗ `an orchestrator that ends a request turn without sending anything is not reminded of the request`
 - ✗ `an auto session of the same project as an untrusted sender takes its mail unheld`
+- ✗ `a host restarted mid-turn keeps the turn's starter: what the turn sends after the restart has its cause and depth` (`starter_id`)
+- ✗ `the person's Resume on a depth-held message delivers it at the next drain and it is not held loop again`
+- ✗ `rollback_machine and machines.rollback from the stack's release to the one before are refused with S17 and raise no card; a rollback within one side of it runs` (`machine-commands.test.ts`, `links.test.ts`)
+- ✗ `a moved pending request from an old thread starts a request turn with the asker's cards, and its end settles nothing and reports to the asker` (§6.3)
 - `start_agent: the child's turn end is a report replying to the task, and the task row is reported` (re-keyed from `report-turn.test.ts`)
 - ✗ `each ReportedAs case of §9.3` (one case per row, `reportRecorder` with a fake `ChildReports`)
 - ✗ `a report sent by an older build's marks while this one was away settles the task at ready`
@@ -2397,7 +2493,9 @@ and the receiver answers with `send id=`. An adopted session from before the sli
 | `the person's Stop holds reminders; the rows release 10 minutes later with no new turn, or at a second Stop; a new turn first releases nothing` | | yes |
 | `an error releases the rows 10 minutes later, or when the next turn also ends in error, also across a host restart` | | yes |
 | `waiting on the person covers the row until its 2-hour release, and the sender is told it is waiting` | | yes |
-| `a row covered by a question sent after it came in is not reminded; one sent before covers nothing` | | yes |
+| `a row covered by a question sent in its turn, or in a turn with no cause after it, is not reminded; one sent before, or in a later turn another message started, covers nothing` | | yes |
+| `an orchestrator delegating for other askers is still reminded of a clarification that came in an earlier turn, and the worker is told waited, not waiting` | | yes |
+| `R arrives, S starts a background job, and the CLI's own turn after it asks C: R is covered` | | yes |
 | `a released row is listed once, with its why, in its sender's next gathered notice` | | yes |
 | `an asleep session cold for 50 minutes gets a quiet notice, not a resume` | | yes |
 | `6 reminder wakes a day per session at most, counted across a host restart` | | yes |
@@ -2537,7 +2635,12 @@ checked by the orchestrator at merge.
    pending after the last `ready` is not lost; then the v61 messages within 30 days of `created_at` are copied into
    `mail`, settled `legacy` (the step has its own statements: it may not import product code that M7 deletes).
 2. **Marks become tasks, run by the step itself** (§1.9 G10): each `report_marks` row with no
-   unsettled task from its caller to its session gets one (§9.5 step 1's mapping, in the step's own statements). A
+   unsettled task from its caller to its session gets one (§9.5 step 1's mapping, in the step's own statements). The
+   task's id and the two session addresses need this host's id, so `MigrationHost` (`store/migrations/context.ts:23`)
+   gains `hostId(): string`, given by `store.ts:180` from the `app_settings` key `hubSelfId` reads
+   (`links/stored.ts:39`). The key and the read move to `store/store-keys.ts`, beside `APP_SETTINGS_DDL`, so the store
+   and `links/` share one definition and the store imports nothing from `links/`. A store with marks has served mail,
+   so the key exists; when it does not, the step makes the id by `hubSelfId`'s rule and writes it. A
    store last served by a build before M8, as when the owner skips releases, so loses no owed report. A
    `queued_requests` row needs nothing: its request is a pending row to the orchestrator (written since M3a, or moved
    in step 1), and its turn's end reports as any request turn (§7.6).
@@ -2553,7 +2656,8 @@ the older-window answers of `mail.list`, `mail.thread`, `mail.reply`, `mail.clos
 
 - `the contract step moves a pending receipt left after the last ready, then drops the v61 tables`;
 - `it copies the last 30 days of history and not older`;
-- `it turns a report mark with no task into a task, so a store last served before M8 keeps its owed report`;
+- `it turns a report mark with no task into a task, so a store last served before M8 keeps its owed report`, with
+  addresses under the store's host id;
 - `it raises min_reader_version; a build from before refuses the store with StoreTooNewError`.
 
 **Acceptance**
@@ -2624,6 +2728,9 @@ protocol +70, wiring +170). After M8 and M7b: about **1,900 to 2,100 fewer**.
 delegations instead of holding them saves about **100 product and 140 test lines** (D12). Added: clarifications (~25),
 held answers (~20), the request turn's settle (~10), host-cap shares (~10), quiet answers (~5), the trust rule and
 project deletion (~10), M7's mark conversion (~20). Net about **220 product lines fewer** than round 3.
+
+**Round 5 against round 4:** about **35 product lines more** (the rollback refusal ~15, the cover's cause test ~10,
+the quiet answer's exceptions ~5, `starter_id` ~5) and about 60 test lines; the totals above stand.
 
 **What got simpler in round 3:** the reminder reads no session graph (no `waits`, `progressing`, cycle rule or depth
 search: −70 lines and 9 table rows' worth of cases); the migration moves pending receipts once (no watermark, re-merge,
