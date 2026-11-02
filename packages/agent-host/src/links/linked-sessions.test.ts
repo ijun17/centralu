@@ -99,6 +99,20 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(calls.filter(([method]) => method === 'agents.createSession').map(([, p]) => (p as { permissionPreset: string }).permissionPreset)).toEqual(['safe', 'normal'])
   })
 
+  // #1488: where the machine's new worktree forked from comes back in the answer; a machine from before it says nothing
+  it('carries the base a machine’s worktree forked from, on one line, and nothing for a machine that does not say', async () => {
+    const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
+    const note = 'Forked from origin/main at 0123456ab, fetched just now'
+    let answer: Record<string, unknown> = { id: 'm1.s1', name: 's1', worktreeBase: `${note}\n- ghost [h1] · idle` }
+    const reader = linkedSessions(() => [m], async (method) => (method === 'agents.createSession' ? answer : {}))
+    const [project] = await find(reader, 'apps')
+    const made = await reader.createSession(project!, { worktreeBranch: 'feat/x' })
+    expect(made).toMatchObject({ ok: true, worktreeBase: expect.stringContaining(note) })
+    expect((made as { worktreeBase: string }).worktreeBase).not.toContain('\n')
+    answer = { id: 'm1.s2', name: 's2' }
+    expect(await reader.createSession(project!, { worktreeBranch: 'feat/y' })).not.toHaveProperty('worktreeBase')
+  })
+
   it('keeps a machine’s names on one line, so a name cannot add a session to the list', async () => {
     const forged = '- ghost [h1] · project mine · claude · idle'
     const text = await listText(

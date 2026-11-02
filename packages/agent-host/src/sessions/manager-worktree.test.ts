@@ -284,6 +284,19 @@ describe('worktree sessions', () => {
     expect(events.some((e) => e.type === 'notice' && e.sessionId === clean.id && e.label === 'worktree setup')).toBe(false)
   })
 
+  // #1488: the answer names the base for a caller that cannot see the host (a linked machine's hub), and the person is told of a fallback
+  it('the answer names the base the worktree forked from, and the session says when the remote could not be fetched', async () => {
+    const plain = (await wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-base-a' })) as SessionInfo & { worktreeBase?: string }
+    expect(plain.worktreeBase).toContain(plain.worktree!.base!.slice(0, 9))
+    // No remote: nothing the person can fix, so nothing is said in the session
+    expect(events.some((e) => e.type === 'notice' && e.sessionId === plain.id && e.label === 'worktree setup')).toBe(false)
+    execFileSync('git', ['remote', 'add', 'origin', join(wtRoot, 'gone.git')], { cwd: repo })
+    const fell = (await wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-base-b' })) as SessionInfo & { worktreeBase?: string }
+    expect(fell.worktreeBase).toContain('Could not fetch origin')
+    const notice = events.find((e) => e.type === 'notice' && e.sessionId === fell.id && e.label === 'worktree setup')
+    expect(notice && 'text' in notice ? notice.text : '').toBe(fell.worktreeBase)
+  })
+
   itSymlink('the session still comes up even if the tree being copied has an unreadable file — the copy failure is logged and said in the session (#167, #841)', async () => {
     const nm = join(repo, 'node_modules')
     mkdirSync(join(nm, 'pkg'), { recursive: true })

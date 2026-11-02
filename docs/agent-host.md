@@ -661,6 +661,9 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk as the remote has it (#1484, `resolveForkBase`): the trunk is fetched (bounded, trusted projects only) and the
 child forks from `origin/<trunk>`, never from the checkout's HEAD, which may be any branch; with no remote, a failed or timed-out fetch, or an
 untrusted project it forks from the newer of the local trunk and the remote-tracking ref last fetched, and with no trunk found at all from HEAD.
+A fetch that failed is remembered per repository and remote for 5 minutes (#1488, `gitFetchBranch`): no start asks again meanwhile, so an
+unreachable remote costs one wait, not one per start. Where the worktree forked from is the start answer's note for a local start, the
+`worktreeBase` of `agents.createSession`'s answer for a linked machine's (an older machine leaves it out), and a session notice for the person when a remote was not fetched.
 A branch asked for that is already there (#1662, a pull request's handed to a new session; `WorktreeSessions.takeBranch`)
 is not forked: the worktree starts on it as the remote has it, fetched (trusted projects only), tracking it when only the remote
 has it. A local branch behind the remote is moved to its head when every commit of its own was on the remote at some point

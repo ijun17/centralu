@@ -378,10 +378,14 @@ export function linkedSessions(
           ...(opts.agentDepth ? { agentDepth: opts.agentDepth } : {}),
           // The caller's preset carried across (#1273): the machine starts it under `auto` only as its own switch allows
           ...(opts.callerPreset ? { fromHub: { callerPreset: opts.callerPreset } } : {}),
-        })) as { id: string; name: string; permissionPreset?: unknown }
+        })) as { id: string; name: string; permissionPreset?: unknown; worktreeBase?: unknown }
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
         const preset = PermissionPreset.safeParse(info.permissionPreset)
-        return { sessionId: info.id, name: opts.name ?? info.name, ...(preset.success ? { preset: preset.data } : {}) }
+        return {
+          sessionId: info.id, name: opts.name ?? info.name,
+          ...(preset.success ? { preset: preset.data } : {}),
+          ...(typeof info.worktreeBase === 'string' && info.worktreeBase ? { worktreeBase: oneLine(info.worktreeBase, 600) } : {}),
+        }
       })
     },
 

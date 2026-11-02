@@ -329,6 +329,30 @@ describe('the base a new worktree forks from (#1484)', () => {
     expect((await resolveForkBase(repo, 'main', { trusted: true })).ref).toBe('main')
   })
 
+  it('a remote that failed is not fetched again for a while, also once it answers again (#1488)', async () => {
+    const { remoteTip } = withRemote()
+    const bare = join(root, 'origin.git')
+    fixtureGit(repo, ['remote', 'set-url', 'origin', join(root, 'gone.git')])
+    const first = await resolveForkBase(repo, 'main', { trusted: true })
+    expect(first.note).toContain('Could not fetch origin')
+    expect(first.unfetched).toBe(true)
+    fixtureGit(repo, ['remote', 'set-url', 'origin', bare])
+    // The remote is fine now, but the failure is remembered: no fetch, the same words, the local ref
+    const second = await resolveForkBase(repo, 'main', { trusted: true })
+    expect(second).toEqual(first)
+    expect(second.sha).not.toBe(remoteTip)
+    // Another repository is its own
+    const other = join(root, 'second')
+    fixtureGit(root, ['clone', '-q', bare, other])
+    expect((await resolveForkBase(other, 'main', { trusted: true })).sha).toBe(remoteTip)
+  })
+
+  it('a fetch that succeeds, or a repository with no remote, is not marked unfetched', async () => {
+    expect((await resolveForkBase(repo, 'main', { trusted: true })).unfetched).toBeUndefined()
+    withRemote()
+    expect((await resolveForkBase(repo, 'main', { trusted: true })).unfetched).toBeUndefined()
+  })
+
   it('a fetch that hangs is ended at its bound and the worktree forks from what is here', async () => {
     fixtureGit(repo, ['remote', 'add', 'origin', 'ssh://example.invalid/x.git'])
     fixtureGit(repo, ['config', 'core.sshCommand', 'node -e "setTimeout(function(){},60000)"'])

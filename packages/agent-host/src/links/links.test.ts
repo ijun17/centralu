@@ -2930,7 +2930,11 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect((await answer('allow')).detail).toMatchObject({ worktree: { branch: 'feat-remote' } })
     const r = await call
     if (!r.ok) throw new Error(r.error)
-    expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)?.worktree).toMatchObject({ branch: 'feat-remote' })
+    const there = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)?.worktree
+    expect(there).toMatchObject({ branch: 'feat-remote' })
+    // Where it forked from (#1488), as a local start's answer says it: the commit the machine's worktree records as its base
+    expect(r.notice).toContain(`forks from the local ref`)
+    expect(r.notice).toContain(there!.base!.slice(0, 9))
   })
 
   // #1161 item 3: the orchestrator removed these over SSH by hand
