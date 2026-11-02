@@ -565,7 +565,8 @@ export class MailDelivery {
   resumeSession(sessionId: string): void {
     this.turns?.resumeBudget(sessionId)
     const recipient = this.service.sessionAddress(sessionId)
-    this.releaseHeld((r) => r.recipient === recipient && r.held === 'budget', 'budget')
+    const ids = this.records.heldRows().flatMap((r) => (r.recipient === recipient && r.held === 'budget' ? [r.messageId] : []))
+    if (ids.length > 0) this.service.resendHeld(recipient, ids, ['budget'])
   }
 
   /**
@@ -579,12 +580,6 @@ export class MailDelivery {
       if (sender) this.turns?.resumePair(r.recipient, sender)
     }
     for (const id of new Set(rows.map((r) => r.messageId))) this.service.resumeDepth(id)
-  }
-
-  private releaseHeld(which: (r: RecipientRow) => boolean, why: 'budget'): void {
-    const byRecipient = new Map<string, string[]>()
-    for (const r of this.records.heldRows().filter(which)) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), r.messageId])
-    for (const [recipient, ids] of byRecipient) this.service.resendHeld(recipient, ids, [why])
   }
 
   /** Looks at the mailbox again after `ms` */
