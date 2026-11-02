@@ -192,10 +192,10 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     }
   }, 90_000 * SLOW)
 
-  it('does not say the old version runs again before it said hello', async () => {
+  it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
     await installedAndRunning()
-    const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2' }, { silent: '9.9.1' })
-    await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either\./)
+    const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-' }, { silent: '9.9.1' })
+    await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./)
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
   }, 60_000 * SLOW)
 

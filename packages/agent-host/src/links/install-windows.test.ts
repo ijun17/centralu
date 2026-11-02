@@ -263,7 +263,8 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
      */
     it('ends a new version that took the lock and hung, by the pid its lock names, and the old one runs again', async () => {
       await installedAndRunning()
-      const { seen, done } = update('9.9.2', { FAKE_HANGS: '9.9.2' })
+      // Under PowerShell 7's module path, as the ssh session of a CI runner has it: the lock's holder must still be told
+      const { seen, done } = update('9.9.2', { FAKE_HANGS: '9.9.2', PSModulePath: pwsh7ModulePath(root) })
       const hung = () => Number(readFileSync(data('hung'), 'utf8'))
       try {
         await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
@@ -283,16 +284,17 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       }
     }, 180_000 * SLOW)
 
-    it('does not say the old version runs again before it said hello', async () => {
+    it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
       await installedAndRunning()
-      const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2' }, { silent: '9.9.1' })
-      await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either\./)
+      const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-' }, { silent: '9.9.1' })
+      await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./)
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
     }, 180_000 * SLOW)
 
     // So a link can drive a temporary folder on a machine whose own installation it must not touch
     it('installs, starts and updates in the data folder the link names, not the one its ssh session has (#1903)', async () => {
-      const other = join(root, 'other data')
+      // Named as a Windows temp folder may be: an 8.3 short name (a CI runner's), `$` and parentheses, read as written
+      const other = join(root, 'OTHER~1 $data (1)')
       try {
         const spec: RemoteSpec = { shell: 'powershell', dataDir: other }
         const first = control({}, { spec })

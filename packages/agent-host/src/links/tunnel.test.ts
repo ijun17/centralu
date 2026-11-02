@@ -645,11 +645,14 @@ describe('the remote command per shell (#82)', () => {
       }
     }
     // Windows: a drive path, with no trailing separator, and no / path (a folder on whatever drive the session is on)
-    for (const bad of ['/tmp/cc', 'C:', 'C:\\', 'C:\\x y\\', "C:\\a'b", 'C:\\$env', 'C:\\a;b', 'cc', 'C:cc']) {
+    for (const bad of ['/tmp/cc', 'C:', 'C:\\', 'C:\\x y\\', "C:\\a'b", 'C:\\a\u2019b', 'C:\\a`b', 'C:\\a[1]', 'C:\\a\tb', 'C:\\a\\\\b', 'C:\\a/b', 'C:\\a:b', 'C:\\a"b', 'cc', 'C:cc']) {
       expect(dataDirError(bad, 'powershell'), bad).not.toBeNull()
       expect(() => connectionCommand({ shell: 'powershell', dataDir: bad }), bad).toThrow(/Not a data folder Centralu can name there/)
     }
-    expect(dataDirError('C:\\Users\\me\\cc try', 'powershell')).toBeNull()
+    // What a Windows temp folder holds: an 8.3 short name (a CI runner's), and any name a person's account may have
+    for (const good of ['C:\\Users\\me\\cc try', 'C:\\Users\\ME~1\\AppData\\Local\\Temp\\cc-x\\other data', 'C:\\Users\\홍길동\\$tmp (1)', 'D:\\a;b,c+d=e@f#g!h%i&j']) {
+      expect(dataDirError(good, 'powershell'), good).toBeNull()
+    }
     expect(dataDirError('/home/me/cc try', 'posix')).toBeNull()
   })
 

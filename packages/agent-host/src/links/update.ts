@@ -208,9 +208,13 @@ async function putBack(
   const tail = await hostLogTail(c).catch(() => '')
   const log = tail ? ` The end of its host.log: ${tail}` : ''
   const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu that was there'
+  // A new host that came up late, or half, goes before the old one starts on the same port. Tried on when it fails, and
+  // said with what fails next: a new host left running is most often why the old one cannot start
+  let stopFailed = ''
   try {
-    // A new host that came up late, or half, goes before the old one starts on the same port
-    await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
+    await stopRemoteHost(c, { forUpdate: true }).catch((err: Error) => {
+      stopFailed = ` (after ${err.message})`
+    })
     await setPointers(c, to, was.current, was.previous)
     if (restore && was.current) await restoreStore(c, was.current)
     if (was.running) {
@@ -219,7 +223,7 @@ async function putBack(
       if (!(await c.answers(was.current?.version ?? null, CHECK_MS))) throw new Error(`it did not answer within ${CHECK_MS / 1000} s either`)
     }
   } catch (err) {
-    throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}.${log}`)
+    throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}${stopFailed}.${log}`)
   }
   const store = restore ? ' Its store is as it was before the dev build first opened it.' : ''
   throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); ${was.running ? `it runs ${back} again` : `${back} is back in place`}.${store}${log}`)

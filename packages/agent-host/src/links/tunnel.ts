@@ -341,17 +341,21 @@ export type RemoteSpec = {
 }
 
 /**
- * The data folders a link may name, per shell: what goes inside the shell's quotes with nothing read into it ($, quotes,
- * backquotes, ~, and no backslash in sh, where one before the closing quote escapes it). A POSIX shell (and WSL) gets an
- * absolute `/` path; Windows a drive path. No trailing separator
+ * The data folders a link may name, per shell: what goes inside the shell's quotes with nothing read into it. No trailing
+ * separator. A POSIX shell (and WSL) gets an absolute `/` path of letters, digits, spaces and `. _ -`: inside sh's
+ * double quotes `$`, backquotes and a backslash are read, and `~` is refused with them. Windows gets a drive path whose
+ * names are what a Windows folder may be called, less what PowerShell would read: inside its single quotes only a quote
+ * ends the text (`'` and the curly ones it takes as the same), and the scripts there pass the folder to `-Path`, which
+ * reads backquotes and brackets as a pattern. So `~` (an 8.3 short name such as ME~1, as a CI runner's temp folder
+ * has), `$`, parentheses and letters of any language are taken
  */
-const DATA_DIR_RE = { posix: /^\/(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+$/, powershell: /^[A-Za-z]:(?:\\[A-Za-z0-9._ -]+)+$/ }
+const DATA_DIR_RE = { posix: /^\/(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+$/, powershell: /^[A-Za-z]:(?:\\[^\\/:*?"<>|'`[\]\u2018-\u201B\p{Cc}]+)+$/u }
 
 /** Why a data folder is not taken for a link of `shell`, or null when it is (`RemoteSpec.dataDir`) */
 export function dataDirError(dir: string, shell: RemoteShell): string | null {
   const ps = shell === 'powershell'
   if (dir.length <= 240 && DATA_DIR_RE[ps ? 'powershell' : 'posix'].test(dir)) return null
-  return `Not a data folder Centralu can name there: ${dir} (${ps ? 'a drive path such as C:\\centralu-try' : 'an absolute path such as /tmp/centralu-try'}, of letters, digits, spaces and . _ -)`
+  return `Not a data folder Centralu can name there: ${dir} (${ps ? "a drive path such as C:\\centralu-try, with no ' ` [ or ]" : 'an absolute path such as /tmp/centralu-try, of letters, digits, spaces and . _ -'})`
 }
 
 /** `CC_DATA_DIR` set to the spec's data folder, in the shell's terms, before what runs after it; "" when it names none */

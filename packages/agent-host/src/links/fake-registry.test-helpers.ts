@@ -105,7 +105,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * happened to `<data>/events` and which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that
  * version fail to start and leave a line in `host.log`. `--autostart off` and `remove` remove `<data>/autostart`, the
  * stand-in for a boot entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that
- * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse. `--connection` prints a connection line with the running
+ * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse, or with `-` only when no version runs. `--connection` prints a connection line with the running
  * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
  * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
  * `FAKE_MIGRATES=<version>` plays a version whose migration only it reads: starting, it writes `needs <version>` to
@@ -140,7 +140,7 @@ if (a === 'serve --stop') {
   log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : lockPid() ? 'hung' : '-') + (existsSync(d + '/remote/hold.json') ? ' (held)' : '') + (process.env.CENTRALU_STOP_FOR === 'update' ? ' (for update)' : ''))
   rmSync(d + '/running', { force: true })
   if (real && lockPid()) await real.runStop({ env: process.env, home: process.env.HOME || process.env.USERPROFILE, entry: d + '/no-host.mjs' })
-  else console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
+  else console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS === '1' || (process.env.FAKE_STOP_FAILS === '-' && !was) ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
 } else if (a === 'serve --detach' || a.startsWith('serve --detach --from ')) {
   log('start ' + V)
   // FAKE_MIGRATES=<version>: that version migrates the store so only it reads it; any other then refuses it

@@ -84,6 +84,7 @@ import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } 
 import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
+import { pwsh7ModulePath } from '../packages/agent-host/src/links/windows-remote.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -2430,6 +2431,16 @@ describe('the folder’s host on a system with no ps', () => {
     lock(d, { pid: process.pid, started: null, at: created! - 1_000, by: 'serve' })
     expect(lockHolderIsAlive(d)).toBe(false)
     expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+  })
+
+  // A CI runner's shell is PowerShell 7: every lock held on Windows read as dead, and `--stop` left a hung host (#1906)
+  it.skipIf(POSIX)('reads it when started under PowerShell 7, whose module path Windows PowerShell inherits', () => {
+    vi.stubEnv('PSModulePath', pwsh7ModulePath(tempDir()))
+    try {
+      expect(processCreatedAt(process.pid)).toBeGreaterThan(0)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.skipIf(!POSIX)('knows nothing of a creation time where ps tells the start', () => {
