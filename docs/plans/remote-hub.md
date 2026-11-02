@@ -535,6 +535,118 @@ ignores fields it does not know), and when nothing is found, the preflight of §
 hub keeps the last answer with the machine for Settings → Machines, and asks again at every link start, which it does
 anyway.
 
+### 10.5a The machine runs its own switch (#1903, design, 2026-11-03)
+
+**Problem.** §10.5's steps 2 to 5 are separate ssh commands from the hub: stop, switch, start, wait for hello, put back.
+Anything that ends the hub's part between them strands the machine. If the link drops between the stop and the start,
+no host runs until ssh returns and the link's reconnect starts one. After a hub stop the exit is clean, so systemd's
+`Restart=on-failure` does not fire. If the hub dies mid-update, no host runs until a hub returns, and that hub starts
+whatever `current` names. If it dies after the start and before the check, an unchecked version stays with no put-back,
+because the hub keeps no update state across a restart.
+
+**Rule.** The machine owns the transaction. The hub hands it one command and then only reads the outcome. Nothing the
+hub or the link does after that command can leave the machine without a host for longer than the switch itself takes.
+
+**Prior art** (read only). Three self-updating tools were read.
+
+- One agent updater writes an atomic state file before the switch (active and backup version, last target, success).
+  It watches the new process for a stable pid and a ready signal from that pid within a minute. On failure it restores
+  the links and the database backup, and any later run repairs a half-done switch from that file.
+- One desktop client copies its own binary to a temporary file, starts the copy detached and exits, so the installer can
+  replace the original. It keeps a log but no status file, and the parent never learns the outcome.
+- One CI runner writes a script, starts it without waiting, and passes its pid so the script waits for it to exit. It
+  leaves a "finished" flag and a log, and has no rollback.
+
+Taken from them: state written before the switch and reconciled at every start; health as a hello from the new
+version's own host within a bound; a lock against a second run; the outcome in a file the caller reads.
+
+**Shape.**
+
+1. **Place** (unchanged, §10.2): the new version beside `current`, over the link.
+2. **Wait for turns** (unchanged, #1399/#1618): the hub's `beforeStop` still runs before anything is handed over, since
+   only the hub can show the person the wait.
+3. **Hand over**: one ssh command, `remote-install.mjs` action `switch`, with `{ id, to, keep, was, checkMs }`. It
+   takes the switch lock, writes `<data>/remote/switch.json`, starts the **switcher** detached (below), and returns
+   `{ id }` at once. The switcher is the same `remote-install.mjs`, copied to `<data>/remote/switch.mjs` so it outlives
+   the ssh session's temporary file, run on the Node `current` runs on.
+4. **The switcher** runs §10.5 steps 2 to 6 itself, with the same launchers the hub runs today. It stops with
+   `serve --stop` (`CENTRALU_STOP_BY=hub`, `CENTRALU_STOP_FOR=update`), writes the pointers, and starts with
+   `serve --detach`. The check is a probe with the folder's own credential from `serve.json` (`probeHost`) until it
+   answers as `to`, within 30 s. On failure it stops the new host (`--stop`, which ends a lock holder that never
+   listened, #1903), puts the pointers back, restores the store when §10.11 asks for it, starts the old version and
+   waits for its hello. On success it prunes. It writes each step to `switch.json` before doing it.
+5. **The hub reads the outcome.** It holds the link (§10.5), then reads `switch.json` over ssh every 2 s and shows its
+   step on the row as today's `UpdateStep`s. A failed read (link down) is retried with the link's backoff and is not a
+   failure of the update. It ends on `outcome` and reconnects. At every link start (a new hub process, a reconnect)
+   the hub reads `switch.json` once. A switch still running is shown as running and followed. An outcome not yet marked
+   `seen` is reported once on the row, then marked.
+
+**`switch.json`** (`v: 1`, written by rename): `{ id, by: <hub name>, from, to, keep, was: { current, previous },
+step, startedAt, at, pid, pidCreatedAt, outcome?: 'done' | 'put_back' | 'failed', message?, seen? }`. `pid` and
+`pidCreatedAt` are the switcher's own, read the way `host.lock`'s holder is read (`lockHolderIsAlive`, #1888), so a dead
+switcher is told from a live one.
+
+**Concurrent updates.** `<data>/remote/switch.lock` is taken with an exclusive create naming the switcher's pid and
+start time. A second `switch` while it is held by a live process is refused with who started it and when. A held
+lock whose process is gone is stale and is taken over. `operate`'s one-at-a-time on the hub stays, and the lock covers
+two hubs.
+
+**The switcher's own crash.** The machine's next `serve` reconciles before it starts a host. That `serve` is the hub's
+`--detach` after a reconnect, the boot entry's start, or a person's `serve`. It finds `switch.json` with no `outcome`
+and a switcher that is not alive, then decides by the last step written:
+
+- Before `switch`, nothing changed: outcome `failed`, "interrupted before the switch".
+- From `switch` until the check passed: the pointers in `was` are put back and the old version starts, outcome
+  `put_back`, "interrupted".
+- After the check passed: outcome `done`.
+
+Each step is safe to do twice (pointers by rename, stop of a host already stopped, prune of what is gone).
+
+**Detaching, per system.** The switcher must outlive the ssh session that started it, as the host must. So it is
+started the way `serve --detach` starts the host (`startDetached`, serve-detach.mjs), imported from the launcher of the
+version `current` names.
+
+- **Linux and macOS:** `setsid`, as the host. A distro whose logind ends a user's processes at logout without linger
+  ends the host too, and §10.4's linger note covers both.
+- **Windows:** WMI `Win32_Process.Create`, which leaves the ssh session's job object; measured for the host in §10.4.
+  The switcher runs in the network logon that ssh has, which is fine for it. The host it starts goes through
+  `serve --detach`, which still prefers the sign-in task when someone is signed in (#1224). With nobody signed in, the
+  host starts through WMI with the network-logon note, as today.
+- **WSL (open):** the host runs inside the distro, so the switcher does too. WSL stops a distro about 15 s after its
+  last client, and a WMI-created `wsl.exe` was seen to hang (§10.4), so nothing measured yet keeps the distro up for the
+  switcher once the hub's ssh is gone. Until a probe settles it, a WSL machine keeps today's hub-driven steps.
+
+**The update-resume list (#1618).** Unchanged in meaning. The switcher's stop is still `CENTRALU_STOP_FOR=update`, so
+the stopping host writes its `update-resume.<uuid>.json` and the next host, new or put back, continues the listed turns
+once. A put-back after a crashed switcher starts the old version, which reads the same lists. A list naming turns the
+new version already continued names a conversation past its mark and continues nothing.
+
+**Compatibility.** `remote-install.mjs` travels with the hub, so a hub with this design can use `switch` on any machine.
+The switcher imports `startDetached`, `probeHost` and `runStop` from the launcher of the version it switches from or to.
+When neither of them has those exports (a rollback to a version from before them), the hub runs today's steps one by
+one. An older hub never writes `switch.json` and ignores one it finds.
+
+**What goes.** The hub's `switchRemote`, `startOrRestore` and `putBack` become the switcher's. Expected: update.ts
+loses the step sequencing (≈120 lines), `remote-install.mjs` gains `switch` and reconciliation, and the hub keeps
+`installRemote`, the read loop and the report.
+
+**Tests.** A fake ssh into a real sh and a real PowerShell, as in install-windows.test.ts, plus the hung-version stand-in
+from #1906. Each of these fails on main:
+
+- the ssh command ends right after the handover (link drop), and the machine still ends with the new version, or the
+  old one put back;
+- the hub's process is killed after the handover and a new hub reads the outcome and reports it once;
+- the switcher is killed at each step, and the next `serve --detach` reconciles to a running host;
+- a second `switch` while one runs is refused.
+
+**Visible wording** (the owner's call; proposed):
+
+| Text | Where |
+|---|---|
+| `An update of <machine> started from <hub> at <time> is still running; try again when it ends` | The update's refusal, machine row and card |
+| `<machine> was updated to Centralu <version> while this computer was away` | Machine row note, once, after a hub restart |
+| `The update of <machine> to Centralu <to> was interrupted; it runs Centralu <from> again` | Machine row note, once |
+
 ### 10.6 Probe 4: where the hub's ssh lives across a hub swap
 
 **Rig** ([probe4-swap.mjs](../spikes/2026-10-remote-install/probe4-swap.mjs)): the released beta.12 keeper and host
