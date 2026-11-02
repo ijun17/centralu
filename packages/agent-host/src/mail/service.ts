@@ -1,5 +1,4 @@
 import { createListeners } from '@cc/common'
-import { scriptLabel } from './script-label.js'
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { asObj, isObj } from '../json-value.js'
 import {
@@ -32,7 +31,6 @@ import {
   NEXT_MAX,
   SUBJECT_MAX,
   bodyLimit,
-  cutTask,
   dueAt,
   flowsDown,
   mayEditTask,
@@ -49,7 +47,6 @@ import {
   stateAfterUnblocked,
   type SenderClass,
   type Standing,
-  ADOPTED_TASK,
 } from './rules.js'
 
 /*
@@ -162,25 +159,6 @@ export type CentraluPost = {
 /** A thread changed (and who has new mail in it): what the delivery engine and the windows hear */
 export type MailChange = { threadId: string; recipients: string[] }
 
-/** A thread a handoff moved to the successor (`MailService.handOver`): as it is after the move, the original's role in it, and how much unread mail moved with it */
-export type HandedOverThread = {
-  thread: ThreadRow
-  role: ParticipantRole
-  unread: number
-  /**
-   * `moved`: the successor took the original's place. `closed`: a done thread, which stays as it is, whose unread mail now waits for the
-   * successor, a member of it from now on. `left`: the successor already holds the other side, so the thread stays with the original and
-   * moves on when it goes (`partyGone`: an owner left behind makes the person the owner, an assignee left behind leaves it open)
-   */
-  kind: 'moved' | 'closed' | 'left'
-}
-
-/** Which of the original's threads a handoff moves: `all` for an original that goes, or those it owns with one of these sessions as assignee */
-export type HandOverScope = 'all' | { assignees: readonly string[] }
-
-/** What a handoff would do with the original's mail (`MailService.handOverPreview`): the subject and the original's role of each thread, by what happens to it */
-export type HandOverPreview = Record<HandedOverThread['kind'], { subject: string; role: ParticipantRole }[]>
-
 export type PostResult = {
   message: MessageRow
   thread: ThreadRow
@@ -189,27 +167,6 @@ export type PostResult = {
   repeated?: boolean
 }
 
-/** Work a session gave another through a tool the host already delivered it by (start_agent, ask_project, ...): the host writes it down (§8.1) */
-export type DelegationInput = {
-  assignee: string
-  /** The caller's own words for the task (never a frame or the project's instructions the host adds) */
-  task: string
-  origin: ThreadOrigin
-  projectId?: string | null
-  /**
-   * The thread of the work the caller is doing as it hands this on (its current turn's, `MailTurns.current`), and the depth the child
-   * works at. The parent counts only when the caller is its assignee and it is not over; otherwise the thread has none (§3.3, §6)
-   */
-  parentId?: string | null
-  depth?: number
-  /** The task is a script's message (§8.1, 3.8b): a fact on the `assign`, written by the host from the connection, so no reader takes it for the person's words */
-  fromScript?: { credential: string }
-}
-
-export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
-
-const sameStrings = (a: unknown, b: readonly string[]): boolean => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i])
-
 /** The session id of a session's address; an address that is not one stays as it is */
 const sessionIdOf = (address: string): string => {
   const p = parseAddress(address)
@@ -217,39 +174,6 @@ const sessionIdOf = (address: string): string => {
 }
 
 const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
-
-/** The task of a thread adopted from a report mark: the words the owner gave were not kept, and the session's conversation has them */
-
-/**
- * How a turn of delegated work ended, told by Centralu to the thread's owner (§6, §8.1). The words of `body` are Centralu's own with the
- * session's last response behind them; `facts` is what the wake carries (an outcome word, the kind of error, how many tasks are left
- * running, whether the person wrote into the turn)
- */
-export type TurnReport = {
-  /** The thread's owner, who is told */
-  to: string
-  /** The session whose turn ended */
-  about: string
-  /**
-   * The session's last response, which are its own words: they go in the thread as a message of the session's, in front of the report, and
-   * are read with the tool under what the session is to the reader. They are never in the words of Centralu's report, which stay words
-   * Centralu wrote (#1186). Recorded read and handled for the owner: the report is what wakes it
-   */
-  answer?: string
-  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
-  outcome: string
-  body: string
-  error?: string
-  paused?: number
-  personNote?: boolean
-  /**
-   * The owner has been told already, by the call that returned the answer or by the old way of telling: the report is recorded as
-   * delivered, read and handled for it, and nothing wakes it
-   */
-  told?: boolean
-  /** What the thread becomes: `review` when the work was reported (the owner decides), `running` when it paused on its own background work, `dropped` when the person took it over */
-  then: 'review' | 'running' | 'dropped'
-}
 
 export type OpenResult = PostResult & {
   /** The participants of the threads this one follows, who may be added to it (§3.3, "offered as its own") */
@@ -372,29 +296,6 @@ export class MailService {
   /** A session's address on this host */
   sessionAddress(sessionId: string): string {
     return sessionAddress(this.host, sessionId)
-  }
-
-  /**
-   * A session left the host's list (it went to the trash, or was deleted): the work it held moves on (§3.3). A host that never
-   * made mail has nothing to move and does not even ask for its id
-   */
-  sessionGone(sessionId: string): ThreadRow[] {
-    if (!this.records.hasThreads()) return []
-    return this.partyGone(this.sessionAddress(sessionId))
-  }
-
-  /**
-   * The subjects of the unfinished threads a session holds, the work `sessionGone` would move on: those it is assigned and those it
-   * owns. Read only (it makes no party and no host id), so the session archive can name them before it moves the session (#1512)
-   */
-  openWorkOf(sessionId: string): { assigned: string[]; owned: string[] } {
-    if (!this.records.hasThreads()) return { assigned: [], owned: [] }
-    const address = this.sessionAddress(sessionId)
-    const open = ['open', 'running', 'review', 'blocked'] as const
-    return {
-      assigned: this.records.threadsOfParty(address, 'assignee', open).map((t) => t.subject),
-      owned: this.records.threadsOfParty(address, 'owner', open).map((t) => t.subject),
-    }
   }
 
   /**
@@ -760,13 +661,6 @@ export class MailService {
     return this.records.markHandled(thread.id, reader, upTo ?? Number.MAX_SAFE_INTEGER, this.now())
   }
 
-  /** Whether `address` may change the task of the thread (its owner, its assignee, the person): asked before anything is posted for a change that would be refused */
-  mayEditTask(threadId: string, address: string): boolean {
-    const thread = this.mustThread(threadId)
-    const standing = this.standing(thread, address)
-    return standing !== null && mayEditTask(standing)
-  }
-
   /** The threads that follow this one, and the ones it follows: a follow-up is shown both ways (§3.3) */
   followUps(threadId: string): ThreadRow[] {
     return this.records.threadsFollowing(threadId)
@@ -1029,172 +923,6 @@ id: ${sessionIdOf(assignee)}` : ''
     })
   }
 
-  /**
-   * A handoff moves the original session's mail to the session that took over (§4.1, #693, #738, #1574): in each thread that moves,
-   * the successor takes the original's place, as owner, as assignee or as a member, and what the original has not read waits for the
-   * successor instead (`moveUnreadReceipts`). Each thread keeps its state and leaves an `event`; nobody is woken inside the move
-   * (it runs before the successor's first message); the unread mail waits for the successor's next rest or the caller's poke. The
-   * host's own write, like `partyGone`'s: no policy or rate check, since the handoff's own checks came first (`HandoffChildren.moveChildren` trusts its caller the same way).
-   *
-   * `which`: `all` for an original that goes (every thread not done it is in), or the sessions whose work moved to the successor
-   * while the original stays (the threads the original owns with one of them as assignee). A thread the successor already holds
-   * the other side of (it owns what the original is assigned, or the reverse) stays where it is: the two sides of a thread are two
-   * parties, and the original's departure moves it on as before (`partyGone`); it is returned as `left`, so the note says so. A
-   * done thread the original has unread mail in (a closing report it never read) stays done and keeps its parties; the successor
-   * joins it and the unread mail waits for it (`closed`). Called inside the transaction of the children's move
-   * (`ChildOwnershipRecords.moveChildren`), so the mail and the children move together or not at all. Returns every thread it
-   * looked at by what became of it, for the handoff note (`handOverPreview` reads the same plan without writing)
-   */
-  handOver(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverThread[] {
-    if (fromSessionId === toSessionId || !this.records.hasThreads()) return []
-    const from = this.sessionAddress(fromSessionId)
-    const to = this.sessionAddress(toSessionId)
-    return this.run(() => {
-      const now = this.now()
-      const done = this.handOverPlan(from, to, which).map((p): HandedOverThread => {
-        const { thread: t, role, kind } = p
-        if (kind === 'left') {
-          // It moves on when the original goes, as `partyGone` says; what waits for the original in it is not to wake a restored one
-          this.records.handleUnread(t.id, from, now)
-          return { ...p, unread: 0 }
-        }
-        if (kind === 'closed') {
-          // A done thread keeps its owner and its history: the successor joins it to read what the original never did
-          this.records.putParticipantIfAbsent(t.id, to, 'member', now)
-          return { ...p, unread: this.records.moveUnreadReceipts(t.id, from, to, now) }
-        }
-        this.records.leaveParticipant(t.id, from, now)
-        // A successor already in the thread as a member takes the original's role; its own read position stays
-        if (role === 'member') this.records.putParticipantIfAbsent(t.id, to, 'member', now)
-        else this.records.putParticipant(t.id, to, role, now)
-        const facts = { change: 'handed_over', party: from, to, role }
-        const after =
-          role === 'member'
-            ? (this.insertEvent(t.id, 'The session in this thread handed over: the session that took over is in it instead.', facts, now), t)
-            : this.moveState(t, role === 'owner' ? { owner: to } : { assignee: to }, now, facts,
-                role === 'owner' ? 'The owner handed over: the session that took over owns the thread.' : 'The assignee handed over: the session that took over has the work.')
-        // Nobody is woken here: inside the children's transaction, before the successor's first message. The successor's next rest
-        // (or the caller's poke) delivers it
-        return { thread: after, role, kind, unread: this.records.moveUnreadReceipts(t.id, from, to, now) }
-      })
-      // An original that goes leaves nothing waiting in a done thread either: what none of it moved (the successor's own words) is handled
-      if (which === 'all') for (const t of this.records.doneThreadsWithUnread(from)) this.records.handleUnread(t.id, from, now)
-      return done
-    })
-  }
-
-  /**
-   * What `handOver` would do with the original's mail, read only: the archive preview of an original with an heir says it thread by
-   * thread (#1574), from the same plan the move follows
-   */
-  handOverPreview(fromSessionId: string, toSessionId: string, which: HandOverScope = 'all'): HandOverPreview {
-    const preview: HandOverPreview = { moved: [], closed: [], left: [] }
-    if (fromSessionId === toSessionId || !this.records.hasThreads()) return preview
-    for (const p of this.handOverPlan(this.sessionAddress(fromSessionId), this.sessionAddress(toSessionId), which)) preview[p.kind].push({ subject: p.thread.subject, role: p.role })
-    return preview
-  }
-
-  /**
-   * The threads a handoff looks at, and what becomes of each (`HandedOverThread.kind`): those not done the original owns, is assigned or
-   * is in, and the done ones it has unread mail in; with `assignees`, only those it owns whose assignee is one of them. A thread in a
-   * state a newer build wrote is not touched
-   */
-  private handOverPlan(from: string, to: string, which: HandOverScope): Omit<HandedOverThread, 'unread'>[] {
-    const assignees = which === 'all' ? null : new Set(which.assignees.map((id) => this.sessionAddress(id)))
-    const open = ['open', 'running', 'review', 'blocked'] as const
-    const threads = new Map<string, ThreadRow>()
-    for (const t of [
-      ...this.records.threadsOfParty(from, 'owner', open),
-      ...this.records.threadsOfParty(from, 'assignee', open),
-      ...this.records.openThreadsWith(from),
-      ...this.records.doneThreadsWithUnread(from),
-    ]) threads.set(t.id, t)
-    const plan: Omit<HandedOverThread, 'unread'>[] = []
-    for (const t of threads.values()) {
-      if (t.state === 'unknown') continue
-      const role: ParticipantRole = t.owner === from ? 'owner' : t.assignee === from ? 'assignee' : 'member'
-      if (assignees && !(role === 'owner' && t.assignee !== null && assignees.has(t.assignee))) continue
-      // A done thread's unread mail moves only from an original that goes: one that stays still owns it, and reads it there.
-      // Nor is a done thread listed whose unread mail would all stay (the successor's own words, or what it has already)
-      if (t.state === 'done' && (assignees || this.records.movableUnread(t.id, from, to) === 0)) continue
-      const kind = t.state === 'done' ? 'closed' : (role === 'owner' && t.assignee === to) || (role === 'assignee' && t.owner === to) ? 'left' : 'moved'
-      plan.push({ thread: t, role, kind })
-    }
-    return plan
-  }
-
-  /**
-   * A turn of delegated work ended (§6): Centralu's `report` in the thread, for its owner, and the thread's state moves with it: `review`
-   * when the work was reported, `running` when it paused on the session's own background work, and `done` (`dropped`, taken over) when the
-   * person took the session over. A thread that is done, or whose owner is no longer in it, takes no report: the caller says so and the
-   * old way of telling goes on
-   */
-  reportTurn(threadId: string, input: TurnReport): PostResult {
-    return this.run(() => {
-      const now = this.now()
-      const thread = this.mustThread(threadId)
-      this.assertWritable(thread)
-      if (!this.recipients(thread.id, CENTRALU).includes(input.to)) throw refuse('not_participant', `${input.to} is not in thread ${threadId}`)
-      /*
-       * Work handed on keeps the thread running (§6): a turn that ended while threads opened in this work are still going is a pause,
-       * not the work's end. Said once for the same threads: the turns that follow, while they are still going, tell nobody anything new
-       */
-      const waiting = input.then === 'dropped' || thread.state === 'blocked' ? [] : this.records.openChildren(thread.id).map((t) => t.id)
-      const holds = waiting.length > 0 && input.then === 'review' && input.outcome === 'finished'
-      if (waiting.length > 0 && (holds || input.then === 'running')) {
-        // Against Centralu's last report of the thread: its events (a state change, a join) between two pauses do not make the second one news
-        const last = this.records.lastReportBy(thread.id, CENTRALU)
-        if (last && last.facts.outcome === 'paused' && sameStrings(last.facts.waitingOn, waiting)) return { message: last, thread, duplicate: true }
-      }
-      const outcome = holds ? 'paused' : input.outcome
-      const body = this.checkBody(
-        'centralu',
-        holds ? `[Centralu] The assigned work paused: its turn ended while ${waiting.length} thread${waiting.length === 1 ? '' : 's'} it handed on ${waiting.length === 1 ? 'is' : 'are'} still going.\nid: ${sessionIdOf(input.about)}` : input.body,
-        false,
-      )
-      const facts: MailFacts = {
-        outcome,
-        about: { session: input.about },
-        ...(input.error ? { error: input.error } : {}),
-        ...(input.paused ? { paused: input.paused } : {}),
-        ...(waiting.length > 0 && (holds || input.then === 'running') ? { waitingOn: waiting } : {}),
-        ...(input.personNote ? { personNote: true } : {}),
-        ...(input.then === 'dropped' ? { takenOver: true } : {}),
-      }
-      // The session's own words, as its message: only the assignee's, so a reader reads them as the session's and not as Centralu's
-      if (input.answer && input.answer.trim() !== '' && thread.assignee === input.about) {
-        const own = this.insertPost(thread.id, input.about, 'report', this.checkBody('session', input.answer, false), { relayed: true }, {}, now, undefined, [input.to])
-        this.records.markDelivered(input.to, [own.id], [own.id], now)
-        this.records.markHandledIds(input.to, [own.id], now)
-      }
-      /*
-       * A pause wakes its owner once (§6): the first one of a thread, or the first after the owner or the person posted work or a note in
-       * it. The pauses after it are recorded and read at the owner's next turn; the end of the work, a failure and the rest always wake
-       */
-      const pause = outcome === 'paused'
-      const lastWoke = pause ? this.records.lastWakingPause(thread.id) : undefined
-      const quiet = pause && lastWoke !== undefined && !this.records.newWorkSince(thread.id, lastWoke.seq, thread.owner)
-      const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, quiet ? { wake: false } : {}, now, undefined, [input.to])
-      if (input.told) {
-        this.records.markDelivered(input.to, [message.id], [message.id], now)
-        this.records.markReportsHandled(thread.id, input.to, now)
-      }
-      let after = thread
-      const to: ThreadState = input.then === 'dropped' ? 'done' : holds ? 'running' : input.then
-      if (to !== thread.state && thread.state !== 'blocked') {
-        after = this.moveState(
-          thread,
-          { state: to, stateSince: now, ...(to === 'done' ? { outcome: 'dropped' as const, doneAt: now } : {}) },
-          now,
-          { change: 'state', from: thread.state, to, by: CENTRALU, ...(to === 'done' ? { outcome: 'dropped' } : {}) },
-          `State: ${thread.state} to ${to}.`,
-        )
-        if (to === 'done') this.releaseWaiters(thread.id, 'dropped', now)
-      }
-      return { message, thread: after, duplicate: false }
-    })
-  }
-
   /** Whether the thread's assignee is a session: its state follows the turns that session runs (`turnStarted`) */
   private assignedToSession(thread: ThreadRow): boolean {
     return parseAddress(thread.assignee ?? '')?.kind === 'session'
@@ -1241,96 +969,6 @@ id: ${sessionIdOf(assignee)}` : ''
   private handedOnFrom(thread: ThreadRow, recipient: string): boolean {
     const parent = thread.parentId ? this.records.thread(thread.parentId) : undefined
     return !!parent && parent.assignee === recipient && parent.state === 'running'
-  }
-
-  /**
-   * Work an earlier build finished while it served the store and this build was not the host (§4.2), or that a quit cut: it reports the old way and leaves the
-   * threads this build wrote untouched, so one it finished still reads `running`, and its parent would count it as work going for ever. The thread goes to
-   * `review`, as if it had been reported, with an event that says the session owes no report (not whose doing that is). No report is posted: the owner was told
-   */
-  finishedByEarlierBuild(threadId: string): ThreadRow | undefined {
-    const thread = this.records.thread(threadId)
-    if (!thread || (thread.state !== 'open' && thread.state !== 'running')) return undefined
-    return this.run(() => {
-      const now = this.now()
-      return this.moveState(
-        thread,
-        { state: 'review', stateSince: now },
-        now,
-        { change: 'state', from: thread.state, to: 'review', by: CENTRALU, reason: 'no_report_owed' },
-        `State: ${thread.state} to review. The session that did this work owes no report, and nothing is going on in it.`,
-      )
-    })
-  }
-
-  /**
-   * A report mark an older build wrote, adopted as a thread when this build becomes the active host (§4.2): the owner is the marking caller,
-   * the assignee the session that owes the report, and the thread is `running`. A pause on the session's own background work is an event with
-   * the count of its tasks. Idempotent: a pair that already has a thread that is not over is left as it is. The mark stays until this build
-   * reports, as today, so a rollback finds nothing owed twice and nothing lost
-   */
-  adoptMark(owner: string, assignee: string, input: { origin: ThreadOrigin; projectId?: string | null; depth?: number; paused?: number }): ThreadRow | undefined {
-    const last = this.records.latestBetween(owner, assignee)
-    if (last && last.state !== 'done') return undefined
-    const { thread } = this.recordDelegation(owner, {
-      assignee,
-      task: ADOPTED_TASK,
-      origin: input.origin,
-      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-      ...(input.depth !== undefined ? { depth: input.depth } : {}),
-    })
-    return this.run(() => {
-      const now = this.now()
-      this.insertEvent(thread.id, 'Adopted from the report mark an earlier build wrote.', { change: 'adopted', by: CENTRALU, ...(input.paused ? { paused: input.paused } : {}) }, now)
-      return thread
-    })
-  }
-
-  /** How many threads opened in the work `assignee` does for `owner` are still going (§6): the work it handed on and waits for */
-  waitingOn(owner: string, assignee: string): number {
-    const thread = this.records.latestBetween(owner, assignee)
-    return thread && thread.state !== 'done' ? this.records.openChildren(thread.id).length : 0
-  }
-
-  /** The old way of telling delivered a report the mailbox holds for `to`: delivered, read and handled, so nothing wakes the owner for it (§8.1) */
-  reportTold(threadId: string, to: string, messageId: string): void {
-    this.run(() => {
-      const now = this.now()
-      this.records.markDelivered(to, [messageId], [messageId], now)
-      this.records.markReportsHandled(threadId, to, now)
-    })
-    this.announce(threadId)
-  }
-
-  /**
-   * Whether the person has work with this session that its turns are reported on: a thread of theirs that is `running` (§8.1). A script or the RPC
-   * started the session with a first message; the first turn that is the work's closes it into `review`, and the turns after it are the person's own
-   */
-  personOwes(assignee: string): boolean {
-    const thread = this.records.latestBetween(PERSON, assignee)
-    return thread !== undefined && thread.state === 'running'
-  }
-
-  /**
-   * A call returned the answer a report told of (§8.1): the caller read it, so the reports of this thread waiting for `owner` are read and
-   * handled, and no wake follows for news the call already gave. The threads of the pair that a delegation tool opened; other mail is left
-   */
-  reportsAnswered(owner: string, assignee: string): void {
-    const thread = this.records.latestBetween(owner, assignee)
-    if (!thread) return
-    const n = this.run(() => this.records.markReportsHandled(thread.id, owner, this.now()))
-    if (n > 0) this.announce(thread.id)
-  }
-
-  /**
-   * The owner finishes with work a delegation tool gave: it deletes the session that did it (`agent_session delete`), once it has the
-   * work's report. A thread in `review` is closed `done` (`finished`): the work is over, and the child's going is no event of it. Work
-   * still going is left to `partyGone` when the session goes
-   */
-  ownerFinished(owner: string, assignee: string): void {
-    const thread = this.records.latestBetween(owner, assignee)
-    if (!thread || thread.state !== 'review') return
-    this.update(thread.id, owner, { state: 'done', outcome: 'finished' })
   }
 
   // ── The wake ──
@@ -1450,74 +1088,6 @@ id: ${sessionIdOf(assignee)}` : ''
     }
     const frame = buildMailFrame(items, undefined, this.policy.calls?.(recipient))
     return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack, threads: [...threads], workThread: turnStarts ? workThread : null }
-  }
-
-  /**
-   * What a host that died left half done (§7.6.5): a delivery whose attempt was written and whose acceptance was not. The next
-   * host does not send it again on its own, because it cannot tell whether the tool took it, and an `assign` taken just before
-   * the host died would start the same work twice. So it is held `uncertain`, said in the thread (an `event` the sender reads)
-   * and, by the delivery, in the receiver's conversation, for the person to resend or dismiss. The exceptions go again by
-   * themselves, and their next frame says it may be a repeat: news that starts no work (a notice) and Centralu's own words,
-   * which only restate what the host knows
-   */
-  reconcileInterrupted(): { recipient: string; resent: number; held: number }[] {
-    const left = this.records.attemptedUnconfirmed()
-    if (left.length === 0) return []
-    const out = this.run(() => {
-      const now = this.now()
-      const byRecipient = new Map<string, MessageRow[]>()
-      for (const r of left) {
-        const m = this.records.message(r.messageId)
-        if (m) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), m])
-      }
-      const result: { recipient: string; resent: number; held: number }[] = []
-      for (const [recipient, messages] of byRecipient) {
-        result.push({ recipient, ...this.settleUncertain(recipient, messages, 'restart', now) })
-      }
-      return result
-    })
-    // What is held `uncertain` waits for the person's Resend or Dismiss: the Inbox is told
-    this.announceMessages(left.map((r) => r.messageId))
-    return out
-  }
-
-  /**
-   * A wake the tool failed after the wait for it ran out (§7.6.5, the same uncertainty as a restart's): the tool had been counted as
-   * having taken it, and a failure told this late (a session stopped or closed, a turn that took the input among others ended in an
-   * error) does not prove it never ran it. The receipts that wake delivered (matched by `deliveredAt`) are unread and undelivered
-   * again, in the same transaction, and treated as a restart's: held `uncertain` and said in the thread, or, for news that starts no
-   * work, sent again with the note that it may be a repeat. Mail handled, held or delivered again since is left alone
-   */
-  deliveryFailedLate(recipient: string, messageIds: readonly string[], deliveredAt: number): { resent: number; held: number } {
-    const out = this.run(() => {
-      const ids = this.records.undeliver(recipient, messageIds, deliveredAt)
-      const messages = ids.flatMap((id) => this.records.message(id) ?? [])
-      return this.settleUncertain(recipient, messages, 'late', this.now())
-    })
-    this.announceMessages(messageIds)
-    return out
-  }
-
-  /** Mail whose delivery may or may not have gone: news and Centralu's own words go again, the rest is held for the person */
-  private settleUncertain(recipient: string, messages: readonly MessageRow[], cause: 'restart' | 'late', now: number): { resent: number; held: number } {
-    const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
-    const unsure = messages.filter((m) => !again.includes(m))
-    if (again.length > 0) {
-      this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
-      this.changed(again[0]?.threadId ?? '', [recipient])
-    }
-    if (unsure.length > 0) {
-      this.records.markUncertain(recipient, unsure.map((m) => m.id))
-      const said =
-        cause === 'restart'
-          ? 'A delivery may not have arrived when Centralu restarted. It was not sent again.'
-          : 'A delivery may have reached the session although its tool then reported a failure. It was not sent again.'
-      for (const threadId of new Set(unsure.map((m) => m.threadId))) {
-        const n = unsure.filter((m) => m.threadId === threadId).length
-        this.insertEvent(threadId, said, { change: 'delivery_uncertain', cause, recipient, messages: n }, now)
-      }
-    }
-    return { resent: again.length, held: unsure.length }
   }
 
   /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */
@@ -1641,83 +1211,6 @@ id: ${sessionIdOf(assignee)}` : ''
       facts,
       dedupeKey: null,
       createdAt: now,
-    })
-  }
-
-  /**
-   * A session gave another one a task by a tool whose delivery the host already made (§8.1, §4.2): the host writes it down, in step
-   * with the old path, which stays the way the task reaches the child. So the `assign` is recorded delivered and read for the
-   * child: nothing wakes it. The thread is the caller's own (it is the owner, the child the assignee) and `running`. A caller's
-   * later instruction to the same child goes into the thread they already have as a `note`; into one that is `done` it opens a new
-   * thread that follows it. No relation or rate check is made, because the delegation's own checks (consent, trust, ceilings) came
-   * first, and this is the host's act, not an agent's post: an agent reaches the mailbox only through `open` and `post`
-   */
-  recordDelegation(caller: string, input: DelegationInput): DelegationResult {
-    const owner = this.party(caller)
-    const assignee = this.party(input.assignee)
-    // Between two sessions of this host, or the person and a session (a script or the RPC started it with a first message: the person owns the work)
-    if ((owner.kind !== 'session' && owner.kind !== 'person') || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host, or from the person to one')
-    if (caller === input.assignee) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
-    if (!THREAD_ORIGINS.includes(input.origin)) throw refuse('bad_value', `unknown origin ${String(input.origin)}`)
-    const body = cutTask(input.task, bodyLimit('session'))
-    if (body === '') throw refuse('empty', 'a task says something')
-    return this.run(() => {
-      const now = this.now()
-      const last = this.records.latestBetween(caller, input.assignee)
-      let thread: ThreadRow
-      let message: MessageRow
-      if (last && last.state !== 'done') {
-        thread = last
-        message = this.insertPost(thread.id, caller, 'note', body, {}, {}, now, undefined, [input.assignee])
-        // The child has it in hand again: the move the old path would have made when its turn started
-        const restarts = thread.state === 'open' || thread.state === 'review'
-        if (restarts) {
-          thread = this.records.updateThread(thread.id, { state: 'running', stateSince: now }, now, true)
-          this.insertEvent(thread.id, `State: ${last.state} to running.`, { change: 'state', from: last.state, to: 'running', by: CENTRALU }, now)
-        }
-        /*
-         * Whose work it is now (§6): sent more from inside a turn of work the caller is doing, the helper is working for that work, and the
-         * work waits for it; sent more from a turn that belongs to no thread, it is not working for the work it once was
-         */
-        const parent = input.parentId ? this.records.thread(input.parentId) : undefined
-        const within = parent && parent.assignee === caller && parent.state !== 'done' ? parent : undefined
-        if (within && (thread.parentId !== within.id || thread.depth <= within.depth)) {
-          thread = this.records.updateThread(thread.id, { parentId: within.id, depth: Math.max(thread.depth, within.depth + 1) }, now, true)
-        } else if (!within && restarts && thread.parentId !== null) {
-          thread = this.records.updateThread(thread.id, { parentId: null }, now, true)
-        }
-      } else {
-        const subject = oneLineText(body.split(/\r\n|[\n\r\u0085\u2028\u2029]/)[0] ?? '', SUBJECT_MAX) || 'A task'
-        const id = threadIdOf(this.host, this.ulids.next(now))
-        const parent = input.parentId ? this.records.thread(input.parentId) : undefined
-        const within = parent && parent.assignee === caller && parent.state !== 'done' ? parent : undefined
-        this.records.insertThread(
-          {
-            id,
-            home: this.host,
-            projectId: input.projectId ?? null,
-            subject,
-            origin: input.origin,
-            // One level below the work it was handed on from, at least; never above the depth the host knows the child to be at
-            depth: Math.max(nonNegativeInt(input.depth ?? 0, 'depth'), within ? within.depth + 1 : 0),
-            parentId: within?.id ?? null,
-            follows: last ? [last.id] : [],
-            state: 'running',
-            owner: caller,
-            assignee: input.assignee,
-            next: null,
-            links: {},
-          },
-          now,
-        )
-        this.records.putParticipant(id, caller, 'owner', now)
-        this.records.putParticipant(id, input.assignee, 'assignee', now)
-        message = this.insertPost(id, caller, 'assign', body, input.fromScript ? { fromScript: { credential: scriptLabel(input.fromScript.credential) } } : {}, {}, now, undefined, [input.assignee])
-        thread = this.mustThread(id)
-      }
-      // The old path delivered it already: delivered, and read with it
-      this.records.markDelivered(input.assignee, [message.id], [message.id], now)
-      return { thread, message, continued: last !== undefined && last.state !== 'done' }
     })
   }
 
@@ -1853,20 +1346,6 @@ id: ${sessionIdOf(assignee)}` : ''
     if (words >= ASKS_PER_HOUR) {
       throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} words an hour to the orchestrator from the sessions of one project or one root session, a follow-up in an answered request included: wait, or ask the person`)
     }
-  }
-
-  /**
-   * The session whose request a thread is, or none (§9.7). The thread's first word says it, not its owner now: a session that is gone leaves the
-   * thread to the person (`partyGone`), and the words in it are still the session's. A thread nobody asked in, or one the orchestrator is not
-   * the assignee of, is nobody's request
-   */
-  requestedBy(thread: Pick<ThreadRow, 'id' | 'owner' | 'assignee'>): string | undefined {
-    if (thread.assignee === null || this.policy.isOrchestrator?.(thread.assignee) !== true) return undefined
-    const owner = parseAddress(thread.owner)
-    if (owner?.kind === 'session') return owner.sessionId
-    const first = this.records.messagesAfter(thread.id, 0, 1)[0]
-    const from = first ? parseAddress(first.sender) : undefined
-    return first && from?.kind === 'session' && first.sender !== thread.assignee ? from.sessionId : undefined
   }
 
   /** Whether a thread is a session's request to the orchestrator (§9.7): a session owns it and the orchestrator is its assignee */

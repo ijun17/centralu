@@ -72,7 +72,7 @@ const ANSWER_KEPT = 600
 export function answerRecorder(
   mail: MessageService,
   records: MailboxRecords,
-  turns?: Pick<MailTurns, 'startedAtOf'>,
+  turns?: Pick<MailTurns, 'latest'>,
   /** The work the child handed on in this work that is still owed (§9.4): an answer given while it is, is `waiting`, and the task stays open */
   waitingOn: (ownerId: string, childId: string) => number = () => 0,
 ): (callerId: string, childId: string, how?: AnswerGiven) => void {
@@ -87,7 +87,7 @@ export function answerRecorder(
     if (!how || !task) return
     const read = `read_session(sessionId="${childId}")`
     const waiting = how.ok ? waitingOn(callerId, childId) : 0
-    const startedAt = turns?.startedAtOf(childId)
+    const startedAt = turns?.latest(childId)?.startedAt
     const written = mail.report(task.id, {
       ...(startedAt !== undefined ? { startedAt } : {}),
       ...(waiting > 0 ? { outcome: 'waiting' as const, waitingOn: waiting } : { outcome: how.ok ? ('finished' as const) : ('failed' as const) }),
@@ -205,9 +205,9 @@ function askedReportBody(draft: Pick<ReportDraft, 'outcome'>): string {
  * Which message a turn's end reports (§9.2): the turn's work message when it is the owner's task to the child or the owner's request to the
  * orchestrator; else the newest unsettled task from the owner to the child. None: the old path tells
  */
-function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'messageOf'>, owner: string, child: string, childId: string): { work: MailRow; request: boolean } | undefined {
-  const turnWork = turns.messageOf(childId)
-  const work = turnWork === null ? undefined : records.message(turnWork)
+function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'latest'>, owner: string, child: string, childId: string): { work: MailRow; request: boolean } | undefined {
+  const turnWork = turns.latest(childId)?.messageId
+  const work = turnWork == null ? undefined : records.message(turnWork)
   if (work && work.sender === owner && records.recipient(work.id, child)) {
     if (work.kind === 'task') return { work, request: false }
     if (work.kind === 'message') return { work, request: true }
@@ -224,7 +224,7 @@ function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'messageOf
 export function reportRecorder(
   mail: MessageService,
   records: MailboxRecords,
-  turns: Pick<MailTurns, 'messageOf' | 'seqOf' | 'startedAtOf'>,
+  turns: Pick<MailTurns, 'latest'>,
   /** The work the child handed on in this work that is still owed (§9.4): a turn that ends while it is, is `waiting` */
   waitingOn: (ownerId: string, childId: string) => number = () => 0,
 ): (ownerId: string, childId: string, draft: ReportDraft) => ReportedAs {
@@ -242,7 +242,7 @@ export function reportRecorder(
     try {
       // A request's report carries none of the orchestrator's other words (S12)
       const { answer: _answer, ...unanswered } = draft
-      const startedAt = turns.startedAtOf(childId)
+      const startedAt = turns.latest(childId)?.startedAt
       const report = request ? { ...turnReport(unanswered, 0), body: askedReportBody(draft) } : turnReport(draft, waitingOn(ownerId, childId))
       written = mail.report(work.id, startedAt === undefined ? report : { ...report, startedAt })
     } catch (e) {
@@ -250,7 +250,7 @@ export function reportRecorder(
       throw e
     }
     // The request turn's end settles every request of that asker it carried (§7.6)
-    const seq = turns.seqOf(childId)
+    const seq = turns.latest(childId)?.seq
     if (request && seq !== undefined && draft.then !== 'running') mail.requestTurnEnded(child, owner, seq)
     if ('settledAlready' in written || written.duplicate) return 'closed'
     if (draft.delivery === 'wake') return 'mailed'

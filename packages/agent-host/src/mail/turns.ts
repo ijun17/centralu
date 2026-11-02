@@ -42,15 +42,18 @@ export type TurnStartedBy = 'mail' | 'person' | 'caller' | 'cli' | 'report' | 'a
 /** A session's turn now (§8.2 step 6), read from its row so a restart or an update's continue keeps it; `asker` is an address */
 export type TurnNow = { turnSeq: number; by: TurnStartedBy; starter: string | null; messageId: string | null; asker: string | null; startedAt: number }
 
-/** What is known of a turn while it runs. The guards count only the turns mail started */
-type Open = {
+type LastTurn = {
   seq: number
   startedAt: number
+  /** The turn's work message (a task, or the orchestrator's request) */
+  messageId: string | null
+}
+
+/** What is known of a turn while it runs. The guards count only the turns mail started */
+type Open = LastTurn & {
   acted: boolean
   tokens: number
   by: TurnStartedBy
-  /** The turn's work message (a task, or the orchestrator's request) */
-  messageId: string | null
   /** The message that started it: what its sends are caused by */
   starter: string | null
   /** The caller whose work the turn is, when it is */
@@ -79,7 +82,7 @@ export class MailTurns {
   private readonly tokens = new Map<string, { at: number; tokens: number }[]>()
   private readonly empty = new Map<string, number>()
   /** The work message and number of each session's last turn that ended; replaced when the next turn begins */
-  private readonly lastEnded = new Map<string, { messageId: string | null; seq: number; startedAt: number }>()
+  private readonly lastEnded = new Map<string, LastTurn>()
   /** Since when a pair's turns are counted anew: the person pressed Resume */
   private readonly pairFrom = new Map<string, number>()
 
@@ -152,28 +155,12 @@ export class MailTurns {
     return t && { turnSeq: t.seq, by: t.by, starter: t.starter, messageId: t.messageId, asker: t.asker ?? null, startedAt: t.startedAt }
   }
 
-  /** The number of the turn going in the session (it grows with every turn); none when no turn is recorded */
-  numberOf(sessionId: string): number | undefined {
-    return this.open.get(sessionId)?.seq
-  }
-
   /**
-   * The work message of the session's turn that is going, or else of the one that ended last: the end of a turn is reported once it ends, and the
-   * report belongs to that turn's work whichever of the two the report is made in (§9.2)
+   * The session's turn that is going, or else the one that ended last: the end of a turn is reported once it ends, and the report belongs to that
+   * turn's work (§9.2), covers what it did since it began (§9.3), and settles the requests it carried (§7.6) whichever of the two it is made in
    */
-  messageOf(sessionId: string): string | null {
-    const turn = this.open.get(sessionId)
-    return turn ? turn.messageId : (this.lastEnded.get(sessionId)?.messageId ?? null)
-  }
-
-  /** The number of the session's turn that is going, or else of the one that ended last (a request turn's end settles what it carried, §7.6) */
-  seqOf(sessionId: string): number | undefined {
-    return this.open.get(sessionId)?.seq ?? this.lastEnded.get(sessionId)?.seq
-  }
-
-  /** When the session's turn that is going began, or else the one that ended last: what a report made at a turn's end covers (§9.3) */
-  startedAtOf(sessionId: string): number | undefined {
-    return this.open.get(sessionId)?.startedAt ?? this.lastEnded.get(sessionId)?.startedAt
+  latest(sessionId: string): Readonly<LastTurn> | undefined {
+    return this.open.get(sessionId) ?? this.lastEnded.get(sessionId)
   }
 
   /** The delivery that was to start the turn `seq` failed: no turn. A failure told late finds the session's turn may be another one by then, which is left alone */
@@ -199,7 +186,7 @@ export class MailTurns {
     const turn = this.open.get(sessionId)
     if (!turn) return
     this.open.delete(sessionId)
-    this.lastEnded.set(sessionId, { messageId: turn.messageId, seq: turn.seq, startedAt: turn.startedAt })
+    this.lastEnded.set(sessionId, turn)
     const now = this.now()
     this.records.endTurn(sessionId, turn.seq, now, outcome)
     // The budget is mail's: a turn the person or a caller started is theirs to spend

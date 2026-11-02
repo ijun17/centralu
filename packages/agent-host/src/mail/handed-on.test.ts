@@ -25,7 +25,7 @@ function setup(owed: Set<string>) {
   box.turns = new MailTurns(w.store.mailbox, { now: () => w.clock.t })
   const t = box.turns
   const oldOwes = (sender: string, recipient: string) => owed.has(`${sender}>${recipient}`)
-  const waitingOn = (ownerId: string, childId: string) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId), t.messageOf(childId), oldOwes)
+  const waitingOn = (ownerId: string, childId: string) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId), t.latest(childId)?.messageId ?? null, oldOwes)
   const report = reportRecorder(mail, w.store.mailbox, t, waitingOn)
   return { ...w, mail, turns: t, report, waitingOn }
 }

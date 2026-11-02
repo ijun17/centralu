@@ -1,4 +1,4 @@
-import { errorMessage, oneLineText, type SessionInfo } from '@cc/protocol'
+import { errorMessage, type SessionInfo } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import type { MailHooks, SessionManager } from '../sessions/manager.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
@@ -9,7 +9,7 @@ import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './del
 import { mailCalls } from './frame.js'
 import { MessageService } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
-import { REFUSAL_TEXT } from './rules.js'
+import { REFUSAL_TEXT, firstLineOf } from './rules.js'
 import { MailTool } from './tool.js'
 import { MailTurns } from './turns.js'
 
@@ -22,7 +22,7 @@ export type HostMailSessions = {
   listSessions(): SessionInfo[]
   /** Whether the session's seat has the `mail` tool (`reader` or `orchestrator`) */
   canReadMail(id: string): boolean
-  orchestratorId(): string | undefined
+  orchestratorId(): string | null
   /** Why sessions may not ask the orchestrator now, or null when they may (§7.6) */
   orchestratorAsks(): string | null
   /** Whether the session reaches `mail` as a command behind `centralu_run` (the orchestrator) */
@@ -83,7 +83,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const s = sessions.sessionInfo(id)
       return s && { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
     },
-    orchestratorId: () => sessions.orchestratorId() ?? null,
+    orchestratorId: () => sessions.orchestratorId(),
     orchestratorAsks: () => sessions.orchestratorAsks() === null,
     // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session
     appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
@@ -140,7 +140,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const s = sessions.sessionInfo(id)
       return s && { address: addressOf(id), askedBy: s.askedBy ?? null }
     },
-    orchestratorId: () => sessions.orchestratorId() ?? null,
+    orchestratorId: () => sessions.orchestratorId(),
     mailArgs: () => 1,
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
@@ -151,12 +151,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     const child = parseAddress(recipient)
     return owner?.kind === 'session' && child?.kind === 'session' && sessions.oldOwes(owner.sessionId, child.sessionId)
   }
-  const waitingOn = (ownerId: string, childId: string): number => service.waitingOn(addressOf(ownerId), addressOf(childId), mailTurns.messageOf(childId), owedOld)
+  const waitingOn = (ownerId: string, childId: string): number => service.waitingOn(addressOf(ownerId), addressOf(childId), mailTurns.latest(childId)?.messageId ?? null, owedOld)
 
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, mailTurns, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
-    handOver: (from, to, which) => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { recipients: which.senders.map(addressOf) }),
+    handOver: (from, to, which) => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }),
     handOverPreview: (from, to) => service.handOverPreview(addressOf(from), addressOf(to)),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
@@ -167,7 +167,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     waitingOn,
     answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
-    personWork: { started: personWorkRecorder(service), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.messageOf(id), owedOld)) },
+    personWork: { started: personWorkRecorder(service), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
     // A turn's end is a report on the task, and the owner is told as mail when it can read it (§9.3)
     report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
@@ -225,14 +225,13 @@ function askGroupMembers(sessions: HostMailSessions, hostId: string, address: st
 
 /** What the archive card says a session holds (#1512): first lines of what waits for its answer, and of the tasks it owes a report of */
 function openWork(service: MessageService, store: Store, address: string): { unanswered: string[]; owed: string[] } {
-  const first = (body: string) => oneLineText(body.split(/\r\n|[\n\r]/)[0] ?? '', 160)
   const unanswered: string[] = []
   const owed: string[] = []
   for (const row of service.watchedTo(address)) {
     const m = store.mailbox.message(row.messageId)
     if (!m) continue
-    if (m.kind === 'task') owed.push(first(m.body))
-    else if (m.needsReply && row.answerId === null) unanswered.push(first(m.body))
+    if (m.kind === 'task') owed.push(firstLineOf(m.body, 160))
+    else if (m.needsReply && row.answerId === null) unanswered.push(firstLineOf(m.body, 160))
   }
   return { unanswered, owed }
 }
@@ -247,6 +246,6 @@ function refusesDelegation(
 ): string | null {
   const projectId = reach.refusesDelegation(callerId, target)
   if (projectId === null) return null
-  service.refused(callerId, { tool: call.tool, target: call.target, firstLine: call.text.split(/\r\n|[\n\r]/)[0] ?? '', projectId })
+  service.refused(callerId, { tool: call.tool, target: call.target, firstLine: firstLineOf(call.text), projectId })
   return `Refused (untrusted_project): ${REFUSAL_TEXT.untrusted_project(reach.projectLabel(projectId), call.target)}`
 }

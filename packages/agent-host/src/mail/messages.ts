@@ -35,6 +35,7 @@ import {
   cutTask,
   depthOf,
   dueAt,
+  firstLineOf,
   flowsDownTo,
   pickWork,
   postsPerMinute,
@@ -760,7 +761,7 @@ export class MessageService {
   handOverPreview(from: string, to: string, scope: HandOverScope = 'all'): HandedOverMessage[] {
     return this.records.movable(from, to, scope).flatMap((id) => {
       const m = this.records.message(id)
-      return m ? [{ messageId: id, firstLine: oneLineText(m.body.split(/\r\n|[\n\r]/)[0] ?? '', 160), kind: m.kind, unread: this.records.recipient(id, from)?.readAt === null }] : []
+      return m ? [{ messageId: id, firstLine: firstLineOf(m.body, 160), kind: m.kind, unread: this.records.recipient(id, from)?.readAt === null }] : []
     })
   }
 

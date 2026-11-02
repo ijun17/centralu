@@ -346,85 +346,9 @@ export class MailRecords {
       })
   }
 
-  /** The parties that own or are assigned a thread that is not done: whom the sweep asks whether they are still here */
-  partiesOfOpenThreads(): string[] {
-    return this.db
-      .prepare<[], { address: string }>(
-        `SELECT owner AS address FROM mail_threads WHERE state != 'done'
-         UNION SELECT assignee FROM mail_threads WHERE state != 'done' AND assignee IS NOT NULL`,
-      )
-      .all()
-      .map((r) => r.address)
-  }
-
-  /** Whether there is a thread at all: a host that never made mail has nothing to move when a session goes */
-  hasThreads(): boolean {
-    return !!this.db.prepare<[], { one: number }>(`SELECT 1 AS one FROM mail_threads LIMIT 1`).get()
-  }
-
   thread(id: string): ThreadRow | undefined {
     const row = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE id = ?`).get(id)
     return row && toThread(row)
-  }
-
-  /**
-   * The newest delegation thread `owner` gave `assignee`, whatever its state: where the next instruction of a delegation goes (§8.1).
-   * Only a thread a delegation tool opened: a task one of them gave through `mail` is another task, with its own assign still to arrive
-   */
-  latestBetween(owner: string, assignee: string, origins: readonly ThreadOrigin[] = DELEGATION_ORIGINS): ThreadRow | undefined {
-    const row = this.db
-      .prepare<[string, string], ThreadSql>(
-        `SELECT * FROM mail_threads WHERE owner = ? AND assignee = ? AND origin IN (${origins.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
-      )
-      .get(owner, assignee)
-    return row && toThread(row)
-  }
-
-  /**
-   * The delegation threads going with someone on them (`open` or `running`) in the origins whose work is tracked by a report mark while it is owed:
-   * what a start-up looks at to find work an earlier build finished (`reconcileFinished`). Threads made with `mail` carry no mark, and are not here
-   */
-  goingMarked(): ThreadRow[] {
-    const rows = this.db
-      .prepare<[], ThreadSql>(
-        `SELECT * FROM mail_threads WHERE origin IN ('start_agent', 'send_to_session', 'ask_project') AND assignee IS NOT NULL AND state IN ('open', 'running') ORDER BY created_at, id`,
-      )
-      .all()
-    return rows.map(toThread)
-  }
-
-  /**
-   * How many threads opened in the work that session `assigneeId` does for session `ownerId` are going (§6), from the two sessions' ids alone. For
-   * the host's start, which knows no address yet: an address ends in `/<session id>`
-   */
-  waitingOnSessions(ownerId: string, assigneeId: string): number {
-    const row = this.db
-      .prepare<[string, string], ThreadSql>(
-        `SELECT * FROM mail_threads WHERE owner LIKE ? AND assignee LIKE ? AND origin IN (${DELEGATION_ORIGINS.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
-      )
-      .get(`session:%/${ownerId}`, `session:%/${assigneeId}`)
-    return row && row.state !== 'done' ? this.openChildren(row.id).length : 0
-  }
-
-  /**
-   * The threads opened in the work of `parentId` that are going (`open`, `running`, `blocked`, with someone on them): the work it handed on and
-   * waits for (§6). A thread with nobody on it (its helper was archived or deleted) is not work going: no one is doing it, and the parent would wait for ever.
-   * So is one in `review` that its owner or the person sent more into, which its assignee has not yet taken: it runs when the turn that mail starts
-   * begins (`MailService.turnStarted`, 3.10), and until then the work is still going
-   */
-  openChildren(parentId: string): ThreadRow[] {
-    const rows = this.db
-      .prepare<[string], ThreadSql>(
-        `SELECT t.* FROM mail_threads t WHERE t.parent_id = ? AND t.assignee IS NOT NULL AND (
-            t.state IN ('open', 'running', 'blocked')
-            OR (t.state = 'review' AND EXISTS (
-              SELECT 1 FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-               WHERE m.thread_id = t.id AND r.recipient = t.assignee AND r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released')
-                 AND m.kind IN ('note', 'question', 'answer', 'assign') AND (m.sender = t.owner OR m.sender = 'person')))
-          ) ORDER BY t.created_at, t.id`,
-      )
-      .all(parentId)
-    return rows.map(toThread)
   }
 
   /** Threads a party owns or is assigned, optionally in some states: what the party's departure moves (§3.3) */
@@ -432,79 +356,6 @@ export class MailRecords {
     const column = role === 'owner' ? 'owner' : 'assignee'
     const rows = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE ${column} = ? ORDER BY created_at, id`).all(address)
     return rows.map(toThread).filter((t) => !states || states.includes(t.state))
-  }
-
-  /** The threads that are not done in which a party is still a participant, whatever its role: what a handoff moves of it (§4.1) */
-  openThreadsWith(address: string): ThreadRow[] {
-    const rows = this.db
-      .prepare<[string], ThreadSql>(
-        `SELECT t.* FROM mail_threads t JOIN mail_participants p ON p.thread_id = t.id AND p.address = ? AND p.left_at IS NULL
-          WHERE t.state <> 'done' ORDER BY t.created_at, t.id`,
-      )
-      .all(address)
-    return rows.map(toThread)
-  }
-
-  /** The done threads in which `address` has mail it has neither read nor handled: what a handoff's move of its receipts looks at too (§4.1) */
-  doneThreadsWithUnread(address: string): ThreadRow[] {
-    const rows = this.db
-      .prepare<[string], ThreadSql>(
-        `SELECT t.* FROM mail_threads t WHERE t.state = 'done' AND EXISTS (
-            SELECT 1 FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-             WHERE m.thread_id = t.id AND r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL)
-          ORDER BY t.created_at, t.id`,
-      )
-      .all(address)
-    return rows.map(toThread)
-  }
-
-  /**
-   * A handoff's move of what `from` has not read in a thread to `to` (§4.1): each receipt neither read nor handled is `to`'s, and
-   * waits to be delivered to it, delivered to `from` or not (what went into the original's conversation never reached its
-   * successor). A hold about the original itself (its delivery `uncertain` or `failed`, its `loop`, `budget` or `policy`, each
-   * judged for the original's wakes) is let go, for the delivery to judge again for the successor; one the person settled
-   * (`released`, `dismissed`) stays. Not moved, and handled for `from` instead: a receipt for a message `to` sent itself (nobody
-   * is sent their own words), and one for a message `to` already has a receipt for (it keeps its own). So nothing of the
-   * original's stays waiting (`handleUnread`), and a restored original is not woken for mail of a thread it has left. Returns how many moved
-   */
-  moveUnreadReceipts(threadId: string, from: string, to: string, now: number): number {
-    const moved = this.db
-      .prepare(
-        `UPDATE OR IGNORE mail_receipts
-            SET recipient = @to, delivered_at = NULL, attempt_at = NULL, attempts = 0, last_error = NULL,
-                held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
-          WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
-            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId AND sender <> @to)`,
-      )
-      .run({ threadId, from, to }).changes
-    this.handleUnread(threadId, from, now)
-    return moved
-  }
-
-  /** How many of `from`'s unread receipts in the thread `moveUnreadReceipts` would give `to`: not those of `to`'s own messages, nor those it has already */
-  movableUnread(threadId: string, from: string, to: string): number {
-    const row = this.db
-      .prepare<{ threadId: string; from: string; to: string }, { n: number }>(
-        `SELECT COUNT(*) AS n FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-          WHERE r.recipient = @from AND r.read_at IS NULL AND r.handled_at IS NULL AND m.thread_id = @threadId AND m.sender <> @to
-            AND NOT EXISTS (SELECT 1 FROM mail_receipts o WHERE o.message_id = r.message_id AND o.recipient = @to)`,
-      )
-      .get({ threadId, from, to })
-    return row?.n ?? 0
-  }
-
-  /**
-   * `from`'s receipts in a thread that are neither read nor handled are handled: a handoff's original left the thread, or is about to
-   * when it goes (§4.1), and nothing of it waits there, so a restored original is not woken for a thread it no longer holds
-   */
-  handleUnread(threadId: string, from: string, now: number): void {
-    this.db
-      .prepare(
-        `UPDATE mail_receipts SET handled_at = @now
-          WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
-            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
-      )
-      .run({ threadId, from, now })
   }
 
   /**
@@ -712,36 +563,6 @@ export class MailRecords {
     return this.latestMessage('thread_id = ? AND sender = ?', threadId, sender)
   }
 
-  /** Centralu's latest report of a pause in the thread that was to wake its owner (§6): the one the next pause is compared with */
-  lastWakingPause(threadId: string): MessageRow | undefined {
-    return this.latestMessage(
-      `thread_id = ? AND sender = 'centralu' AND kind = 'report' AND (wake IS NULL OR wake <> 'no')
-           AND json_valid(facts) AND json_extract(facts, '$.outcome') = 'paused'`,
-      threadId,
-    )
-  }
-
-  /** Whether `owner` or the person has posted work, a note, a question or an answer in the thread after `seq` */
-  newWorkSince(threadId: string, seq: number, owner: string): boolean {
-    return (
-      this.db
-        .prepare<[string, number, string], { one: number }>(
-          `SELECT 1 AS one FROM mail_messages WHERE thread_id = ? AND seq > ? AND kind IN ('assign', 'note', 'question', 'answer') AND (sender = ? OR sender = 'person') LIMIT 1`,
-        )
-        .get(threadId, seq, owner) !== undefined
-    )
-  }
-
-  /** The latest `report` `sender` posted in the thread (not an event or a note) */
-  lastReportBy(threadId: string, sender: string): MessageRow | undefined {
-    return this.latestMessage(`thread_id = ? AND sender = ? AND kind = 'report'`, threadId, sender)
-  }
-
-  /** The latest message `sender` wrote itself: not one Centralu put in the thread in its name (`relayed`: a session's last response a report carries) */
-  lastWordBy(threadId: string, sender: string): MessageRow | undefined {
-    return this.latestMessage(`thread_id = ? AND sender = ? AND COALESCE(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.relayed') END, 0) <> 1`, threadId, sender)
-  }
-
   /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
   lastMessageOf(threadId: string): MessageRow | undefined {
     return this.latestMessage(`thread_id = ? AND kind <> 'event'`, threadId)
@@ -884,30 +705,6 @@ export class MailRecords {
       .map((r) => r.recipient)
   }
 
-  /**
-   * When the first of `recipient`'s waiting mail that is not due yet becomes due, or null for none: when to look at its
-   * mailbox next. Mail already due is not counted: it was looked at, and may be waiting for its receiver, not for the clock
-   */
-  nextDue(recipient: string, after: number): number | null {
-    const row = this.db
-      .prepare<[string, number], { due: number | null }>(
-        `SELECT MIN(due_at) AS due FROM mail_receipts
-          WHERE recipient = ? AND due_at > ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
-      )
-      .get(recipient, after)
-    return row?.due ?? null
-  }
-
-  /** Whether any of `recipient`'s waiting mail is due by `now` */
-  hasDue(recipient: string, now: number): boolean {
-    return !!this.db
-      .prepare<[string, number], { one: number }>(
-        `SELECT 1 AS one FROM mail_receipts
-          WHERE recipient = ? AND due_at <= ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released') LIMIT 1`,
-      )
-      .get(recipient, now)
-  }
-
   /** Written, and committed, before a delivery is tried (§7.6.1): a host that dies after it and before `markDelivered` leaves a delivery that may have gone */
   markAttempt(recipient: string, messageIds: readonly string[], now: number): void {
     this.updateReceipts('attempt_at = ?, attempts = attempts + 1', [now], recipient, messageIds)
@@ -919,76 +716,14 @@ export class MailRecords {
     this.markRead(recipient, readIds, now)
   }
 
-  /** How many times the most-tried of these has been attempted: when to give up and hold for the person */
-  attemptsOf(recipient: string, messageIds: readonly string[]): number {
-    const row = this.db
-      .prepare<[string, string], { n: number | null }>(`SELECT MAX(attempts) AS n FROM mail_receipts WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
-      .get(recipient, JSON.stringify(messageIds))
-    return row?.n ?? 0
-  }
-
-  /**
-   * A delivery the tool failed after all (late, once it was counted as taken): the receipts that delivery marked delivered at
-   * `deliveredAt` are unread and undelivered again, unless handled or held for the person since. Mail delivered again by a later
-   * wake has another time and is left alone. Returns the ids put back
-   */
-  undeliver(recipient: string, messageIds: readonly string[], deliveredAt: number): string[] {
-    const ids = JSON.stringify(messageIds)
-    const where = `recipient = ? AND delivered_at = ? AND handled_at IS NULL AND (held IS NULL OR held = 'released') AND message_id IN (SELECT value FROM json_each(?))`
-    const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_receipts WHERE ${where}`).all(recipient, deliveredAt, ids).map((r) => r.message_id)
-    this.db.prepare(`UPDATE mail_receipts SET delivered_at = NULL, read_at = NULL WHERE ${where}`).run(recipient, deliveredAt, ids)
-    return put
-  }
-
-  /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox. Not "uncertain": nothing went */
-  failAttempt(recipient: string, messageIds: readonly string[], error: string, retryAt: number): void {
-    this.updateReceipts('attempt_at = NULL, last_error = ?, due_at = ?', [error, retryAt], recipient, messageIds)
-  }
-
-  /** A try that was not made after all (the receiver left rest while it was being woken): the attempt is taken back, and it counts for nothing */
-  undoAttempt(recipient: string, messageIds: readonly string[]): void {
-    this.updateReceipts('attempt_at = NULL, attempts = MAX(attempts - 1, 0)', [], recipient, messageIds, 'delivered_at IS NULL')
-  }
-
   /** These messages are read and handled for `recipient`: they were put in a thread for the record, and nothing is to wake it for them */
   markHandledIds(recipient: string, messageIds: readonly string[], now: number): void {
     this.updateReceipts('read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)', [now, now], recipient, messageIds)
   }
 
-  /** The reports of Centralu in a thread that `recipient` has not read or handled are read and handled: a call gave it the answer they tell of. Returns how many */
-  markReportsHandled(threadId: string, recipient: string, now: number): number {
-    return this.db
-      .prepare(
-        `UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)
-          WHERE recipient = ? AND (read_at IS NULL OR handled_at IS NULL)
-            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ? AND kind = 'report' AND sender = 'centralu')`,
-      )
-      .run(now, now, recipient, threadId).changes
-  }
-
   /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
   setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
     this.updateReceipts('held = ?', [held], recipient, messageIds)
-  }
-
-  /** Deliveries that were tried and not known to have gone: what a host that starts finds a previous one left (§7.6.5) */
-  attemptedUnconfirmed(): ReceiptRow[] {
-    return this.db
-      .prepare<[], ReceiptSql>(
-        `SELECT * FROM mail_receipts WHERE attempt_at IS NOT NULL AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
-      )
-      .all()
-      .map(toReceipt)
-  }
-
-  /** A delivery that may have gone and may not: held until the person says (§7.6.5) */
-  markUncertain(recipient: string, messageIds: readonly string[]): void {
-    this.updateReceipts(`held = 'uncertain', attempt_at = NULL`, [], recipient, messageIds)
-  }
-
-  /** A delivery that may have gone, of mail that starts no work: tried again, and its next frame says it may be a repeat (§7.6.5) */
-  markMaybeRepeated(recipient: string, messageIds: readonly string[], dueAt: number): void {
-    this.updateReceipts(`attempt_at = NULL, last_error = 'maybe_repeated', due_at = ?`, [dueAt], recipient, messageIds)
   }
 
   /**
@@ -1056,35 +791,6 @@ export class MailRecords {
       .prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`)
       .all(sessionId)
       .map(toTurn)
-  }
-
-  /** The number the session's next turn is recorded under */
-  nextTurnSeq(sessionId: string): number {
-    const row = this.db.prepare<[string], { n: number }>(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`).get(sessionId)
-    return row?.n ?? 1
-  }
-
-  /** How many turns mail started in the thread since `since` (the loop guard, §7.9) */
-  mailTurnsSince(threadId: string, since: number): number {
-    const row = this.db
-      .prepare<[string, number], { n: number }>(`SELECT COUNT(*) AS n FROM mail_turns WHERE thread_id = ? AND started_by = 'mail' AND started_at >= ? AND COALESCE(outcome, '') <> 'canceled'`)
-      .get(threadId, since)
-    return row?.n ?? 0
-  }
-
-  /** The turns still open: a running host's, or the ones a previous host left */
-  openTurns(): TurnRow[] {
-    return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurn)
-  }
-
-  /** Closes the turns still open, as ones a previous host left (they can never end) */
-  closeOpenTurns(now: number, outcome: string): void {
-    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE ended_at IS NULL`).run(now, outcome)
-  }
-
-  /** The thread a running turn belongs to, found after it began */
-  setTurnThread(sessionId: string, turnSeq: number, threadId: string): void {
-    this.db.prepare(`UPDATE mail_turns SET thread_id = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL AND thread_id IS NULL`).run(threadId, sessionId, turnSeq)
   }
 
   endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {

@@ -1,3 +1,4 @@
+import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
 import type { MessageKind, ThreadState } from '../dev-services/store/mail.js'
@@ -156,25 +157,11 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
 }
 
 /**
- * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, work given or
- * asked in its own threads (an assign, a question, an answer), a report its owner is waiting on, and an app's `needsOwner` post. The rest waits for
- * the session's next turn
+ * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, a task, a report, a
+ * message that needs a reply and an app's post the receiver must see. The rest waits for the session's next turn
  */
-export function needsReceiver(sender: SenderClass, m: { kind: MessageKind; needsOwner: boolean }): boolean {
-  // The person's words are never the kind that can wait out a stop: they decide
-  if (sender === 'person') return true
-  switch (m.kind) {
-    case 'assign':
-    case 'question':
-    case 'answer':
-      return true
-    case 'report':
-      return true
-    case 'notice':
-      return sender === 'app' && m.needsOwner
-    default:
-      return false
-  }
+export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts'>): boolean {
+  return m.sender === PERSON || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
@@ -277,6 +264,11 @@ export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session'
 export function cutTask(text: string, limit: number): string {
   const task = text.trim()
   return task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
+}
+
+/** The first line of a text on one line, cut at `max`: how a message or a call is quoted in a notice, a card or a record */
+export function firstLineOf(text: string, max = Infinity): string {
+  return oneLineText(text.split(/\r\n|[\n\r]/)[0] ?? '', max)
 }
 
 /**

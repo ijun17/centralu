@@ -3,6 +3,7 @@ import { oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { QueuedRequests, QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
+import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 
 /**
@@ -61,7 +62,7 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
     /** Requests of a session that only `auto` let through are dropped when they would go on without it (#606) */
     readonly queue: Pick<QueuedRequests, 'dropOpenedByAuto'>
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
-    mailHandOver: (fromSessionId: string, toSessionId: string, which: 'all' | { senders: readonly string[] }) => HandedOverMessage[]
+    mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverMessage[]
   }
 
 /**

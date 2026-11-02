@@ -517,15 +517,6 @@ describe('receipt updates touch only the rows their condition names', () => {
     return { s, ids, row }
   }
 
-  it('undoing an attempt leaves a receipt that was delivered as it is', () => {
-    const { s, ids, row } = receipts()
-    s.mail.markAttempt('r', ids, NOW)
-    s.mail.markDelivered('r', [ids[0]!], [], NOW)
-    s.mail.undoAttempt('r', ids)
-    expect(row(ids[0]!)).toMatchObject({ attempts: 1, attemptAt: NOW })
-    expect(row(ids[1]!)).toMatchObject({ attempts: 0, attemptAt: null })
-  })
-
   it('releasing held mail changes only held mail, and releasing it twice changes nothing the second time', () => {
     const { s, ids, row } = receipts()
     s.mail.markAttempt('r', ids, NOW)
