@@ -330,6 +330,13 @@ pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5)
 /// `probe_login_shell` with the shell and the bound given, so a test can hand it a shell that hangs
 /// or stops itself.
 pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> {
+    ask_shell(shell, "command -p echo \"__CC_NODE__:$(command -v node)\"", timeout, super::parse_probe_output)
+}
+
+/// Asks an interactive login shell to run `script` and returns the first line of its output that `pick` takes, within
+/// `timeout`. The one way the keeper (and a test that wants the shell's own answer) runs the shell: a test that ran
+/// it by hand, with its stdin and process group, saw it stopped (SIGTTOU) and never return (#1883).
+pub fn ask_shell(shell: &str, script: &str, timeout: std::time::Duration, pick: impl Fn(&str) -> Option<String>) -> Option<String> {
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Stdio;
@@ -340,7 +347,7 @@ pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> 
     }
 
     let mut cmd = Command::new(shell);
-    cmd.args(["-ilc", "command -p echo \"__CC_NODE__:$(command -v node)\""])
+    cmd.args(["-ilc", script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -384,7 +391,7 @@ pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> 
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         match rx.recv_timeout(left) {
             Ok(line) => {
-                found = super::parse_probe_output(&line);
+                found = pick(&line);
                 if found.is_some() {
                     break;
                 }

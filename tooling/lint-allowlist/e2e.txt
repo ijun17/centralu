@@ -26,10 +26,8 @@ e2e/fixtures/grid-span.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/fixtures/linked-host-main.ts @typescript-eslint/no-unnecessary-type-assertion 4
 e2e/fixtures/linked-hosts-ui-scenarios.ts @typescript-eslint/no-base-to-string 2
 e2e/fixtures/linked-hosts-ui-scenarios.ts @typescript-eslint/restrict-template-expressions 4
-e2e/fixtures/linked-hosts.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/fixtures/new-session.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/fixtures/project-screen.ts @typescript-eslint/no-unnecessary-type-assertion 1
-e2e/fixtures/real-host.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/fixtures/sidebar-groups.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/fixtures/sidebar-selection.ts @typescript-eslint/no-unnecessary-type-assertion 3
 e2e/fixtures/virtual-copy.ts @typescript-eslint/no-unnecessary-type-assertion 1

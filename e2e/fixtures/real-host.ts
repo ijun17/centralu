@@ -103,9 +103,10 @@ export async function startHost(ws: Workspace, port: number): Promise<RealHost> 
 export type SpawnedHost = { child: ChildProcess; stderr: () => string; kill(signal?: NodeJS.Signals): Promise<void> }
 
 /**
- * The hosts this worker started that have not exited yet. A worker that ends first (a failed test, a timeout, the run
- * stopped) ends them in `process.on('exit')`: a host left running is orphaned, and one a test stopped with SIGSTOP is
- * left in state T, which ignores SIGTERM until it is resumed (#1890).
+ * The hosts this worker started that have not exited yet. A worker that ends on its own (a failed test, a timeout, a run
+ * that is stopped) ends them in `process.on('exit')`: a host left running is orphaned, and one a test stopped with SIGSTOP is
+ * left in state T, which ignores SIGTERM until it is resumed (#1890). A worker that is killed with SIGKILL (Playwright does
+ * that after a stop that takes 5 minutes, or when the runner itself is killed) runs no code, and leaves its hosts running.
  */
 const running = new Set<ChildProcess>()
 let endsWithWorker = false
@@ -131,13 +132,11 @@ export async function spawnHost(argv: string[], env: Record<string, string>, wha
     process.on('exit', () => running.forEach((c) => resumeAndSignal(c, 'SIGKILL')))
   }
   let stderr = ''
-  child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
+  child.stderr.on('data', (d: Buffer) => (stderr += String(d)))
   await new Promise<void>((resolve, reject) => {
-    const lines = createInterface({ input: child.stdout! })
-    const timer = setTimeout(() => reject(new Error(`${what} did not become ready
-${stderr}`)), 30_000)
-    child.once('exit', (code) => reject(new Error(`${what} exited (${code}) before it was ready
-${stderr}`)))
+    const lines = createInterface({ input: child.stdout })
+    const timer = setTimeout(() => reject(new Error(`${what} did not become ready\n${stderr}`)), 30_000)
+    child.once('exit', (code) => reject(new Error(`${what} exited (${code}) before it was ready\n${stderr}`)))
     lines.on('line', (line) => {
       try {
         if ((JSON.parse(line) as { ready?: boolean }).ready) {
