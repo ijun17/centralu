@@ -756,13 +756,15 @@ export class ClaudeSession implements SessionHandle {
     // identifies exactly which did not run; do not silently discard their already-visible rows.
     const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
     if (Array.isArray(cancelled)) {
+      const ids = cancelled.filter((id): id is string => typeof id === 'string')
       let count = 0
-      for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
+      for (const id of ids) if (this.personInputs.delete(id)) count++
       this.reportUndelivered(count)
       // Quiet mail goes with the rest (measured on 2.1.296): it goes again, quiet, under a new id. It is the mailbox's, delivered already
-      for (const id of cancelled) {
-        const quiet = typeof id === 'string' ? this.quietInputs.get(id) : undefined
-        if (!quiet || !this.quietInputs.delete(id)) continue
+      for (const id of ids) {
+        const quiet = this.quietInputs.get(id)
+        if (!quiet) continue
+        this.quietInputs.delete(id)
         this.deliver(quiet.text, centraluInputId(), false, quiet.origin, true)
       }
     }
