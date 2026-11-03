@@ -715,7 +715,11 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     })
 
     const gotten = () => machine.fromHub.filter((t) => /first note|second note|third note|C-note/.test(t)).map((t) => /first|second|third|C-note/.exec(t)![0])
-    const queueNote = (text: string) => hub.act('send', { text, ifBusy: 'queue' })
+    const queueNote = async (text: string) => {
+      const r = await hub.act('send', { text, ifBusy: 'queue' })
+      expect(r).toMatchObject({ ok: true, state: 'queued' })
+      return r
+    }
 
     it('keeps the order of held notes when a turn opens between the read that found the child at rest and the send', async () => {
       await reportedThenBusy()
