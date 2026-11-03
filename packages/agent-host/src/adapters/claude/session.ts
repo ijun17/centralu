@@ -86,8 +86,11 @@ export class ClaudeSession implements SessionHandle {
   private get closed(): boolean {
     return this.ledger.closed
   }
-  /** The CLI has said something on its stream: it is running, so an exit with nothing in flight is no failure to start (see `inFlight`) */
-  private spoke = false
+  /**
+   * The CLI has said something on its stream: it is running, so an exit with nothing in flight is no failure to start (see
+   * `inFlight`). An adopted one ran under the previous host and says nothing until its next turn (#1397)
+   */
+  private spoke: boolean
   /** The CLI ran a turn on its own (it took a quiet input into one): the result that ends it ends a turn, though it names only quiet inputs */
   private cliTurnRan = false
   /** The live query — the channel for asking about slash commands and context. */
@@ -184,6 +187,7 @@ export class ClaudeSession implements SessionHandle {
     this.schedules = new ClaudeScheduleLook({ sessionId, emit: (e) => this.emit(e), closed: () => this.closed, tasks: this.stream.tasks })
     // An adopted CLI announces its id only with its next turn's init; it is the conversation we resume
     if (opts.processSource?.adopt) this.externalId = opts.resumeExternalId ?? null
+    this.spoke = !!opts.processSource?.adopt
     if (opts.processSource?.adopt && opts.resumeExternalId) void this.schedules.recover(opts.resumeExternalId, opts.cwd)
     // The background work the previous host saw in this process (#648): the CLI will not list it again by itself
     if (opts.processSource?.adopt?.backgroundTasks?.length) this.stream.tasks.seed(opts.processSource.adopt.backgroundTasks)
