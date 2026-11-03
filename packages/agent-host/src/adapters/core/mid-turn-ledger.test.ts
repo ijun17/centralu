@@ -169,6 +169,20 @@ describe('a tool that takes input mid-turn: the queue', () => {
     expect(said.slice(-2)).toEqual(['write:a+/compact', 'turn_complete'])
   })
 
+  it('drops what waited behind a blocking turn on the person’s Stop: said not delivered, and never written after it (#1640)', async () => {
+    const { wire, ledger, events } = await ready()
+    ledger.send('/compact')
+    await tick()
+    ledger.turnStarted('compact-1')
+    ledger.send('a')
+    await tick()
+    ledger.stopByPerson()
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: { message: '1 message(s) were still queued when the turn stopped and were not delivered — please resend' } })
+    ledger.turnEnded('compact-1', { how: 'interrupted' })
+    await tick()
+    expect(wire.writes.map((w) => w.texts)).toEqual([['/compact']])
+  })
+
   it('a refused message that waited behind a blocking turn fails every tracked input still waiting, not only its own', async () => {
     const { wire, ledger, said, observe } = await ready()
     void ledger.sendTracked('x', observe('x')).catch(() => {})

@@ -923,10 +923,15 @@ requires the verified CLI protocol (2.1.289 or newer, compared as semver, so a s
 `interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
 mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
 Results without input IDs belong to synthetic turns (including background-task notifications) and neither
-complete nor cancel a pending note. Stop cancels pending notes too
-(Claude's SDK `cancelQueued` / control-request `cancel_queued`; Codex removes queued notes and interrupts a turn
-named by an in-flight response after Stop). Claude reports person messages dropped from its local queue or
-listed as cancelled in the SDK interrupt receipt as **not delivered**, asking the person to resend them. A turn error instead cancels only parent notes, via the SDK's optional
+complete nor cancel a pending note. **A Stop is a stop** (#1640): on any Stop of a turn (the person's, or a caller's or an app's
+that ends the work it gave) every tool drops what it still holds queued behind the turn, notes and plain messages alike, and nothing runs as a turn after the Stop. Claude asks the SDK's
+`cancelQueued` / control-request `cancel_queued` on every Stop when the CLI offers it (a plain interrupt leaves a
+message sent while the turn wrote its answer queued, and the CLI runs it right after; measured on 2.1.296); a CLI
+older than that protocol is interrupted plainly, as before. Codex removes what waits behind a compact or review
+(not while an adopted conversation opens: that Stop stops nothing yet) and interrupts a turn named by an in-flight
+response after Stop; an ACP tool drops the prompts it queued. Each reports the messages dropped as **not
+delivered**, asking the person to resend them. Mail that must not wake (a quiet input) is never the person's to
+resend: Claude's `cancel_queued` cancels it with the rest, so it goes again, quiet. A turn error instead cancels only parent notes, via the SDK's optional
 `cancelAsyncMessage` / `cancel_async_message`, and preserves the person's local/SDK queue. Without that SDK
 method the CLI queue is left intact; the failed delegation still receives the turn's error. SDK cancellation
 is also skipped while person input is pending: cancelling an already-dequeued representative UUID can drop its

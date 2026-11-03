@@ -334,6 +334,12 @@ export class MidTurnLedger {
   stopByPerson(): void {
     const tracked = this.receipts.size > 0
     this.interrupt(undefined, tracked)
+    /*
+     * What waits behind a compact or review never runs after the Stop (#1640): said not delivered. Not while the conversation opens:
+     * the turn a Stop is for is not known yet, so nothing is stopped, and what was sent goes into the turn the tool is running
+     */
+    const dropped = this.phase === 'opening' ? 0 : this.takeQueued()
+    if (dropped > 0) this.emit(undeliveredError(this.sessionId, dropped, 'were still queued when the turn stopped'))
     if (this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0) {
       this.wire.idleStop?.(tracked)
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })

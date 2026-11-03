@@ -196,6 +196,9 @@ class Model {
       case 'stop':
         if (this.phase !== 'ready' || !this.running) break
         this.stopAsked = true
+        // What waits behind the turn is dropped, not run after the Stop (#1640)
+        if (this.queue.length) this.said.push('undelivered')
+        for (const q of this.queue.splice(0)) this.outcome.set(q, 'fail')
         // `agy`: SIGINT ends the process, and its exit ends the turn it stopped
         if (this.kind === 'agy') {
           this.procAlive = false
@@ -422,7 +425,7 @@ describe('the ledger, case by case', () => {
 })
 
 describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => {
-  it('queues what is sent mid-turn, and after a Stop starts a new process on the conversation the first one named in init', async () => {
+  it('queues what is sent mid-turn, drops it on a Stop, and starts a new process on the conversation the first one named in init for the next input', async () => {
     const w = world('agy')
     await w.session.ready
     expect(w.session.externalId).toBeNull()
@@ -433,10 +436,14 @@ describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => 
     w.session.interrupt()
     expect(w.spawned[0]?.signalCode).toBe('SIGINT')
     await settle()
-    expect(w.wire.writes).toEqual(['one@p1', 'two@p2'])
+    // A Stop is a stop (#1640): what waited behind the turn is said not delivered, and runs no turn after it
+    expect(w.wire.writes).toEqual(['one@p1'])
+    w.session.send('three')
+    await settle()
+    expect(w.wire.writes).toEqual(['one@p1', 'three@p2'])
     expect(w.wire.launches).toEqual([null, { externalId: 'conv-1' }])
     expect(w.wire.opens).toEqual([null, { externalId: 'conv-1' }])
-    expect(said(w.events)).toEqual(['working', 'waiting:interrupted', 'working'])
+    expect(said(w.events)).toEqual(['working', 'undelivered', 'waiting:interrupted', 'working'])
     await w.session.dispose()
   })
 

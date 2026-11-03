@@ -229,6 +229,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     const turn = this.turn
     if (!turn || this.phase !== 'ready') return
     turn.stopAsked = true
+    // What waits behind the turn never runs after the person's Stop (#1640): said not delivered, as Claude and Codex say it
+    this.dropQueue('were still queued when the turn stopped')
     this.wire.interrupt?.()
     this.wire.releaseCards()
     if (!turn.stopTimer) {
