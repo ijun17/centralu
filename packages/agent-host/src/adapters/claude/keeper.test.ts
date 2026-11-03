@@ -188,11 +188,39 @@ describe('claude under the keeper', () => {
     sdk.end()
   })
 
+  /**
+   * #1397: the keeper keeps an idle CLI through a host swap, and it says nothing until its next turn. A shutdown, a logout or a
+   * kill that lands on it later is a process gone from a session at rest: asleep, no error, whatever the exit code.
+   */
+  it.each([
+    ['its stream ends', () => sdk.end()],
+    ['the SDK throws for exit code 143', () => sdk.fail(new Error('Claude Code process exited with code 143'))],
+  ])('a CLI the keeper kept that exits idle (%s) is asleep, with no error', async (_how, exit) => {
+    const { events, spawn } = await adoptedSession([])
+    spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })
+    exit()
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'session_live')).toBe(true))
+    expect(events.find((e) => e.type === 'session_live')).toEqual({ type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' })
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
+  /** A call still open in the kept CLI means a turn was running at the swap: the CLI going silent then is not rest */
+  it('a CLI the keeper kept that exits with a call still open is a crash', async () => {
+    const { events, spawn } = await adoptedSession([{ callId: 'c1', tool: 'Bash' }])
+    spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })
+    sdk.end()
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true))
+    expect(events.find((e) => e.type === 'error')).toMatchObject({ error: { code: 'adapter_crashed' } })
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+  })
+
   /** The SDK adds a CLI's stderr to its error only for a process it spawned itself; the keeper's was left without (#428) */
   it('a crash of the keeper\'s CLI carries the end of its stderr', async () => {
-    const { events, adopted, spawn } = await adoptedSession([])
+    const { events, adopted, handle, spawn } = await adoptedSession([])
     Object.assign(adopted, { stderrTail: () => 'Error: Invalid API key · Please run /login\n' })
     spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })
+    // A message the CLI had taken is lost with it: a crash, not sleep
+    handle.send('hello')
     sdk.fail(new Error('Claude Code process exited with code 1'))
     await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true))
     const err = events.find((e) => e.type === 'error')
