@@ -612,8 +612,11 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   it('gives what an original that stayed started since to the new session when the original is deleted later', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
+    const before = await settledChild(h, parent, 'Earlier notes')
     const heir = await handOff(h, project, parent, false)
     const child = await settledChild(h, parent)
+    // One finished before the handoff went with it; this one is the original's own until it is deleted
+    expect(owner(before)).toBe(heir)
     expect(owner(child)).toBe(parent)
 
     await h.mgr.trashSession(parent)

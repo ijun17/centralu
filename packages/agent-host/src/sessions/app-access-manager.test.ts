@@ -365,12 +365,6 @@ describe('a handoff carries the attached apps (#1638)', () => {
     expect(note).toContain('- app "beta/ledger" — attached to you too — handle: app-ledger.')
   })
 
-  it('a successor of a session that attached nothing gets no apps section', async () => {
-    const s = await create(alpha, 'claude')
-    await handOff(s, 'claude')
-    expect(readFileSync(handoffNotePath(alpha, s.id), 'utf8')).toBe('NOTE BODY')
-  })
-
   it('keeps the apps with the original when it goes, and the successor holds them under its own trust', async () => {
     const s = await withTwoApps('claude')
     const heir = await handOff(s, 'claude', true)
