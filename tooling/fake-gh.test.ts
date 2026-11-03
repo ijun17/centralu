@@ -42,7 +42,7 @@ async function readWhileSpinning(read: (statePath: string) => unknown) {
     }
     await new Promise((r) => setImmediate(r))
   }
-  return { torn, reads, ended: (gh.state() as { n: number }).n }
+  return { torn, reads, ended: gh.state<{ n: number }>().n }
 }
 
 describe('the shared fake gh', { timeout: 30_000 * SLOW }, () => {
