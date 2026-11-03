@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -25,6 +25,26 @@ function make() {
 const run = (args: string[], input?: string) =>
   spawnSync('gh', args, { env: gh.env(), input, encoding: 'utf8', windowsHide: true })
 
+/** Reads the state with `read` in a loop while a fake gh rewrites it 200 times; answers the reads that threw and the last number it wrote */
+async function readWhileSpinning(read: (statePath: string) => unknown) {
+  const spinner = spawn('gh', ['spin'], { env: gh.env(), stdio: 'ignore', windowsHide: true })
+  const done = new Promise((r) => spinner.once('exit', r))
+  let ended = false
+  void done.then(() => (ended = true))
+  const torn: string[] = []
+  let reads = 0
+  while (!ended) {
+    try {
+      read(gh.statePath)
+      reads++
+    } catch (e) {
+      torn.push((e as Error).message)
+    }
+    await new Promise((r) => setImmediate(r))
+  }
+  return { torn, reads, ended: (gh.state() as { n: number }).n }
+}
+
 describe('the shared fake gh', { timeout: 30_000 * SLOW }, () => {
   it('is the gh its PATH finds, logs each call with what --input sent, and answers from the state the test wrote', () => {
     make()
@@ -45,30 +65,41 @@ describe('the shared fake gh', { timeout: 30_000 * SLOW }, () => {
   })
 
   /*
-   * The fake rewrites the state in place, so a read can find it half written. The shared reader tries again; the
-   * queue test's reader did, and the other readers did not (#845).
+   * The fake rewrites the state again and again while the test reads it. Where a file can be replaced under a reader, the
+   * fake writes a whole file and renames it into place, so a read that does not try again never finds it half written. It
+   * wrote in place before, and a reader that tried again (50 times, 20 ms apart) was still beaten by a loaded CI runner: the
+   * main guard reverted an innocent pull request for the failure (#1496).
    */
+  it.skipIf(process.platform === 'win32')('never shows the state half written while the fake is rewriting it', async () => {
+    make()
+    gh.setState({ n: -1 })
+    const { ended, reads, torn } = await readWhileSpinning((statePath) => JSON.parse(readFileSync(statePath, 'utf8')))
+    expect(torn).toEqual([])
+    expect(reads).toBeGreaterThan(0)
+    expect(ended).toBe(199)
+  })
+
+  /* Windows refuses to replace a file another process has open, so there the state is written in place and the read waits for it */
   it('reads the state whole while the fake is rewriting it', async () => {
     make()
     gh.setState({ n: -1 })
-    const spinner = spawn('gh', ['spin'], { env: gh.env(), stdio: 'ignore', windowsHide: true })
-    const done = new Promise((r) => spinner.once('exit', r))
-    let ended = false
-    void done.then(() => (ended = true))
-    const torn: string[] = []
-    let reads = 0
-    while (!ended) {
-      try {
-        gh.state()
-        reads++
-      } catch (e) {
-        torn.push((e as Error).message)
-      }
-      await new Promise((r) => setImmediate(r))
-    }
+    const { ended, reads, torn } = await readWhileSpinning(() => gh.state())
     expect(torn).toEqual([])
     expect(reads).toBeGreaterThan(0)
-    expect(gh.state().n).toBe(199)
+    expect(ended).toBe(199)
+  })
+
+  it('waits for a state that is half written for longer than a loaded machine leaves its writer descheduled', () => {
+    make()
+    writeFileSync(gh.statePath, '{"n": 1, "pad": "x')
+    // Whole again after 2.5 s, from another process: this one is blocked in the read, which tried 50 times in a second before
+    const finish = String.raw`setTimeout(() => require('node:fs').writeFileSync(process.argv[1], JSON.stringify({ n: 7 })), 2500)`
+    const writer = spawn(process.execPath, ['-e', finish, gh.statePath], { stdio: 'ignore', windowsHide: true })
+    try {
+      expect(gh.state()).toEqual({ n: 7 })
+    } finally {
+      writer.kill()
+    }
   })
 
   /*

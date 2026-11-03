@@ -747,7 +747,19 @@ looked into).
   quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
   A bisect probe is read the same way (#1453): one that failed in a setup step (a timeout inside one included) or lost its runner has its failed jobs rerun once, and
   when it fails that way again the hunt ends with an issue saying the probe could not be judged, no commit blamed and nothing
-  reverted; a probe that fails in a test step, times out outside a setup step, is on the flaky list or lost its runner to a shutdown is red.
+  reverted; a probe that fails in a test step, times out outside a setup step, is on the flaky list or lost its runner to a shutdown is red
+  only if its failed jobs fail again on that rerun (below).
+- **A failure must repeat before a commit is blamed** (#1496, 2026-10-23): a flaky `fake-gh` test failed once on a commit that did
+  not touch it, the hunt found a pass on the commit before and that one failure, and the queue opened a revert of reviewed work.
+  A red is now a run whose failed jobs fail again when only they are rerun. Main's red run, when it failed in a test, has its failed jobs
+  rerun once (as an infrastructure failure does), before any commit is looked for; and a bisect probe that fails for any reason but a
+  runner shutdown is rerun once in the same way, and is red only if it fails again. A job that passes on its rerun makes the run green:
+  main is as it was, no hunt starts or goes on with that probe as red, no issue is filed and no session is told, and the guard
+  posts one comment on the known failures issue (`ci.knownFailuresIssue`) naming the job, the commit, the run and the first failing line
+  (`noteFlakes`, `guard.reruns[run].noted`). A rerun GitHub refuses or does not start in 10 minutes is reported, not hunted: a failure
+  that could not be confirmed reverts nothing. What this does not catch: a flake that makes a run pass when it should fail (the commit
+  after the real culprit is then blamed for the pass it got by chance). Each failed run costs one more run of its failed jobs, not of the
+  whole workflow.
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
