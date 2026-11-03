@@ -324,8 +324,8 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   // The same test has passed its rerun on main lately, often enough that this is no flake (`FLAKE_REPEATS`): hunted without another rerun
   const flakes = jobs.kind === 'test' && !rerun ? earlierFlakes({ reruns: g.reruns, runs, names: jobs.names, line }) : []
   const repeats = flakes.length >= FLAKE_REPEATS - 1 ? { times: flakes.length + 1, window: FLAKE_WINDOW } : null
-  if (repeats) base.repeats = repeats
   if (repeats) {
+    base.repeats = repeats
     // Those flakes are spent on this hunt: the next failure of the test starts the count over
     await update((fresh) => {
       for (const id of flakes) if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].counted = true
@@ -430,8 +430,8 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   }
   if (commits.length === 1 && !endCarries && !retest) return finish({ hunt: fresh, culprit: commits[0], how: 'the only commit since the last green one', ...ctx })
   // A suspect by the failed jobs' paths is confirmed with the full tier around it before anything is done about it
-  const byPaths = endCarries ? null : attributeByPaths(commits, base.jobs, QUEUE.guard.jobPaths)
-  const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${base.jobs.join(', ')}` } : null
+  const byPaths = endCarries ? null : attributeByPaths(commits, jobs.names, QUEUE.guard.jobPaths)
+  const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${jobs.names.join(', ')}` } : null
   return await stepHunt({ hunt: { ...fresh, confirm }, ...ctx })
 }
 
