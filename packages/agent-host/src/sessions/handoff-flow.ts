@@ -87,7 +87,7 @@ type Run = {
  * which is the original's, is within the orchestrator's own (`covered`). The original stays, so nothing is lost and
  * no power is added. The checks run again after the card, since the target may have started a turn while it stood.
  *
- * What moves is what the person's own handoff moves: the live children go to the successor, which is then owed their
+ * What moves is what the person's own handoff moves: the children go to the successor, and the apps the original attached are copied, which is then owed their
  * reports; `moveChildren` checks no authority itself, which is why every check above precedes it. The original always
  * stays (the issue: never deleted automatically); the person removes it. The successor runs with the original's
  * preset, which the card names, so the handoff raises no session above what the person set for it.
@@ -286,7 +286,7 @@ export class HandoffFlow {
   /**
    * Starts the successor as the window does: every setting of the original when the tool stays, none of the
    * tool-specific ones when it changes, the original's preset and name, and the note as a marker (`createSession`'s
-   * `handoff`, which moves the live children before the first message is sent). The original stays and is told.
+   * `handoff`, which moves the children before the first message is sent). The original stays and is told.
    */
   private async succeed(
     callerId: string,

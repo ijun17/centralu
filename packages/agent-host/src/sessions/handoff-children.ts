@@ -5,6 +5,7 @@ import type { QueuedRequests, QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { HandedOverMessage } from '../mail/messages.js'
+import type { SessionAppWiring } from './session-app-wiring.js'
 
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
@@ -13,28 +14,40 @@ import type { HandedOverMessage } from '../mail/messages.js'
  * depends on what moved: a child it now started, a turn it now owns in a session it did not start, another project's
  * session, a queued request, a standing card.
  */
-export type MovedChild = { handle: string; name: string; state: string; can: string; project?: string; request?: boolean; /** A message the original held (#1574, mailbox §7.7): the handle is the message's id */ message?: boolean }
+export type MovedChild = {
+  handle: string; name: string; state: string; can: string; project?: string; request?: boolean
+  /** A message the original held (#1574, mailbox §7.7): the handle is the message's id */
+  message?: boolean
+  /** An app the original attached itself, attached to the successor too (#1638): the handle is its server name, the name its `find_apps` ref */
+  app?: boolean
+}
 
 /** A moved child with nothing owed (#738): finished and reported, and often waiting for the next instruction */
 const SETTLED_CHILD = 'finished; waiting for more work'
 
 /**
- * The section a handoff note opens with when live children moved (#693): what they are, and what can be done with each.
+ * The section a handoff note opens with when children, mail or apps moved (#693, #1638): what they are, and what can be done with each.
  * `commands` says how the new session runs a tool the lines name that it reaches only through centralu_run (#850).
  */
 export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): string {
+  const work = moved.some((c) => !c.app)
   return [
     '## Work handed over with this note (added by Centralu)',
     '',
-    ...(moved.some((c) => c.message)
-      ? [
-          'The previous session started or asked for these, or held these mail messages. They are yours now as each line says',
-          '(a finished session waits for more work); use the handle with the tool it names.',
-        ]
-      : [
-          'The previous session started or asked for these. They now answer to you as each line says (a finished one waits',
-          'for more work); use the handle with the tool it names.',
-        ]),
+    ...(!work
+      ? []
+      : moved.some((c) => c.message)
+        ? [
+            'The previous session started or asked for these, or held these mail messages. They are yours now as each line says',
+            '(a finished session waits for more work); use the handle with the tool it names.',
+          ]
+        : [
+            'The previous session started or asked for these. They now answer to you as each line says (a finished one waits',
+            'for more work); use the handle with the tool it names.',
+          ]),
+    ...(moved.some((c) => c.app)
+      ? [work ? 'The apps the previous session had attached are attached to you too, with the same settings.' : 'The previous session had these apps attached. They are attached to you too, with the same settings.']
+      : []),
     ...(commands ? [commands] : []),
     '',
     ...moved.map((c) => `- ${movedLabel(c)} — ${c.state} — handle: ${c.handle}. ${c.can}`),
@@ -45,8 +58,9 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
   ].join('\n')
 }
 
-function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'message'>): string {
+function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'message' | 'app'>): string {
   if (c.request) return 'start_agent request'
+  if (c.app) return `app "${oneLineText(c.name, 120)}"`
   if (c.message) return `mail message "${oneLineText(c.name, 120)}"`
   return `"${oneLineText(c.name, 120)}"${c.project ? ` (project ${c.project})` : ''}`
 }
@@ -59,6 +73,8 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'messag
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards' | 'mailPoke'> &
   Pick<QueuedRequestsHost, 'turnRunning'> & {
+    /** The apps a session attached itself (#1638) */
+    readonly apps: Pick<SessionAppWiring, 'appAccess'>
     /** Requests of a session that only `auto` let through are dropped when they would go on without it (#606) */
     readonly queue: Pick<QueuedRequests, 'dropOpenedByAuto'>
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
@@ -74,18 +90,18 @@ export class HandoffChildren {
   constructor(private readonly host: HandoffChildrenHost) {}
 
   /**
-   * A handoff moves the original's **live** children to the session that took over (#693). Left with the original,
+   * A handoff moves the original's children to the session that took over (#693, #738, #1475). Left with the original,
    * their reports woke a session the person no longer works in, the new session could not reach them with
    * agent_session (only the starter can), and once the original was deleted they had nobody at all.
    *
-   * Live is anything still owed: a session working or waiting on the person (approval or question), a request the
-   * original queued, a report not yet delivered, an ask_project answer not yet read, and a start_agent request whose
-   * card still stands. A settled child (finished, reported or read, nothing pending) stays with the original, so the
-   * history stays where it happened, but only while the original stays (#738). `scope`:
-   * - `live`: a handoff that keeps the original. Only the live children move.
-   * - `all`: a handoff whose original the window removes next. Every child moves, settled ones too ("finished; waiting
-   *   for more work" in the note): one left with a session about to go would belong to nobody, its next report owed to
-   *   a removed session and out of reach of agent_session for a successor that is not `auto`.
+   * Every child moves, the settled ones too (finished, reported or read, nothing pending: "finished; waiting for more
+   * work" in the note): a settled child is often still in use, and one left with the original could not be listed or
+   * archived by the session that carries the work on, nor would its next report reach it. What else is owed moves with
+   * them: a request the original queued, a report not yet delivered, an ask_project answer not yet read, and a
+   * start_agent request whose card still stands. `scope` is whether the original goes, and so what of its mail moves:
+   * - `kept`: a handoff that keeps the original. The mail those children sent it moves; the rest stays with it, to read
+   *   and answer.
+   * - `goes`: a handoff whose original the window removes next. All its unsettled mail moves too.
    * - `removed`: the original is being removed now (`trashSessionOnce`), after a handoff that kept it or one whose
    *   window did not say it would remove it. Its children themselves go to the session that inherited its handoff
    *   (`askedBy`/`parentSessionId`, with the reports, turns and delegations that are theirs), since an orphan is worse;
@@ -109,7 +125,7 @@ export class HandoffChildren {
    * project's ordinary session in its view, not mid-turn, the person's card unless `auto`). Any other agent-facing path
    * must check its own authority the same way before it does.
    */
-  moveChildren(from: string, to: string, scope: 'live' | 'all' | 'removed'): MovedChild[] {
+  moveChildren(from: string, to: string, scope: 'kept' | 'goes' | 'removed'): MovedChild[] {
     const original = this.host.meta.get(from)
     const heir = this.host.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
@@ -121,7 +137,7 @@ export class HandoffChildren {
     if (!removed && heir.permissionPreset !== 'auto') this.host.queue.dropOpenedByAuto(from)
     const queuedBy = removed ? new Set<string>() : new Set([...this.host.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
-    const stateOf = (s: SessionInfo): string | null => {
+    const stateOf = (s: SessionInfo): string => {
       // A question blocks the session as an approval does (waiting_approval), so its own list is read first
       if (s.pendingApproval) return 'waiting for an approval'
       if (s.pendingQuestions.length) return 'waiting on a question'
@@ -133,8 +149,8 @@ export class HandoffChildren {
       if (this.host.children.awaitingReport.get(s.id) === from) return 'finished; its report has not been delivered yet'
       // ask_project tells nobody when it ends: an answer the original never came back for is still owed
       if (delegated.some((d) => d.sessionId === s.id && d.settled && !d.agent)) return 'finished; its answer has not been read yet'
-      // Settled: nothing is owed. It moves only when the original goes (#738), and is often still in use
-      return scope === 'live' ? null : SETTLED_CHILD
+      // Settled: nothing is owed, and it is often still in use, so it moves with the rest (#738, #1475)
+      return SETTLED_CHILD
     }
     const childIds = [...this.host.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
@@ -157,8 +173,8 @@ export class HandoffChildren {
     const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
     for (const id of linked) {
       const s = this.host.meta.get(id)
-      const state = s && id !== to ? stateOf(s) : null
-      if (!s || !state) continue
+      if (!s || id === to) continue
+      const state = stateOf(s)
       sessions.push(id)
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
       // What the new session can actually do with it, by what moved (#693 review)
@@ -190,10 +206,10 @@ export class HandoffChildren {
     /*
      * The original's mail moves in the same transaction (#1574, docs/plans/mailbox.md §7.7). An original that goes gives every unsettled
      * watched row and unread message it holds; one that stays gives those from the children that moved, so a child's word reaches the
-     * successor. The rest stays with an original that stays, as a settled child does: it is still there to read and answer it, and work it
-     * was given is its own until it goes, when all of it moves (scope `removed`)
+     * successor. The rest stays with an original that stays: it is still there to read and answer it, and work it was given is its own
+     * until it goes, when all of it moves (scope `removed`)
      */
-    const mailWhich = scope === 'live' ? (sessions.length ? { senders: sessions } : null) : 'all'
+    const mailWhich = scope === 'kept' ? (sessions.length ? { senders: sessions } : null) : 'all'
     if (!moved.length && mailWhich === null) return []
     let threads: HandedOverMessage[] = []
     try {
@@ -257,6 +273,17 @@ export class HandoffChildren {
     }
     console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail message(s)`)
     return moved
+  }
+
+  /**
+   * The apps a handoff's successor holds from its original (#1638), as the note lists them: copied before the successor started
+   * (`AppAccess.carry`), so what is listed is what it counts now, under its own preset and the person's consent.
+   */
+  carriedApps(to: string): MovedChild[] {
+    return (this.host.apps.appAccess?.held(to) ?? []).map((a) => ({
+      handle: a.server, name: a.ref, app: true, state: 'attached to you too',
+      can: 'Its tools are yours under that server name, as the previous session had them. detach_app removes it from this session only.',
+    }))
   }
 }
 

@@ -489,7 +489,7 @@ export function buildHandoffRecord(opts: {
 
 /**
  * The record's table of parts after `by` lines were put above it (#1481). The note is written once by
- * `buildHandoffRecord` and rewritten with the moved-children block in front when the handoff moves live work
+ * `buildHandoffRecord` and rewritten with the moved-children block in front when the handoff moves children, mail or apps
  * (#693); every line number of the table moves by that block's length, or `sed` reads the wrong range. A note with no
  * table (one the agent wrote) is returned as it is.
  */

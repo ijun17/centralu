@@ -298,6 +298,12 @@ export class SessionStarts {
       if (params.builderOf) this.host.appSessions.setBuilder(params.builderOf, id)
       // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
       // it
+      /*
+       * The apps the original attached itself go with a handoff (#1638), copied before the process starts and counts its tools: a Codex thread
+       * fixes them when it starts, and a thread that has had no turn yet cannot be resumed to add one. A copy, not a move, as the original
+       * keeps what it can still use; they leave with it when it is deleted
+       */
+      if (params.handoff?.fromSessionId) this.host.apps.appAccess?.carry(params.handoff.fromSessionId, id)
       apps = this.host.apps.appsFor(info)
       // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
       // flag says what the row's slot already says
@@ -477,12 +483,14 @@ export class SessionStarts {
       const { from, fromSessionId } = params.handoff
       let { note } = params.handoff
       /*
-       * The original's live children become this session's (#693), before its first turn reads the note: the note
+       * The original's children become this session's (#693, #738, #1475), before its first turn reads the note: the note
        * opens with them, in the file the opening message points at and in the marker that keeps the note's original.
        * Nothing here awaits until the first message is sent, so a moved child's report cannot reach this session first.
-       * When the window removes the original next (#738), every child moves, settled ones too, and the note lists them.
+       * The apps the original attached are listed with them (#1638); they were copied before this session started.
        */
-      const moved = fromSessionId ? this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'all' : 'live') : []
+      const moved = fromSessionId
+        ? [...this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'goes' : 'kept'), ...this.host.handoffChildren.carriedApps(id)]
+        : []
       if (moved.length) {
         const movedBlock = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session']))
         // The record's table of parts names lines; they move down by the block put above them (#1481)

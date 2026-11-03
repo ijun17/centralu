@@ -244,6 +244,26 @@ export class AppAccess implements OnDemandApps {
     }
   }
 
+  /**
+   * A handoff's successor starts with the apps its original attached itself (#1638): the stored row is copied whole, an attachment this
+   * build cannot read included, so each keeps its server name and its consent. What the successor may use is still asked again on every
+   * count (`allowed`), under its own preset. A copy: the original keeps its own, which go when it is deleted (`forget`).
+   */
+  carry(from: string, to: string): void {
+    const row = this.deps.store.settings.appSetting(KEY(from))
+    if (row !== null) this.deps.store.settings.setAppSetting(KEY(to), row)
+    this.cache.delete(to)
+  }
+
+  /** What this session attached itself and may use now, as `find_apps` names it and the server its tools come under — the handoff note lists them */
+  held(sessionId: string): { ref: string; server: string }[] {
+    const session = this.deps.session(sessionId)
+    const have = session ? this.deps.hub.refsFor(session) : []
+    return this.records(sessionId)
+      .filter((r) => have.some((h) => h.server === r.server))
+      .map((r) => ({ ref: this.refOf(r), server: r.server }))
+  }
+
   /** The apps this session attached itself, as `find_apps` names them — for the tool texts */
   attachedRefs(sessionId: string): string[] {
     return this.records(sessionId).map((r) => this.refOf(r))

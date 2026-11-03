@@ -357,7 +357,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
     expect((await opened.apps!.call('app-ledger', 'peek', {})).isError).toBe(false)
     // A copy: the original keeps its own, and detaching there leaves the successor's alone
     expect(servers(original)).toEqual(['app-board', 'app-ledger'])
-    expect(await tool(s.id, 'detach_app', { app: 'beta/board' })).toMatchObject({ isError: false })
+    expect((await tool(s.id, 'detach_app', { app: 'beta/board' })).isError).toBeFalsy()
     expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
     const note = readFileSync(handoffNotePath(alpha, s.id), 'utf8')
     expect(note).toContain('The previous session had these apps attached. They are attached to you too')

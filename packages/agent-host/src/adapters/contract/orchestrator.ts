@@ -803,7 +803,7 @@ export type OrchestratorTools = {
   appUpkeep?(req: AppUpkeepRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
-   * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.
+   * by the session (`mode: 'agent'`), the original's children moved to the successor and its attached apps copied (#693, #1638), the original kept.
    * The rules of who may hand off what are `HandoffFlow`'s (handoff-flow.ts). Absent on seats that cannot hand off.
    */
   handoffSession?(

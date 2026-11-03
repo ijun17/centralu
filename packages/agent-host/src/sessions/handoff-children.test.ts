@@ -609,11 +609,11 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
   })
 
-  it('gives what an original that stayed still has to the new session when the original is deleted later', async () => {
+  it('gives what an original that stayed started since to the new session when the original is deleted later', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
-    const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent, false)
+    const child = await settledChild(h, parent)
     expect(owner(child)).toBe(parent)
 
     await h.mgr.trashSession(parent)
@@ -640,8 +640,8 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   it("passes a removed original's children on past a successor that is gone too", async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
-    const child = await settledChild(h, parent)
     const first = await handOff(h, project, parent, false)
+    const child = await settledChild(h, parent)
     // The first successor hands over in turn and goes; the original stayed all along
     await writeHandoffNote(project, first, 'SECOND NOTE')
     const second = (await h.mgr.createSession({
@@ -718,8 +718,8 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   it('does not choose a successor that is being deleted at the same time', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
-    const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent, false)
+    const child = await settledChild(h, parent)
     const both = Promise.all([h.mgr.trashSession(heir), h.mgr.trashSession(parent)])
     await both
     expect(owner(child)).toBe(parent)
@@ -728,7 +728,6 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   it('tries an older successor when the newest is gone with no successor of its own', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
-    const child = await settledChild(h, parent)
     // Older: handed over in turn, then deleted; its successor is still here
     const older = await handOff(h, project, parent, false)
     await writeHandoffNote(project, older, 'SECOND NOTE')
@@ -742,6 +741,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const newer = await handOff(h, project, parent, false)
     await h.mgr.trashSession(newer)
 
+    const child = await settledChild(h, parent)
     await h.mgr.trashSession(parent)
     expect(owner(child)).toBe(olderHeir)
   })
