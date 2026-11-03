@@ -74,7 +74,7 @@ type Run = {
 /**
  * The orchestrator's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the
  * window's session menu does (`handoffSession` in the UI's store), with the same note, the same first message and the
- * same move of the original's live children (#693).
+ * same move of the original's children (#693) and copy of its attached apps (#1638).
  *
  * **Who may hand off what.** Only the central orchestrator has the tool (`profileAllows`); a lead, an ordinary session
  * and an app's agent do not. Its target is a session of its own view on this computer (`orchestratorToolsFor`), and of
@@ -339,7 +339,7 @@ export class HandoffFlow {
     return (
       `Allow the orchestrator to hand off the session ${name} to a fresh session of the tool ${trustedJsonText(tool)}? ` +
       (mode === 'record' ? 'The note is built from its stored conversation; the session is not asked. ' : 'The session is asked to write the note first. ') +
-      `${name} stays, the live work it started moves to the new session, and the new session runs under the ${target.permissionPreset} preset.` +
+      `${name} stays, the sessions it started move to the new session, the apps it attached are copied to it (one it was allowed only once is not), and the new session runs under the ${target.permissionPreset} preset.` +
       words
     )
   }

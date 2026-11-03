@@ -8,9 +8,9 @@ import type { HandedOverMessage } from '../mail/messages.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 
 /**
- * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
- * lists it: a session (started with start_agent, forked, or asked in another project), or a start_agent request still
- * waiting for the person, whose handle is the request id. `can` is what the new session can actually do with it, which
+ * One piece of the original's work a handoff moved to the session that took over (#693), as the handoff note
+ * lists it: a session (started with start_agent, forked, or asked in another project, finished or not), a start_agent request still
+ * waiting for the person, whose handle is the request id, a mail message, or an app. `can` is what the new session can actually do with it, which
  * depends on what moved: a child it now started, a turn it now owns in a session it did not start, another project's
  * session, a queued request, a standing card.
  */
@@ -18,12 +18,22 @@ export type MovedChild = {
   handle: string; name: string; state: string; can: string; project?: string; request?: boolean
   /** A message the original held (#1574, mailbox §7.7): the handle is the message's id */
   message?: boolean
-  /** An app the original attached itself, attached to the successor too (#1638): the handle is its server name, the name its `find_apps` ref */
+  /**
+   * An app the original attached itself (#1638): the name is its `find_apps` ref; the handle is its server name when it is attached to the
+   * successor too, else the ref `attach_app` takes, for one that did not carry over
+   */
   app?: boolean
+  /**
+   * A finished child of the original's own project that it started (#1475): the note and the original's notice say how many there are, not
+   * each of them, since `agent_session` with `list` shows each with its name, handle and state. Any other piece keeps its line
+   */
+  folded?: boolean
 }
 
 /** A moved child with nothing owed (#738): finished and reported, and often waiting for the next instruction */
 const SETTLED_CHILD = 'finished; waiting for more work'
+/** An app of the original that the successor cannot use as it is (#1638): an "Allow once" answer, or a consent that does not apply to it */
+const NOT_ATTACHED = 'not attached to you'
 
 /**
  * The section a handoff note opens with when children, mail or apps moved (#693, #1638): what they are, and what can be done with each.
@@ -31,6 +41,7 @@ const SETTLED_CHILD = 'finished; waiting for more work'
  */
 export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): string {
   const work = moved.some((c) => !c.app)
+  const folded = moved.filter((c) => c.folded).length
   return [
     '## Work handed over with this note (added by Centralu)',
     '',
@@ -46,11 +57,20 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
             'for more work); use the handle with the tool it names.',
           ]),
     ...(moved.some((c) => c.app)
-      ? [work ? 'The apps the previous session had attached are attached to you too, with the same settings.' : 'The previous session had these apps attached. They are attached to you too, with the same settings.']
+      ? [
+          (work ? 'The apps the previous session had attached are listed too.' : 'The previous session had these apps attached.') +
+            (moved.some((c) => c.app && c.state === NOT_ATTACHED) ? ' One marked "not attached to you" does not carry over: attach it again with attach_app, where the person is asked.' : ''),
+        ]
       : []),
     ...(commands ? [commands] : []),
     '',
-    ...moved.map((c) => `- ${movedLabel(c)} — ${c.state} — handle: ${c.handle}. ${c.can}`),
+    ...moved.filter((c) => !c.folded).map((c) => `- ${movedLabel(c)} — ${c.state} — handle: ${c.handle}. ${c.can}`),
+    ...(folded > 0
+      ? [
+          `- ${folded} finished session${folded === 1 ? '' : 's'} — ${SETTLED_CHILD}. agent_session(action="list") lists ${folded === 1 ? 'it' : 'them'} with ${folded === 1 ? 'its' : 'their'} names, handles and states. ` +
+            `${folded === 1 ? 'It answers' : 'They answer'} to you as ${folded === 1 ? 'a session' : 'sessions'} you started: agent_session works on ${folded === 1 ? 'it' : 'each'} (status, wait, send, stop, delete), and a send gives more work, whose report comes to you.`,
+        ]
+      : []),
     '',
     '---',
     '',
@@ -185,7 +205,8 @@ export class HandoffChildren {
         : s.askedBy === from
           ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work with agent_session (send) and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, send, stop, delete).`
           : `${told ? 'Its report comes to you' : 'Nothing about it comes to you unless you ask'}${owns ? ', and you are told of the cards of the turn you now own' : ''}. You did not start it, so agent_session works on it only with the auto preset.`
-      moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}) })
+      const folded = state === SETTLED_CHILD && project === undefined && s.askedBy === from
+      moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}), ...(folded ? { folded: true } : {}) })
     }
     // A removed original's requests still open are withdrawn by the session archive, not raised in another session
     const starts = removed ? [] : [...this.host.children.agentStarts.values()].filter((r) => r.req.callerId === from && !r.ended)
@@ -259,16 +280,22 @@ export class HandoffChildren {
         this.host.hostCards.closeAsk(ask, 'deny', { moveTo: to })
       }
     })
-    const items = moved.map((c) => `${movedLabel(c)} (${c.state})`)
     if (scope === 'removed') {
+      const items = moved.map((c) => `${movedLabel(c)} (${c.state})`)
       this.host.onEvent({
         type: 'notice', sessionId: to, level: 'info', from: 'Centralu', label: 'handoff',
         text: `“${original.name}” [${from}], which handed over to this session, was archived. This session follows what it still had from now on: ${items.join('; ')}.`,
       })
     } else {
+      // A finished child has no line of its own here: how many there are, and the new session lists them
+      const items = moved.filter((c) => !c.folded).map((c) => `${movedLabel(c)} (${c.state})`)
+      const folded = moved.length - items.length
+      const finished = `${folded} finished session${folded === 1 ? '' : 's'}`
       this.host.onEvent({
         type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff',
-        text: `Handed over to “${heir.name}” [${to}], which follows them from now on: ${items.join('; ')}. This session no longer does.`,
+        text: items.length
+          ? `Handed over to “${heir.name}” [${to}], which follows them from now on: ${items.join('; ')}. This session no longer does.${folded ? ` ${finished} also moved to “${heir.name}”.` : ''}`
+          : `${finished} moved to “${heir.name}” [${to}], which follows ${folded === 1 ? 'it' : 'them'} from now on. This session no longer does.`,
       })
     }
     console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail message(s)`)
@@ -276,14 +303,22 @@ export class HandoffChildren {
   }
 
   /**
-   * The apps a handoff's successor holds from its original (#1638), as the note lists them: copied before the successor started
-   * (`AppAccess.carry`), so what is listed is what it counts now, under its own preset and the person's consent.
+   * The apps of a handoff's original (#1638), as the note lists them: those the successor can call now (copied before it started, `AppAccess.carry`,
+   * and counted under its own preset and the person's consent), and those it must attach again, which `leftBehind` (an "Allow once" answer) and
+   * a copied consent that does not apply to it make up.
    */
-  carriedApps(to: string): MovedChild[] {
-    return (this.host.apps.appAccess?.held(to) ?? []).map((a) => ({
-      handle: a.server, name: a.ref, app: true, state: 'attached to you too',
-      can: 'Its tools are yours under that server name, as the previous session had them. detach_app removes it from this session only.',
-    }))
+  carriedApps(to: string, leftBehind: readonly string[]): MovedChild[] {
+    const access = this.host.apps.appAccess
+    return [
+      ...(access?.held(to) ?? []).map((a): MovedChild => ({
+        handle: a.server, name: a.ref, app: true, state: 'attached to you too',
+        can: 'Its tools are yours under that server name. detach_app removes it from this session only.',
+      })),
+      ...[...leftBehind, ...(access?.notHeld(to) ?? [])].map((ref): MovedChild => ({
+        handle: ref, name: ref, app: true, state: NOT_ATTACHED,
+        can: 'It does not carry over (a one-time "Allow once" answer, or a consent that does not apply to you). Call attach_app with this handle if you need it.',
+      })),
+    ]
   }
 }
 

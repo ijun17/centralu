@@ -242,8 +242,21 @@ export class DelegationWaits {
     }
   }
 
+  /**
+   * A session a handoff gave away that the memory of it is gone for (a host restart, #1475): a child that existed before the successor was
+   * created and is the successor's now, when the successor took over from `callerId` through any number of handoffs. Read from the store: the
+   * child's owner and the successors' handoff markers. A child the successor started itself is younger than it, and was not given away.
+   */
+  private movedByHandoff(callerId: string, id: string): { from: string; to: string } | undefined {
+    const child = this.host.meta.get(id)
+    const to = child?.askedBy ?? child?.parentSessionId
+    const heir = to ? this.host.meta.get(to) : undefined
+    if (!child || !heir || heir.id === callerId || child.createdAt >= heir.createdAt) return undefined
+    return this.host.store.handoffs.lineage(heir.id).includes(callerId) ? { from: callerId, to: heir.id } : undefined
+  }
+
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined {
-    const h = this.host.children.handedOver.get(id)
+    const h = this.host.children.handedOver.get(id) ?? this.movedByHandoff(callerId, id)
     if (!h || h.from !== callerId) return undefined
     const heir = this.host.meta.get(h.to)
     const what = this.host.meta.get(id)?.name ?? this.host.children.agentStarts.get(id)?.req.detail.text ?? id

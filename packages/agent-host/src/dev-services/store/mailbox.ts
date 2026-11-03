@@ -102,7 +102,10 @@ export type RecipientRow = {
 export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }
 export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
   Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
-/** Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) */
+/**
+ * Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) and Centralu's mail about
+ * them: a finished child's report is sent as Centralu, with the child in its `about`, so it goes with the child it reports
+ */
 export type HandOverScope = 'all' | { senders: readonly string[] }
 
 /** The stored message, and whether it was there already under the sender's `dedupeKey` */
@@ -825,7 +828,10 @@ export class MailboxRecords {
 
   /** The ids of the messages a handoff would move, in the order sent: what `moveRows` moves, read only (the archive's preview, §7.7) */
   movable(from: string, to: string, scope: HandOverScope): string[] {
-    const inScope = scope === 'all' ? '1' : `m.sender IN (SELECT value FROM json_each(@senders))`
+    const inScope =
+      scope === 'all'
+        ? '1'
+        : `(m.sender IN (SELECT value FROM json_each(@senders)) OR (json_valid(m.facts) AND json_extract(m.facts, '$.about.session') IN (SELECT value FROM json_each(@senders))))`
     return this.db
       .prepare<{ from: string; to: string; senders: string }, { id: string }>(
         `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id

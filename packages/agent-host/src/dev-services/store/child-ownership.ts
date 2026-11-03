@@ -129,7 +129,7 @@ export class ChildOwnershipRecords {
   }
 
   /**
-   * A handoff's move of the original session's live children to the session that took over (#693), in one
+   * A handoff's move of the original session's children to the session that took over (#693, #1475), in one
    * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
    * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
    * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose

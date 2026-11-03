@@ -161,13 +161,16 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const note = readFileSync(handoffNotePath(project, parent), 'utf8')
     expect(note).toContain('Work handed over with this note')
     expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you. agent_session works on it as on a session you started`)
-    expect(note).toContain(`"Quick check" — finished; waiting for more work — handle: ${settled}. Give it more work with agent_session (send)`)
+    // A finished child has no line of its own: the count, and agent_session lists it with its handle
+    expect(note).not.toContain(settled)
+    expect(note).toContain('- 1 finished session — finished; waiting for more work. agent_session(action="list") lists it with its names, handles and states.')
     // The note the person wrote follows, whole; the marker keeps the same text
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
     expect(marker(heir)?.note).toBe(note)
     expect(store.children.listReportMarks()).toEqual([{ sessionId: live, callerSessionId: heir }])
     // The original is told, and asking about the child says where it went
-    expect(events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: parent, text: expect.stringContaining('"Quick check"') }))
+    expect(events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: parent, text: expect.stringContaining('1 finished session also moved to') }))
+    expect(events.find((e) => e.type === 'notice' && e.sessionId === parent)).toMatchObject({ text: expect.not.stringContaining('Quick check') })
     expect(await h.mgr.agentSession(parent, { sessionId: settled, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('took over from this one') })
   })
 
@@ -235,8 +238,9 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     await eventually(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const heir = await handOff(h, project, parent, false)
     expect(owner(settled)).toBe(heir)
-    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`finished; waiting for more work — handle: ${settled}.`)
-    expect(marker(heir)?.note).toContain(settled)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain('- 1 finished session — finished; waiting for more work.')
+    expect(events.filter((e) => e.type === 'notice' && e.sessionId === parent)).toEqual([expect.objectContaining({ text: expect.stringMatching(/^1 finished session moved to /) })])
+    expect(marker(heir)?.note).toContain('- 1 finished session')
     expect(events.filter((e) => e.type === 'session_owner')).toEqual([expect.objectContaining({ sessionId: settled, askedBy: heir })])
   })
 
@@ -547,7 +551,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(note).toContain(`(resumed session)" — working — handle: ${live}.`)
   })
 
-  it('lists every moved child in the note, a settled one as waiting for more work', async () => {
+  it('lists each child with something going in the note and counts the finished ones, which agent_session lists', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await settledChild(h, parent)
@@ -556,8 +560,11 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const heir = await handOff(h, project, parent)
 
     const note = readFileSync(handoffNotePath(project, parent), 'utf8')
-    expect(note).toContain(`"Release notes" — finished; waiting for more work — handle: ${settled}. Give it more work with agent_session (send) and its report comes to you. agent_session works on it as on a session you started`)
+    expect(note).not.toContain('"Release notes"')
+    expect(note).toContain('- 1 finished session — finished; waiting for more work. agent_session(action="list") lists it')
     expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you.`)
+    // The list gives what the folded line does not: its name, its handle and its state
+    expect((await h.mgr.runOrchestratorTool(heir, 'agent_session', { action: 'list' })).text).toContain(`- Release notes [${settled}] · claude · finished`)
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
     expect(marker(heir)?.note).toBe(note)
     expect(owner(live)).toBe(heir)

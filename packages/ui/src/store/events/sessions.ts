@@ -143,7 +143,7 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
   }
 
   /*
-   * A handoff moved a live child to the session that took over (#693): the sidebar hangs it there now. A session
+   * A handoff moved a child to the session that took over (#693, #1475): the sidebar hangs it there now. A session
    * not known here comes with its owner in the list, so the event is not held for it.
    */
   if (e.type === 'session_owner') {

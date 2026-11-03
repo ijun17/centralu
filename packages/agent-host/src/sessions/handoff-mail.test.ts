@@ -397,18 +397,6 @@ describe('the re-check of the review fixes (#1580)', () => {
     expect(pendingFor(parent, question.id)).toBe(false)
   })
 
-  it("keeps Centralu's unread report on its task to a child that moved with an original that stays", async () => {
-    const h = host()
-    const { project, parent } = await parentOf(h)
-    const child = await startChild(h, parent, 'long work')
-    const old = give(h, parent, child, 'A gave C work by mail')
-    const report = h.m.service.report(old.id, { outcome: 'finished', body: 'it is done' })
-    if (!('message' in report)) throw new Error('no report written')
-    const heir = await handOff(h, project, parent, false)
-    expect(read.row(report.message.id, at(parent))).toMatchObject({ readAt: null })
-    expect(read.row(report.message.id, at(heir))).toBeUndefined()
-  })
-
   it("previews only the mail that goes to the heir, not the heir's own answer, and with the right article", async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

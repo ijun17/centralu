@@ -699,7 +699,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
   /**
-   * Who a session belongs to changed (#693): a handoff moved the original's live children to the session that took
+   * Who a session belongs to changed (#693): a handoff moved the original's children to the session that took
    * over, so the sidebar hangs them under it. Carries the session's `askedBy` and `parentSessionId` as they are now.
    */
   z.object({
