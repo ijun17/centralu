@@ -1084,6 +1084,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       next.adoptReport('s', 'caller', null)
       next.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
       expect(next.personInTurn('s')).toBe(true)
+      expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ marks: { 'person-1': 'joined' } })
       const third = new ChildOwnership(store)
       third.adoptReport('s', 'caller', null)
       expect(third.personInTurn('s')).toBe(true)
@@ -1098,6 +1099,8 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       next.adoptReport('s', 'caller', null)
       expect(next.personInTurn('s')).toBe(true)
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
+      // From here this build's own record is kept: the old list is read only once
+      expect(store.settings.appSetting('turn_inputs:s')).not.toBeNull()
     })
 
     it('reads once what a build before #1639 left: the hub’s messages its tool holds', () => {

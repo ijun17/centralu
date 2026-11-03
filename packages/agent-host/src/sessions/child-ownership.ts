@@ -691,9 +691,11 @@ export class ChildOwnership {
    */
   private legacyHeld(sessionId: string): Entry[] {
     const listed = tryParseJson(this.store.settings.appSetting(inputOriginsKey(sessionId)) ?? '[]')
-    const hub = (Array.isArray(listed) ? listed : []).flatMap((e) => {
-      const origin = Array.isArray(e) && typeof e[0] === 'string' ? TurnOrigin.safeParse(e[1]) : undefined
-      return origin?.success ? [{ id: e[0] as string, seq: origin.data.seq, origin: origin.data }] : []
+    const items: unknown[] = Array.isArray(listed) ? listed : []
+    const hub = items.flatMap((e) => {
+      const [id, given]: unknown[] = Array.isArray(e) ? e : []
+      const origin = TurnOrigin.safeParse(given)
+      return typeof id === 'string' && origin.success ? [{ id, seq: origin.data.seq, origin: origin.data }] : []
     })
     const turn = asObj(tryParseJson(this.store.settings.appSetting(reportTurnKey(sessionId)) ?? '{}'))
     // The turn running was decided by the build before, at its start
