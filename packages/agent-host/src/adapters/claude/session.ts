@@ -74,7 +74,7 @@ export class ClaudeSession implements SessionHandle {
    * Quiet inputs (the mailbox's mail that must not wake) not yet answered. The CLI answers each with a `result` 40 to 160 ms later
    * though no turn ran (measured on 2.1.296), and that is no finished turn: it is not shown as one
    */
-  private quietInputs = new Set<string>()
+  private quietInputs = new Map<string, ClaudeInput>()
   private trackedInputKnown = false
   /** Installed only after the initial CLI metadata confirms the protocol we have verified. */
   sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void>
@@ -141,14 +141,14 @@ export class ClaudeSession implements SessionHandle {
     this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     this.ledger = new MidTurnLedger(sessionId, (e) => this.emit(e), {
       label: 'Claude Code',
-      // With a tracked input waiting, the interrupt also cancels what the SDK holds (`cancel_queued`)
-      interrupt: (_turn, tracked) => this.askInterrupt(tracked),
+      // The interrupt also cancels what the SDK holds (`cancel_queued`), whenever the CLI can (`cancelsQueued`)
+      interrupt: (_turn, tracked) => this.askInterrupt(tracked || this.cancelsQueued),
       // Said stopped at the turn's result (said at once, a rejected interrupt showed a working turn as stopped)
       stopConfirmMs: launch.stopConfirmMs,
       // A refusal makes the turn's own ending its own again (the normalizer's `stopping`)
       stopRefused: () => this.stream.stopFailed(),
-      idleStop: (tracked) => void this.askInterrupt(tracked).catch((err: Error) => this.emit(couldNotStop(this.sessionId, err))),
-      releaseCards: (tracked) => this.releaseForStop(tracked),
+      idleStop: (tracked) => void this.askInterrupt(tracked || this.cancelsQueued).catch((err: Error) => this.emit(couldNotStop(this.sessionId, err))),
+      releaseCards: (tracked) => this.releaseForStop(tracked || this.cancelsQueued),
       inFlight: () => this.inFlight(),
       exitWords: PROCESS_LOST,
       connectionEnded: () => this.releaseAgents(PROCESS_LOST),
@@ -588,8 +588,9 @@ export class ClaudeSession implements SessionHandle {
   private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean, origin?: InputOrigin, quiet?: boolean): void {
     if (quiet) {
       // No turn: the process reads it and answers nothing, and the session stays at rest (the mailbox's mail that must not wake)
-      this.quietInputs.add(uuid)
-      this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}), quiet: true })
+      const input: ClaudeInput = { text, uuid, parentNote, ...(origin ? { origin } : {}), quiet: true }
+      this.quietInputs.set(uuid, input)
+      this.queue.push(input)
       this.notify?.()
       this.notify = null
       return
@@ -708,15 +709,25 @@ export class ClaudeSession implements SessionHandle {
    * not taken is a notice, not an error (the turn still runs). With no turn open the session is said stopped at once.
    */
   interrupt(): void {
-    // The SDK's plain interrupt leaves queued commands alive; a tracked input waiting maps to control-request cancel_queued
     this.ledger.stopByPerson()
+  }
+
+  /**
+   * Whether a Stop empties the CLI's queue (`cancel_queued`, offered with the protocol `sendTracked` needs). A plain interrupt leaves
+   * a message sent while the turn wrote its answer queued, and the CLI runs it as a new turn right after the Stop (#1640, measured on
+   * 2.1.296: `still_queued` names it, and the turn runs). So every Stop asks it, and what it cancels is said not delivered, as an ACP
+   * or Codex Stop says what it drops. A CLI without it is asked plainly: what it holds runs after the Stop, as before
+   */
+  private get cancelsQueued(): boolean {
+    return this.sendTracked !== undefined
   }
 
   /** What a Stop releases besides the turn, after the tracked inputs failed */
   private releaseForStop(cancelQueued: boolean): void {
-    const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote).length : 0) +
+    const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote && !input.quiet).length : 0) +
       this.raceRetry.held.filter((input) => !input.parentNote).length
-    if (cancelQueued) this.queue.length = 0
+    // Mail that must not wake stays: it starts nothing, and nobody would send it again
+    if (cancelQueued) this.queue = this.queue.filter((input) => input.quiet)
     this.reportUndelivered(held)
     /*
      * This also stops any app calls this session made (M4 A-5). The SDK makes no promise about
@@ -748,6 +759,12 @@ export class ClaudeSession implements SessionHandle {
       let count = 0
       for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
       this.reportUndelivered(count)
+      // Quiet mail goes with the rest (measured on 2.1.296): it goes again, quiet, under a new id. It is the mailbox's, delivered already
+      for (const id of cancelled) {
+        const quiet = typeof id === 'string' ? this.quietInputs.get(id) : undefined
+        if (!quiet || !this.quietInputs.delete(id)) continue
+        this.deliver(quiet.text, centraluInputId(), false, quiet.origin, true)
+      }
     }
   }
 
