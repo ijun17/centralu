@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -767,28 +768,37 @@ function prePrCheckout() {
   const tools = commit(work, 'c.txt', 'c\n', 'tools')
   g(work, 'push', '-q', 'origin', 'main', 'feat/low', 'feat/tools')
   g(work, 'checkout', '-q', 'main')
+  // The script is main's: committed and pushed, as the board fetches it (#1931)
   mkdirSync(join(work, 'scripts'))
   writeFileSync(
     join(work, 'scripts/pre-pr.mjs'),
     [
       "import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'",
       "import { execFileSync, spawn } from 'node:child_process'",
+      "import { join } from 'node:path'",
       "const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/centralu-pre-pr'], { encoding: 'utf8' }).trim().split('\\n')",
-      "appendFileSync(new URL('../../pre-pr-calls.jsonl', import.meta.url), JSON.stringify({ args: process.argv.slice(2), refs }) + '\\n')",
-      "const answer = new URL('../../pre-pr-answer.json', import.meta.url)",
+      "appendFileSync(join(process.cwd(), '..', 'pre-pr-calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), refs, script: import.meta.url }) + '\\n')",
+      "const answer = join(process.cwd(), '..', 'pre-pr-answer.json')",
       "const hang = existsSync(answer) ? JSON.parse(readFileSync(answer, 'utf8')).hangMs : 0",
       "if (hang && !process.argv.includes('--cleanup')) {",
       "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })",
-      "  writeFileSync(new URL('../../pre-pr-grandchild.pid', import.meta.url), String(child.pid))",
+      "  writeFileSync(join(process.cwd(), '..', 'pre-pr-grandchild.pid'), String(child.pid))",
       "  await new Promise((r) => setTimeout(r, hang))",
       "  child.kill()",
       "}",
       "process.stdout.write('progress on stdout\\n' + (existsSync(answer) ? readFileSync(answer, 'utf8') : 'not json') + '\\n')",
     ].join('\n'),
   )
+  g(work, 'add', 'scripts')
+  g(work, 'commit', '-q', '-m', 'pre-pr')
+  g(work, 'push', '-q', 'origin', 'main')
+  // What the checkout has out is an older one, which says nothing: the board must not run it
+  writeFileSync(join(work, 'scripts/pre-pr.mjs'), "process.stdout.write(JSON.stringify({ error: 'the checkout copy of pre-pr ran' }) + '\\n')\n")
   return { work, low, tools }
 }
-const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[] }) : [])
+const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[]; script: string }) : [])
+/** The folder main's script was written to, from the address the script recorded for itself */
+const copyOf = (url: string) => /^(.*?cc-board-pre-pr-[^\\/]+)/.exec(fileURLToPath(url))![1]!
 const prePrAnswers = (a: unknown) => writeFileSync(join(root, 'pre-pr-answer.json'), JSON.stringify(a))
 /** The refs a call fetched under: refs/centralu-pre-pr/<one of its own>, read from its --head */
 const spaceOf = (args: string[]) => /^(refs\/centralu-pre-pr\/[^/]+)\/feat\/tools$/.exec(args[args.indexOf('--head') + 1]!)![1]!
@@ -827,6 +837,96 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     // Nothing of the person's moved: the board's refs are gone, and the remote-tracking refs are as they were
     expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
     expect(g(c.work, 'for-each-ref', 'refs/remotes')).toBe(tracking)
+  })
+
+  // #1931: a checkout out at an old commit ran its old script, and a check added since (lint) never ran, with nothing to say so
+  it("runs main's pre-pr as just fetched, not the checkout's older copy, from a folder of its own that it removes", async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools })
+    // A newer main, which the checkout has not pulled: its script is the one that runs
+    const newer = join(root, 'newer')
+    g(root, 'clone', '-q', join(root, 'origin.git'), newer)
+    g(newer, 'config', 'user.name', 'Tester')
+    g(newer, 'config', 'user.email', 'tester@example.test')
+    g(newer, 'config', 'commit.gpgsign', 'false')
+    const script = readFileSync(join(newer, 'scripts/pre-pr.mjs'), 'utf8')
+    writeFileSync(join(newer, 'scripts/pre-pr.mjs'), `${script}\nappendFileSync(join(process.cwd(), '..', 'pre-pr-newer'), 'ran')\n`)
+    g(newer, 'commit', '-q', '-am', 'a newer pre-pr')
+    g(newer, 'push', '-q', 'origin', 'main')
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    const [run] = prePrCalls()
+    const ran = fileURLToPath(run!.script)
+    expect(ran).not.toContain(c.work)
+    expect(existsSync(join(root, 'pre-pr-newer'))).toBe(true)
+    expect(readFileSync(join(c.work, 'scripts/pre-pr.mjs'), 'utf8')).toContain('the checkout copy of pre-pr ran')
+    // Gone with the refs; the checkout's index and files are as they were
+    expect(existsSync(copyOf(run!.script))).toBe(false)
+    expect(g(c.work, 'status', '--porcelain')).toBe('M scripts/pre-pr.mjs')
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
+  })
+
+  it('says so, running nothing, when main has no pre-pr script', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    const r = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', script: 'scripts/not-there.mjs' })
+    expect(r).toEqual({ ran: false, why: 'main on origin has no scripts/not-there.mjs', refsLeft: [] })
+    expect(prePrCalls()).toEqual([])
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
+  })
+
+  it('runs a script at the root of the repository, with the tree it sits in', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools })
+    writeFileSync(join(c.work, 'check.mjs'), g(c.work, 'show', 'main:scripts/pre-pr.mjs'))
+    g(c.work, 'add', 'check.mjs')
+    g(c.work, 'commit', '-q', '-m', 'a script at the root')
+    g(c.work, 'push', '-q', 'origin', 'main')
+    const r = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', script: 'check.mjs' })
+    expect(r.ran, r.why).toBe(true)
+    const [run] = prePrCalls()
+    expect(fileURLToPath(run!.script)).toBe(join(copyOf(run!.script), 'files', 'check.mjs'))
+    expect(existsSync(copyOf(run!.script))).toBe(false)
+  })
+
+  it('answers that the script could not be written out, with its refs removed, instead of throwing', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    // Not a missing file: git is not asked at all, and says why it failed
+    const r = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', script: 'scripts/bad\0name.mjs' })
+    expect(r.ran).toBe(false)
+    expect(r.why).toMatch(/^scripts\/bad\0name\.mjs of main on origin could not be written out to run: /)
+    expect(r.refsLeft).toEqual([])
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
+    expect(readdirSync(tmpdir()).filter((n) => n.startsWith(`cc-board-pre-pr-${process.pid}-`))).toEqual([])
+  })
+
+  it("removes the copies of main's script that a killed call left in the temporary folder, and only those of processes that ended", async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools })
+    // The pid of a process that has ended, and a folder named so as a call killed outright leaves it (its finally never ran)
+    const ended = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout
+    const left = join(tmpdir(), `cc-board-pre-pr-${ended}-left`)
+    // A call of this process that is still running, which runs side by side with the next one
+    const running = join(tmpdir(), `cc-board-pre-pr-${process.pid}-running`)
+    mkdirSync(join(left, 'files'), { recursive: true })
+    mkdirSync(running)
+    try {
+      const r = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main' })
+      expect(r.ran).toBe(true)
+      expect(existsSync(left)).toBe(false)
+      expect(existsSync(running)).toBe(true)
+    } finally {
+      rmSync(left, { recursive: true, force: true })
+      rmSync(running, { recursive: true, force: true })
+    }
   })
 
   it('checks every pull request under a stacked one, and says in Verified that it passed', async () => {
@@ -968,6 +1068,9 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     await until('the clean-up run', () => prePrCalls().some((x) => x.args[0] === '--cleanup'))
     const [run, cleanup] = prePrCalls()
     expect(cleanup!.args).toEqual(['--cleanup', run!.args[run!.args.indexOf('--run-id') + 1]])
+    // The clean-up ran from main's copy too, and the copy is removed once it has
+    expect(cleanup!.script).toBe(run!.script)
+    await until("the copy to go", () => !existsSync(copyOf(run!.script)))
     await until('the grandchild to be stopped', () => !isAlive(grandchild()))
     // Long after pre-pr would have answered "passed", still nothing was opened
     await new Promise((r) => setTimeout(r, 1_500))
@@ -985,6 +1088,8 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     expect(late.why).toBe('it was stopped: it did not finish within 3 s.')
     await until('the grandchild to be stopped', () => !isAlive(grandchild()))
     expect(prePrCalls().at(-1)!.args[0]).toBe('--cleanup')
+    expect(prePrCalls().at(-1)!.script).toBe(prePrCalls().at(-2)!.script)
+    expect(existsSync(copyOf(prePrCalls().at(-1)!.script))).toBe(false)
 
     // A ref locked while pre-pr runs cannot be deleted after: the answer names it
     prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 2_000 })
