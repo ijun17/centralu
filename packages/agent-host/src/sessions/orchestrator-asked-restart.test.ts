@@ -3,10 +3,8 @@
  * reply to a session's request by what was really read before it, on the same store in the same data folder, as the first host would have.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { realpathSync } from 'node:fs'
-import { join } from 'node:path'
 import { ORCHESTRATOR_CHANGE, type ProjectInfo, type SessionInfo, type ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess } from '../adapters/contract.js'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
@@ -27,11 +25,11 @@ type Host = { store: Store; adapter: FakeAdapter; mgr: SessionManager; mail: Hos
 
 /** A host on the data folder's store: its manager, its mail, and the fake tool its sessions run on */
 async function startHost(kept: ReadonlySet<string> = new Set()): Promise<Host> {
-  const store = new Store(join(data, 'store.db'))
+  const store = new Store(`${data}/store.db`)
   const adapter = new FakeAdapter()
   adapter.capabilities.gatesSteps = true
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, () => {}, undefined, join(data, 'worktrees'), { keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, () => {}, undefined, `${data}/worktrees`, { keptSessions: kept })
   const rpc = createRpcHandler(mgr, adapters)
   mgr.useWindowRpc((method, params) => rpc(method, params))
   const mail = wireHostMail(mgr, store, { now: () => clock.t, orchestratorHasMailCommand: () => commandsFor('orchestrator').includes('mail') })
@@ -70,7 +68,7 @@ const settle = async () => {
 }
 
 async function project(h: Host, label: string): Promise<ProjectInfo> {
-  const dir = realpathSync(tempRoot(`cc-asked-${label}-`))
+  const dir = tempRoot(`cc-asked-${label}-`)
   dirs.push(dir)
   const p = (await h.rpc('projects.add', { path: dir })) as ProjectInfo
   await h.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
@@ -115,7 +113,7 @@ async function readThenRestart(what: 'own project' | 'other project', how: 'quit
   await stopHost(a, how)
 
   const b = await startHost(how === 'swap' ? new Set([orc]) : new Set())
-  if (how === 'swap') await b.mgr.adoptKept([{ sessionId: orc, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+  if (how === 'swap') await b.mgr.adoptKept([{ sessionId: orc, tool: 'claude', process: new FakeProcess() }])
   else await b.mgr.resumeSession(orc)
   const request = await ask(b, orc, asker, 'and what did it find?')
   const reply = b.mgr.runOrchestratorTool(orc, 'centralu_run', { command: 'mail', args: { action: 'reply', thread: request, text: 'it found the bug in login' } })

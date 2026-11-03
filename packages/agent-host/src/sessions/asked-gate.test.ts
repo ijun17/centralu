@@ -375,6 +375,32 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     }
   })
 
+  it('a read that cannot be written to the record counts as having read everything, also for the next host', async () => {
+    const w = world({ asker: () => null, folders: [HOME] })
+    const set = w.settings.set.bind(w.settings)
+    w.settings.set = () => {
+      throw new Error('disk full')
+    }
+    expect(() => w.gate.seen('orc', 'Read', { file_path: OUTSIDE })).toThrow('disk full')
+    w.settings.set = set
+    const after = world({ settings: w.settings, folders: [HOME] })
+    await send(after, reply())
+    expect(after.asked).toHaveLength(1)
+    const here = world({ asker: () => ASKER, folders: [HOME] })
+    here.settings.set = () => {
+      throw new Error('disk full')
+    }
+    here.settings.delete = () => {
+      throw new Error('disk full')
+    }
+    // (the gate's own read: not run)
+    const r = ran()
+    await expect(here.gate.when('orc', { name: 'Read', args: { file_path: OUTSIDE } }, undefined, r.run, refused)).rejects.toThrow('disk full')
+    expect(r.calls).toEqual([])
+    await send(here, reply())
+    expect(here.asked).toHaveLength(1)
+  })
+
   it('a reply held for the person tells the session that asked; a card for any other step does not', async () => {
     const w = world({ folders: [HOME], answer: 'deny' })
     await send(w, { action: 'send', to: 'someone', text: 'hi' })

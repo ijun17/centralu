@@ -62,6 +62,9 @@ export type WhenAsked = <T>(
 ) => Promise<T>
 
 export class AskedGate {
+  /** The orchestrators whose record this process cannot trust: it did not read, or a read could not be written to it. Cleared by a new conversation */
+  private readonly unknown = new Set<string>()
+
   constructor(private readonly host: AskedGateHost) {}
 
   /**
@@ -70,9 +73,13 @@ export class AskedGate {
    * kept in the store until a new conversation begins and is judged against the reach of whoever asks when words are written (`readIn`)
    */
   private readsOf(orchestratorId: string): Reads | null {
+    if (this.unknown.has(orchestratorId)) return null
     const raw = this.host.kept.appSetting(readsKey(orchestratorId))
     const reads = readJson(raw, READS.nullable(), null)
-    if (raw !== null && reads === null) console.error(`[agent-host] app_settings.${readsKey(orchestratorId)} does not read as what the conversation read; it counts as having read everything`)
+    if (raw !== null && reads === null) {
+      this.unknown.add(orchestratorId)
+      console.error(`[agent-host] app_settings.${readsKey(orchestratorId)} does not read as what the conversation read; it counts as having read everything`)
+    }
     return reads
   }
 
@@ -84,6 +91,7 @@ export class AskedGate {
   beginConversation(orchestratorId: string, fresh = true): void {
     if (fresh) this.host.kept.setAppSetting(readsKey(orchestratorId), '[]')
     else this.host.kept.deleteAppSetting(readsKey(orchestratorId))
+    this.unknown.delete(orchestratorId)
   }
 
   /** The orchestrator read something in a turn that was not a request (the person's own): kept, since a later request's reply could carry it */
@@ -108,7 +116,19 @@ export class AskedGate {
     if (list.some((r) => r.name === name && JSON.stringify(r.scope) === JSON.stringify(scope))) return
     // (bounded: past a few hundred distinct reads it is simply "everything")
     const next: Reads = list.length >= 300 ? [{ name: 'reads', scope: { everywhere: true } }] : [...list, { name, scope }]
-    this.host.kept.setAppSetting(readsKey(orchestratorId), JSON.stringify(next))
+    try {
+      this.host.kept.setAppSetting(readsKey(orchestratorId), JSON.stringify(next))
+    } catch (e) {
+      // The read is not in the record: from now on it counts as having read everything, here and, with the record gone, for the next host. Thrown on,
+      // so a read the gate runs itself is not run; the CLI's hook in the person's turn lets its read go on, which the mark covers
+      this.unknown.add(orchestratorId)
+      try {
+        this.host.kept.deleteAppSetting(readsKey(orchestratorId))
+      } catch {
+        // The store cannot be written at all: this process still counts it as everything
+      }
+      throw e
+    }
   }
 
   /** The first read of this conversation that the asker could not make itself, in words, or null */
