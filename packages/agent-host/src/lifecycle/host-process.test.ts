@@ -284,12 +284,34 @@ describe('the host process, started for real', () => {
   }, 60_000 * SLOW)
 
   /*
-   * #1902: an update's stop (host.stop { forUpdate }, what a linked hub sends) ends every terminal and Run command; the host
-   * that starts next on the data folder opens the terminals again and starts the commands again. Which stop lists them, and
-   * that the start brings them back before it listens, are about the order main.ts takes its steps in, so it is asked of two real
-   * hosts: a plain stop must bring back nothing.
+   * #1902: an update's stop ends every terminal and Run command; the host that starts next on the data folder opens the terminals
+   * again and starts the commands again. Which stop lists them, and that the start brings them back before it listens, are about
+   * the order main.ts takes its steps in, so it is asked of real hosts: a plain stop must bring back nothing. The stop for an update
+   * comes the ways a host is stopped in order: `host.stop { forUpdate }` over the socket, from a linked hub through `centralu
+   * serve`, and, from the desktop window that is the host's parent (#1895), a line on the host's stdin, since that window speaks no
+   * WebSocket and `host.stop` is refused to a host the app runs.
    */
-  it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', async () => {
+  type Running = { p: ChildProcess; port: number }
+  const stops = {
+    hub: {
+      env: { CC_SERVE: '1' },
+      update: async (h: Running, token: string) => expect(await rpc(h.port, token, 'host.stop', { forUpdate: true })).toMatchObject({ ok: true }),
+      plain: async (h: Running, token: string) => expect(await rpc(h.port, token, 'host.stop', {})).toMatchObject({ ok: true }),
+    },
+    window: {
+      env: { CC_STARTED_BY: 'app' },
+      update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'stop', forUpdate: true })}\n`),
+      // The window quitting: its end of the pipe closes
+      plain: async (h: Running) => void h.p.stdin!.end(),
+    },
+    drain: {
+      env: { CC_KEEPER: '1' },
+      update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'drain', timeoutMs: 100 })}
+`),
+      plain: async (h: Running) => void h.p.stdin!.end(),
+    },
+  }
+  const bringsBack = async (how: (typeof stops)[keyof typeof stops]) => {
     const s = setup()
     const token = 'token-handed-on-stdin-0123456789'
     const project = join(s.dir, 'project')
@@ -299,7 +321,7 @@ describe('the host process, started for real', () => {
     const boot = async () => {
       // The host runs a Run command through `$SHELL -lc`: setup()'s SHELL is a script that only answers the PATH probe and ends,
       // so a command run through it ends at once and is not one the stop can list. A real shell, as a person's is
-      const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_SERVE: '1', ...(posix ? { SHELL: '/bin/sh' } : {}) })
+      const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', ...how.env, ...(posix ? { SHELL: '/bin/sh' } : {}) })
       host.p.stdin.write(`${JSON.stringify({ token })}
 `)
       return { ...host, port: await host.ready }
@@ -315,7 +337,7 @@ describe('the host process, started for real', () => {
     await rpc(first.port, token, 'commands.run', { projectId: id, command: run })
     // It is running when the stop comes: what the stop lists is what is running
     expect((await state(first.port, id)).runs).toEqual([expect.objectContaining({ command: run, running: true })])
-    expect(await rpc(first.port, token, 'host.stop', { forUpdate: true })).toMatchObject({ ok: true })
+    await how.update(first, token)
     expect(await first.exited).toBe(0)
 
     // The update's stop listed them: the next host has a terminal with nothing in it but its own start, and the command running again
@@ -327,14 +349,17 @@ describe('the host process, started for real', () => {
     expect(log.run?.history.startsWith('Started again after the update.')).toBe(true)
 
     // A plain stop, then a start: nothing comes back, and no list was left behind
-    expect(await rpc(second.port, token, 'host.stop', {})).toMatchObject({ ok: true })
+    await how.plain(second, token)
     expect(await second.exited).toBe(0)
     expect(readdirSync(s.dir).filter((n) => n.startsWith('update-resume.'))).toEqual([])
     const third = await boot()
     expect(await state(third.port, id)).toEqual({ terminals: [], runs: [] })
-    expect(await rpc(third.port, token, 'host.stop', {})).toMatchObject({ ok: true })
+    await how.plain(third, token)
     expect(await third.exited).toBe(0)
-  }, 180_000 * SLOW)
+  }
+  it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', () => bringsBack(stops.hub), 180_000 * SLOW)
+  it("the same for the window's stop line on the host's stdin (#1895)", () => bringsBack(stops.window), 180_000 * SLOW)
+  it('the same for a keeper draining a host that holds no agents for a swap (#1895)', () => bringsBack(stops.drain), 180_000 * SLOW)
 
   it('without --watch-parent the end of stdin means nothing, and a signal still shuts it down (HO7)', async () => {
     const s = setup()
