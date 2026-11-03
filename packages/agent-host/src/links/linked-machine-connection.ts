@@ -965,10 +965,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     /*
      * The machine switches versions itself (plan §10.5a): a switch under way is waited for, and one that ended while no hub
      * followed it is said once. Asked where the hub manages an install (no other machine pays for the extra ssh), when no
-     * host runs, and when one does only while it may have ended unread (`switchUnread`)
+     * host runs, and when one does only while there may be news: the connection line says the last switch there is under
+     * way or ended unreported (#1907), however this hub missed it, across its restarts too. A launcher from before that
+     * says nothing of it, and is asked while it may have ended unread here (`switchUnread`)
      */
     const managed = !!endpoint.line.install?.current && !this.held && this.operation === null
-    const asked = managed && (!endpoint.line.hostRunning || this.switchUnread)
+    const last = endpoint.line.install?.lastSwitch
+    const news = last === undefined ? this.switchUnread : !!last && (!last.ended || !last.seen)
+    const asked = managed && (!endpoint.line.hostRunning || news)
     const read = asked ? await this.switchThere() : null
     // Unread still while it is under way; a read that failed leaves it so
     if (asked && read !== undefined) this.switchUnread = !!read && !read.outcome
@@ -1135,7 +1139,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (s.id !== this.switchWatched) this.switchNote = `${this.name} was updated to Centralu ${s.to.version} while this computer was away`
     } else {
       try {
-        switchResult(s, this.record.sshTarget, null, this.name)
+        switchResult(s, this.name)
       } catch (err) {
         this.switchNote = errorMessage(err)
       }

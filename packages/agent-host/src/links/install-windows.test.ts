@@ -445,6 +445,25 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(switchNow()).toMatchObject({ outcome: 'done', startedMeanwhile: '9.9.1' })
     }, 240_000 * SLOW)
 
+    /*
+     * #1907: a switcher died at the start and nobody finished its switch; then someone started the old version with its
+     * own CLI, which asks no switch. The next reader stopped that host and started it again. It now leaves it serving
+     */
+    it('a reader finishing a dead switch leaves serving an old host someone started meanwhile, and puts the pointers back', async () => {
+      await installedAndRunning()
+      void update('9.9.2', { FAKE_HOLD: 'start 9.9.2' }, { exec: goneAfterHandover() }).done.catch(() => undefined)
+      await killSwitcher('start')
+      tell({})
+      // 9.9.1 started by hand: a fake version's host is its `running` file
+      writeFileSync(data('running'), '9.9.1')
+      const before = events()
+      expect(await readSwitchStatus(control().c)).toMatchObject({ outcome: 'put_back', kept: '9.9.1', interrupted: true })
+      // Nothing stopped, nothing started again
+      expect(events()).toEqual(before)
+      expect(running()).toBe('9.9.1')
+      expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
+    }, 180_000 * SLOW)
+
     it('refuses a second update, and starts no host, while a live switcher is between its stop and its start', async () => {
       await installedAndRunning()
       const first = update('9.9.2', { FAKE_HOLD: 'stop' })

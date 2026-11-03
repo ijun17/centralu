@@ -22,8 +22,8 @@ export const WIN_NODE_FILE = `node-v${WIN_NODE_V}-win-x64.zip`
 /** What the fake ssh prints when it could not run the command or the command was ended: no status, and not a bare exit 1 (#1244) */
 export const FAKE_SSH_MARK = 'fake ssh: '
 
-/** Windows OpenSSH runs the command line it is given through cmd.exe; so does `shell: true` */
-const SSH = `const r = require('node:child_process').spawnSync(process.argv.at(-1), { shell: true, stdio: 'inherit' })
+/** Windows OpenSSH runs the command line it is given through cmd.exe, in the account's home; so does this (in the checkout, PowerShell left its module cache there) */
+const SSH = `const r = require('node:child_process').spawnSync(process.argv.at(-1), { shell: true, stdio: 'inherit', cwd: process.env.USERPROFILE })
 if (r.error || r.status === null) console.error(${JSON.stringify(FAKE_SSH_MARK)} + (r.error ? r.error.message : 'the command was ended by ' + r.signal))
 process.exit(r.status ?? 1)
 `

@@ -471,7 +471,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     // ssh hands its last argument to the remote's shell, as sshd does
     writeFileSync(
       join(root, 'ssh'),
-      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit' })\nprocess.exit(r.status ?? 1)\n`,
+      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
     )
     chmodSync(join(root, 'ssh'), 0o755)
     archive = tarGz(`node-v${NODE_V}-linux-x64`, {

@@ -412,7 +412,7 @@ function wholeCommand(o: {
     const { repo } = fakeRepo(root)
     const version = `${BASE}.local.1`
     await expect(dev(repo, { env: { FAKE_BROKEN: version } }).done).rejects.toThrow(
-      new RegExp(`Centralu ${version.replaceAll('.', '\\.')} did not start on box .*; it runs Centralu ${BASE.replaceAll('.', '\\.')} again`),
+      new RegExp(`Centralu ${version.replaceAll('.', '\\.')} did not start on Box .*; it runs Centralu ${BASE.replaceAll('.', '\\.')} again`),
     )
     expect(running()).toBe(BASE)
     expect(readFileSync(remote('current'), 'utf8')).toBe(`${BASE} ${node()}\n`)
@@ -454,7 +454,7 @@ describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux m
       tool('getconf', 'echo "glibc 2.39"')
       writeFileSync(
         join(root, 'ssh'),
-        `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit' })\nprocess.exit(r.status ?? 1)\n`,
+        `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
       )
       chmodSync(join(root, 'ssh'), 0o755)
       const archive = tarGz(`node-v${NODE_V}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT' })

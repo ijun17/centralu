@@ -602,15 +602,18 @@ running host's own hello on the folder's credential. Nothing is imported across 
    fails (the link down) is tried again, the wait doubling to 30 s, and does not fail the update. It ends on `outcome`, or
    after 15 minutes with "could not be followed to its end; how it ended is shown once the machine is reached again". It
    then reads once more with `--seen <id>`, which marks the outcome reported. At a link start where the hub manages an
-   install it reads the switch too: always when no host runs, and when one does while the last switch may have ended
-   unread by this hub (the first open, a switch last seen under way, or an operation of this hub's that failed, such as
-   one it could not follow). A switch under way is waited for, and an outcome not yet `seen` is said once on the row
+   install it reads the switch too: always when no host runs, and when one does while the connection line's
+   `install.lastSwitch` (`{ id, ended, seen }`, from `switch.json`) says the last switch is under way or ended
+   unreported. That covers a hub that was away for the whole switch, or restarted since, with no extra ssh at an open
+   with nothing to say (#1907). A launcher from before that says nothing of it; there the hub reads while the switch may
+   have ended unread by it (the first open, a switch last seen under way, or an operation of its own that failed). A
+   switch under way is waited for, and an outcome not yet `seen` is said once on the row
    (`switchNote`), then marked. A switch of another hub's that this hub showed `updating` for and that went through is no
    news, so it says nothing then; a failed one it says.
 
 **`switch.json`** (`v: 1`, written by rename): `{ id, by, from, to, keep, was: { current, previous }, saveStore, step,
 startedAt, at, pid, started, wasRunning?, outcome?: 'done' | 'put_back' | 'failed', stage?, why?, putBackWhy?, stopFailed?,
-log?, restored?, interrupted?, startedMeanwhile?, removed?, left?, seen? }`. `why` is written when the put-back begins, so
+log?, restored?, interrupted?, startedMeanwhile?, kept?, removed?, left?, seen? }`. `why` is written when the put-back begins, so
 a reader that finishes it can still say it. The sentences are the hub's, from these fields.
 
 **Is the switcher alive?** Every reader asks this before it believes a `switch.json` with no `outcome`: `--switch-status`,
@@ -652,6 +655,11 @@ switch before anything else, by the last step written:
   is past, so a reader hours later never stops a host that has served all along.
 - `roll_back` or `restart`, with `current` back on the old version and a host answering as it: outcome `put_back`,
   `interrupted`, with the `why` the put-back began with.
+- From `switch` to `restart`, a host answering as a version this part of the switch did not start (the old one from
+  `switch` to `check`; anything but the new one, which the put-back is ending, in the put-back) was started by someone
+  else meanwhile, with a CLI that asks no switch. A reader never stops it (#1907): the old version keeps serving with
+  the pointers back as they were (`put_back`, `kept`); another version keeps serving with nothing changed (`failed`,
+  stage `kept`).
 - Otherwise from `switch` to `restart`: the new host is stopped, the pointers in `was` go back, the store copy goes back
   for a dev build, and the old version is started and waited for. Outcome `put_back`, `interrupted`. When the reader is a
   `serve` or `--detach` of the new version, it then runs the same command of the version `current` names now, which
@@ -717,6 +725,8 @@ with main's steps (no host after the stop):
   next `--detach` finishes it, with nothing switched or with the old version put back and serving;
 - the switcher is killed at its check while the new version answers: the next `--detach`, or a status read, finishes it
   as `done`, and the new host keeps serving (#1907);
+- the switcher is killed at its start, then the old version's host is started by hand: the next status read leaves it
+  serving and puts the pointers back, stopping and starting nothing (#1907);
 - a version that asks no switch (`FAKE_NO_GATE`, as a release from before it) is started between the stop and the new
   start: the switcher stops it and the update goes through (#1907). Run too with the published 0.1.0-beta.45 as the old
   version and its real launcher starting the host mid-switch;
@@ -731,7 +741,10 @@ Launcher-level tests (tooling/launcher-switch.test.ts) cover the arguments, the 
 rule, the steps a start is refused in, a dead switcher finished before and after the switch, a busy second switch that
 writes nothing, and what a prune keeps, and a dead switcher finished by a launcher that then exits on a missing host
 entry. The hub's link (links.test.ts) waits for a switch under way, says nothing of one it watched go through, and says
-once how an update it could not follow ended, on the next reach.
+once how an update it could not follow ended, and how a switch it missed altogether ended, on the next reach.
+
+The ssh stand-ins run each command in the account's home, as sshd does. Run in the checkout, PowerShell wrote its module
+cache there (`Microsoft/Windows/PowerShell/ModuleAnalysisCache`), which a commit then picked up.
 
 **Visible wording** (the owner approved the first four, 2026-11-03; the rest are new and proposed):
 
@@ -745,10 +758,11 @@ once how an update it could not follow ended, on the next reach.
 | `The update of <machine> to Centralu <to> was interrupted before the switch; nothing was switched` | The update's error or row note |
 | `<hub> is switching the Centralu version on <machine>; press Connect to try again` | Machine row, Auto reconnect off |
 | `an update from <hub> started at <time> is switching versions here; no host starts until it ends` | `serve` / `--detach` on the machine (stderr) |
-| `Centralu <version> did not start on <target> (Centralu <other> answered there instead; something started it again during the switch); it runs Centralu <from> again` | The update's error, when an old host came back twice (#1907) |
+| `Centralu <version> did not start on <machine> (Centralu <other> answered there instead; something started it again during the switch); it runs Centralu <from> again` | The update's error, when an old host came back twice (#1907) |
+| `The update of <machine> to Centralu <to> was interrupted; Centralu <other> was started there meanwhile and runs` | Row note or the update's error, when a reader left a host of a third version serving (#1907) |
 
-`<time>` is HH:MM in local time in every one, the machine's own texts included (#1907). `<machine>` is the machine's name
-on its row; `<target>` is the ssh target, which the older texts of §10.5 use.
+`<time>` is HH:MM in local time in every one, the machine's own texts included, each side in its own zone (#1907).
+`<machine>` is the machine's name on its row, in every sentence of the switch's outcome and of the handover.
 
 ### 10.6 Probe 4: where the hub's ssh lives across a hub swap
 

@@ -456,11 +456,17 @@ function finishDone(dataDir, w, extra = {}) {
 /**
  * A switch with no outcome whose switcher is not alive, finished by whoever read it, by the last step written: before
  * the switch nothing changed (`failed`); from the switch until the check passed the old version is put back
- * (`put_back`); after it (`prune`), `done`. A version the pointers name that answers as itself is taken as it is, never
- * stopped (#1907): the new one from the switch to the check (`done`), the old one in the put-back (`put_back`), within
- * the time the switcher would have given it, or at once when that is past. `start`: a host is started too (the old one,
- * or the one that runs when nothing was switched); a caller that starts one itself next passes false. Answers the
- * switch as it is now
+ * (`put_back`); after it (`prune`), `done`.
+ *
+ * What answers there decides first, and a reader never stops a host the switch did not start (#1907):
+ *   - the version this part of the switch starts (the new one from the switch to the check, the old one in the
+ *     put-back) answering as itself is taken as it is: `done`, or `put_back`; asked within the time the switcher would
+ *     have given it, or once when that is past;
+ *   - any other version answering, except the new one in the put-back (which the switch started and is ending), was
+ *     started by someone else meanwhile (a version from before this switch asks none). It keeps serving: the old one
+ *     with the pointers back as they were (`put_back`, `kept`), another with nothing changed (`failed`, stage `kept`).
+ * `start`: a host is started too (the old one, or the one that runs when nothing was switched); a caller that starts
+ * one itself next passes false. Answers the switch as it is now
  */
 export async function reconcile(dataDir, { env, platform = process.platform, start }) {
   const s = readSwitch(dataDir)
@@ -475,12 +481,24 @@ export async function reconcile(dataDir, { env, platform = process.platform, sta
     const w = switchWork(dataDir, again, { env, platform })
     if (again.step === 'prune') return finishDone(dataDir, w, { interrupted: true })
     const now = readPointerFile(l.current)
-    const forward = ['switch', 'start', 'check'].includes(again.step) && now?.version === again.to.version
-    const back = ['roll_back', 'restart'].includes(again.step) && now && now.version === again.was.current?.version
-    if (forward || back) {
+    const back = ['roll_back', 'restart'].includes(again.step)
+    const old = again.was.current
+    if (now && (back || ['switch', 'start', 'check'].includes(again.step))) {
+      // What this part of the switch starts; only it is waited for, and only when the pointers name it
+      const own = back ? old?.version : again.to.version
       const left = (typeof again.at === 'number' ? again.at : 0) + (again.step === 'start' || again.step === 'restart' ? 2 : 1) * CHECK_MS - Date.now()
-      if ((await w.hear(now, now.version, Math.max(0, left))).ok) {
-        return forward ? finishDone(dataDir, w, { interrupted: true }) : w.write({ outcome: 'put_back', why: again.why ?? 'interrupted', interrupted: true })
+      const heard = own ? await w.hear(now, own, now.version === own ? Math.max(0, left) : 0) : { ok: false }
+      if (heard.ok && now.version === own) {
+        return back ? w.write({ outcome: 'put_back', why: again.why ?? 'interrupted', interrupted: true }) : finishDone(dataDir, w, { interrupted: true })
+      }
+      const other = heard.ok ? own : heard.other
+      if (other && !(back && other === again.to.version)) {
+        const why = `Centralu ${other} was started there during the switch`
+        if (old && other === old.version) {
+          setPointers(dataDir, old, again.was.previous, platform)
+          return w.write({ outcome: 'put_back', why, kept: other, interrupted: true })
+        }
+        return w.write({ outcome: 'failed', stage: 'kept', why, kept: other, interrupted: true })
       }
     }
     if (again.step === 'stop' || again.step === 'backup') {

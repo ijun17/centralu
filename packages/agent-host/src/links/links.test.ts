@@ -682,6 +682,43 @@ describe('a hub linked to another host (#82)', () => {
       await eventually(() => sw.seen === true)
     })
 
+    /*
+     * #1907: a hub away for the whole of a switch (nothing seen under way, no operation of its own) read nothing once its
+     * host ran there, and said nothing. The connection line now says the last switch ended unreported
+     */
+    it('says once how a switch ended that this hub missed altogether, on the next reach', async () => {
+      let sw: Record<string, unknown> | null = null
+      const asked: string[] = []
+      const install = { managed: true, current: { version: RELEASE, node: '24.21.0' }, previous: null, node: '24.21.0', lastSwitch: null as { id: string; ended: boolean; seen: boolean } | null }
+      const l = await linkTo(
+        async () => ({ how: 'detached', note: null }),
+        async (cmd) => {
+          const script = String(cmd) + Buffer.from(/^printf %s (\S+) \|/.exec(String(cmd))?.[1] ?? '', 'base64').toString('utf8')
+          asked.push(script)
+          if (sw && script.includes(' --seen ')) {
+            sw.seen = true
+            install.lastSwitch = { id: String(sw.id), ended: true, seen: true }
+          }
+          return { code: 0, stdout: `${JSON.stringify({ v: 1, switchStatus: sw })}\n`, stderr: '' }
+        },
+        { install },
+      )
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      const reads = asked.length
+      // While this hub was away (a laptop asleep), another hub updated the machine; nobody reported how it ended
+      sw = { id: 'switch-1907-0002', by: 'other-hub', to: { version: RELEASE, node: '24.21.0' }, keep: null, was: { current: null, previous: null }, step: 'prune', startedAt: Date.now(), outcome: 'done' }
+      install.lastSwitch = { id: 'switch-1907-0002', ended: true, seen: false }
+      l.links.reconnect('m1')
+      await eventually(() => l.links.list()[0]!.switchNote === `Remote box was updated to Centralu ${RELEASE} while this computer was away`)
+      await eventually(() => sw.seen === true)
+      // Reported: the next reach reads nothing more
+      const after = asked.length
+      expect(after).toBeGreaterThan(reads)
+      l.links.reconnect('m1')
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      expect(asked.length).toBe(after)
+    })
+
     it('starts it without asking, says so in the row and the log, and connects', async () => {
       const l = await linkTo(async () => ({ how: 'detached', note: null }))
       await eventually(() => l.links.list()[0]!.status === 'connected')
@@ -1473,7 +1510,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   it('puts the old version back when the host that answers is not the new one, and says so', async () => {
     const { hub, u, runs } = await setup({ startsVersion: '0.0.9', busy: false })
     await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(
-      /Centralu .* did not start on box \(it did not answer within 30 s\); it runs Centralu 0\.0\.1 again\. The end of its host\.log: host: the store was written by a newer Centralu/,
+      /Centralu .* did not start on Remote box \(it did not answer within 30 s\); it runs Centralu 0\.0\.1 again\. The end of its host\.log: host: the store was written by a newer Centralu/,
     )
     expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
     // Back on the old version, the prompt is there again
@@ -1483,7 +1520,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   // #1903: what ran there before was not installed by a hub, so its version is not known; any host that answers is it
   it('counts the Centralu the hub did not install as back once any host answers, not before', async () => {
     const { u, runs } = await setup({ startsVersion: '0.0.9', busy: false, unmanaged: true })
-    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(/did not start on box \(it did not answer within 30 s\); it runs the Centralu that was there again\./)
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(/did not start on Remote box \(it did not answer within 30 s\); it runs the Centralu that was there again\./)
     expect(runs.filter((k) => k !== 'open').slice(-3)).toEqual(['stop', 'pointers', 'start'])
   })
 })

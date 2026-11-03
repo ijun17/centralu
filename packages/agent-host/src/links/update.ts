@@ -119,7 +119,9 @@ export type SwitchState = {
   startedAt: number
   wasRunning?: boolean
   outcome?: 'done' | 'put_back' | 'failed'
-  stage?: 'stop' | 'backup' | 'put_back' | 'interrupted'
+  stage?: 'stop' | 'backup' | 'put_back' | 'interrupted' | 'kept'
+  /** A version someone started there during the switch, which a reader that finished it left serving */
+  kept?: string
   why?: string
   putBackWhy?: string
   stopFailed?: string | null
@@ -227,33 +229,35 @@ async function follow(c: HostControl, id: string): Promise<SwitchState> {
 }
 
 /** What the person is told when the store was put back as it was before a dev build */
-const restoredNote = (version: string, target: string) =>
-  `The store on ${target} was put back as it was before the dev build first opened it, since Centralu ${version} could not read it as the dev build left it; what was done on the dev build since is not in it`
+const restoredNote = (version: string, machine: string) =>
+  `The store on ${machine} was put back as it was before the dev build first opened it, since Centralu ${version} could not read it as the dev build left it; what was done on the dev build since is not in it`
 
-/** A finished switch as the update's result, or the sentence it failed with (thrown) */
-export function switchResult(s: SwitchState, target: string, stoppedTurns: string | null = null, machine = target): InstallResult {
+/** A finished switch as the update's result, or the sentence it failed with (thrown); `machine` is its name on the row */
+export function switchResult(s: SwitchState, machine: string, stoppedTurns: string | null = null): InstallResult {
   const from = s.was.current
   const back = from ? `Centralu ${from.version}` : 'the Centralu that was there'
   const log = s.log ? ` The end of its host.log: ${s.log}` : ''
   if (s.outcome === 'done') {
-    const note = [stoppedTurns, s.restored ? restoredNote(s.to.version, target) : null].filter(Boolean).join(' ')
+    const note = [stoppedTurns, s.restored ? restoredNote(s.to.version, machine) : null].filter(Boolean).join(' ')
     return { current: s.to, previous: s.keep, removed: s.removed ?? [], left: s.left ?? [], ...(note ? { note } : {}) }
   }
   if (s.outcome === 'put_back') {
     if (s.interrupted) throw new Error(`The update of ${machine} to Centralu ${s.to.version} was interrupted; it runs ${back} again`)
     const store = s.saveStore ? ' Its store is as it was before the dev build first opened it.' : ''
-    throw new Error(`Centralu ${s.to.version} did not start on ${target} (${s.why}); ${s.wasRunning === false ? `${back} is back in place` : `it runs ${back} again`}.${store}${log}`)
+    throw new Error(`Centralu ${s.to.version} did not start on ${machine} (${s.why}); ${s.wasRunning === false ? `${back} is back in place` : `it runs ${back} again`}.${store}${log}`)
   }
   switch (s.stage) {
     case 'stop':
-      throw new Error(`Centralu on ${target} could not be stopped: ${s.why ?? 'no reason given'}`)
+      throw new Error(`Centralu on ${machine} could not be stopped: ${s.why ?? 'no reason given'}`)
     case 'backup':
-      throw new Error(`The store on ${target} could not be copied before the dev build first opened it (${s.why ?? 'no reason given'}); the release was started again and nothing was switched`)
+      throw new Error(`The store on ${machine} could not be copied before the dev build first opened it (${s.why ?? 'no reason given'}); the release was started again and nothing was switched`)
+    case 'kept':
+      throw new Error(`The update of ${machine} to Centralu ${s.to.version} was interrupted; Centralu ${s.kept ?? 'another version'} was started there meanwhile and runs`)
     case 'interrupted':
       throw new Error(`The update of ${machine} to Centralu ${s.to.version} was interrupted before the switch; nothing was switched`)
     default: {
-      const stop = s.stopFailed ? ` (after Centralu on ${target} could not be stopped: ${s.stopFailed})` : ''
-      throw new Error(`Centralu ${s.to.version} did not start on ${target} (${s.why}), and putting back ${back} failed too: ${s.putBackWhy}${stop}.${log}`)
+      const stop = s.stopFailed ? ` (after Centralu on ${machine} could not be stopped: ${s.stopFailed})` : ''
+      throw new Error(`Centralu ${s.to.version} did not start on ${machine} (${s.why}), and putting back ${back} failed too: ${s.putBackWhy}${stop}.${log}`)
     }
   }
 }
@@ -283,20 +287,20 @@ export async function handOver(c: HostControl, runners: InstalledVersion[], p: O
   const answer = lineOf(r.stdout, 'switch') as { ok?: unknown; reason?: unknown; by?: unknown; startedAt?: unknown; message?: unknown } | undefined
   // Begun since the read above
   if (answer?.ok === false && answer.reason === 'busy') throw busy(answer.by, answer.startedAt)
-  if (answer?.ok === false) throw new Error(`${c.target} did not take the update: ${typeof answer.message === 'string' ? answer.message : 'no reason given'}`)
+  if (answer?.ok === false) throw new Error(`${machine} did not take the update: ${typeof answer.message === 'string' ? answer.message : 'no reason given'}`)
   // No answer at all: the command may have died with the link after the switcher started; the switch says
   if (answer === undefined) {
     const s = await readSwitchStatus(c).catch(() => undefined)
     if (s?.id !== params.id) {
       const why = lastLine(r.stderr)
-      throw new Error(`Handing the update to ${c.target} gave no answer${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}; nothing was switched`)
+      throw new Error(`Handing the update to ${machine} gave no answer${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}; nothing was switched`)
     }
   }
   const s = await follow(c, params.id)
   // Reported here: a hub that links later does not report it again
   await readSwitchStatus(c, params.id).catch(() => undefined)
   // The versions as this hub knows them (a dev build's `source` with them), not as the machine echoes them
-  return { ...switchResult(s, c.target, stoppedTurns, machine), current: p.to, previous: p.keep }
+  return { ...switchResult(s, machine, stoppedTurns), current: p.to, previous: p.keep }
 }
 
 export type UpdateOptions = Omit<InstallOptions, 'exec' | 'spec' | 'target' | 'script' | 'onStep' | 'activate'>

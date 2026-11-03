@@ -146,7 +146,21 @@ export function installInfo(dataDir, env, nodeVersion = process.versions.node) {
     const source = p && installSource(join(l.versions, p.version))
     return p && source ? { ...p, source } : p
   }
-  return { managed: env.CENTRALU_MANAGED === '1', current: read(l.current), previous: read(l.previous), node: nodeVersion }
+  return { managed: env.CENTRALU_MANAGED === '1', current: read(l.current), previous: read(l.previous), node: nodeVersion, lastSwitch: lastSwitchOf(l.root) }
+}
+
+/**
+ * The last switch there (`switch.json`, serve-switch.mjs), as much as a hub needs to know whether to read it: its id,
+ * whether it ended, and whether its outcome was reported (`--seen`). A hub that was away for the whole of it, or
+ * restarted since, learns from this at its next open that there is an outcome to say (#1907). Null when none ran
+ */
+function lastSwitchOf(root) {
+  try {
+    const s = JSON.parse(readFileSync(join(root, 'switch.json'), 'utf8'))
+    return typeof s?.id === 'string' ? { id: s.id, ended: typeof s.outcome === 'string', seen: s.seen === true } : null
+  } catch {
+    return null
+  }
 }
 
 /**

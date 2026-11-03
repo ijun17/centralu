@@ -1853,7 +1853,7 @@ describe('the install field and the managed launcher (remote-hub.md §10.1)', ()
 
   it('says whether the managed launcher ran it, what is current and previous, and which Node answered', () => {
     const d = tempDir()
-    expect(installInfo(d, {}, '24.21.0')).toEqual({ managed: false, current: null, previous: null, node: '24.21.0' })
+    expect(installInfo(d, {}, '24.21.0')).toEqual({ managed: false, current: null, previous: null, node: '24.21.0', lastSwitch: null })
     const l = remoteLayout(d)
     mkdirSync(l.root, { recursive: true })
     writeFileSync(l.current, '0.1.0-beta.14 24.21.0\n')
@@ -1863,7 +1863,13 @@ describe('the install field and the managed launcher (remote-hub.md §10.1)', ()
       current: { version: '0.1.0-beta.14', node: '24.21.0' },
       previous: { version: '0.1.0-beta.13', node: '24.21.0' },
       node: '24.21.0',
+      lastSwitch: null,
     })
+    // #1907: the last switch, so a hub that missed it knows there is an outcome to say
+    writeFileSync(join(l.root, 'switch.json'), JSON.stringify({ id: 'switch-test-0001', step: 'check' }))
+    expect(installInfo(d, {}, '24.21.0').lastSwitch).toEqual({ id: 'switch-test-0001', ended: false, seen: false })
+    writeFileSync(join(l.root, 'switch.json'), JSON.stringify({ id: 'switch-test-0001', step: 'prune', outcome: 'done', seen: true }))
+    expect(installInfo(d, {}, '24.21.0').lastSwitch).toEqual({ id: 'switch-test-0001', ended: true, seen: true })
   })
 
   /**

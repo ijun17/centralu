@@ -97,6 +97,11 @@ export type RemoteInstall = {
   previous: { version: string; node: string; source?: InstallSource } | null
   /** The Node that ran `--connection` */
   node: string | null
+  /**
+   * The last switch there (plan §10.5a): whether it ended and its outcome was reported. Null when none ran; absent from a
+   * launcher from before #1907, which does not say
+   */
+  lastSwitch?: { id: string; ended: boolean; seen: boolean } | null
 }
 
 /**
@@ -251,7 +256,9 @@ function parseInstall(raw: unknown): RemoteInstall | null {
     const source = s && s.kind === 'dev' && typeof s.commit === 'string' && /^[0-9a-f]{7,64}$/.test(s.commit) ? { kind: 'dev' as const, commit: s.commit, dirty: s.dirty === true } : null
     return { version: p.version, node: p.node, ...(source ? { source } : {}) }
   }
-  return { managed: o.managed === true, current: pointer(o.current), previous: pointer(o.previous), node: typeof o.node === 'string' ? o.node : null }
+  const ls = o.lastSwitch as { id?: unknown; ended?: unknown; seen?: unknown } | null | undefined
+  const lastSwitch = ls === null ? { lastSwitch: null } : ls && typeof ls.id === 'string' ? { lastSwitch: { id: ls.id, ended: ls.ended === true, seen: ls.seen === true } } : {}
+  return { managed: o.managed === true, current: pointer(o.current), previous: pointer(o.previous), node: typeof o.node === 'string' ? o.node : null, ...lastSwitch }
 }
 
 /** The `autostart` field, field by field; null when it is not one */
