@@ -693,7 +693,8 @@ export class ChildOwnership {
     const listed = tryParseJson(this.store.settings.appSetting(inputOriginsKey(sessionId)) ?? '[]')
     const items: unknown[] = Array.isArray(listed) ? listed : []
     const hub = items.flatMap((e) => {
-      const [id, given]: unknown[] = Array.isArray(e) ? e : []
+      const pair: unknown[] = Array.isArray(e) ? e : []
+      const [id, given] = pair
       const origin = TurnOrigin.safeParse(given)
       return typeof id === 'string' && origin.success ? [{ id, seq: origin.data.seq, origin: origin.data }] : []
     })
