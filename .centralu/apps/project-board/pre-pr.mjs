@@ -4,11 +4,15 @@
 //
 // The branches are fetched under refs of this call's own and removed again afterwards (as fetchRefs
 // in git.mjs does): no branch or remote-tracking ref of the person's moves. The script works in
-// temporary worktrees, so the checkout is not touched either. Cancelled or out of time, the script's
+// temporary worktrees, so the checkout is not touched either. The script itself is main's, as just fetched, written to a
+// folder of the call's own and removed with the refs (#1931): the checkout's copy is whatever that checkout has out (an old main,
+// another branch), and a stale one skipped the lint check without a word. Main's, not the head's, so a pull request cannot loosen
+// its own checks. Cancelled or out of time, the script's
 // whole process tree is stopped and its `--cleanup` removes what it left (worktrees, dependency links).
 import { runProgram } from './system.mjs'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, sep } from 'node:path'
 import { git, remoteFor, topLevel } from './git.mjs'
 import { now as clock } from './clock.mjs'
 
@@ -41,6 +45,24 @@ export function answerOf(stdout) {
   return null
 }
 
+/**
+ * The folder of `script` as the fetched main (`mainRef`) has it, written under `into`; answers the script's path there, or
+ * null when main has no such file. Through a temporary index of git's own, so the checkout's index and files are not touched.
+ */
+async function mainScript(root, mainRef, script, into) {
+  const folder = dirname(script)
+  if (folder === '.') throw new Error(`${script} is not in a folder`)
+  try {
+    await git(root, ['cat-file', '-e', `${mainRef}:${script}`])
+  } catch {
+    return null
+  }
+  const env = { GIT_INDEX_FILE: join(into, 'index') }
+  await git(root, ['read-tree', `--prefix=${folder}/`, `${mainRef}:${folder}`], { env })
+  await git(root, ['checkout-index', '--all', `--prefix=${into.split(sep).join('/')}/files/`], { env })
+  return join(into, 'files', script)
+}
+
 /** Runs the script; answers { stdout, stderr, code, stopped } where `stopped` is 'cancelled' or 'timed out'. */
 async function runScript(args, cwd, { signal, limitMs, beat }) {
   const started = clock()
@@ -67,17 +89,19 @@ async function runScript(args, cwd, { signal, limitMs, beat }) {
  */
 export async function runPrePr({ dir, repo, head, base, main, lowers = [], exempt = {}, script = 'scripts/pre-pr.mjs', beat = () => {}, signal, limitMs = LIMIT_MS }) {
   const root = await topLevel(dir)
-  const path = join(root, script)
-  if (!existsSync(path)) return { ran: false, why: `the checkout at ${root} has no ${script}`, refsLeft: [] }
   const remote = await remoteFor(root, repo)
   if (!remote) return { ran: false, why: `the checkout at ${root} has no remote for github.com/${repo}`, refsLeft: [] }
   const id = `board-${process.pid}-${++calls}`
   const branches = [...new Set([head, base, main, ...lowers])]
   const ref = (b) => `${SPACE}/${id}/${b}`
   const refsLeft = []
+  let copy = null
   try {
     await git(root, ['fetch', '--no-tags', '--quiet', remote, ...branches.map((b) => `+refs/heads/${b}:${ref(b)}`)], { timeoutMs: 5 * 60_000 })
     if (signal?.aborted) return { ran: false, why: 'the call was cancelled', refsLeft }
+    copy = await mkdtemp(join(tmpdir(), 'cc-board-pre-pr-'))
+    const path = await mainScript(root, ref(main), script, copy)
+    if (!path) return { ran: false, why: `${main} on ${remote} has no ${script}`, refsLeft }
     const args = [path, '--json', '--no-fetch', '--run-id', id, '--remote', remote, '--limit', String(scriptLimit(limitMs)), '--head', ref(head), '--base', ref(base), '--main', ref(main), ...lowers.flatMap((b) => ['--stack', ref(b)])]
     for (const [check, why] of Object.entries(exempt)) args.push('--exempt', `${check}=${why}`)
     const result = await runScript(args, root, { signal, limitMs, beat })
@@ -110,5 +134,6 @@ export async function runPrePr({ dir, repo, head, base, main, lowers = [], exemp
     for (const b of branches) {
       await git(root, ['update-ref', '-d', ref(b)]).catch((e) => refsLeft.push(`${ref(b)} (${e.message}); remove it with git update-ref -d ${ref(b)}`))
     }
+    if (copy) await rm(copy, { recursive: true, force: true }).catch((e) => refsLeft.push(`${copy} (${e.message}); remove that folder`))
   }
 }

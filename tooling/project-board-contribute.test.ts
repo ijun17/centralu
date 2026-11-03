@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
@@ -767,25 +767,32 @@ function prePrCheckout() {
   const tools = commit(work, 'c.txt', 'c\n', 'tools')
   g(work, 'push', '-q', 'origin', 'main', 'feat/low', 'feat/tools')
   g(work, 'checkout', '-q', 'main')
+  // The script is main's: committed and pushed, as the board fetches it (#1931)
   mkdirSync(join(work, 'scripts'))
   writeFileSync(
     join(work, 'scripts/pre-pr.mjs'),
     [
       "import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'",
       "import { execFileSync, spawn } from 'node:child_process'",
+      "import { join } from 'node:path'",
       "const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/centralu-pre-pr'], { encoding: 'utf8' }).trim().split('\\n')",
-      "appendFileSync(new URL('../../pre-pr-calls.jsonl', import.meta.url), JSON.stringify({ args: process.argv.slice(2), refs }) + '\\n')",
-      "const answer = new URL('../../pre-pr-answer.json', import.meta.url)",
+      "appendFileSync(join(process.cwd(), '..', 'pre-pr-calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), refs, script: import.meta.url }) + '\\n')",
+      "const answer = join(process.cwd(), '..', 'pre-pr-answer.json')",
       "const hang = existsSync(answer) ? JSON.parse(readFileSync(answer, 'utf8')).hangMs : 0",
       "if (hang && !process.argv.includes('--cleanup')) {",
       "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })",
-      "  writeFileSync(new URL('../../pre-pr-grandchild.pid', import.meta.url), String(child.pid))",
+      "  writeFileSync(join(process.cwd(), '..', 'pre-pr-grandchild.pid'), String(child.pid))",
       "  await new Promise((r) => setTimeout(r, hang))",
       "  child.kill()",
       "}",
       "process.stdout.write('progress on stdout\\n' + (existsSync(answer) ? readFileSync(answer, 'utf8') : 'not json') + '\\n')",
     ].join('\n'),
   )
+  g(work, 'add', 'scripts')
+  g(work, 'commit', '-q', '-m', 'pre-pr')
+  g(work, 'push', '-q', 'origin', 'main')
+  // What the checkout has out is an older one, which says nothing: the board must not run it
+  writeFileSync(join(work, 'scripts/pre-pr.mjs'), "process.stdout.write(JSON.stringify({ error: 'the checkout copy of pre-pr ran' }) + '\\n')\n")
   return { work, low, tools }
 }
 const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[] }) : [])
@@ -827,6 +834,44 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     // Nothing of the person's moved: the board's refs are gone, and the remote-tracking refs are as they were
     expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
     expect(g(c.work, 'for-each-ref', 'refs/remotes')).toBe(tracking)
+  })
+
+  // #1931: a checkout out at an old commit ran its old script, and a check added since (lint) never ran, with nothing to say so
+  it("runs main's pre-pr as just fetched, not the checkout's older copy, from a folder of its own that it removes", async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools })
+    // A newer main, which the checkout has not pulled: its script is the one that runs
+    const newer = join(root, 'newer')
+    g(root, 'clone', '-q', join(root, 'origin.git'), newer)
+    g(newer, 'config', 'user.name', 'Tester')
+    g(newer, 'config', 'user.email', 'tester@example.test')
+    g(newer, 'config', 'commit.gpgsign', 'false')
+    const script = readFileSync(join(newer, 'scripts/pre-pr.mjs'), 'utf8')
+    writeFileSync(join(newer, 'scripts/pre-pr.mjs'), `${script}\nappendFileSync(join(process.cwd(), '..', 'pre-pr-newer'), 'ran')\n`)
+    g(newer, 'commit', '-q', '-am', 'a newer pre-pr')
+    g(newer, 'push', '-q', 'origin', 'main')
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    const [run] = prePrCalls()
+    const ran = fileURLToPath(run!.script)
+    expect(ran).not.toContain(c.work)
+    expect(existsSync(join(root, 'pre-pr-newer'))).toBe(true)
+    expect(readFileSync(join(c.work, 'scripts/pre-pr.mjs'), 'utf8')).toContain('the checkout copy of pre-pr ran')
+    // Gone with the refs; the checkout's index and files are as they were
+    expect(existsSync(dirname(ran))).toBe(false)
+    expect(g(c.work, 'status', '--porcelain')).toBe('M scripts/pre-pr.mjs')
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
+  })
+
+  it('says so, running nothing, when main has no pre-pr script', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    const r = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', script: 'scripts/not-there.mjs' })
+    expect(r).toEqual({ ran: false, why: 'main on origin has no scripts/not-there.mjs', refsLeft: [] })
+    expect(prePrCalls()).toEqual([])
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
   })
 
   it('checks every pull request under a stacked one, and says in Verified that it passed', async () => {
