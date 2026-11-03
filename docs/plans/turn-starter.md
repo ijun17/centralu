@@ -1,87 +1,105 @@
-# Whose a turn is, from the tool's naming of its inputs
+# Whose a turn is: decided at its start, corrected by the inputs the tool names
 
-Issue #1639, proposed 2026-11-03. Status: **design only**. It is built once the owner has answered the
-decisions in §5. Everything here is read from main at `d648f42e1`, the mailbox switch.
+Issue #1639. Status: **built** in the same pull request as this document. The owner's decisions (2026-11-03) are in
+§6. Read from main at `c9f3807a7`.
 
-## 1. Today
+## 1. Before
 
-A session's turn is the person's or the work's (`TurnStarter.by`, #1377). Two records answer "who sent the message
-this turn runs for", and only one of them asks the tool:
+A session's turn is the person's or the work's (`TurnStarter.by`, #1377). `ChildOwnership` decided it when the session
+went from rest to `working`, from the message noted in the last 15 s (`NEXT_STARTER_MS`), else the CLI's own turn. That
+is a guess by time: under load, or when the tool held a message longer than the window, the turn went to the wrong side.
+A command the tool answered without a turn had the same effect when a work turn followed within the window. The record
+(`nextStarter`, `nextSource`, `pending`) was memory only, so a host swap lost it.
 
-| Record | Kept | Whose messages | Decided |
-|---|---|---|---|
-| `nextStarter` / `nextSource` / `pending` in `ChildOwnership` (#1377) | memory, plus `report_turn:<session>` while a report is owed | every message | when the session goes from rest to `working` (`turnStarted`): the message noted in the last `NEXT_STARTER_MS` (15 s), or else the CLI's own turn |
-| `input_origins:<session>` (#1604) | the store | a hub's messages only | on the event that opens the turn, by the input the tool names (`turnStartInputs`) |
+What reads `by`:
 
-The 15 s window is a guess based on time. Under load, or when the tool holds a message longer than the window, the
-turn goes to the wrong side: it reads as the CLI's own turn, so a person's turn is reported as the work's. A command
-the tool answers without a turn has the same effect when a work turn follows within the window: that turn reads as
-the person's, and its report is not sent. `docs/agent-host.md` lists two limits of this rule (a CLI before 2.1.289,
-and a host swap losing the memory-only record).
+- the mailbox's turn row (`onTurnStarted` → `turnRecorder` → `MailTurns.beginOther`, `mail_turns.started_by`), which
+  the pair loop guard and `lastPersonTurn` count, and from which what the turn sends gets its cause;
+- `continuesPause` and `personInTurn`, each time a call arrives during the turn;
+- `turnEnded`, at the turn's end: the report goes out or not.
 
-What reads `by` when a turn starts:
+## 2. The rule
 
-- the mailbox (`ChildOwnership.onTurnStarted` → `turnRecorder` → `MailTurns.beginOther`) writes the turn's row
-  (`mail_turns.started_by`: `person`, `caller`, `cli`, `report`, `app`). The pair loop guard and
-  `lastPersonTurn` count these rows, and what the turn sends gets its cause from them;
-- `continuesPause` (the CLI's own turn after paused work is the caller's, #1576) and `personInTurn` (a refusal
-  says "the person may be using it"), each time a call arrives during the turn;
-- at the turn's end, `turnEnded` (the report goes out or not, and `turn` on the ending event).
+**Decide now, correct later.** There is no "not yet known" state: everything that reads `by` keeps working as it did.
 
-## 2. What each tool names
+1. **Entries.** Every message `sendMessage` gives the tool is one entry: the user row it already writes, which now
+   also holds `inputId` (every message gets one, whoever sends it), `intent` (`task` or `takeover`, when not `ask`)
+   and `relayed` (a report). The row's `from`, `fromApp` and `fromScript` say whose it is, as before: the person's when
+   it has none of them. The first prompt `createSession` writes (a handoff, a script) is an entry the same way.
+   The ids go to the tool with the message on every path: the queue drain (`QueuedRequests`), a routed card, and a
+   Codex `send` (its `clientUserMessageId`, as `sendTracked` already did).
+2. **Which entries are held.** `turn_inputs:<session>` holds `{ spent }`: the rows at or before `spent` are done with.
+   The held entries are the rows after it that carry an `inputId`. They are kept in memory too and read back from the
+   rows once per host, so a host that takes a kept session over after a swap knows them.
+3. **At the turn's start** (rest to `working`): the turn is the oldest held entry's sender's, else the CLI's own
+   (`cli`). Written to `report_turn` and the mailbox's row as before.
+4. **When the tool names the turn's inputs** (`turnStartInputs` on a `working`, which now has three answers):
+   - ids, of which some are held: the turn ran for every held entry up to the last one named (the tool runs inputs in
+     order). It is the work's if any of them is, with `wrote` (or `added`) when one of them is the person's, else the
+     person's. Those entries are spent.
+   - ids, none held (a mail wake, a compact, a quiet note, the CLI's own): the turn is the CLI's own (`cli`).
+   - `[]` (an opening that names nothing, from a tool that names inputs): the CLI's own.
+   - `null` (not an opening, or a tool that never names): nothing changes.
 
-| Tool | At a turn's start | At its end |
+   When the answer differs from the start's, the turn is decided again: `starters`, `report_turn` and the mailbox's
+   row (`MailTurns.restate`: `started_by`, `message_id`, `starter_id` of the same turn). A turn the person took over
+   (`takeTurn`) stays theirs.
+5. **At the turn's end** (`turnInputs`):
+   - ids: the held entries up to the last one named joined the turn (a person's into the work's is `wrote`, or
+     `added`); they are spent. The rest stay for the next turn.
+   - undefined (the tool takes every message into the running turn, Codex): every held entry joined, and is spent.
+   - `null` (the tool cannot tell: a CLI before 2.1.289): every entry given before the end is spent, joined to no turn.
+6. **Stop, cut, a process gone**: every held entry is spent (`spent` = the last row).
+7. **Removed**: `NEXT_STARTER_MS`, `nextStarter`, `nextSource`, `pending`, `addNext`.
+
+How each tool names a turn's inputs:
+
+| Tool | At the start (`turnStartInputs`) | At the end (`turnInputs`) |
 |---|---|---|
-| Claude Code | `user_message_uuid` on the turn's first stream message (`turnStartInputs`). A turn the CLI starts itself (a task notification) names none (#1830). **A message sent at rest** makes the adapter say `working` at once (`deliver`), before the CLI says anything. The naming message comes later and no event carries it, so today neither record learns the input of a turn started at rest | `user_message_uuids` on the result (2.1.289 and newer; older: none) |
-| Codex | a second `working` on the turn's first item, naming the `clientId` (`announceStart`) | none: an input sent while a turn runs joins that turn |
-| ACP (core ledger) | nothing today, though the ledger starts every turn with one known input (`Queued.named`) | `turnInputs`: that input |
+| Claude Code, 2.1.289 and newer (the CLI tracks inputs) | a second `working` on the turn's first stream message, also after a send at rest, also while a card is up: the message's `user_message_uuid`, or `[]` for a turn the CLI started itself | `user_message_uuids` |
+| Claude Code, older | `null` | `null` |
+| Codex | a second `working` on the turn's first item: its client id (`announceStart`) | undefined |
+| ACP (core ledger) | on the ledger's own `working`: the input it started the turn with, or `[]` | that input |
 
-## 3. Proposal
+`input_origins:<session>` (a hub's messages, #1604) is unchanged and still written beside the entries until the next
+release: a build before this one reads it during a swap. It is removed then (add first, remove later).
 
-1. **One record, in the store.** Every message given to the tool goes in under an id, whoever sends it: the person,
-   an app, a session, the mailbox's wake, or a hub. `SessionHandle.send` already takes `opts.id` in every adapter.
-   One list per session, `turn_inputs:<session>`, in the order the messages were given, at most 64: each entry is
-   `[id, { by, added?, source?, origin? }]`. It replaces `nextStarter`, `nextSource` and `pending`, and it carries
-   what `input_origins` carries (`origin`).
-2. **Decided when the tool names the inputs.** A turn begins (rest to `working`) with its starter not yet known.
-   The first `working` of that turn whose `turnStartInputs` names an id held in the list decides it: the turn
-   belongs to the sender of the last named id, and every entry given up to that one leaves the list. This is the
-   same rule `takeInputOrigin` follows today. A turn that names nothing on the event that opens it (Claude's first
-   stream message with no uuid, Codex's first item with no client id) is the CLI's own turn (`cli`), with no doubt.
-   For that:
-   - the Claude adapter says `working` again on the first stream message of a turn it already said working, when that
-     message names an input (as Codex does), so a turn started at rest is named too;
-   - the ACP ledger answers `turnStartInputs` with the input it starts the turn with.
-3. **Until it is decided, nothing acts on `by`.** The mailbox's turn row is written when the starter is decided (the hook
-   moves from `turnStarted` to that point). `continuesPause` is false and `personInTurn` reads "not known" as not
-   the caller's turn. A turn that ends before it is decided is decided at its end by rule 4.
-4. **A tool that names nothing (one definite rule, no clock).** The turn belongs to the oldest entry given before the
-   turn began. For a tool that runs one prompt at a time this is exact. A message that went into a running turn
-   stays in the list until a turn names it or a later one, or until the end of a turn that names what it took in (as
-   `turnEnded` does today).
-5. **Remove** `NEXT_STARTER_MS`, `nextStarter`, `nextSource`, `pending` and `addNext`. Also remove the limit row in
-   `docs/agent-host.md` (the first limit goes; the swap limit goes with rule 1).
+## 3. Cases still attributed wrongly
 
-#1640 (the person's Stop drops what is queued and says it was not delivered) is a prerequisite: after a Stop no
-entry can start a turn, and the Stop already clears the list (`dropInputOrigins`).
+From the review on #1639, and which way each errs:
+
+| Case | Now |
+|---|---|
+| A compact, a mail wake, a queued request or a `start_agent` prompt is credited to a person's message still held | The queued request and the first prompt are entries now. A compact and a mail wake have none: until the tool names their id the turn is the held message's; Claude 2.1.289+, Codex and ACP correct it to `cli` at once. An older CLI keeps it: the turn reads as the person's, so its report is held back |
+| A Codex turn from a person's `send` | Named (`clientUserMessageId`): right |
+| An older CLI's own turn after a note was taken in mid-turn goes to that note's sender | Gone: an end that cannot name spends every entry. The cost: a note an older CLI really runs as a turn of its own after is read as the CLI's own turn, the work's, so a person's answer there is reported to the caller |
+| The person then a caller at rest, folded into one turn | The work's with `wrote`, from every entry up to the one named |
+| A takeover before the tool names the inputs is overwritten | Not overwritten: a taken-over turn stays the person's |
+| Entries a build before this one leaves during a swap | It writes no `inputId`, so its rows are no entries. Its turns do not spend this build's entries: the next turn here decides by them until the tool names its input (Claude 2.1.289+, Codex, ACP), and an older CLI's end spends them |
+| A message that started no turn (`/goal` refused, a limit at rest) | Stays held: the next turn is decided by it at its start, and corrected when the tool names that turn's input. An older CLI keeps it for one turn |
 
 ## 4. Tests
 
-- A message held queued longer than 15 s (fake timers) still has its turn attributed to its sender.
-- A Claude send at rest: the `working` said at once names nothing, and the later one names the caller's id. The turn
-  is the caller's, and the test fails when the decision moves back to the rest-to-`working` edge.
-- A command the tool answers without a turn, then a CLI turn of its own: that turn is `cli`, not the person's.
-- A real Claude child: the person types while a caller's note is queued, and each turn is attributed to its own sender.
+- A message held queued for 20 s before its turn opens is still its sender's turn (fails with the 15 s window).
+- A Claude send at rest whose naming `working` names the caller's input after the person's started the turn: the
+  turn is decided again as the caller's (fails when the decision stays at the rest-to-`working` edge).
+- A compact or wake id named that no entry holds: the CLI's own turn.
+- An end that cannot name spends every entry: the CLI's next turn is its own.
+- The person takes over before the naming: the turn stays theirs.
+- The mailbox's row is decided again in place (`MailTurns.restate`).
 
-## 5. Decisions for the owner
+## 5. Not built here
 
-| # | Question | Proposed | Other choice |
-|---|---|---|---|
-| D1 | Keep every message's entry in the store (one small settings write per message sent) | Yes: one record, it survives a swap, and it removes both limits in `agent-host.md` | Keep the person's entries in memory (no write per message), and keep the swap limit |
-| D2 | The key | A new `turn_inputs:<session>`, with `input_origins:` still written beside it for a hub's messages until the next release (a build before this one reads it during a swap), then removed (add first, remove later) | Extend `input_origins` entries in place: the older build skips any entry without `from`, so it would lose the person's entries, which it never kept anyway |
-| D3 | A call that arrives while the starter is not known yet (between the turn's start and the tool's first message, usually under 3 s) | Refused as for a turn this host cannot tie to the work, with the existing words ("a turn it started by itself that this hub cannot tie to the work you gave it") | Hold the call until the starter is decided, with a bound |
-| D4 | How Claude names a turn started at rest | A second `state_change: working`, as Codex does (no protocol change; the host already reads `turnStartInputs` on every `working`) | A new event that names the inputs (a protocol addition) |
-| D5 | The hub's own 15 s window for "Add to the task" on a linked machine (`ADD_NEXT_MS`, `sessions/linked-reports.ts`) | Not in this change: the machine's host already sends `origin`. A follow-up issue | Same change |
+- The hub's own 15 s window for "Add to the task" on a linked machine (`ADD_NEXT_MS`, `sessions/linked-reports.ts`)
+  pairs the person's message with a machine's echo and does not decide who starts a turn. A follow-up issue.
 
-Size, estimated: `child-ownership.ts` about −60/+45, `session-events.ts` about ±10, the Claude adapter +8, the
-ACP ledger +3, tests about +120, `agent-host.md` −1 limit row and the record's paragraph rewritten.
+## 6. Owner's decisions (2026-11-03)
+
+| # | Decision |
+|---|---|
+| Design | The review's simpler design: decided at the turn's start, corrected when the tool names its inputs |
+| D1 | No separate entry store: `inputId`, `intent` and `relayed` go on the user row `sendMessage` already writes |
+| D2 | A new key (`turn_inputs:<session>`), never `input_origins` extended in place: an older build rewrites that list and drops what it cannot parse, and any key there marks the session as followed by a hub. `input_origins` is still written for a hub's messages until the next release |
+| D3 | Goes away with this design (there is no "not yet known") |
+| D4 | A second `working` event, no protocol event |
+| D5 | A follow-up issue |
