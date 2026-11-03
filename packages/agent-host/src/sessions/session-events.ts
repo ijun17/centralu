@@ -349,7 +349,7 @@ export class SessionEvents {
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
     if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) void this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
-    if (endedTurn && e.sessionId && !owed && turnBy?.by !== 'person') void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
+    if (endedTurn && e.sessionId && !owed) void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)

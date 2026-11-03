@@ -111,6 +111,8 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
  * their message to the task.
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
+/** A turn a quit or a swap ended, and who to tell, waiting for the start to finish (#698); `turn`: whose a quit's was (#1946) */
+export type QuitNotice = { sessionId: string; requester: string; swapped?: true; turn?: TurnStarter | undefined }
 /**
  * A message given the tool (#1639, docs/plans/turn-starter.md): the input id and row it went in under (none in a test that gives no
  * row), whose it is, and `joined`: it is queued while a turn runs (given into it, or behind the input it opened from), which may take it in
@@ -152,7 +154,7 @@ function starterFor(ran: readonly Entry[]): { starter: TurnStarter; source: Turn
   if (!ran.some((e) => e.by === 'work')) return { starter: { by: 'person' }, source }
   return { starter: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, source }
 }
-/** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
+/** The store's record of whose the turn a session is in is (#1377), kept across a swap and read by the next start for a turn a quit cut (#1946) */
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
 /**
  * The hub's messages the tool holds (#1604), in `input_origins:<session>`: `[inputId, origin][]`. Written from the held entries (the ones
@@ -515,7 +517,6 @@ export class ChildOwnership {
   }
   clearReport(sessionId: string): void {
     this.unpauseReport(sessionId)
-    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     this.lastBy.delete(sessionId)
     if (!this.reports.delete(sessionId)) return
     this.store.children.clearReportMark(sessionId)
@@ -754,11 +755,15 @@ export class ChildOwnership {
   /**
    * The process that ran the session's turns is gone (#1604): it crashed, lost its conversation, or this host started with no
    * process for a session the last one left mid-turn. A turn it was in will never send its end, so it ends here: its words
-   * are those said so far (or none), never the turn before's, and nothing it was given is run by anyone
+   * are those said so far (or none), never the turn before's, and nothing it was given is run by anyone. Returns whose that turn
+   * was, as the host before recorded it (#1946); none recorded reads as the work's, as at any turn's end
    */
-  processGone(sessionId: string): void {
+  processGone(sessionId: string): TurnStarter {
     this.dropInputOrigins(sessionId)
     this.noteTurnEnd(sessionId)
+    const turn = readTurn(this.store.settings.appSetting(reportTurnKey(sessionId))) ?? { by: 'work' }
+    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
+    return turn
   }
   /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
@@ -979,10 +984,10 @@ export class ChildOwnership {
       this.save(sessionId)
     }
   }
-  /** Kept while a report is owed, for a host that takes the session over mid-turn */
+  /** Kept for a host that takes the session over mid-turn, and for the next start when a quit cuts the turn (#1946) */
   private persistTurn(sessionId: string): void {
     const s = this.starters.get(sessionId)
-    if (s && this.reports.has(sessionId)) this.store.settings.setAppSetting(reportTurnKey(sessionId), JSON.stringify(s))
+    if (s) this.store.settings.setAppSetting(reportTurnKey(sessionId), JSON.stringify(s))
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {

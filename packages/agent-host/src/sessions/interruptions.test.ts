@@ -452,6 +452,32 @@ describe('a turn a quit stopped (#698)', () => {
  * once, as the person's Continue would, through Centralu's channel. On 2026-10-26 the hub updated a linked Windows machine
  * at once with two children in a turn: both turns ended, and their parent had to send each a note by hand to carry on
  */
+/*
+ * #1946 (2026-11-03): a session had asked the orchestrator in the morning; the person used the orchestrator through the day, and a restart
+ * that cut one of the person's turns told the morning's asker its work stopped, and woke it for nothing
+ */
+describe("the person's own turn a quit cut (#1946)", () => {
+  it('is reported to nobody: not to the session that started this one', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('indent fixed')
+    await eventually(() => reportsTo(parent, child).length === 1)
+    await eventually(() => info(a, parent).state === 'working')
+    a.claude.handles.get(parent)!.answer('noted')
+    // The person's own turn, then the quit
+    await a.mgr.send(child, 'now tidy the imports')
+    expect(info(a, child).state).toBe('working')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => log.mockRestore())
+    const b = host()
+    await startNoticesRan()
+    expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
+    expect(toldLines(log)).toEqual([])
+    expect(reportsTo(parent, child)).toHaveLength(1)
+  })
+})
+
 describe("a turn a linked hub's update cut (#1618)", () => {
   /** What went into the session's process since it was continued: Centralu's note, never a message of the person's */
   const sentTo = (h: ReturnType<typeof host>, id: string) => h.claude.handles.get(id)?.sent ?? []

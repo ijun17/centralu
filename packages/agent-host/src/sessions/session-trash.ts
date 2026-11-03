@@ -1,6 +1,6 @@
 import type { ModelWindows } from './auto-compact.js'
 import { restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
-import type { ChildOwnership } from './child-ownership.js'
+import type { ChildOwnership, QuitNotice } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
@@ -73,7 +73,7 @@ export type SessionTrashHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>
-  quitNotices: { sessionId: string; requester: string; swapped?: true }[]
+  quitNotices: QuitNotice[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
   readonly modelWindows: Pick<ModelWindows, "forget">
