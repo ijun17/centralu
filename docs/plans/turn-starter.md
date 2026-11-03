@@ -31,8 +31,9 @@ What reads `by`:
 2. **Which entries are held.** `turn_inputs:<session>` holds `spent`: the rows at or before it are done with. It is
    written with the first message (the row before it), so nothing given is ever outside it. The held entries are every
    user row after it that carries an `inputId`, however many rows the turn wrote. A user row with no `inputId`
-   after them (an older build after a rollback, or a turn run outside Centralu) means something else ran the
-   session: the entries before it are done with. The key also keeps the running turn's state: `named` (its opening
+   after them was written by an older build after a rollback, which ran the session: the entries before it are
+   done with. This build gives every user row an `inputId` except the first prompt (the first row) and the words the
+   resume catch-up reads from the tool's own record, which are marked `transcript` and skipped. The key also keeps the running turn's state: `named` (its opening
    was named), `takenOver`, and `marks`, each held id that is `joined`, `after` or `carried`. All of it is kept in
    memory and read back once per host, so a host that takes a kept session over mid-turn decides as the one before
    would have; a message the new host is given first, whose row it read back, is marked as given then.
