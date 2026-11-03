@@ -923,8 +923,8 @@ requires the verified CLI protocol (2.1.289 or newer, compared as semver, so a s
 `interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
 mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
 Results without input IDs belong to synthetic turns (including background-task notifications) and neither
-complete nor cancel a pending note. **A Stop is a stop** (#1640): every tool drops what it still holds queued
-behind the turn, notes and plain messages alike, and nothing runs as a turn after the Stop. Claude asks the SDK's
+complete nor cancel a pending note. **A Stop is a stop** (#1640): on any Stop of a turn (the person's, or a caller's or an app's
+that ends the work it gave) every tool drops what it still holds queued behind the turn, notes and plain messages alike, and nothing runs as a turn after the Stop. Claude asks the SDK's
 `cancelQueued` / control-request `cancel_queued` on every Stop when the CLI offers it (a plain interrupt leaves a
 message sent while the turn wrote its answer queued, and the CLI runs it right after; measured on 2.1.296); a CLI
 older than that protocol is interrupted plainly, as before. Codex removes what waits behind a compact or review
