@@ -226,7 +226,11 @@ export class SessionEvents {
          * when the tool opens the turn it runs for an earlier one (a note sent into the turn before, which that turn did not
          * read). The tool names the input only on the event that opens the turn, so no other event says one
          */
-        if (e.type === 'state_change' && e.state === 'working') started = this.host.children.takeInputOrigin(m.id, handle?.turnStartInputs?.())
+        if (e.type === 'state_change' && e.state === 'working') {
+          const named = handle?.turnStartInputs?.()
+          // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639); and the hub's message it ran for
+          started = this.host.children.turnNamed(m.id, named)
+        }
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
          * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
@@ -604,6 +608,9 @@ export class SessionEvents {
     // before it is one chunk (#66)
     this.host.record.closeStream(sessionId)
     const seq = this.host.store.messages.nextSeq(sessionId)
+    // Every message goes in named, so the tool says which turn runs it (#1639, `turnStartInputs`, `turnInputs`), with Centralu's mark as every
+    // input the adapter names itself, so its line reads back as one Centralu wrote (`centraluInputId`)
+    const inputId = centraluInputId()
     this.host.store.messages.appendMessages([
       {
         sessionId,
@@ -612,7 +619,8 @@ export class SessionEvents {
         kind: 'text',
         // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
         // image bytes back in
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(attachments?.length ? { attachments } : {}) },
+        // The input id it goes in under, what the person meant and whether it is a report (#1639): the record of whose a turn it starts is
+        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(intent !== 'ask' ? { intent } : {}), ...(relayed ? { relayed: true } : {}) },
         ts: Date.now(),
       },
     ])
@@ -670,20 +678,16 @@ export class SessionEvents {
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`), with Centralu's mark
-    // as every input the adapter names itself, so its line reads back as one Centralu wrote (`centraluInputId`)
-    // Also a hub's message at rest: the turn that runs it may open after another's (#1604)
     const hubInput = from?.sessionId === HUB_SENDER
-    const inputId = joins || hubInput ? centraluInputId() : undefined
-    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
+    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
-    if (inputId && from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
+    if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, ...(inputId ? { id: inputId } : {}) })
-    else h.send(input, inputId ? { id: inputId } : undefined)
+    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId })
+    else h.send(input, { id: inputId })
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
   }

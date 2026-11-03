@@ -114,7 +114,7 @@ export class RoutedCards {
     try {
       // Relayed, as a report: the stored line names the source, and the agent reads the same host-written words, which
       // carry nothing of the target's
-      await this.host.deliver(callerId, text, undefined, { sessionId, name }, true, undefined, 'inline', (h) => h.send(text))
+      await this.host.deliver(callerId, text, undefined, { sessionId, name }, true, undefined, 'inline', (h, _input, inputId) => h.send(text, inputId ? { id: inputId } : undefined))
     } catch {
       // The caller may be asleep or deleted — a notice must not destabilize the host
     }

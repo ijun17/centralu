@@ -83,8 +83,9 @@ export class MidTurnLedger {
     return this.phase === 'ready' && !this.blocking ? this.running : null
   }
 
-  send(text: string): void {
-    this.enqueue({ text, receipt: null })
+  /** `id`: the host's name for the input (a UUID), which the turn that opens for it names back (#1639) */
+  send(text: string, id?: string): void {
+    this.enqueue({ text, receipt: null, ...(id !== undefined && isUuid(id) ? { name: id } : {}) })
   }
 
   /** `id`: the host's name for the input, which becomes its receipt's id when it is a UUID, so the tool names it back */

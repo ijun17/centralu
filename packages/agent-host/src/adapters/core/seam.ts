@@ -89,7 +89,8 @@ export interface ToolWire {
 }
 
 /** One input to a tool that takes input mid-turn: its words, and its receipt when the sender tracks it (`sendTracked`) */
-export type MidTurnInput = { readonly text: string; readonly receipt: InputReceipt | null }
+/** `name`: the host's id for an untracked input, which the tool names back when the turn it opens runs for it (#1639) */
+export type MidTurnInput = { readonly text: string; readonly receipt: InputReceipt | null; readonly name?: string }
 
 /** How a turn the tool named ended, as it said: the core says it to the host and settles the inputs bound to it */
 export type ToolTurnEnding = { how: 'complete' | 'interrupted' } | { how: 'failed'; error: ProtocolErrorOf }

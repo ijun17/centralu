@@ -345,7 +345,7 @@ export class CodexSession implements SessionHandle {
         if (group) {
           this.inputGroups.delete(p.item.clientId)
           if (this.ledger.taken(group, p.turnId)) this.threadWritten()
-          if (opening) this.announceStart(group.flatMap((i) => (i.receipt ? [i.receipt.id] : [])))
+          if (opening) this.announceStart(group.flatMap((i) => (i.receipt ? [i.receipt.id] : i.name ? [i.name] : [])))
         }
       }
     }
@@ -452,8 +452,8 @@ export class CodexSession implements SessionHandle {
     return this.startInputs
   }
 
-  send(text: string): void {
-    this.ledger.send(text)
+  send(text: string, opts?: { id?: string }): void {
+    this.ledger.send(text, opts?.id)
   }
 
   /**
@@ -491,7 +491,7 @@ export class CodexSession implements SessionHandle {
       return { answer, blocking: true }
     }
     if (command) return { answer: command.request }
-    const clientId = inputs.find((i) => i.receipt)?.receipt?.id
+    const clientId = inputs.find((i) => i.receipt)?.receipt?.id ?? inputs.find((i) => i.name)?.name
     if (clientId) this.inputGroups.set(clientId, [...inputs])
     const answer = this.client
       .request('turn/start', {

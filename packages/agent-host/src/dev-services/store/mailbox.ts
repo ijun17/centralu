@@ -932,6 +932,13 @@ export class MailboxRecords {
       .run(t.sessionId, t.turnSeq, t.messageId, t.starterId, t.startedBy, t.startedAt)
   }
 
+  /** Whose the open turn is and what it is the work of, decided again in place (#1639, `MailTurns.restate`) */
+  restateTurn(sessionId: string, turnSeq: number, t: Pick<TurnRecord, 'messageId' | 'starterId' | 'startedBy'>): void {
+    this.db
+      .prepare(`UPDATE mail_turns SET message_id = ?, starter_id = ?, started_by = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`)
+      .run(t.messageId, t.starterId, t.startedBy, sessionId, turnSeq)
+  }
+
   nextTurnSeq(sessionId: string): number {
     return this.count(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`, sessionId)
   }

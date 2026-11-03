@@ -736,6 +736,30 @@ describe('what the turn that ends took in (#1377)', () => {
     await handle.dispose()
   })
 
+  // #1639: a send at rest says working at once, before the CLI names its input: the CLI's first message for it says working again, naming it
+  it('names the input of a turn a send at rest began, on its first message, once', async () => {
+    const starts: (readonly string[] | null | undefined)[] = []
+    const box: { handle?: Awaited<ReturnType<InstanceType<typeof ClaudeAdapter>['createSession']>> } = {}
+    const handle = await adapter().createSession({ sessionId: 'sy', cwd: dir, permissionPreset: 'auto' }, (e) => {
+      if (e.type === 'state_change' && e.state === 'working') starts.push(box.handle?.turnStartInputs?.())
+    })
+    box.handle = handle
+    const cli = sdk.started.at(-1)!
+    handle.send('first', { id: idA })
+    await cli.input.next()
+    expect(starts).toEqual([null])
+    cli.push({ type: 'assistant', user_message_uuid: idA, message: { role: 'assistant', content: [{ type: 'text', text: 'on it' }] } })
+    await eventually(() => starts.length === 2)
+    expect(starts[1]).toEqual([idA])
+    // Later messages of the same turn say nothing more
+    cli.push({ type: 'assistant', user_message_uuid: idA, message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } })
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: idA, user_message_uuids: [idA] })
+    await eventually(() => handle.turnInputs?.() === null)
+    expect(starts).toHaveLength(2)
+    cli.end()
+    await handle.dispose()
+  })
+
   it('a result that names none (a background task\'s own turn) took none in', async () => {
     const { handle, seen, cli } = await watched(adapter())
     cli.push({ type: 'result', subtype: 'success' })

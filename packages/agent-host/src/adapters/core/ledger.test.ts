@@ -384,6 +384,26 @@ describe('the ledger, case by case', () => {
     await w.session.dispose()
   })
 
+  // #1639: whose a turn is, decided again by the input it opens with: the one the ledger starts it with, or none named
+  it('names the input each turn opens with while its working is handled, and none outside it', async () => {
+    const w = world('acp')
+    await w.session.ready
+    const starts: (readonly string[] | null)[] = []
+    const push = w.events.push.bind(w.events)
+    w.events.push = (...es: NormalizedEvent[]) => {
+      for (const e of es) if (e.type === 'state_change' && e.state === 'working') starts.push(w.session.turnStartInputs())
+      return push(...es)
+    }
+    w.session.send('a', { id: 'name-a' })
+    w.wire.end({ how: 'complete' })
+    void w.session.sendTracked('b', undefined, { id: 'name-b' }).catch(() => {})
+    w.wire.end({ how: 'complete' })
+    w.session.send('c')
+    expect(starts).toEqual([['name-a'], ['name-b'], []])
+    expect(w.session.turnStartInputs()).toBeNull()
+    await w.session.dispose()
+  })
+
   it("puts the process's last words in a crash, after the marker that keeps them from being read as the turn's failure", async () => {
     const w = world('acp')
     await w.session.ready

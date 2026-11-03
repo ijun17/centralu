@@ -31,7 +31,8 @@ const turnStartedBy = (stored: string): TurnStartedBy => STARTED_BY.find((s) => 
  * A turn that started, as the mailbox hears of it (docs/plans/mailbox.md §8.2): whose it is, whether the CLI ran it on its own, and
  * the caller it is the work of, when there is one
  */
-export type TurnStart = { by: 'person' | 'work'; added: boolean; cli: boolean; source: TurnSource; ownerId?: string }
+/** `again`: the turn was decided at its start, and the tool's naming of its inputs decided it otherwise (#1639) */
+export type TurnStart = { by: 'person' | 'work'; added: boolean; cli: boolean; source: TurnSource; ownerId?: string; again?: true }
 
 /** What a message of the work that starts a turn is: a caller's own, a report or notice about another session (Centralu's), or an app's */
 export type TurnSource = 'caller' | 'report' | 'app'
@@ -75,6 +76,9 @@ type Open = LastTurn & {
  * **A turn continued after a restart or an update is not mail-started** (§8.2 step 6): nothing begins it here, its row is read back (`closeStale`
  * with `keepOpen`), so `current` gives the original turn's starter and asker, and it adds no row the cap or the pair guard could count.
  */
+/** What started a turn the mailbox did not: the person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it */
+const causeOf = (by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null): string | null => (by === 'caller' ? messageId : null)
+
 export class MailTurns {
   private readonly now: () => number
   private readonly o: { turnsPerHour: number; tokensPerHour: number; emptyInARow: number }
@@ -130,10 +134,25 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     const startedAt = this.now()
-    // The person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it
-    const starter = by === 'caller' ? messageId : null
+    const starter = causeOf(by, messageId)
     this.records.startTurn({ sessionId, turnSeq: seq, messageId, starterId: starter, startedBy: by, startedAt })
     this.open.set(sessionId, { seq, startedAt, acted: false, tokens: 0, by, messageId, starter, ...(owner ? { owner } : {}) })
+  }
+
+  /**
+   * The turn going, which `beginOther` recorded, was decided again when the tool named the input it opened from (#1639): the same turn, its
+   * starter, work message and owner corrected in place. A turn the mailbox's delivery started is the mailbox's
+   */
+  restate(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null, owner?: string): void {
+    const turn = this.open.get(sessionId)
+    if (!turn || turn.by === 'mail') return
+    const starter = causeOf(by, messageId)
+    turn.by = by
+    turn.messageId = messageId
+    turn.starter = starter
+    if (owner) turn.owner = owner
+    else delete turn.owner
+    this.records.restateTurn(sessionId, turn.seq, { messageId, starterId: starter, startedBy: by })
   }
 
   /**

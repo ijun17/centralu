@@ -354,9 +354,9 @@ export class AskProjectFlow {
         const releaseHold = d.wait.holdInput()
         const release = () => { releaseHold(); this.host.applyDeferredRestart(delegatedId) }
         releaseInput = release
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', (h, input) => {
+        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', (h, input, inputId) => {
           const fail = (e: Error) => { d.wait.fail(e); release() }
-          void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
+          void h.sendTracked!(input, { complete: release, fail }, inputId ? { id: inputId } : undefined).then(release, fail)
         }, stillAllowed)
       } else {
         await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)

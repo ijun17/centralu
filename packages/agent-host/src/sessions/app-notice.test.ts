@@ -33,7 +33,7 @@ describe("an app's notice into a session that called it (#1161 item 1)", () => {
     await w.mgr.appNotice(s.id, LANDED, board)
 
     expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).toMatchObject({ text: LANDED, fromApp: board })
-    expect(w.store.messages.loadMessages(s.id).find((m) => m.role === 'user')?.payload).toEqual({ text: LANDED, fromApp: board })
+    expect(w.store.messages.loadMessages(s.id).find((m) => m.role === 'user')?.payload).toEqual({ text: LANDED, fromApp: board, inputId: expect.any(String) })
     const sent = await until(() => w.claude.handles.get(s.id)?.sent ?? [], (x) => x.length > 0)
     expect(sent).toEqual([
       '[Centralu] The app "Project board" (app-project-board) posted this notice to this session, which called its tools before. ' +

@@ -51,7 +51,8 @@ function historyRow(sessionId: string, seq: number, h: HistoryMessage, fallbackT
     const payload = { ...h.event, sessionId }
     return { sessionId, seq, role: 'system', kind: recordedRowKind(payload) ?? 'marker', payload, ts }
   }
-  return { sessionId, seq, role: h.role, kind: 'text', payload: { text: h.text }, ts }
+  // Words read from the tool's record carry no input id (#1639): marked, so they do not read as a row an older build wrote
+  return { sessionId, seq, role: h.role, kind: 'text', payload: { text: h.text, ...(h.role === 'user' ? { transcript: true } : {}) }, ts }
 }
 
 /**
