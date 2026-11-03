@@ -11,6 +11,7 @@ import type { MachineInfo, NormalizedEvent } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS, useStore } from './store.js'
+import { resyncsOf } from './machines.js'
 import { delta, holdList, line, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
@@ -546,6 +547,47 @@ describe('linked machines (#82)', () => {
     expect(await useStore.getState().setMachineAutostart('box', false)).toBe(false)
     expect(useStore.getState().toast).toBe('Could not turn off starting at boot: Centralu on box could not stop starting at boot: Failed to connect to bus')
     expect(useStore.getState().machines['box']!.autostart?.on).toBe(true)
+  })
+
+  /*
+   * #1902: an update restarts a machine's host. Its terminals begin again at 1 and its Run commands start with new run ids, so a
+   * view that kept the old ones draws another shell under an old tab or stays on a run that is gone. The machine's own resync is
+   * the word the window gets (the connection to this computer's host did not change), and it reaches the views as a count
+   * that is the machine's alone (resyncsOf) and as the run ledger read again.
+   */
+  it("a machine's resync counts for that machine's projects only, and reads their runs again with the new run ids", async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    const here = await mock.projects.add('/tmp/here')
+    await useStore.getState().attach(mock)
+    await useStore.getState().runCommand(remote.id, 'pnpm dev')
+    await useStore.getState().runCommand(here.id, 'pnpm dev')
+    const runId = (projectId: string) => useStore.getState().commandRuns[projectId]?.['pnpm dev']?.runId
+    const [remoteWas, hereWas] = [runId(remote.id), runId(here.id)]
+    const counted = (projectId: string) => resyncsOf(useStore.getState(), projectId)
+    const [remoteCount, hereCount] = [counted(remote.id), counted(here.id)]
+
+    // The update restarted both hosts' runs; only the machine's resync is announced
+    await mock.commands.run(remote.id, 'pnpm dev', 100, 30)
+    await mock.commands.run(here.id, 'pnpm dev', 100, 30)
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+
+    await vi.waitFor(() => expect(runId(remote.id)).not.toBe(remoteWas))
+    expect(counted(remote.id)).toBe(remoteCount + 1)
+    expect(counted(here.id)).toBe(hereCount)
+    expect(runId(here.id)).toBe(hereWas)
+  })
+
+  it("a resync of the connection reads every project's runs again", async () => {
+    const mock = new MockPlatform()
+    const here = await mock.projects.add('/tmp/here')
+    await useStore.getState().attach(mock)
+    await useStore.getState().runCommand(here.id, 'pnpm dev')
+    const was = useStore.getState().commandRuns[here.id]?.['pnpm dev']?.runId
+    await mock.commands.run(here.id, 'pnpm dev', 100, 30)
+    mock.setConnectionState('resync_required')
+    await vi.waitFor(() => expect(useStore.getState().commandRuns[here.id]?.['pnpm dev']?.runId).not.toBe(was))
   })
 
   it('a resync re-reads that machine\'s sessions and projects and leaves every other row as it was', async () => {

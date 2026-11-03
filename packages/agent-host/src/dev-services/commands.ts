@@ -161,9 +161,9 @@ export class CommandRunner {
     return n
   }
 
-  /** The runs still running, as an update's stop records them (#1902); `projectOf` names the project whose folder a run is in */
-  runningSnapshot(projectOf: (cwd: string) => string | null): EndedRun[] {
-    return [...this.entries.values()].filter((e) => e.slot.alive).map((e) => ({ projectId: projectOf(e.cwd), cwd: e.cwd, command: e.command }))
+  /** The runs still running, as an update's stop records them (#1902) */
+  runningSnapshot(): EndedRun[] {
+    return [...this.entries.values()].filter((e) => e.slot.alive).map((e) => ({ cwd: e.cwd, command: e.command }))
   }
 
   disposeAll(): void {

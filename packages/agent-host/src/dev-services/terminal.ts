@@ -178,11 +178,11 @@ export class TerminalService {
   }
 
   /**
-   * Every open terminal as an update's stop records it (#1902): its place and size, in the order they were opened. Read before the shells
-   * are killed. `projectOf` names the project whose folder the terminal is in
+   * Every open terminal as an update's stop records it (#1902): its folder and size, in the order they were opened. Read before the
+   * shells are killed
    */
-  snapshot(projectOf: (cwd: string) => string | null): EndedTerminal[] {
-    return [...this.byId.values()].map((e) => ({ projectId: projectOf(e.cwd), cwd: e.cwd, cols: e.cols, rows: e.rows }))
+  snapshot(): EndedTerminal[] {
+    return [...this.byId.values()].map((e) => ({ cwd: e.cwd, cols: e.cols, rows: e.rows }))
   }
 
   /** Open terminals with a live shell — counted by the keeper's idle rule (#280, keeper-link.ts) */

@@ -41,6 +41,25 @@ export function resyncOwed(platform: object | null, machineId: string): boolean 
 }
 
 /**
+ * How many times what the host holds for this project has to be read again by the views that keep it (a terminal's tabs, a
+ * run's panel): the connection to the host resynced (#842), or the project's machine did (`machine_resync`, #1902). A machine that
+ * was updated starts its terminals and runs over, with ids that begin again at 1 and a run id that is new, so a view that
+ * kept the old ones would draw another shell under an old tab, or stay on a run that is gone.
+ */
+export function resyncsOf(s: Pick<AppState, 'hostResyncs' | 'machineResyncs' | 'projects'>, projectId: string): number {
+  const machine = s.projects[projectId]?.machine
+  return s.hostResyncs + (machine ? (s.machineResyncs[machine] ?? 0) : 0)
+}
+
+/** Reads the run ledger again for every project this window has it for: all of them, or those of one machine */
+export function reloadCommandRuns(get: StoreGet, machineId?: string): void {
+  const s = get()
+  for (const projectId of Object.keys(s.commandRuns)) {
+    if (machineId === undefined || s.projects[projectId]?.machine === machineId) void s.loadCommandRuns(projectId)
+  }
+}
+
+/**
  * The machines that are connected and whose rows still carry the hub's mirror mark (#1611): the list that wrote it was
  * read while the link was down or failing, and no resync has replaced it. They are read again where a list is taken
  * whole (attach, a reconnect to the hub), since that list can land after the machine's own resync.

@@ -3567,16 +3567,28 @@ the person's Continue would.
 - **Terminals and Run commands the stop ended** (#1902 part B). Before this, they vanished with no event: `terminal.list` and
   `commands.state` were empty after the restart. They are not a session's, so they have no conversation mark and a list of their
   own (`recordUpdateEnded`, lifecycle/update-resume.ts; the shapes are in lifecycle/update-ended.ts), written by the stopping host in
-  its first step (`recordEnded` in `stopPlan`, before the shells are killed: no await comes before the kill). Only what opening them
-  again needs is kept, and nothing a shell printed or a person typed: per terminal its project (the one whose folder it is in), folder
-  and size (`TerminalService.snapshot`); per running Run command its project, folder and command (`CommandRunner.runningSnapshot`).
-  The next host takes the list whole, once, before it listens (`UpdateResumeLists.takeEnded`, `restartEnded`). Each terminal comes
-  back as a **fresh shell in the same folder** (same project, same size; named by its place, as ever) with an empty screen and
-  nothing typed into it, and each Run command that was running **starts again**, its log opening with one line saying why
-  (`RUN_RESTARTED_LINE`). What ran inside a terminal is not run again and not offered: the owner chose that (2026-11, #1908). So
-  the person sees their terminal tabs back with an empty prompt, and their Run commands running again with that log line; there is
-  no new element. A terminal or run whose project is gone or whose folder is missing is skipped and said in the log. A list is never
-  taken twice. A rollback to a host from before this reads `turns` and leaves the rest.
+  its first step (`recordEnded` in `stopPlan`, before the shells are killed: no await comes before the kill; only a stop that was
+  asked for an update records, `host.stop { forUpdate }`). Only what opening them again needs is kept, and nothing a shell printed or
+  a person typed: per terminal its folder and size (`TerminalService.snapshot`); per running Run command its folder and command
+  (`CommandRunner.runningSnapshot`), with the time of the stop. The next host takes the list whole, once, before it listens
+  (`UpdateResumeLists.takeEnded`, `restartEnded`). **The list is removed first**, by the path the lists of turns are removed by, and
+  nothing is brought back when it cannot be (a scanner holds it): it would otherwise open them again at every start. **A list older
+  than ten minutes is removed and not used** (`ENDED_MAX_AGE_MS`): a rollback to a host from before this never removes a list that
+  names no turn, and a new host started days later must not open terminals and run commands nobody expects. Each terminal comes
+  back as a **fresh shell in the same folder** (same size; named by its place, as ever) with an empty screen and nothing typed into
+  it, and each Run command that was running **starts again**, its log opening with one line saying why (`RUN_RESTARTED_LINE`; its
+  size is measured again when a window attaches). What ran inside a terminal is not run again and not offered, and a Run command is
+  started again at once even when it was a one-shot started seconds before the stop: both are the owner's decision (#1908). The
+  person sees their terminal tabs back with an empty prompt and their Run commands running again with that log line; there is no
+  new element. A folder that is no project's now, or is gone from the disk, is skipped and said in the log. A list is never taken
+  twice.
+  **The windows read them again.** An update restarts the host of a linked machine while the hub's window stays connected, and the
+  new host numbers its terminals from 1 and gives its runs new ids, so a tab kept from before would draw another shell under its
+  name. The machine's `machine_resync` therefore counts for that machine's projects (`machineResyncs`, `resyncsOf` in the UI
+  store): the terminal pane lists its shells again and mounts every tab fresh, and the run ledger of the machine's projects is read
+  again (`reloadCommandRuns`, also on the resync of the connection to this computer's host), so the Run panel shows the run that is
+  running now. A Run command a session started is started again too, and that session is not told (the note of the tasks the stop
+  ended, above, lists its own background tasks, not these).
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that

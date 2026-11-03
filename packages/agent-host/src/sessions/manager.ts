@@ -1264,11 +1264,6 @@ export class SessionManager {
     this.stoppingForUpdate = true
   }
 
-  /** A linked hub's update is stopping this host (`stopForUpdate`) */
-  stoppingForUpdateNow(): boolean {
-    return this.stoppingForUpdate
-  }
-
   /** The terminals and Run commands an update's stop left in the lists, once (#1902): the lists that held them go */
   takeUpdateEnded(): Ended {
     return this.updateLists?.takeEnded() ?? { terminals: [], runs: [] }

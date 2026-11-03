@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeSync } from 'node:fs'
-import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -423,15 +423,13 @@ if (held) {
   terminals.adopt(held.kept.terminals)
   commandRuns.adopt(held.kept.runs)
 }
-/** The project whose folder this is, if any (#1902): a terminal is asked for by project */
-const projectOfCwd = (cwd: string): string | null => store.projects.listProjects().find((p) => mgr.cwdOfProject(p.id) === cwd)?.id ?? null
 // The terminals and Run commands a linked hub's update ended come back (#1902), before any screen asks for them
 restartEnded(mgr.takeUpdateEnded(), {
-  cwdOf: (projectId, cwd) => (projectId !== null && projectOfCwd(cwd) === projectId && existsSync(cwd) ? cwd : null),
+  projectFolders: new Set(store.projects.listProjects().map((p) => mgr.cwdOfProject(p.id))),
   terminals,
   runs: commandRuns,
   log: (line) => console.error(line),
-})
+}, realOs())
 /*
  * The update check is done by **the host** — not by the launcher (issue #43).
  *
@@ -573,10 +571,15 @@ if (launch.underKeeper) {
  */
 let stopNow: (() => void) | null = null
 let stopAsked = false
+/** The stop that is asked for is a linked hub's update (`host.stop { forUpdate }`): what it ends is listed for the next host */
+let stoppingForUpdate = false
 const stopFromRequest = (o: { forUpdate: boolean }) => {
   console.error(`[agent-host] asked to stop (centralu serve --stop${o.forUpdate ? ', for an update' : ''})`)
   // A linked hub's update: the turns this stop ends are listed for the host it starts next (#1618)
-  if (o.forUpdate) mgr.stopForUpdate()
+  if (o.forUpdate) {
+    mgr.stopForUpdate()
+    stoppingForUpdate = true
+  }
   if (stopNow) stopNow()
   else stopAsked = true
 }
@@ -810,9 +813,9 @@ const shutdown = new Shutdown({
   plan: (mode, handOver) =>
     stopPlan(mode, handOver, {
       recordEnded: () => {
-        if (!updateResume || !mgr.stoppingForUpdateNow()) return
+        if (!updateResume || !stoppingForUpdate) return
         try {
-          recordUpdateEnded(updateResume, { terminals: terminals.snapshot(projectOfCwd), runs: commandRuns.runningSnapshot(projectOfCwd) })
+          recordUpdateEnded(updateResume, { terminals: terminals.snapshot(), runs: commandRuns.runningSnapshot() })
         } catch (err) {
           console.error(`[agent-host] could not list the terminals and commands an update ends: ${errorMessage(err)}`)
         }

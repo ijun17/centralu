@@ -191,6 +191,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     connection: 'connecting',
     workspaceReady: false,
     hostResyncs: 0,
+    machineResyncs: {},
     projects: {},
     gitEpoch: {},
     sessions: {},
