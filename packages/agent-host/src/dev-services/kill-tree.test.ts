@@ -362,15 +362,12 @@ describe('leftovers of an ended process on Windows', () => {
     expect(orphansOf(table('200 100 999\n'), root)).toEqual([])
   })
 
-  it('a child created after the root was seen to end, by more than the two clocks can differ, belongs to a later holder of that number', () => {
-    expect(orphansOf(table(`200 100 ${root.exitedAt + Math.ceil(CLOCK_TICK_MS) + 1}\n`), root)).toEqual([])
-  })
-
   // #1773: Node's `Date.now()` can be up to a clock tick behind the creation times Windows stamps. The first row is main's CI log
-  it('a child created a few ms after the exit as the host read it is still the root\'s own', () => {
+  it('a child created within a clock tick after the exit as the host read it is the root\'s own, a later one a later holder\'s', () => {
     const ci = { pid: 8092, spawnedAt: 1793687827086, exitedAt: 1793687827165 }
     expect(orphansOf(table('6416 8092 1793687827167\n'), ci).map((r) => r.pid)).toEqual([6416])
     expect(orphansOf(table(`6416 8092 ${ci.exitedAt + Math.floor(CLOCK_TICK_MS)}\n`), ci).map((r) => r.pid)).toEqual([6416])
+    expect(orphansOf(table(`6416 8092 ${ci.exitedAt + Math.ceil(CLOCK_TICK_MS) + 1}\n`), ci)).toEqual([])
   })
 
   it('a deeper process older than the parent now holding its parent id is someone else\'s', () => {
