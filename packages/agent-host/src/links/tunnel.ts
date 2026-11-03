@@ -229,6 +229,11 @@ function takesOf(raw: unknown): { takes?: string[] } {
  * This computer's name as a remote's `serve --detach --from` takes it (#1223): letters, digits, `.`, `_` and `-`, at
  * most 64 of them, so it can go on any of the three remote shells' command lines unquoted. Null when nothing of it is left
  */
+/** This computer's name as a machine is told it (`hubNameForRemote`), for a switch it hands over (update.ts) */
+export function thisHubName(): string {
+  return hubNameForRemote(hostname()) ?? 'another computer'
+}
+
 export function hubNameForRemote(name: string): string | null {
   const clean = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
   return clean || null
@@ -261,7 +266,7 @@ export function parseAutostart(raw: unknown): RemoteAutostart | null {
 /** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
 export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
-  | { ok: false; reason: string; message: string; node?: string }
+  | { ok: false; reason: string; message: string; node?: string; by?: string; startedAt?: number }
 
 /**
  * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
@@ -272,6 +277,21 @@ export class StartedNotServing extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'StartedNotServing'
+  }
+}
+
+/**
+ * `serve --detach` refused to start a host because the machine is switching versions (`reason: 'switching'`, plan
+ * §10.5a): an update from `by` started at `startedAt` is between its stop and its start. The link waits for it
+ */
+export class SwitchUnderWay extends Error {
+  constructor(
+    message: string,
+    readonly by: string,
+    readonly startedAt: number,
+  ) {
+    super(message)
+    this.name = 'SwitchUnderWay'
   }
 }
 
@@ -290,6 +310,8 @@ export function parseDetachLine(stdout: string): DetachAnswer {
       reason: typeof o.reason === 'string' ? o.reason : 'failed',
       message: typeof o.message === 'string' ? o.message : 'centralu serve --detach failed',
       ...(typeof o.node === 'string' ? { node: o.node } : {}),
+      ...(typeof o.by === 'string' ? { by: o.by } : {}),
+      ...(typeof o.startedAt === 'number' ? { startedAt: o.startedAt } : {}),
     }
   }
   throw new Error('The remote did not say whether it started')
@@ -874,6 +896,7 @@ export class SshTunnel implements Tunnel {
     if (answer.reason === 'node_too_old') throw new NodeTooOld(answer.message, 'refused', answer.node ?? null)
     if (answer.reason === 'exited' && isHostCrash(answer.message)) throw new NodeTooOld(answer.message, 'crashed', null)
     if (answer.reason === 'exited' || answer.reason === 'timeout') throw new StartedNotServing(answer.message)
+    if (answer.reason === 'switching') throw new SwitchUnderWay(answer.message, answer.by ?? 'another computer', answer.startedAt ?? Date.now())
     throw new Error(answer.message)
   }
 

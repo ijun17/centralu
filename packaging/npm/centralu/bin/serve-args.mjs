@@ -77,6 +77,16 @@ export const FROM_RE = /^[A-Za-z0-9._-]{1,64}$/
  * `--autostart` writes starts serve on the port it recorded.
  */
 export function parseServeArgs(argv) {
+  // The hub's switch of the install it manages (docs/plans/remote-hub.md §10.5a): whole commands of their own, not in the help
+  if (argv[0] === '--switch' || argv[0] === '--switch-run') {
+    if (argv.length !== 2 || !/^[A-Za-z0-9_-]{1,4096}$/.test(argv[1])) return { error: `${argv[0]} takes one argument, the switch the hub wrote` }
+    return { mode: argv[0].slice(2), port: null, switchArg: argv[1] }
+  }
+  if (argv[0] === '--switch-status') {
+    if (argv.length === 1) return { mode: 'switch-status', port: null, seen: null }
+    if (argv.length === 3 && argv[1] === '--seen' && /^[0-9A-Za-z-]{8,64}$/.test(argv[2])) return { mode: 'switch-status', port: null, seen: argv[2] }
+    return { error: '--switch-status takes only --seen <id>' }
+  }
   let mode = 'serve'
   let port = null
   let help = false

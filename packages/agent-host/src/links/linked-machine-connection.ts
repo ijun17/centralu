@@ -19,10 +19,10 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, dataDirError, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, shimNames, StartedNotServing, SwitchUnderWay, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
-import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
+import { readSwitchStatus, switchResult, type SwitchState } from './update.js'
 
 /**
  * A linked machine's connection (links.ts): its transport and client, the backoff, the version gate,
@@ -216,8 +216,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * starts a host of its own: it would start the old version between the stop and the switch
    */
   protected held = false
-  /** Called with the version of every hello, while an update waits for the new one */
-  protected helloWaiters = new Set<(version: string | null) => void>()
   /** What the hub installed there, from the last connection line (plan §10.5, S12) */
   protected installed: MachineInfo['install'] = null
   /** Whether it starts its host at boot, from the last connection line or `machines.autostart` (plan §10.4) */
@@ -236,8 +234,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected switchTried = false
   /** Why the install that was tried failed, kept so the retries keep saying it */
   protected switchFailure: string | null = null
-  /** The link waits on a swap's hold there and said so once (swap-hold.ts) */
-  private holdSaid = false
+  /** The link waits for a switch there and said so once (plan §10.5a) */
+  private switchSaid = false
+  /** The machine's last switch was read once since this hub started: a running host is not asked again at every open */
+  private switchRead = false
+  /** How the machine's last switch ended, said once on its row when this hub did not follow it (plan §10.5a) */
+  protected switchNote: string | null = null
   /** Whether the remote host said in its last hello that it runs with administrator rights (#702); null: it did not say */
   private elevated: boolean | null = null
   /** Which Windows logon the remote host said in its last hello it runs in (#1224); null: it did not say */
@@ -465,6 +467,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       handover: this.handover,
       autoReconnect: this.autoReconnect,
       updateWaits: true,
+      switchNote: this.switchNote,
       ...this.otherCredentials(),
     }
   }
@@ -953,6 +956,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
      */
     this.installed = installOf(endpoint.line.install)
     this.bootStart = autostartOf(endpoint.line.autostart)
+    /*
+     * The machine switches versions itself (plan §10.5a): a switch under way is waited for, and one that ended while no hub
+     * followed it is said once. Asked where the hub manages an install (no other machine pays for the extra ssh), when no
+     * host runs, and once per hub when one does
+     */
+    const managed = !!endpoint.line.install?.current && !this.held && this.operation === null
+    const sw = managed && (!endpoint.line.hostRunning || !this.switchRead) ? await this.switchThere() : null
+    if (managed) this.switchRead = true
+    if (this.stopped) return
+    if (sw?.outcome && !sw.seen) this.noteSwitch(sw)
     // Found running: a Start has nothing left to start, and nothing is held back
     if (endpoint.line.hostRunning) {
       this.startAsked = false
@@ -973,23 +986,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
       if (this.held) return
-      /*
-       * `pnpm remote-dev` is swapping the host there (#1036, swap-hold.ts): a host started now would be the old version,
-       * between its stop and its switch. The link waits, asking again shortly; the command starts the new one itself.
-       * Asked only where the hub manages an install: a swap needs one (no other machine pays for the extra ssh)
-       */
-      const hold = endpoint.line.install?.current ? await this.swapHold() : null
-      if (this.stopped || this.held) return
-      if (hold) {
-        this.setStatus('updating', null)
-        if (!this.holdSaid) this.deps.log?.(`[links] ${this.name}: ${hold.by} is swapping its host; this link starts none until it is done`)
-        this.holdSaid = true
-        // With Auto reconnect off nothing asks again (#1341): the row says so instead of waiting on a retry
-        if (!this.autoReconnect) return this.setStatus('unreachable', `${hold.by} is swapping the host on ${this.name}; ${WAITS_FOR_PERSON}`)
-        // Asked again at the backoff's first step (2 s), never later than the hold lapses
-        return this.retryLater(Math.max(50, Math.min(this.deps.retryMs?.[0] ?? 2_000, hold.until - Date.now())))
-      }
-      this.holdSaid = false
+      if (this.held) return
+      // A switch there between its stop and its start: a host started now would be the old version; the switch starts one
+      if (sw && !sw.outcome) return this.waitForSwitch(sw.by)
+      this.switchSaid = false
       // A Node below the floor crashes the host on its first database call; the connection line says which Node answered (#699)
       const there = endpoint.line.install
       const floor = this.floor()
@@ -1004,6 +1004,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         started = await this.tunnel.startHost()
       } catch (err) {
         if (this.stopped) return
+        // `--detach` refused: a switch there began since the read above (another hub's, a boot entry's)
+        if (err instanceof SwitchUnderWay) return this.waitForSwitch(err.by)
         // A host that was started and never answered, one that crashes at boot (#1143 re-review): counted as one that
         // answered and then stopped, and the Start it answered is spent. A crash the Node there may explain too
         if (err instanceof StartedNotServing || (err instanceof NodeTooOld && err.kind === 'crashed')) this.countStart((err as Error).message)
@@ -1041,13 +1043,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`${shimNames(this.record.remote).centralu} serve\` is running there`)
       return this.retryLater()
     }
-    /*
-     * A check after a switch (`answers`) is met here, by the version the running host gave the
-     * connection line (`serve --connection` says hello to it). A rollback leaves a host older than
-     * this hub, so the link below does not open to it (plan §4) and no hello of the link's own would
-     * ever come: on a real Windows PC every rollback timed out and put the newer version back (2026-10-11)
-     */
-    for (const w of [...this.helloWaiters]) w(endpoint.line.version)
     // The versions are checked before the link is opened (plan §4)
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return
@@ -1101,14 +1096,39 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     )
   }
 
-  /** A swap's hold on the machine (swap-hold.ts), asked over its shell; none where there is no shell or no answer */
-  private async swapHold(): Promise<SwapHold | null> {
-    if (!this.tunnel.exec) return null
+  /** The machine's last switch (plan §10.5a), asked over its shell; null where there is no shell, none ran, or no answer */
+  private async switchThere(): Promise<SwitchState | null> {
+    const exec = this.tunnel.exec?.bind(this.tunnel)
+    if (!exec) return null
     try {
-      return parseHold((await this.tunnel.exec(readHoldCommand(this.record.remote))).stdout, Date.now())
+      return (await readSwitchStatus({ exec, spec: this.record.remote })) ?? null
     } catch {
       return null
     }
+  }
+
+  /** The row says `updating` while a switch `by` runs there, and the link asks again shortly; it starts no host meanwhile */
+  private waitForSwitch(by: string): void {
+    this.setStatus('updating', null)
+    if (!this.switchSaid) this.deps.log?.(`[links] ${this.name}: ${by} is switching the Centralu version there; this link starts no host until it is done`)
+    this.switchSaid = true
+    // With Auto reconnect off nothing asks again (#1341): the row says so instead of waiting on a retry
+    if (!this.autoReconnect) return this.setStatus('unreachable', `${by} is switching the Centralu version on ${this.name}; ${WAITS_FOR_PERSON}`)
+    this.retryLater(this.deps.retryMs?.[0] ?? 2_000)
+  }
+
+  /** A switch that ended while this hub did not follow it, said once on the row and marked reported there */
+  private noteSwitch(s: SwitchState): void {
+    if (s.outcome === 'done') this.switchNote = `${this.name} was updated to Centralu ${s.to.version} while this computer was away`
+    else {
+      try {
+        switchResult(s, this.record.sshTarget, null, this.name)
+      } catch (err) {
+        this.switchNote = errorMessage(err)
+      }
+    }
+    const exec = this.tunnel.exec?.bind(this.tunnel)
+    if (exec) void readSwitchStatus({ exec, spec: this.record.remote }, s.id).catch(() => undefined)
   }
 
   /**
@@ -1286,7 +1306,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   private async onHello(client: RemoteClient, h: RemoteHello): Promise<void> {
     if (this.client !== client) return
-    for (const w of [...this.helloWaiters]) w(h.build?.version ?? null)
     // The host that answered may not be the one the connection line described (restarted since)
     if (h.build) {
       const v = this.check({ version: h.build.version ?? this.versions?.remote.version ?? 'unknown', protocolVersion: h.build.protocolVersion, dev: h.build.commit === 'dev' })

@@ -54,6 +54,9 @@ import {
   runDetachedChild,
   runServe,
   runStop,
+  runSwitch,
+  runSwitchRun,
+  runSwitchStatus,
   runWindow,
   SERVE_HELP,
 } from './serve.mjs'
@@ -629,6 +632,19 @@ switch (cmd) {
       }
       if (args.mode === 'rotate') {
         process.exitCode = rotateToken({ env: process.env, home: HOME })
+        break
+      }
+      // The hub's switch of the install it manages (serve-switch.mjs): it starts and checks hosts only through serve's CLI
+      if (args.mode === 'switch') {
+        process.exitCode = await runSwitch({ env: process.env, home: HOME, raw: args.switchArg, cliPath: realpathSync(process.argv[1]) })
+        break
+      }
+      if (args.mode === 'switch-run') {
+        process.exitCode = await runSwitchRun({ env: process.env, home: HOME, raw: args.switchArg })
+        break
+      }
+      if (args.mode === 'switch-status') {
+        process.exitCode = await runSwitchStatus({ env: process.env, home: HOME, seen: args.seen })
         break
       }
       /*

@@ -85,6 +85,7 @@ export const OS_LAYER = [
   'packaging/npm/centralu/bin/serve-host.mjs',
   'packaging/npm/centralu/bin/serve-install.mjs',
   'packaging/npm/centralu/bin/serve-run.mjs',
+  'packaging/npm/centralu/bin/serve-switch.mjs',
   'packaging/npm/centralu/bin/serve-window.mjs',
   'packaging/npm/centralu/bin/serve-windows.mjs',
 ]

@@ -1,33 +1,26 @@
-import { isLocalBuildVersion } from '@cc/protocol'
+import { randomUUID } from 'node:crypto'
 import { removeAutostart } from './autostart.js'
-import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
-import { lastLine, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { DATA_PS, DATA_SH, STEP, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
+import { lastLine, thisHubName, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
 
 /**
  * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
- * (docs/plans/remote-hub.md §10.5, phase 3 step 4), over the same ssh as the link:
+ * (docs/plans/remote-hub.md §10.5 and §10.5a), over the same ssh as the link:
  *
- *   update     install beside (install.ts, `activate: false`; the running host is not touched)
- *              → stop the running host in order (`centralu serve --stop`)
- *              → `previous` = the old `current`, `current` = the new one, each by rename
- *              → start it (`serve --detach`) → a hello from the new version within 30 s
- *              → on success remove what neither pointer names; otherwise put the old pointers back,
- *                start the old version, and fail with the end of the new host's `host.log`
- *   rollback   the same stop, switch, start and check, towards `previous`; `previous` is cleared,
- *              so it is one step back only
+ *   update     install beside (install.ts, `activate: false`; the running host is not touched), wait for the turns
+ *              there (`beforeStop`), then hand the switch to the machine: one command runs the new version's
+ *              `serve --switch`, which stops the old host, switches the pointers, starts and checks the new version,
+ *              and prunes, or puts the old version back. The hub then only reads its steps and outcome
+ *              (`serve --switch-status`), so a link drop or a hub that dies leaves the machine with a host
+ *   rollback   the same switch towards `previous`, run by the version that runs now; `previous` is cleared
  *   uninstall  stop, then the boot entry removed (`serve --autostart off`, autostart.ts), then
  *              `<data>/remote/` removed; the data (store, `serve.json`, logs) stays
  *
- * Nothing is switched before the running host is gone and nothing is removed before the new one
- * answered: on Windows a running `node.exe` cannot be deleted (plan §10.5), and one step back is safe
- * only while both versions are there.
- *
- * What runs things there and what watches the link is the caller's (`HostControl`, given by
- * `LinkedMachine`), so every order and every guard here is tested against a fake.
+ * What runs things there and what watches the link is the caller's (`HostControl`, given by `LinkedMachine`).
  */
 
-/** How long the new version has to answer after it was started (plan §10.5 step 4) */
+/** How long the new version has to answer after it was started (plan §10.5 step 4); the switcher's own bound */
 export const CHECK_MS = 30_000
 
 export type UpdateStep =
@@ -56,26 +49,23 @@ export type HostControl = {
   spec: RemoteSpec
   /** The ssh target, for the sentences */
   target: string
-  /** `remote-install.mjs`'s text: the pointer and prune steps run it too */
+  /** `remote-install.mjs`'s text, which places a version */
   script: string
   /**
    * Called before the running host is stopped (#1399): resolves when it may be, with a sentence for the person when it was
    * stopped with turns running; rejects to end the update with nothing switched. Absent: stopped at once
    */
   beforeStop?: () => Promise<string | null>
-  /** The link stops reconnecting and starting a host on its own; called before the host is stopped */
+  /** The link stops reconnecting and starting a host on its own; called before the switch is handed over */
   hold: () => void | Promise<void>
-  /** `centralu serve --detach` there, through the lookup (which reads `current`) */
-  start: () => Promise<void>
-  /** Whether a host answering as `version` (null: any) said hello within `ms`; the link reconnects for it */
-  answers: (version: string | null, ms: number) => Promise<boolean>
-  /** `count`: what a `wait_idle` or `wait_open` step waits for (#1579) */
   step: (step: UpdateStep, count?: number) => void
-}
-
-/** Whether a host answering as `got` is the one `HostControl.answers` waits for: `want` null takes any (#1903) */
-export function answersAs(want: string | null, got: string | null | undefined): boolean {
-  return want === null || got === want
+  /** The machine's name, for the sentences the person reads on its row; the ssh target when not given */
+  machine?: string
+  /** Who hands the switch over, said there to a second hub and on a refused start; this computer's name by default */
+  by?: string
+  /** For tests: how often the switch is read, and how long it is followed */
+  pollMs?: number
+  followMs?: number
 }
 
 /** `{ v: 1, stop: { ok, wasRunning, how?, message? } }`, the line `serve --stop` prints; null when there is none */
@@ -92,11 +82,8 @@ export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolea
 }
 
 /**
- * Stops the host there in order. Rejects with a sentence when it is still running afterwards.
- *
- * `forUpdate` (#1618): a host starts again in the folder after this stop (an update, a rollback, a version put back), so
- * the stopping host lists the turns it ends and the next one continues each of them once (`CENTRALU_STOP_FOR=update`,
- * lifecycle/update-resume.ts). Not for an uninstall, after which no host starts there
+ * Stops the host there in order. Rejects with a sentence when it is still running afterwards. For an uninstall: an update
+ * or rollback stops it through the switch
  */
 export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'target'>, o: { forUpdate: boolean }): Promise<{ wasRunning: boolean }> {
   const r = await c.exec(stopCommand(c.spec, o))
@@ -111,122 +98,200 @@ export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'tar
   return { wasRunning: answer.wasRunning }
 }
 
-/** Writes both pointers there (`remote-install.mjs`, action `pointers`), run on the Node of `run` */
-async function setPointers(c: HostControl, run: InstalledVersion, current: InstalledVersion | null, previous: InstalledVersion | null) {
-  const out = readStep(await c.exec(installCommand(c.spec, c.script, { action: 'pointers', version: run.version, node: run.node, current, previous })), 'done', c.target)
-  return JSON.parse(out) as { current: InstalledVersion | null; previous: InstalledVersion | null }
+/** What the machine was asked to switch to (`serve --switch`'s argument, serve-switch.mjs `decodeSwitch`) */
+export type SwitchParams = {
+  id: string
+  by: string
+  to: InstalledVersion
+  keep: InstalledVersion | null
+  was: { current: InstalledVersion | null; previous: InstalledVersion | null }
+  /** A dev build (#1036): the store is copied before it first opens it, and put back when it does not answer */
+  saveStore: boolean
 }
 
-async function pruneThere(c: HostControl, run: InstalledVersion): Promise<{ removed: string[]; left: string[] }> {
-  const out = JSON.parse(readStep(await c.exec(installCommand(c.spec, c.script, { action: 'prune', version: run.version, node: run.node })), 'done', c.target)) as {
-    removed?: string[]
-    left?: string[]
+/** `switch.json` as `serve --switch-status` reads it there */
+export type SwitchState = {
+  id: string
+  by: string
+  to: InstalledVersion
+  keep: InstalledVersion | null
+  was: { current: InstalledVersion | null; previous: InstalledVersion | null }
+  saveStore?: boolean
+  step: string
+  startedAt: number
+  wasRunning?: boolean
+  outcome?: 'done' | 'put_back' | 'failed'
+  stage?: 'stop' | 'backup' | 'put_back' | 'interrupted'
+  why?: string
+  putBackWhy?: string
+  stopFailed?: string | null
+  log?: string
+  restored?: boolean
+  interrupted?: boolean
+  removed?: string[]
+  left?: string[]
+  seen?: boolean
+}
+
+/** What the handover command prints when neither version has `serve --switch` */
+export const NO_SWITCH = 'CENTRALU-NO-SWITCH'
+const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
+
+/**
+ * The handover (plan §10.5a step 3): the first of `runners` whose package has `serve --switch` runs it, on its own Node,
+ * after its version is written to `switch.runner`, which `switchStatusCommand` reads it through. `NO_SWITCH` when none has
+ */
+export function switchCommand(spec: RemoteSpec, runners: InstalledVersion[], params: SwitchParams): RemoteCommand {
+  const raw = Buffer.from(JSON.stringify(params), 'utf8').toString('base64url')
+  const tries = runners.filter((v) => WORD.test(v.version) && WORD.test(v.node))
+  const sh = `${DATA_SH}
+${tries
+  .map(
+    (v) =>
+      `if [ -f "$r/versions/${v.version}/node_modules/centralu/bin/serve-switch.mjs" ]; then printf '%s\\n' '${v.version} ${v.node}' > "$r/switch.runner.tmp" && mv -f "$r/switch.runner.tmp" "$r/switch.runner"; CENTRALU_MANAGED=1; export CENTRALU_MANAGED; exec "$r/node/v${v.node}/bin/node" "$r/versions/${v.version}/node_modules/centralu/bin/centralu.mjs" serve --switch ${raw}; fi`,
+  )
+  .join('\n')}
+echo ${NO_SWITCH}
+`
+  const ps = `${DATA_PS}
+${tries
+  .map(
+    (v) =>
+      `$c = Join-Path $r 'versions\\${v.version}\\node_modules\\centralu\\bin'
+if (Test-Path (Join-Path $c 'serve-switch.mjs')) { [IO.File]::WriteAllText((Join-Path $r 'switch.runner'), "${v.version} ${v.node}\`n"); $env:CENTRALU_MANAGED = '1'; & (Join-Path $r 'node\\v${v.node}\\node.exe') (Join-Path $c 'centralu.mjs') serve --switch '${raw}'; return }`,
+  )
+  .join('\n')}
+'${NO_SWITCH}'
+`
+  return remoteScript(spec, { sh, ps })
+}
+
+/** `serve --switch-status` of the version that ran the last switch there; `{ v: 1, switchStatus: null }` when none did */
+export function switchStatusCommand(spec: RemoteSpec, seen: string | null = null): RemoteCommand {
+  const seenArg = seen && /^[0-9A-Za-z-]{8,64}$/.test(seen) ? ` --seen ${seen}` : ''
+  const none = `{"v":1,"switchStatus":null}`
+  const sh = `${DATA_SH}; v= n=; read -r v n < "$r/switch.runner" 2>/dev/null
+case "$v" in ""|[!0-9A-Za-z]*|*[!0-9A-Za-z.+-]*) echo '${none}'; exit 0 ;; esac
+case "$n" in ""|[!0-9A-Za-z]*|*[!0-9A-Za-z.+-]*) echo '${none}'; exit 0 ;; esac
+CENTRALU_MANAGED=1; export CENTRALU_MANAGED; exec "$r/node/v$n/bin/node" "$r/versions/$v/node_modules/centralu/bin/centralu.mjs" serve --switch-status${seenArg}
+`
+  const ps = `${DATA_PS}; $f = Join-Path $r 'switch.runner'
+$w = if (Test-Path $f) { @((Get-Content -Raw $f).Trim() -split '\\s+') } else { @() }
+if ($w.Count -ne 2 -or $w[0] -notmatch '^[0-9A-Za-z][0-9A-Za-z.+-]*$' -or $w[1] -notmatch '^[0-9A-Za-z][0-9A-Za-z.+-]*$') { '${none}'; return }
+$env:CENTRALU_MANAGED = '1'; & (Join-Path $r "node\\v$($w[1])\\node.exe") (Join-Path $r "versions\\$($w[0])\\node_modules\\centralu\\bin\\centralu.mjs") serve --switch-status${seenArg}
+`
+  return remoteScript(spec, { sh, ps })
+}
+
+/** The `{ v: 1, [key]: … }` line of `stdout`, the last one; undefined when there is none */
+function lineOf(stdout: string, key: string): unknown {
+  for (const l of stdout.split(/\r?\n/).reverse()) {
+    const o = tryParseJson(l.trim()) as Record<string, unknown> | null | undefined
+    if (o && typeof o === 'object' && o.v === 1 && key in o) return o[key]
   }
-  return { removed: out.removed ?? [], left: out.left ?? [] }
+  return undefined
 }
 
-const TAIL_SH = `${DATA_SH}; tail -n 12 "$d/host.log" 2>/dev/null; true\n`
-const TAIL_PS = `${DATA_PS}; Get-Content -Tail 12 (Join-Path $d 'host.log') -ErrorAction SilentlyContinue\n`
-
-/** The end of `host.log` there, in one line for a sentence ("" when there is none) */
-export async function hostLogTail(c: Pick<HostControl, 'exec' | 'spec'>): Promise<string> {
-  const r = await c.exec(remoteScript(c.spec, { sh: TAIL_SH, ps: TAIL_PS }))
-  const lines = r.stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(-4)
-  const text = lines.join(' / ')
-  return text.length > 600 ? `…${text.slice(-600)}` : text
+/** The switch there now, null when none ran; undefined when it could not be read (the link down, an older Centralu) */
+export async function readSwitchStatus(c: Pick<HostControl, 'exec' | 'spec'>, seen: string | null = null): Promise<SwitchState | null | undefined> {
+  const r = await c.exec(switchStatusCommand(c.spec, seen))
+  const s = lineOf(r.stdout, 'switchStatus')
+  if (s === null) return null
+  return s && typeof s === 'object' && typeof (s as SwitchState).id === 'string' ? (s as SwitchState) : undefined
 }
 
-/** Started, then answering as `version`; otherwise why not */
-async function startAndCheck(c: HostControl, version: string): Promise<string | null> {
-  c.step('start')
-  try {
-    await c.start()
-  } catch (err) {
-    return (err as Error).message
+const POLL_MS = 2_000
+/** Past the longest switch the switcher can take, with a link that comes back on its backoff */
+const FOLLOW_MS = 15 * 60_000
+
+/** The step the row shows for the switcher's: its `restart` is the put-back's start */
+const rowStep = (s: string): UpdateStep => (s === 'restart' ? 'roll_back' : (s as UpdateStep))
+
+/** Reads the switch `id` there until it has an outcome, showing its steps; a read that fails is tried again later */
+async function follow(c: HostControl, id: string): Promise<SwitchState> {
+  const until = Date.now() + (c.followMs ?? FOLLOW_MS)
+  const poll = c.pollMs ?? POLL_MS
+  let shown: string | null = null
+  let wait = poll
+  for (;;) {
+    const s = await readSwitchStatus(c).catch(() => undefined)
+    if (s?.id === id) {
+      wait = poll
+      if (s.step !== shown) c.step(rowStep((shown = s.step)))
+      if (s.outcome) return s
+    } else wait = Math.min(wait * 2, 30_000)
+    if (Date.now() > until) throw new Error(`The update of ${c.target} could not be followed to its end from this computer; how it ended is shown once ${c.target} is reached again`)
+    await new Promise((r) => setTimeout(r, wait))
   }
-  c.step('check')
-  return (await c.answers(version, CHECK_MS)) ? null : `it did not answer within ${CHECK_MS / 1000} s`
-}
-
-/** Copies the store there, no host running, before `before` first opens it (remote-install.mjs `storeBackup`, #1036) */
-async function backupStore(c: HostControl, owner: InstalledVersion, before: string): Promise<void> {
-  readStep(await c.exec(installCommand(c.spec, c.script, { action: 'store-backup', version: owner.version, node: owner.node, owner: owner.version, before })), 'done', c.target)
-}
-
-/** Puts back the copy of the store taken for `owner`, no host running; false when there is none */
-async function restoreStore(c: HostControl, owner: InstalledVersion): Promise<boolean> {
-  const out = JSON.parse(readStep(await c.exec(installCommand(c.spec, c.script, { action: 'store-restore', version: owner.version, node: owner.node, owner: owner.version })), 'done', c.target)) as {
-    restored?: boolean
-  }
-  return out.restored === true
 }
 
 /** What the person is told when the store was put back as it was before a dev build */
 const restoredNote = (version: string, target: string) =>
   `The store on ${target} was put back as it was before the dev build first opened it, since Centralu ${version} could not read it as the dev build left it; what was done on the dev build since is not in it`
 
-/**
- * `to` started and checked; when it does not answer and the version left was a dev build, the store as it was before
- * that dev build first opened it is put back and `to` started once more (#1036): a dev build may have migrated the
- * store past what `to` reads, and `to` then refuses to start. Only after a dev build: the copy is the store of then,
- * and putting it back drops what was done since
- */
-async function startOrRestore(c: HostControl, to: InstalledVersion, from: InstalledVersion | null): Promise<{ why: string | null; note?: string }> {
-  const why = await startAndCheck(c, to.version)
-  if (!why || !isLocalBuildVersion(from?.version) || isLocalBuildVersion(to.version)) return { why }
-  await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
-  let restored = false
-  try {
-    restored = await restoreStore(c, to)
-  } catch (err) {
-    return { why: `${why}; ${(err as Error).message}` }
+/** A finished switch as the update's result, or the sentence it failed with (thrown) */
+export function switchResult(s: SwitchState, target: string, stoppedTurns: string | null = null, machine = target): InstallResult {
+  const from = s.was.current
+  const back = from ? `Centralu ${from.version}` : 'the Centralu that was there'
+  const log = s.log ? ` The end of its host.log: ${s.log}` : ''
+  if (s.outcome === 'done') {
+    const note = [stoppedTurns, s.restored ? restoredNote(s.to.version, target) : null].filter(Boolean).join(' ')
+    return { current: s.to, previous: s.keep, removed: s.removed ?? [], left: s.left ?? [], ...(note ? { note } : {}) }
   }
-  if (!restored) return { why }
-  c.step('restore_store')
-  const again = await startAndCheck(c, to.version)
-  return again ? { why: again } : { why: null, note: restoredNote(to.version, c.target) }
+  if (s.outcome === 'put_back') {
+    if (s.interrupted) throw new Error(`The update of ${machine} to Centralu ${s.to.version} was interrupted; it runs ${back} again`)
+    const store = s.saveStore ? ' Its store is as it was before the dev build first opened it.' : ''
+    throw new Error(`Centralu ${s.to.version} did not start on ${target} (${s.why}); ${s.wasRunning === false ? `${back} is back in place` : `it runs ${back} again`}.${store}${log}`)
+  }
+  switch (s.stage) {
+    case 'stop':
+      throw new Error(`Centralu on ${target} could not be stopped: ${s.why ?? 'no reason given'}`)
+    case 'backup':
+      throw new Error(`The store on ${target} could not be copied before the dev build first opened it (${s.why ?? 'no reason given'}); the release was started again and nothing was switched`)
+    case 'interrupted':
+      throw new Error(`The update of ${target} to Centralu ${s.to.version} was interrupted before the switch; nothing was switched`)
+    default: {
+      const stop = s.stopFailed ? ` (after Centralu on ${target} could not be stopped: ${s.stopFailed})` : ''
+      throw new Error(`Centralu ${s.to.version} did not start on ${target} (${s.why}), and putting back ${back} failed too: ${s.putBackWhy}${stop}.${log}`)
+    }
+  }
 }
 
+/** The time a switch started, as the person reads it */
+const clock = (at: number | null | undefined) => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
+
 /**
- * After a failed switch to `to`: the end of its log, the pointers as they were, the old host started
- * again and its hello waited for (#1903). Always rejects, with what happened and where the machine is now. `restore`: the
- * store is put back as it was before `to` (a dev build) first opened it, which it may have migrated past what the old
- * version reads (#1036)
+ * Hands a switch to the machine and follows it to its outcome (plan §10.5a steps 3 to 5): the turns there are waited
+ * for, the link is held, then one command runs `serve --switch` of the first of `runners` that has it. Shared by the
+ * update, the rollback and a dev build (dev-build.ts)
  */
-async function putBack(
-  c: HostControl,
-  to: InstalledVersion,
-  why: string,
-  was: { current: InstalledVersion | null; previous: InstalledVersion | null; running: boolean },
-  restore = false,
-): Promise<never> {
-  c.step('roll_back')
-  const tail = await hostLogTail(c).catch(() => '')
-  const log = tail ? ` The end of its host.log: ${tail}` : ''
-  const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu that was there'
-  // A new host that came up late, or half, goes before the old one starts on the same port. Tried on when it fails, and
-  // said with what fails next: a new host left running is most often why the old one cannot start
-  let stopFailed = ''
-  try {
-    await stopRemoteHost(c, { forUpdate: true }).catch((err: Error) => {
-      stopFailed = ` (after ${err.message})`
-    })
-    await setPointers(c, to, was.current, was.previous)
-    if (restore && was.current) await restoreStore(c, was.current)
-    if (was.running) {
-      await c.start()
-      // Back only once it said hello (#1903): a start that went through can still leave no host that answers
-      if (!(await c.answers(was.current?.version ?? null, CHECK_MS))) throw new Error(`it did not answer within ${CHECK_MS / 1000} s either`)
-    }
-  } catch (err) {
-    throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}${stopFailed}.${log}`)
+export async function handOver(c: HostControl, runners: InstalledVersion[], p: Omit<SwitchParams, 'id' | 'by'>): Promise<InstallResult> {
+  // What is working there is waited for before anything is held or stopped (#1399); the new version is already beside it
+  const stoppedTurns = (await c.beforeStop?.()) ?? null
+  await c.hold()
+  c.step('stop')
+  const params: SwitchParams = { id: randomUUID(), by: c.by ?? thisHubName(), ...p }
+  const r = await c.exec(switchCommand(c.spec, runners, params))
+  const machine = c.machine ?? c.target
+  if (r.stdout.includes(NO_SWITCH)) throw new Error(`Update ${machine} first: both versions there predate updates the machine runs itself`)
+  const answer = lineOf(r.stdout, 'switch') as { ok?: unknown; reason?: unknown; by?: unknown; startedAt?: unknown; message?: unknown } | undefined
+  if (answer?.ok === false && answer.reason === 'busy') {
+    throw new Error(`An update of ${machine} started from ${typeof answer.by === 'string' ? answer.by : 'another computer'} at ${clock(answer.startedAt as number)} is still running; try again when it ends`)
   }
-  const store = restore ? ' Its store is as it was before the dev build first opened it.' : ''
-  throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); ${was.running ? `it runs ${back} again` : `${back} is back in place`}.${store}${log}`)
+  if (answer?.ok === false) throw new Error(`${c.target} did not take the update: ${typeof answer.message === 'string' ? answer.message : 'no reason given'}`)
+  // No answer at all: the command may have died with the link after the switcher started; the switch says
+  if (answer === undefined) {
+    const s = await readSwitchStatus(c).catch(() => undefined)
+    if (s?.id !== params.id) {
+      const why = lastLine(r.stderr)
+      throw new Error(`Handing the update to ${c.target} gave no answer${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}; nothing was switched`)
+    }
+  }
+  const s = await follow(c, params.id)
+  // Reported here: a hub that links later does not report it again
+  await readSwitchStatus(c, params.id).catch(() => undefined)
+  // The versions as this hub knows them (a dev build's `source` with them), not as the machine echoes them
+  return { ...switchResult(s, c.target, stoppedTurns, machine), current: p.to, previous: p.keep }
 }
 
 export type UpdateOptions = Omit<InstallOptions, 'exec' | 'spec' | 'target' | 'script' | 'onStep' | 'activate'>
@@ -238,62 +303,14 @@ export async function updateRemote(c: HostControl, o: UpdateOptions): Promise<In
   if (!next) throw new Error(`Installing on ${c.target} answered without saying what it placed; the Centralu there may predate updates from the app`)
   const was = { current: placed.current ?? null, previous: placed.previous ?? null }
   // The old `current` becomes `previous`; with none (an npm install ran there), there is nothing to go back to
-  return switchRemote(c, next, was, was.current && was.current.version !== next.version ? was.current : was.previous)
+  const keep = was.current && was.current.version !== next.version ? was.current : was.previous
+  // The new version runs the switch; leaving a dev build for a release from before it, the dev build does
+  return handOver(c, [next, ...(was.current ? [was.current] : [])], { to: next, keep, was, saveStore: false })
 }
 
-/**
- * The update's steps after a version was placed beside (plan §10.5 steps 2 to 6): stop the running host, point
- * `current` at `next` and `previous` at `keep`, start, check, then prune; or put the pointers back and start the old
- * version again. Shared by `updateRemote` and a dev build (dev-build.ts).
- *
- * `saveStore` (a dev build, #1036): the store is copied while no host runs, before `next` first opens it, and put back
- * when `next` does not answer, so the old version finds the store it can read. Leaving a dev build the other way
- * (`next` a release), a `next` that does not answer gets the copy taken for it and one more start (`startOrRestore`)
- */
-export async function switchRemote(
-  c: HostControl,
-  next: InstalledVersion,
-  was: { current: InstalledVersion | null; previous: InstalledVersion | null },
-  keep: InstalledVersion | null,
-  o: { saveStore?: boolean } = {},
-): Promise<InstallResult> {
-  // What is working there is waited for before anything is held or stopped (#1399); the new version is already beside it
-  const stoppedTurns = (await c.beforeStop?.()) ?? null
-  await c.hold()
-  c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
-  const saveStore = o.saveStore === true && was.current !== null
-  if (saveStore && was.current) {
-    c.step('backup')
-    try {
-      await backupStore(c, was.current, next.version)
-    } catch (err) {
-      // Nothing was switched: the old version starts again as it was
-      if (wasRunning) await c.start().catch(() => undefined)
-      throw err
-    }
-  }
-  c.step('switch')
-  await setPointers(c, next, next, keep)
-  const { why, note } = saveStore ? { why: await startAndCheck(c, next.version), note: undefined } : await startOrRestore(c, next, was.current)
-  if (why) return putBack(c, next, why, { ...was, running: wasRunning }, saveStore)
-  c.step('prune')
-  const pruned = await pruneThere(c, next).catch(() => ({ removed: [], left: [] }))
-  const said = [stoppedTurns, note].filter(Boolean).join(' ')
-  return { current: next, previous: keep, ...pruned, ...(said ? { note: said } : {}) }
-}
-
-/** `machines.rollback`: back to `previous`, one step only (`previous` is cleared) */
-export async function rollbackRemote(c: HostControl, there: { current: InstalledVersion; previous: InstalledVersion }): Promise<InstallResult> {
-  await c.hold()
-  c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
-  c.step('switch')
-  await setPointers(c, there.previous, there.previous, null)
-  // Back from a dev build, the release may not read the store as the dev build left it (#1036)
-  const { why, note } = await startOrRestore(c, there.previous, there.current)
-  if (why) return putBack(c, there.previous, why, { current: there.current, previous: there.previous, running: wasRunning })
-  return { current: there.previous, previous: null, removed: [], left: [], ...(note ? { note } : {}) }
+/** `machines.rollback`: back to `previous`, one step only (`previous` is cleared); the version that runs now switches */
+export function rollbackRemote(c: HostControl, there: { current: InstalledVersion; previous: InstalledVersion }): Promise<InstallResult> {
+  return handOver(c, [there.current, there.previous], { to: there.previous, keep: null, was: { current: there.current, previous: there.previous }, saveStore: false })
 }
 
 const UNINSTALL_SH = `${DATA_SH}

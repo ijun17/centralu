@@ -18,7 +18,7 @@ import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { credentialCheck, usedEvent, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
-import { readHoldCommand } from './swap-hold.js'
+import { switchStatusCommand } from './update.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { activityCounts } from '../idle.js'
@@ -655,25 +655,30 @@ describe('a hub linked to another host (#82)', () => {
       return { links, statuses, logs, starts: () => starts }
     }
 
-    it('starts none while `pnpm remote-dev` holds the machine for a swap, says it is updating, and starts one once the hold is lifted (#1036)', async () => {
-      // The machine's shell, answering the hold a swap wrote there (swap-hold.ts) until it is lifted
-      let hold: string | null = JSON.stringify({ until: Date.now() + 60_000, by: 'pnpm remote-dev' })
+    // §10.5a: the machine switches versions itself; a host started between its stop and its start would be the old version
+    it('starts none while the machine runs a switch, says it is updating, then connects and says once how the switch ended', async () => {
+      // The machine's shell: its last switch, under way until the test ends it
+      const sw: Record<string, unknown> = { id: 'switch-1903-0001', by: 'other-hub', to: { version: RELEASE, node: '24.21.0' }, keep: null, was: { current: null, previous: null }, step: 'stop', startedAt: Date.now() }
       const asked: string[] = []
       const l = await linkTo(
         async () => ({ how: 'detached', note: null }),
         async (cmd) => {
           asked.push(String(cmd))
-          return { code: 0, stdout: hold ? `CENTRALU-HOLD ${hold}\n` : '', stderr: '' }
+          if (String(cmd).includes(' --seen ') || Buffer.from(/^printf %s (\S+) \|/.exec(String(cmd))?.[1] ?? '', 'base64').toString('utf8').includes(' --seen ')) sw.seen = true
+          return { code: 0, stdout: `${JSON.stringify({ v: 1, switchStatus: sw })}\n`, stderr: '' }
         },
-        // A swap needs an install the hub manages there
+        // A switch needs an install the hub manages there
         { install: { managed: true, current: { version: RELEASE, node: '24.21.0' }, previous: null, node: '24.21.0' } },
       )
       await eventually(() => asked.length >= 2 && l.links.list()[0]!.status === 'updating')
       expect(l.starts()).toBe(0)
-      expect(l.logs.filter((x) => x.includes('pnpm remote-dev is swapping its host'))).toHaveLength(1)
-      hold = null
+      expect(l.logs.filter((x) => x.includes('other-hub is switching the Centralu version there'))).toHaveLength(1)
+      Object.assign(sw, { step: 'prune', outcome: 'done' })
       await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.starts()).toBe(1)
+      expect(l.links.list()[0]!.switchNote).toBe(`Remote box was updated to Centralu ${RELEASE} while this computer was away`)
+      // Reported there, so a hub that links later does not say it again
+      await eventually(() => sw.seen === true)
     })
 
     it('starts it without asking, says so in the row and the log, and connects', async () => {
@@ -1045,8 +1050,8 @@ describe('a machine whose Node is below the floor (#699)', () => {
     ]
     const tunnel = Object.assign(new DirectTunnel(() => (opens++, lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line }))), {
       exec: async (cmd: string) => {
-        // A swap's hold (#1036), asked before a host is started where the hub manages an install: there is none here
-        if (cmd === readHoldCommand(o.remote ?? { shell: 'posix' })) return { code: 0, stderr: '', stdout: '' }
+        // The machine's last switch (plan §10.5a), asked where the hub manages an install: none ran here
+        if (cmd === switchStatusCommand(o.remote ?? { shell: 'posix' })) return { code: 0, stderr: '', stdout: '{"v":1,"switchStatus":null}\n' }
         runs.push(cmd)
         if (o.failInstall) return { code: 1, stderr: 'curl: (6) Could not resolve host', stdout: '' }
         const i = runs.length - 1
@@ -1264,6 +1269,44 @@ describe('machines.update never installs an older release than the remote runs (
   })
 })
 
+/**
+ * The machine's side of an update as these tests play it (plan §10.5a): the hub hands the switch over in one command
+ * (`serve --switch`), which this runs at once through the harness's own stop and start, as the switcher there would,
+ * and answers `serve --switch-status` with how it ended. What the switcher did is pushed to `runs` (`pointers`, `prune`,
+ * and `tail` before a put-back), the stop and the start push their own. Null for any other command
+ */
+function fakeSwitcher(h: { runs: string[]; stop: () => Promise<void>; start: () => Promise<unknown>; answers: (version: string) => boolean; log?: string }) {
+  let state: Record<string, unknown> | null = null
+  const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
+  return async (cmd: string): Promise<{ code: number; stderr: string; stdout: string } | null> => {
+    const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
+    const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+    if (script.includes('serve --switch-status')) {
+      const seen = / --seen (\S+)/.exec(script)?.[1]
+      if (seen && state?.id === seen) state = { ...state, seen: true }
+      return out(`${JSON.stringify({ v: 1, switchStatus: state })}\n`)
+    }
+    const raw = / serve --switch (\S+)/.exec(script)?.[1]
+    if (!raw) return null
+    const p = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { id: string; to: { version: string } }
+    const at = { startedAt: Date.now(), wasRunning: true }
+    await h.stop()
+    h.runs.push('pointers')
+    await h.start()
+    if (h.answers(p.to.version)) {
+      h.runs.push('prune')
+      state = { ...p, ...at, step: 'prune', outcome: 'done', removed: [], left: [] }
+    } else {
+      h.runs.push('tail')
+      await h.stop()
+      h.runs.push('pointers')
+      await h.start()
+      state = { ...p, ...at, step: 'restart', outcome: 'put_back', why: 'it did not answer within 30 s', ...(h.log ? { log: h.log } : {}) }
+    }
+    return out(`${JSON.stringify({ v: 1, switch: { ok: true, id: p.id, pid: 1 } })}\n`)
+  }
+}
+
 describe('machines.update through the link (#82, plan §10.5)', () => {
   const NODE = '24.21.0'
   /** What each remote command is, read back from the script the hub sent */
@@ -1293,7 +1336,23 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     const next = { version: RELEASE, node: NODE }
     const done = (o: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(o)}\n`
     let hub: Hub | null = null
+    const switcher = fakeSwitcher({
+      runs,
+      stop: async () => {
+        runs.push('stop')
+        await running.close()
+        line = { ...line, hostRunning: false }
+        // The person presses Reconnect while the host is down: the link must not open, or start a host, now. An open
+        // that is not held says `connecting` before its first wait, so the answer shows it with no time to wait (#845 item 9)
+        expect(hub!.links.reconnect('m1').status).toBe('updating')
+      },
+      start: () => startHost(),
+      answers: (version) => starts === version,
+      log: 'host: the store was written by a newer Centralu',
+    })
     const exec = async (cmd: string) => {
+      const switched = await switcher(cmd)
+      if (switched) return switched
       const kind = classify(cmd)
       runs.push(kind)
       const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
@@ -1304,20 +1363,6 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
           return out('CENTRALU-INSTALL node ok\n')
         case 'install_beside':
           return out(done({ installed: next, current: o.unmanaged ? null : old, previous: null, removed: [], left: [] }))
-        case 'stop': {
-          await running.close()
-          line = { ...line, hostRunning: false }
-          // The person presses Reconnect while the host is down: the link must not open, or start a host, now. An open
-          // that is not held says `connecting` before its first wait, so the answer shows it with no time to wait (#845 item 9)
-          expect(hub!.links.reconnect('m1').status).toBe('updating')
-          return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
-        }
-        case 'pointers':
-          return out(done(starts === OLD_VERSION ? { current: old, previous: null } : { current: next, previous: old }))
-        case 'prune':
-          return out(done({ current: next, previous: old, removed: [], left: [] }))
-        case 'tail':
-          return out('host: the store was written by a newer Centralu\n')
         default:
           return out('')
       }
@@ -1340,7 +1385,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       { exec, startHost },
     )
     const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
-    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500, activityPollMs: 50 })
+    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, switchPollMs: 20, activityPollMs: 50 })
     const u = await ui(hub.port)
     // An older remote on one protocol connects (#689); the update is offered, not required
     await eventually(() => status(hub!) === 'connected')
@@ -1393,7 +1438,8 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       .events()
       .filter((e) => e.type === 'machine_status' && e.machine.operation)
       .map((e) => e.machine.operation.step as string)
-    expect([...new Set(steps)]).toEqual(['preflight', 'registry', 'node', 'centralu', 'stop', 'switch', 'start', 'check', 'prune'])
+    // The handover, then the steps the switch there says it took (this fake's switch says only its last)
+    expect([...new Set(steps)]).toEqual(['preflight', 'registry', 'node', 'centralu', 'stop', 'prune'])
     expect(u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'updating')).toBe(true)
     await eventually(() => status(hub) === 'connected')
     expect(hub.links.list()[0]!.operation).toBeNull()
@@ -1481,7 +1527,23 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     const old = { version: was, node: NODE }
     const next = { version: RELEASE, node: NODE }
     const done = (x: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(x)}\n`
+    const switcher = fakeSwitcher({
+      runs,
+      // The switcher's stop is for an update: the stopping host lists the turns it ends (`host.stop { forUpdate }`, #1618)
+      stop: async () => {
+        runs.push('stop')
+        readsAtStop = reads
+        stops.push(true)
+        running.mgr.stopForUpdate()
+        await running.close()
+        line = { ...line, hostRunning: false }
+      },
+      start: () => startHost(),
+      answers: () => true,
+    })
     const exec = async (cmd: string) => {
+      const switched = await switcher(cmd)
+      if (switched) return switched
       const kind = classifyUpdate(cmd)
       runs.push(kind)
       const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
@@ -1494,17 +1556,10 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         case 'install_beside':
           return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
         case 'stop':
-          readsAtStop = reads
           stops.push(cmd.includes('CENTRALU_STOP_FOR=update'))
-          // What `host.stop { forUpdate }` does there (`serve --stop` passes it on)
-          if (stops.at(-1)) running.mgr.stopForUpdate()
           await running.close()
           line = { ...line, hostRunning: false }
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
-        case 'pointers':
-          return out(done({ current: next, previous: old }))
-        case 'prune':
-          return out(done({ current: next, previous: old, removed: [], left: [] }))
         default:
           return out('')
       }
@@ -1518,7 +1573,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     }
     const tunnel = Object.assign(new DirectTunnel(() => line), { exec, startHost })
     const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
-    const hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500, activityPollMs: 40, ...o.deps })
+    const hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, switchPollMs: 20, activityPollMs: 40, ...o.deps })
     const u = await ui(hub.port)
     await eventually(() => status(hub) === 'connected' || hub.links.list()[0]!.operation !== null)
     const idle = () => Object.assign(activity, { working: 0, approvals: 0, questions: 0, background: 0 })
@@ -3394,15 +3449,21 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const next = { version: RELEASE, node: NODE }
     const runs: string[] = []
     const done = (x: unknown) => ({ code: 0, stderr: '', stdout: `CENTRALU-INSTALL done ${JSON.stringify(x)}\n` })
-    const exec = async (cmd: string) => {
-      if (cmd.includes('serve --stop')) {
-        runs.push(cmd.includes('CENTRALU_STOP_FOR=update') ? 'stop for update' : 'stop')
-        // The host goes, listing the turns it ends (`host.stop { forUpdate }`); its sessions' rows stay as they stood
-        if (cmd.includes('CENTRALU_STOP_FOR=update')) running.mgr.stopForUpdate()
+    const switcher = fakeSwitcher({
+      runs,
+      // The host goes, listing the turns it ends (`host.stop { forUpdate }`); its sessions' rows stay as they stood
+      stop: async () => {
+        runs.push('stop for update')
+        running.mgr.stopForUpdate()
         await running.close()
         line = { ...line, hostRunning: false }
-        return { code: 0, stderr: '', stdout: '{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n' }
-      }
+      },
+      start: () => startHost(),
+      answers: () => true,
+    })
+    const exec = async (cmd: string) => {
+      const switched = await switcher(cmd)
+      if (switched) return switched
       const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
       const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
       if (script.includes('CENTRALU-PREFLIGHT')) return { code: 0, stderr: '', stdout: 'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n' }
@@ -3411,8 +3472,6 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
       runs.push(p?.action ?? (p?.activate === false ? 'install_beside' : 'other'))
       if (p?.activate === false) return done({ installed: next, current: old, previous: null, removed: [], left: [] })
-      if (p?.action === 'pointers') return done({ current: next, previous: old })
-      if (p?.action === 'prune') return done({ current: next, previous: old, removed: [], left: [] })
       return { code: 0, stderr: '', stdout: '' }
     }
     // The next host starts in the same data folder, and reads the file the stopping host wrote
@@ -3427,7 +3486,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
-    const hub = await hubHost(() => line, hubStore, true, { tunnelFor: () => tunnel, installer, checkMs: 3_000, activityPollMs: 40, autoUpdate: () => automatic.on })
+    const hub = await hubHost(() => line, hubStore, true, { tunnelFor: () => tunnel, installer, switchPollMs: 20, activityPollMs: 40, autoUpdate: () => automatic.on })
     await hub.mgr.setProjectTrusted('p-hub', true)
     await eventually(() => status(hub) === 'connected')
     const told = () => hub.store.messages.loadMessages('h1', 80).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))

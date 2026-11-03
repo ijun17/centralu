@@ -1,7 +1,7 @@
 import { isLocalBuildVersion, type InstalledVersion } from '@cc/protocol'
 import { hostname } from 'node:os'
 import { installCommand, readStep, type InstallResult } from './install.js'
-import { switchRemote, type HostControl } from './update.js'
+import { handOver, type HostControl } from './update.js'
 
 /**
  * A dev build of the host on a linked machine, from a git commit (#1036, docs/plans/remote-hub.md §10.11): the way to
@@ -12,8 +12,8 @@ import { switchRemote, type HostControl } from './update.js'
  *           `bundle.mjs` builds the host into `<data>/remote/versions/<base>.local.N/`, marked `source: { kind: 'dev' }`
  *           in its `install.json`. Nothing runs that is not already there: no file crosses the link but the installer,
  *           as for every update, and the build is the working copy's own
- *   swap    the update's own steps (update.ts `switchRemote`): stop, switch, start, a hello from `<base>.local.N`
- *           within 30 s, or the old version put back
+ *   swap    the update's own switch (update.ts `handOver`, run there by the dev build's `serve --switch`): stop,
+ *           switch, start, a hello from `<base>.local.N` within 30 s, or the old version put back
  *
  * `previous` stays the release: a dev build over a dev build keeps the release before both, so `machines.rollback`
  * (or `machines.update`, which takes `<base>.local.N` to `<base>`) always leads back to something a release produced.
@@ -66,5 +66,5 @@ export async function devUpdateRemote(c: HostControl, o: DevBuildOptions): Promi
   // A dev build over a dev build keeps the release before both as the way back
   const keep = isDevVersion(was.current) ? was.previous : was.current
   // The store is copied before the dev build first opens it, and put back if it does not answer
-  return switchRemote(c, next, was, keep, { saveStore: true })
+  return handOver(c, [next, was.current], { to: next, keep, was, saveStore: true })
 }

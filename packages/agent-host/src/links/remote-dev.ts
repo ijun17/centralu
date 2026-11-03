@@ -10,9 +10,7 @@ import { devUpdateRemote } from './dev-build.js'
 import { installScript, type InstallResult } from './install.js'
 import type { MachineRecord } from './link-deps.js'
 import { connectionCommand, NOT_FOUND, parseConnectionLine, SshTunnel, type ConnectionLine, type RemoteSpec, type SshTunnelOptions } from './tunnel.js'
-import { answersAs, type HostControl, type UpdateStep } from './update.js'
-import { HOLD, HOLD_MS, holdCommand } from './swap-hold.js'
-import { sleep } from '../timing.js'
+import type { HostControl, UpdateStep } from './update.js'
 
 /**
  * `pnpm remote-dev <machine> --ref <commit> --repo <path there>` (#1036, docs/plans/remote-hub.md §10.11): a
@@ -24,9 +22,9 @@ import { sleep } from '../timing.js'
  * resolved here, in the hub's working copy, to all 40 digits; the remote's checkout must be exactly that commit. The
  * protocol it must speak is this working copy's own `PROTOCOL_VERSION`, the one the hub this command belongs to speaks.
  *
- * Before the running host is stopped, a hold is written there (swap-hold.ts): a hub's link that finds no host running
- * waits on it instead of starting the old version mid-swap. It is lifted when the command is done, whatever happened,
- * and lapses by itself if the command dies. The link reconnects to the new host by itself.
+ * The machine runs the swap itself (`serve --switch`, update.ts `handOver`): a hub's link that finds no host running
+ * meanwhile waits for it instead of starting the old version mid-swap (`--detach` refuses then, and the link reads the
+ * switch first), and reconnects to the new host by itself.
  */
 
 export type RemoteDevOptions = {
@@ -41,9 +39,8 @@ export type RemoteDevOptions = {
   /** The hub's working copy, where `ref` is resolved */
   cwd?: string
   log?: (line: string) => void
-  /** For tests: the ssh binary, config and environment, and a shorter check */
+  /** For tests: the ssh binary, config and environment */
   ssh?: Pick<SshTunnelOptions, 'ssh' | 'configFile' | 'env'>
-  checkMs?: number
 }
 
 /** The hub's data folder: `CC_DATA_DIR`, else `~/.centralu`, as the host's */
@@ -96,7 +93,6 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
   const target = record.sshTarget
   const spec = record.remote
   const tunnel = new SshTunnel({ target, remote: spec, ...o.ssh, log })
-  let held = false
   try {
     const line = await lineThere(tunnel, spec, target)
     const there = line.install
@@ -106,25 +102,11 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
       exec: (cmd) => tunnel.exec(cmd),
       spec,
       target,
+      machine: record.name,
+      by: 'pnpm remote-dev',
       script: installScript(),
-      hold: async () => {
-        const r = await tunnel.exec(holdCommand(spec, { until: Date.now() + HOLD_MS, by: 'pnpm remote-dev' }))
-        if (!r.stdout.includes(`${HOLD} done`)) throw new Error(`The hold for the swap could not be written on ${target}, so nothing was stopped`)
-        held = true
-      },
-      start: async () => {
-        const how = await tunnel.startHost()
-        if (how.how !== 'detached') throw new Error(`Centralu on ${target} can only run inside an ssh session there (${how.note ?? 'WMI is blocked'}); a dev build cannot be checked from here`)
-      },
-      answers: async (version, ms) => {
-        const deadline = Date.now() + (o.checkMs ?? ms)
-        for (;;) {
-          const now = await lineThere(tunnel, spec, target).catch(() => null)
-          if (now?.hostRunning && answersAs(version, now.version)) return true
-          if (Date.now() > deadline) return false
-          await sleep(1_000)
-        }
-      },
+      // The switch there keeps every link from starting a host until it is done
+      hold: () => undefined,
       step: (s: UpdateStep) => log(`${record.name}: ${s}`),
     }
     const r = await devUpdateRemote(c, {
@@ -136,8 +118,6 @@ export async function remoteDev(o: RemoteDevOptions): Promise<InstallResult & { 
     })
     return { ...r, machine: record.name }
   } finally {
-    // The links wait no longer, whatever happened; a hold that cannot be lifted lapses by itself
-    if (held) await tunnel.exec(holdCommand(spec, null)).catch(() => log(`${record.name}: the swap's hold could not be lifted; it lapses within ${HOLD_MS / 60_000} minutes`))
     await tunnel.close()
   }
 }

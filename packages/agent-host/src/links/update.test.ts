@@ -5,9 +5,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, fakeServe, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
-import { SshTunnel } from './tunnel.js'
-import { parseStopLine, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { SshTunnel, SwitchUnderWay } from './tunnel.js'
+import { parseStopLine, readSwitchStatus, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Update, rollback and uninstall (plan §10.5, phase 3 step 4) against the installer's harness: a fake
@@ -53,6 +53,8 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
         'package.json': JSON.stringify({ name: 'centralu', version }),
         'bin/centralu.mjs': fakeServe(version, { realServe: pathToFileURL(SERVE_MJS).href }),
         'bin/serve.mjs': `export { managedLauncherScript } from ${JSON.stringify(pathToFileURL(SERVE_MJS).href)}\n`,
+        // How the hub tells a version that runs its own switch (update.ts `switchCommand`); its --switch is the real launcher's
+        'bin/serve-switch.mjs': '// the fake centralu.mjs runs the real launcher\'s serve --switch\n',
       },
     },
     { name: '@centralu/linux-x64', version, files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } },
@@ -92,41 +94,75 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
   const running = () => (existsSync(data('running')) ? readFileSync(data('running'), 'utf8') : null)
 
   /** A HostControl as LinkedMachine gives one, with this machine as the remote; what it saw is kept */
-  const control = (env: Record<string, string> = {}, o: { silent?: string } = {}) => {
+  const control = (env: Record<string, string> = {}, o: { exec?: HostControl['exec']; followMs?: number } = {}) => {
     const t = new SshTunnel({ target: 'box', ssh: join(root, 'ssh'), env: { HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin`, ...env } })
     const seen: string[] = []
     const c: HostControl = {
-      exec: (cmd) => t.exec(cmd),
+      exec: o.exec ?? ((cmd) => t.exec(cmd)),
       spec: { shell: 'posix' },
       target: 'box',
       script: installScript(),
       hold: () => void seen.push('hold'),
-      start: async () => {
-        const how = await t.startHost()
-        if (how.how !== 'detached') throw new Error('not detached')
-      },
-      answers: async (version) => {
-        seen.push(`answers ${version}`)
-        return version !== o.silent && running() === version
-      },
-      step: (s: UpdateStep) => void seen.push(s),
+      step: (s: UpdateStep) => void (seen.at(-1) !== s && seen.push(s)),
+      pollMs: 100,
+      ...(o.followMs ? { followMs: o.followMs } : {}),
     }
-    return { c, seen }
+    return { c, seen, t }
   }
-  const update = (version: string, env?: Record<string, string>, o?: { silent?: string }) => {
+  /** What the fake versions are told (`FAKE_*`), in the data folder as well as the session's environment */
+  const tell = (env: Record<string, string>) => {
+    mkdirSync(data(), { recursive: true })
+    writeFileSync(data('fake-env.json'), JSON.stringify(env))
+  }
+  const update = (version: string, env: Record<string, string> = {}, o: { exec?: HostControl['exec']; followMs?: number } = {}) => {
+    tell(env)
     const { c, seen } = control(env, o)
     return { seen, done: updateRemote(c, { version, runtime, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` }) }
+  }
+  /** `serve --detach` through the link's lookup, as a reconnecting hub runs it */
+  const startThere = async () => {
+    const how = await control().t.startHost()
+    expect(how.how).toBe('detached')
   }
   /** 9.9.1 installed by the hub and running, as after an earlier install and a link that started it */
   const installedAndRunning = async () => {
     const { c } = control()
     await installRemote({ exec: c.exec, spec: c.spec, target: 'box', version: '9.9.1', runtime, script: c.script, registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
-    await c.start()
+    await startThere()
     expect(running()).toBe('9.9.1')
     rmSync(data('events'))
   }
+  const switchNow = () => JSON.parse(readFileSync(remote('switch.json'), 'utf8')) as { id: string; pid: number; step: string; outcome?: string; interrupted?: boolean; seen?: boolean }
+  /** A hub that asks nothing more once it handed the switch over: gone, as one that died or lost its link for good */
+  const goneAfterHandover = (): HostControl['exec'] => {
+    const { t } = control()
+    let gone = false
+    return async (cmd) => {
+      if (gone) return new Promise<never>(() => {})
+      const r = await t.exec(cmd)
+      gone = r.stdout.includes('"switch":{')
+      return r
+    }
+  }
+  /** Ends the switcher held at `step` (its pid in switch.json, a process this test's fakes started), then what it held */
+  const killSwitcher = async (step: string) => {
+    await eventually(() => existsSync(data('holding')), 30_000)
+    expect(switchNow().step).toBe(step)
+    const pid = switchNow().pid
+    process.kill(pid, 'SIGKILL')
+    await eventually(() => {
+      try {
+        process.kill(pid, 0)
+        return false
+      } catch {
+        return true
+      }
+    })
+    // What it held ends having done nothing, if it outlived it
+    writeFileSync(data('release'), 'quit')
+  }
 
-  it('installs beside, stops the old host before switching, starts the new one, checks it, then prunes', async () => {
+  it('installs beside, hands the switch to the machine, which stops the old host, switches, starts and checks the new one, then prunes', async () => {
     await installedAndRunning()
     const { seen, done } = update('9.9.2')
     const r = await done
@@ -134,7 +170,8 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     // The old version stopped itself (its own serve), then the new one started: the stop ran before the switch
     expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
     expect(running()).toBe('9.9.2')
-    expect(seen).toEqual(['preflight', 'registry', 'node', 'centralu', 'hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.2', 'prune'])
+    expect(seen.slice(0, 6)).toEqual(['preflight', 'registry', 'node', 'centralu', 'hold', 'stop'])
+    expect(seen.at(-1)).toBe('prune')
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.2 ${NODE_V}\n`)
     expect(readFileSync(remote('previous'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     // A third version removes the first only once it answered
@@ -157,7 +194,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     await expect(done).rejects.toThrow(
       /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\); it runs Centralu 9\.9\.1 again\. The end of its host\.log: host 9\.9\.2: the store was written by a newer Centralu/,
     )
-    expect(seen.slice(-6)).toEqual(['hold', 'stop', 'switch', 'start', 'roll_back', 'answers 9.9.1'])
+    expect(seen).toContain('roll_back')
     expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop - (for update)', 'start 9.9.1'])
     expect(running()).toBe('9.9.1')
     // The pointers are what they were, and nothing was removed: both versions are still there
@@ -172,12 +209,11 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
    */
   it('ends a new version that took the lock and hung, by the pid its lock names, and the old one runs again', async () => {
     await installedAndRunning()
-    const { seen, done } = update('9.9.2', { FAKE_HANGS: '9.9.2' })
+    const { done } = update('9.9.2', { FAKE_HANGS: '9.9.2' })
     const hung = () => Number(readFileSync(data('hung'), 'utf8'))
     try {
       await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
       expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop hung (for update)', 'start 9.9.1'])
-      expect(seen.slice(-2)).toEqual(['roll_back', 'answers 9.9.1'])
       expect(running()).toBe('9.9.1')
       expect(() => process.kill(hung(), 0)).toThrow()
     } finally {
@@ -194,19 +230,85 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
 
   it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
     await installedAndRunning()
-    const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-' }, { silent: '9.9.1' })
-    await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./)
+    const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-', FAKE_SILENT: '9.9.1' })
+    await expect(done).rejects.toThrow(
+      /Centralu 9\.9\.2 did not start on box \(the host exited before it answered\), and putting back Centralu 9\.9\.1 failed too: it did not answer within 30 s either \(after Centralu on box could not be stopped: the host on 127\.0\.0\.1:4141 is still running\)\./,
+    )
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
-  }, 60_000 * SLOW)
+  }, 90_000 * SLOW)
 
-  it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {
+  // #1903: the link dropped between the stop and the start; every command after the stop fails, and the machine ends on the new version
+  it('ends on the new version when the link drops once the old host stopped, with no command from the hub after it', async () => {
+    await installedAndRunning()
+    let down = false
+    const { t } = control()
+    const exec: HostControl['exec'] = async (cmd) => {
+      if (down) throw new Error('ssh: connect to host box port 22: Connection timed out')
+      const r = await t.exec(cmd)
+      if (events().some((e) => e.startsWith('stop'))) down = true
+      return r
+    }
+    await expect(update('9.9.2', {}, { exec, followMs: 3_000 }).done).rejects.toThrow(/could not be followed to its end from this computer/)
+    await eventually(() => running() === '9.9.2' && switchNow().outcome === 'done', 30_000)
+    expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
+  }, 90_000 * SLOW)
+
+  // #1903: the hub died mid-update; the machine finishes, and the next hub that links reads how it ended, once
+  it('finishes when the hub is gone after the handover, and a hub that links later reads the outcome, once', async () => {
+    await installedAndRunning()
+    void update('9.9.2', {}, { exec: goneAfterHandover() }).done.catch(() => undefined)
+    await eventually(() => existsSync(remote('switch.json')) && switchNow().outcome === 'done', 30_000)
+    expect(running()).toBe('9.9.2')
+    const next = control().c
+    const first = await readSwitchStatus(next)
+    expect(first).toMatchObject({ outcome: 'done', to: { version: '9.9.2' } })
+    expect(first?.seen).toBeUndefined()
+    await readSwitchStatus(next, first!.id)
+    expect(await readSwitchStatus(next)).toMatchObject({ outcome: 'done', seen: true })
+  }, 90_000 * SLOW)
+
+  it('a switcher killed before the switch is finished by the next start: nothing was switched, the old version runs', async () => {
+    await installedAndRunning()
+    void update('9.9.2', { FAKE_HOLD: 'stop' }, { exec: goneAfterHandover() }).done.catch(() => undefined)
+    await killSwitcher('stop')
+    tell({})
+    await startThere()
+    expect(switchNow()).toMatchObject({ outcome: 'failed', interrupted: true })
+    expect(running()).toBe('9.9.1')
+    expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
+  }, 90_000 * SLOW)
+
+  it('a switcher killed between the switch and the check is finished by the next start: the old version is put back and runs', async () => {
+    await installedAndRunning()
+    void update('9.9.2', { FAKE_HOLD: 'start 9.9.2' }, { exec: goneAfterHandover() }).done.catch(() => undefined)
+    await killSwitcher('start')
+    expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.2 ${NODE_V}\n`)
+    tell({})
+    await startThere()
+    expect(switchNow()).toMatchObject({ outcome: 'put_back', interrupted: true })
+    expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
+    expect(running()).toBe('9.9.1')
+  }, 90_000 * SLOW)
+
+  it('refuses a second update, and starts no host, while a live switcher is between its stop and its start', async () => {
+    await installedAndRunning()
+    const first = update('9.9.2', { FAKE_HOLD: 'stop' })
+    await eventually(() => existsSync(data('holding')), 30_000)
+    await expect(update('9.9.3', { FAKE_HOLD: 'stop' }).done).rejects.toThrow(/^An update of box started from \S+ at \d\d:\d\d is still running; try again when it ends$/)
+    await expect(control().t.startHost()).rejects.toBeInstanceOf(SwitchUnderWay)
+    writeFileSync(data('release'), 'go')
+    expect(await first.done).toMatchObject({ current: { version: '9.9.2' } })
+    expect(running()).toBe('9.9.2')
+  }, 120_000 * SLOW)
+
+  it('rolls back one step, run by the version that runs now: previous becomes current, and there is no previous left to go back to', async () => {
     await installedAndRunning()
     await update('9.9.2').done
     rmSync(data('events'))
     const { c, seen } = control()
     const r = await rollbackRemote(c, { current: { version: '9.9.2', node: NODE_V }, previous: { version: '9.9.1', node: NODE_V } })
-    expect(r).toEqual({ current: { version: '9.9.1', node: NODE_V }, previous: null, removed: [], left: [] })
-    expect(seen).toEqual(['hold', 'stop', 'switch', 'start', 'check', 'answers 9.9.1'])
+    expect(r).toMatchObject({ current: { version: '9.9.1', node: NODE_V }, previous: null })
+    expect(seen.at(0)).toBe('hold')
     expect(events()).toEqual(['stop 9.9.2 (for update)', 'start 9.9.1'])
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)

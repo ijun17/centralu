@@ -217,22 +217,10 @@ export type InstallParams = {
 }
 
 /**
- * The update's later steps, run by the same `.mjs` on the Node `node` names (plan §10.5): write both
- * pointers as given, or remove what neither names. `version` is only checked as a word
- */
-export type PointerParams = { action: 'pointers'; version: string; node: string; current: InstalledVersion | null; previous: InstalledVersion | null }
-export type PruneParams = { action: 'prune'; version: string; node: string }
-/**
  * A dev build there from a git commit (`devBuild` in remote-install.mjs, #1036): run on the Node `current` runs on,
  * `version` being `current`'s, only checked as a word. `protocol` is the one the hub links on
  */
 export type DevParams = { action: 'dev'; version: string; node: string; repo: string; commit: string; allowDirty: boolean; protocol: number; hub: string }
-/**
- * The store copied before a dev build first opens it, and put back (`storeBackup` / `storeRestore` in
- * remote-install.mjs, #1036); run on the Node of `version`, which is only checked as a word
- */
-export type StoreBackupParams = { action: 'store-backup'; version: string; node: string; owner: string; before: string }
-export type StoreRestoreParams = { action: 'store-restore'; version: string; node: string; owner: string }
 
 export type { InstalledVersion }
 
@@ -241,7 +229,7 @@ export type { InstalledVersion }
  * PowerShell command line) beside the install and runs it on the pinned Node with `params` as one
  * base64 word.
  */
-export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams | DevParams | StoreBackupParams | StoreRestoreParams): RemoteCommand {
+export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | DevParams): RemoteCommand {
   if (!PLAIN.test(params.version) || !PLAIN.test(params.node)) throw new Error('Not a version to install')
   const gz = gzipSync(Buffer.from(script, 'utf8'), { level: 9 }).toString('base64')
   const arg = Buffer.from(JSON.stringify(params), 'utf8').toString('base64')
@@ -321,10 +309,6 @@ function failure(target: string, code: string, detail: string): string {
     }
     case 'dev_deps':
       return `The working copy on ${target} has no dependencies installed; run pnpm install there and try again`
-    case 'store_backup':
-      return `The store on ${target} could not be copied before the dev build first opened it (${detail || 'no reason given'}); the release was started again and nothing was switched`
-    case 'store_restore':
-      return `The store on ${target} could not be put back as it was before the dev build: ${detail || 'no reason given'}`
     case 'dev_build':
       return `Building the host on ${target} failed: ${detail || 'no reason given'} (the whole output is in <data>/remote/dev-build.log there). Nothing was switched`
     default:

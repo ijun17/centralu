@@ -264,6 +264,12 @@ export const MachineInfo = z.object({
    */
   updateWaits: z.boolean().optional(),
   /**
+   * How the machine's last version switch ended, when this hub did not follow it to its end (docs/plans/remote-hub.md
+   * §10.5a): the machine runs the switch itself, so one a hub that went away handed over finishes there and is said here
+   * once. Null otherwise. Additive: an older hub sends nothing
+   */
+  switchNote: z.string().nullable().catch(null).optional(),
+  /**
    * The hub's own update of this machine to the hub's version (#1508), started by itself while the hub's automatic updates
    * are on, that did not go through: `version` is the one it tried to install, `failed` says why, and `retryAt` is when it
    * tries once more (null: it will not try again for this version; the person's Update still can). Null or absent while none

@@ -11,6 +11,7 @@ import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, pro
 import { hostLinkPublicKey } from './serve-keys.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 import { moveIntoSignIn } from './serve-handover.mjs'
+import { beforeHostStart, rerunAs, switchingMessage } from './serve-switch.mjs'
 
 /**
  * The data folder a command that may start or describe a host works in: its state, created on first use, and the
@@ -143,6 +144,13 @@ async function signingHostKey({ dataDir, state, entry, keyId, hubKey, probeKey }
 export async function runServe({ env, home, entry, version, cliPath, port: askedPort, from = null, platform = process.platform, execPath = process.execPath, logFd = null, handOver = moveIntoSignIn }) {
   const { dataDir, state } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry)
+  // A switch of the managed install under way there (§10.5a): no host starts between its stop and its start
+  const gate = await beforeHostStart({ dataDir, env, version, platform })
+  if (gate.rerun) return rerunAs(dataDir, gate.rerun, process.argv.slice(2), env, platform)
+  if (!gate.go) {
+    say(switchingMessage(gate))
+    return 1
+  }
 
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.

@@ -109,22 +109,49 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
  * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
  * `FAKE_MIGRATES=<version>` plays a version whose migration only it reads: starting, it writes `needs <version>` to
- * `<data>/store.db`, and any other version refuses that store (`StoreTooNewError` in host.log). `--stop` marks the
- * event `(held)` while a swap's hold is there (swap-hold.ts).
+ * `<data>/store.db`, and any other version refuses that store (`StoreTooNewError` in host.log).
  *
  * The data folder's lock (#1903): `--detach` refuses, as a host does, while `<data>/host.lock` names a live process.
  * With `realServe` (the URL of the real `serve.mjs`), `FAKE_HANGS=<version>` plays a version whose host takes the lock
  * and then hangs: a process started outside the session as the real launcher starts its host, which never listens,
  * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
  * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`).
+ *
+ * The switch (plan §10.5a): with `realServe`, `--switch`, `--switch-run` and `--switch-status` are the real launcher's,
+ * and `--detach` asks its gate first (`beforeHostStart`), so the real switcher drives these fake versions through their
+ * CLI. A switcher started through WMI gets the account's environment, not the test's, so every `FAKE_*` is read from
+ * `<data>/fake-env.json` too. `FAKE_SILENT=<version>`: `--connection` says no host runs while that version would.
+ * `FAKE_HOLD=stop` or `FAKE_HOLD=start <version>` holds that command (`<data>/holding` says so) until `<data>/release`
+ * appears: `go` lets it on, `quit` ends it having done nothing, as a switcher killed there leaves it. `FAKE_WMI_BLOCKED`:
+ * the handover can start nothing outside the session (WMI blocked), so the switch runs in it.
  */
 export const fakeServe = (version: string, o: { fromPackage?: boolean; installInfo?: string; realServe?: string } = {}) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
 ${o.installInfo ? `import { installInfo } from ${JSON.stringify(o.installInfo)}` : ''}
 ${o.realServe ? `import * as real from ${JSON.stringify(o.realServe)}` : 'const real = null'}
 const V = ${o.fromPackage ? "JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version" : JSON.stringify(version)}
 const d = process.env.CC_DATA_DIR || process.env.HOME + '/.centralu'
 const a = process.argv.slice(2).join(' ')
+const fileEnv = (() => {
+  try {
+    return JSON.parse(readFileSync(d + '/fake-env.json', 'utf8'))
+  } catch {
+    return {}
+  }
+})()
+const F = (k) => process.env[k] ?? fileEnv[k]
+const home = process.env.HOME || process.env.USERPROFILE
+let gate = null
+const hold = async (what) => {
+  if (F('FAKE_HOLD') !== what) return
+  writeFileSync(d + '/holding', what)
+  while (!existsSync(d + '/release')) await new Promise((r) => setTimeout(r, 50))
+  const said = readFileSync(d + '/release', 'utf8')
+  rmSync(d + '/release', { force: true })
+  rmSync(d + '/holding', { force: true })
+  if (said === 'quit') process.exit(3)
+}
 const log = (s) => appendFileSync(d + '/events', s + '\\n')
 const lockPid = () => {
   try {
@@ -135,21 +162,33 @@ const lockPid = () => {
     return null
   }
 }
-if (a === 'serve --stop') {
+if (real && a.startsWith('serve --switch')) {
+  const [, mode, arg, seen] = process.argv.slice(2)
+  // FAKE_WMI_BLOCKED: nothing can be started outside the session, so the switch runs in it
+  const start = F('FAKE_WMI_BLOCKED') ? async () => ({ ok: false, blocked: true, message: 'WMI is blocked here' }) : undefined
+  if (mode === '--switch') process.exitCode = await real.runSwitch({ env: process.env, home, raw: arg, cliPath: fileURLToPath(import.meta.url), start })
+  else if (mode === '--switch-run') process.exitCode = await real.runSwitchRun({ env: process.env, home, raw: arg })
+  else process.exitCode = await real.runSwitchStatus({ env: process.env, home, seen: seen ?? null })
+} else if (a === 'serve --stop') {
+  await hold('stop')
   const was = existsSync(d + '/running')
-  log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : lockPid() ? 'hung' : '-') + (existsSync(d + '/remote/hold.json') ? ' (held)' : '') + (process.env.CENTRALU_STOP_FOR === 'update' ? ' (for update)' : ''))
+  log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : lockPid() ? 'hung' : '-') + (process.env.CENTRALU_STOP_FOR === 'update' ? ' (for update)' : ''))
   rmSync(d + '/running', { force: true })
-  if (real && lockPid()) await real.runStop({ env: process.env, home: process.env.HOME || process.env.USERPROFILE, entry: d + '/no-host.mjs' })
-  else console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS === '1' || (process.env.FAKE_STOP_FAILS === '-' && !was) ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
+  if (real && lockPid()) await real.runStop({ env: process.env, home, entry: d + '/no-host.mjs' })
+  else console.log(JSON.stringify({ v: 1, stop: F('FAKE_STOP_FAILS') === '1' || (F('FAKE_STOP_FAILS') === '-' && !was) ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
+} else if ((a === 'serve --detach' || a.startsWith('serve --detach --from ')) && real && (gate = await real.beforeHostStart({ dataDir: d, env: process.env, version: V })) && !gate.go) {
+  if (gate.rerun) process.exitCode = await real.rerunAs(d, gate.rerun, process.argv.slice(2), process.env)
+  else console.log(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'switching', by: gate.by, startedAt: gate.startedAt, message: 'switching' } }))
 } else if (a === 'serve --detach' || a.startsWith('serve --detach --from ')) {
+  await hold('start ' + V)
   log('start ' + V)
   // FAKE_MIGRATES=<version>: that version migrates the store so only it reads it; any other then refuses it
-  if (process.env.FAKE_MIGRATES === V) writeFileSync(d + '/store.db', 'needs ' + V)
+  if (F('FAKE_MIGRATES') === V) writeFileSync(d + '/store.db', 'needs ' + V)
   const store = existsSync(d + '/store.db') ? readFileSync(d + '/store.db', 'utf8') : ''
   if (lockPid()) {
     appendFileSync(d + '/host.log', 'host ' + V + ': the data folder is in use by another Centralu host (pid ' + lockPid() + ')\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
-  } else if (real && process.env.FAKE_HANGS === V) {
+  } else if (real && F('FAKE_HANGS') === V) {
     const hung = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', 'setInterval(() => {}, 1e6)'], env: process.env, cwd: d })
     if (!hung.ok) throw new Error(hung.message)
     writeFileSync(d + '/host.lock', JSON.stringify({ pid: hung.pid, started: real.processStartTime(hung.pid), at: Date.now(), by: 'serve' }))
@@ -163,7 +202,7 @@ if (a === 'serve --stop') {
   } else if (store.startsWith('needs ') && store.slice(6) !== V) {
     appendFileSync(d + '/host.log', 'host ' + V + ': StoreTooNewError: this store needs Centralu ' + store.slice(6) + '\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
-  } else if (process.env.FAKE_BROKEN === V) {
+  } else if (F('FAKE_BROKEN') === V) {
     appendFileSync(d + '/host.log', 'host ' + V + ': the store was written by a newer Centralu\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
   } else {
@@ -171,15 +210,16 @@ if (a === 'serve --stop') {
     console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: V, protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
   }
 } else if (a === 'serve --connection') {
-  const running = existsSync(d + '/running') ? readFileSync(d + '/running', 'utf8') : null
+  const said = existsSync(d + '/running') ? readFileSync(d + '/running', 'utf8') : null
+  const running = said !== null && said !== F('FAKE_SILENT') ? said : null
   ${o.installInfo ? 'const install = installInfo(d, process.env)' : 'const install = undefined'}
-  console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: running ?? V, protocolVersion: Number(process.env.FAKE_PROTOCOL || 1), dataDir: d, hostRunning: running !== null, ...(install ? { install } : {}) }))
+  console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: running ?? V, protocolVersion: Number(F('FAKE_PROTOCOL') || 1), dataDir: d, hostRunning: running !== null, ...(install ? { install } : {}) }))
 } else if (a === 'serve --autostart off' || a === 'serve --autostart remove') {
   log(a.slice('serve --'.length))
-  if (process.env.FAKE_NO_AUTOSTART) {
+  if (F('FAKE_NO_AUTOSTART')) {
     console.error('unknown option for serve: --autostart')
     process.exitCode = 2
-  } else if (process.env.FAKE_AUTOSTART_FAILS) {
+  } else if (F('FAKE_AUTOSTART_FAILS')) {
     console.log(JSON.stringify({ v: 1, autostart: { ok: false, on: true, how: 'systemd', linger: null, message: 'Failed to connect to bus' } }))
   } else {
     rmSync(d + '/autostart', { force: true })

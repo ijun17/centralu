@@ -14,6 +14,7 @@ import { startInSignIn } from './serve-autostart.mjs'
 import { stopServedHost } from './serve-handover.mjs'
 import { connectionLine, serveFrom } from './serve-host.mjs'
 import { describe, runServe, serveFolder } from './serve-run.mjs'
+import { beforeHostStart, rerunAs, switchingMessage } from './serve-switch.mjs'
 
 /**
  * What a detached launcher needs from the `--detach` that started it. A process created through WMI
@@ -134,6 +135,10 @@ export async function runDetach({
     return true
   }
   if (await answered(true)) return 0
+  // A switch of the managed install under way there (§10.5a): no host starts between its stop and its start
+  const gate = await beforeHostStart({ dataDir, env, version, platform })
+  if (gate.rerun) return rerunAs(dataDir, gate.rerun, process.argv.slice(2), env, platform)
+  if (!gate.go) return answerLine(write, 'detach', { ok: false, how, reason: 'switching', by: gate.by, startedAt: gate.startedAt, message: switchingMessage(gate) })
 
   const log = join(dataDir, SERVE_LOG_FILE)
   /*

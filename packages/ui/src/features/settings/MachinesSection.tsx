@@ -188,6 +188,11 @@ export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCatego
             )}
           </p>
         )}
+        {m.switchNote && !m.operation && (
+          <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid={`machine-switch-note-${m.id}`}>
+            {m.switchNote}
+          </p>
+        )}
         {followFailed && !m.operation && (
           <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid={`machine-follow-failed-${m.id}`}>
             {followFailed}

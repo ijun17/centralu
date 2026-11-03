@@ -21,7 +21,7 @@
  * folder (`serve-files.mjs`), the port (`serve-port.mjs`), the launchers and the managed install
  * (`serve-install.mjs`), the host and its socket (`serve-host.mjs`), the foreground serve
  * (`serve-run.mjs`), `--detach` and `--stop` (`serve-detach.mjs`), `--autostart`
- * (`serve-autostart.mjs`), Windows, WSL and PowerShell (`serve-windows.mjs`), and small helpers
+ * (`serve-autostart.mjs`), the hub's version switch (`serve-switch.mjs`), Windows, WSL and PowerShell (`serve-windows.mjs`), and small helpers
  * (`serve-util.mjs`).
  */
 export { SERVE_STATE_FILE, SERVE_LOG_FILE, SERVE_PID_FILE, serveDataDir, readServeState, ensureServeState, recordServePort, rotateServeToken, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, verifierOf, limitedOf, changeServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, processStartTime, processCreatedAt, lockHolder, lockHolderPid, readServePid, SERVE_STOPPED_FILE, SERVE_LOGS_KEPT, markStopped, readStopped, rotateServeLog } from './serve-files.mjs'
@@ -36,3 +36,4 @@ export { runWindow } from './serve-window.mjs'
 export { AUTOSTART_FILE, AUTOSTART_ENV, autostartHow, autostartUnsupported, pathKey, autostartName, autostartLauncher, systemdUnit, taskActionScript, taskScript, parseTaskAnswer, readAutostartMark, autostartInfo, lingerMessage, runAutostart, startInSignIn } from './serve-autostart.mjs'
 export { printConnection, runServe, rotateToken, revokeCredential } from './serve-run.mjs'
 export { CARRIED_ENV, encodeChildSpec, decodeChildSpec, startDetached, runDetach, runDetachedChild, runStop } from './serve-detach.mjs'
+export { SWITCH_FILE, SWITCH_LOCK, SWITCH_RUNNER, lockIsLive, decodeSwitch, encodeSwitch, readSwitch, setPointers, prune, storeBackup, storeRestore, hostLogTail, runSwitcher, reconcile, beforeHostStart, rerunAs, runSwitch, runSwitchRun, runSwitchStatus } from './serve-switch.mjs'
