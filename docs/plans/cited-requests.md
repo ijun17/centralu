@@ -31,11 +31,11 @@ own card, for a step that can be undone, and never answers a card the step raise
    renamed or brought back from the archive, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken
    away. These run in a request's turn without the request's card, cited or not; the cards they raise themselves ask as they do in the
    person's own turn (the trust card, the project's card, the machine's card, the settings that ask), under the orchestrator's own preset.
-   Work handed on to a session runs without the request's card only within the asking session's own reach (§4). Every other step raises the
+   Work handed on to a session runs without the request's card unless that session is looser than the asking one (§4). Every other step raises the
    person's card first, under every preset (`alwaysAsk`): a delete, an archive's steps removed, a machine installed, removed, uninstalled,
    rolled back or set to start with the OS, an app removed or put back to an older version, agent versions applied, background work cleared,
-   an update installed or applied, an answer to a session's card given for the person, a subagent of the orchestrator's own, another
-   project's session asked, a handoff, every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP
+   an update installed or applied, an answer to a session's card given for the person, work handed to a session looser than the asking
+   one, every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP
    server's and of an app's, and every command no list names: a command added later asks until someone lists it (`asked-acts.test.ts` holds
    every tool and command definition to exactly one list). The person's Allow on that card covers the cards the same call raises itself, so
    one step is one card. A step that would outlive the turn (a subagent, a scheduled prompt, a background command, a workflow, a monitor) is
@@ -60,18 +60,19 @@ all the same, with no `cites`, and the sender's result says why. The 5-an-hour l
 ## 4. What an asker can be handed
 
 **Work handed on.** The floor covers the orchestrator's own steps; a worker it starts runs under its own preset, as one the asker started
-itself would. So work handed on in a request's turn runs without the request's card only where the asking session could have handed it on
-itself with no card (`AskedGateHost.inReach`, `sessions/manager.ts`):
+itself would. Where the work goes (another project, a linked machine) is the orchestrator's judgement, as it is in the person's own turn,
+where the orchestrator starts sessions there with no card; the step is recorded like every other. The one check in code is about power: the
+request's card is skipped unless the work goes to a session looser than the asking one (`AskedGateHost.noLooser`, `sessions/manager.ts`):
 
-| The orchestrator's step | Without the request's card when | What the asking session itself could do |
-|---|---|---|
-| `create_session` | in the asking session's own project on this computer, the new session's preset (`normal` at most, never above the orchestrator's: `createdPreset`) no looser than the asking session's, and the asking session would start an agent there with no card (`AgentConsents.startsWithoutCard`: a remembered consent, the project's trust under `normal` or `edits`, or `auto`) | `start_agent` there: its child runs under the asking session's own preset (`start-agent-flow.ts`), behind the same consent |
-| `send_to_session`, `agent_session` `send` | to a worker of the asking session's own project on this computer, under no looser preset than the asking session's | `agent_session` `send` gives work only to a session no looser than itself (`agent-session-actions.ts`) |
-| `mail` `send` | to a session of the asking session's own project on this computer | `mail` there itself; the recipient acts under its own preset |
+| The orchestrator's step | The preset compared with the asking session's |
+|---|---|
+| `create_session` | the new session's, here or on a linked machine: `normal` at most, never above the orchestrator's (`createdPreset`) |
+| `start_agent` | the orchestrator's own: its child runs under the caller's preset (`start-agent-flow.ts`) |
+| `handoff_session` | the handed-off session's, which the new one keeps (the orchestrator's own when none is named) |
+| `send_to_session`, `agent_session` `send`, `ask_project` (`session`), `mail` `send` | the session it goes to |
 
-Anywhere else (another project, a linked machine, a session under a looser preset, a name the host cannot resolve) it asks: there the asking
-session would have met a consent card, or could not have done it at all. `start_agent` (its child runs under the orchestrator's own preset, in
-the orchestrator's place), `ask_project`, `handoff_session`, `answer_question` and `agent_session` `stop`, `delete` and `answer` always ask.
+A session whose preset this host does not know (one on a linked machine, a name it cannot resolve, `ask_project` with no session named) asks.
+`answer_question` and `agent_session` `stop`, `delete` and `answer` always ask: they cannot be undone, or answer for the person.
 
 **Reads.** The reads of a request's turn are free, and the answer goes back to the asker, so the orchestrator can pass on what it read. What
 that adds is narrow. Under #984 a trusted project's ordinary session already reads every project's ordinary sessions, on this computer and the linked

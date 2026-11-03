@@ -1057,7 +1057,7 @@ message.
 | Per-pair new threads, 5 an hour (owner, #1455) | **keep, re-keyed** | 5 **non-reply** messages an hour per ordered pair: refused `pair_rate`. Replies are not counted | A message that is not a reply is what a new thread was |
 | One open request to the orchestrator per group (`checkAsk`, `service.ts:1819`) | **drop** | — | #1683: a report is not a second request, and the gate stranded it |
 | 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
-| Request turns: the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message; since #1739 a step that can be undone, and work handed on within the asker's own reach, run without it ([cited-requests.md](cited-requests.md)) | Mail grants nothing |
+| Request turns: the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message; since #1739 a step that can be undone, and work handed on to a session no looser than the asker, run without it ([cited-requests.md](cited-requests.md)) | Mail grants nothing |
 | The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **dropped** (#1739) | the orchestrator judges a request, with the person's message it cites as evidence; a step that cannot be undone asks, and every change is recorded ([cited-requests.md](cited-requests.md)) | Replaced, not re-keyed |
 | Mail never answers a card, never passes for the person, grants nothing (old §9.2) | **keep** | unchanged: the frame, quoted bodies, the held `card` state | Not about threads |
 | The `auto` receiver's hold (`holdsInbound`, `policy.ts:22`) | **drop** | — | Owner, 2026-11-02 (D10) |
@@ -1078,7 +1078,7 @@ message.
   own conversation (sent from the window, at most 30 minutes old and not later than now, cited once: `dedupe_key`
   `cite:<seq>`) and stores `facts.cites`; `mail read` puts that message with the request, as evidence for the
   orchestrator's judgement. A request that cites nothing, or fails the check, is delivered all the same, as the
-  session's own words. In the turn, a step not listed as undoable, and work handed beyond the asker's own reach, ask
+  session's own words. In the turn, a step not listed as undoable, and work handed to a session looser than the asker, ask
   the person; a step's own cards ask as in the person's turn; every change is recorded in the asking session once it
   ran.
 - **One asker per wake.** `drain` for the orchestrator keeps the requests of one session (the person's words and

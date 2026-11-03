@@ -496,14 +496,13 @@ request and in no other: read in the person's turn, or in another request's, the
 only who the request is from there, and `mail inbox` lists a request by that header and not by the subject the session wrote. (3) **The floor and the record.** A request's turn is never looser than the
 person's own. The steps that can be undone are listed (`UNDOABLE`, `sessions/asked-acts.ts`: a project added or made, a machine added or its link changed, a trust or a
 setting changed, a session renamed or restored, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken away), and so is work
-handed on within the asking session's own reach (`create_session`, `send_to_session`, `agent_session send`, `mail send`: only to its own project on this computer, no
-looser than its own preset, and for a new session only where its own `start_agent` would need no card, `AskedGateHost.inReach`). These run without the request's card,
+handed on to a session no looser than the asking one, wherever it is (`create_session`, `start_agent`, `send_to_session`, `agent_session send`, `ask_project`, a handoff,
+`mail send`; the new or target session's preset after any cap, `AskedGateHost.noLooser`): where the work goes is the orchestrator's judgement, recorded like every step. These run without the request's card,
 and the cards they raise themselves ask as in the person's turn (the trust card, the project's card, the machine's card, the settings that ask, a start's consent): the
 turn never answers them. Every other step raises the person's card first, cited or not, naming the session and its project, under every preset (`alwaysAsk`, so `auto`
 does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`): a delete, an archive's steps removed, a machine installed, removed, uninstalled, rolled back or set to
 start with the OS, an app removed or put back to an older version, agent versions applied, background work cleared, an update installed or applied, an answer given for
-the person, work handed beyond the asking session's reach (another project, a linked machine, a looser preset, the orchestrator's own `start_agent`, `ask_project`, a
-handoff), every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP server's and of an app's, and every command no list names,
+the person, work handed to a session looser than the asking one, or one whose preset this host does not know, every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP server's and of an app's, and every command no list names,
 so a command added later asks until it is listed (a test holds every definition to one list). Its Allow covers the cards that same call raises (`HostCards.cover`), so one
 step is one card. Every step that changed something, cited or not, the ones the person allowed included, leaves a notice in the asking session once it has run and not
 failed (a step of the CLI's own when the CLI says it ran, `PostToolUse`), where the person reads it (label `request record`): what was done, and on which message of
@@ -524,7 +523,8 @@ or a thread the person gave) is as it was. **Where the orchestrator's tool canno
 is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
 **Not covered, and named:** the orchestrator's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read
 hostile content can talk it into either. The floor covers the orchestrator's own steps; a worker it starts runs under its own preset, as one the asker started itself would,
-which is why work handed on without the request's card stays within what the asker could hand on itself. What it can pass back that the asker could not read itself is narrow, since under #984 a trusted asker reads every project's
+which is why work handed on without the request's card goes only to a session no looser than the asker; where it goes, another project or a linked machine, is
+the orchestrator's judgement. What it can pass back that the asker could not read itself is narrow, since under #984 a trusted asker reads every project's
 ordinary sessions, here and on the linked machines, and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own conversation,
 coordinators' and app sessions' conversations, sessions with no project, and files the asker's stricter preset would ask about; for an asker in an untrusted project,
 anything outside its own project, though its requests are held until the person trusts the project. A hub's orchestrator, which holds this host's token, could send

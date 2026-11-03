@@ -25,7 +25,7 @@ import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcrip
 
 /**
  * The preset of a session create_session makes (#838): never more than the seat's own permissions, and `normal` at most, since `auto` is the
- * person's to give. Also what a request's turn compares with the asking session's own preset (`AskedGateHost.inReach`)
+ * person's to give. Also what a request's turn compares with the asking session's own preset (`AskedGateHost.noLooser`)
  */
 export function createdPreset(seat: PermissionPreset): PermissionPreset {
   return lowestPreset('normal', seat)

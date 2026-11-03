@@ -9,11 +9,11 @@ import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } fr
  * they run at once, as before. In a request's turn the orchestrator judges, from the request and the person's message it may cite (checked by the
  * host at send), what to do, and these hold whatever it judges:
  *
- * - **A step that can be undone** (`stepKind` `undoable`: a project added, a session renamed, a setting changed), and work handed on within the
- *   asking session's own reach (`handsOn`, `inReach`), run without the request's card. The cards such a step raises itself ask as in the
+ * - **A step that can be undone** (`stepKind` `undoable`: a project added, a session renamed, a setting changed), and work handed on to a session
+ *   no looser than the asking one (`handsOn`, `noLooser`), run without the request's card. The cards such a step raises itself ask as in the
  *   person's own turn (a trust card, a project's card, a start's consent): a request's turn is never looser than the person's.
- * - **Every other step** (`asks`: a delete, an uninstall, an OS entry, a command, a file written, an app's step, work handed beyond the asking
- *   session's reach, a name no list holds) raises the person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny
+ * - **Every other step** (`asks`: a delete, an uninstall, an OS entry, a command, a file written, an app's step, work handed to a session looser
+ *   than the asking one, a name no list holds) raises the person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny
  *   does not.
  * - **A step that would outlive the turn** (a subagent, a scheduled prompt, a background command) is refused without a question.
  * - **Every step that changed something leaves a record** in the asking session (`done`), once it has run and not failed, so the person can see
@@ -32,10 +32,10 @@ export type AskedGateHost = {
   /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
   cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
   /**
-   * Whether work handed on (`handsOn`: a session made with its first message, a message to a session's turn, mail to a session) stays where the
-   * asking session could have handed it on itself: its own project on this computer, and a session under no looser preset than its own
+   * Whether work handed on (`handsOn`: a session made or started, a session handed off, a message or mail to a session's turn) goes to a session
+   * under no looser preset than the asking session's own, once any cap is applied. False when that preset is not known here
    */
-  inReach(asker: Asker, call: { name: string; args: Record<string, unknown> }): boolean
+  noLooser(asker: Asker, call: { name: string; args: Record<string, unknown> }): boolean
   /** A step that changed something was done for a session's request: its record, in the asking session (docs/plans/cited-requests.md §5) */
   done(asker: Asker, act: string): void
 }
@@ -105,7 +105,7 @@ export class AskedGate {
     }
     const kind = stepKind(call.name, call.args)
     // Not covered: the cards the step raises itself ask as they would in the person's own turn
-    if (kind === 'undoable' || (kind === 'handsOn' && this.host.inReach(asker, call))) return recorded()
+    if (kind === 'undoable' || (kind === 'handsOn' && this.host.noLooser(asker, call))) return recorded()
     return this.put(orchestratorId, asker, step, signal, recorded, refused)
   }
 

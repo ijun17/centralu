@@ -3,7 +3,7 @@ import { oneLineText } from '@cc/protocol'
 /**
  * What the orchestrator's acts are in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md): reads and answers in the
  * request's thread (`askedAct` null), and steps that change something. Of those, the ones listed as able to be undone (`UNDOABLE`) run without the
- * request's card, and so does work handed on within the asking session's own reach (`HANDS_ON`, decided by `AskedGate`'s host); every other step
+ * request's card, and so does work handed on to a session no looser than the asking one (`HANDS_ON`, decided by `AskedGate`'s host); every other step
  * asks the person first, whatever the orchestrator's own preset (`stepKind`).
  *
  * **Fail closed.** The reading acts and the steps that can be undone are listed; every other tool or command asks the person, so a command added
@@ -150,17 +150,16 @@ const UNDOABLE: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Work handed on to a session: run without the request's card only when the asking session could have handed it on itself, in its own project on
- * this computer and to a session under no looser preset than its own (`AskedGateHost.inReach`). Anywhere else it asks: the asking session would
- * have met a consent card there, or could not have done it at all
+ * Work handed on to a session: run without the request's card unless the session it goes to runs under a looser preset than the asking session's
+ * own (`AskedGateHost.noLooser`), the one check about power. Where it goes (another project, a linked machine) is the orchestrator's judgement,
+ * recorded as every step is (owner, 2026-11-03)
  */
-const HANDS_ON: ReadonlySet<string> = new Set(['create_session', 'send_to_session'])
+const HANDS_ON: ReadonlySet<string> = new Set(['create_session', 'send_to_session', 'start_agent', 'ask_project', 'handoff_session'])
 
 /**
  * The steps a session's request never takes without the person's card, cited or not, besides every step no list names: what cannot be undone (a
- * delete, an uninstall, an OS entry, an install, a version put back over the current one, work stopped, an update applied), an answer given for
- * the person, and work handed on that the asking session could not hand on itself (a subagent under the orchestrator's own preset, another
- * project's session, a handoff)
+ * delete, an uninstall, an OS entry, an install, a version put back over the current one, work stopped, an update applied), and an answer given
+ * for the person
  */
 const CANNOT_BE_UNDONE: ReadonlySet<string> = new Set([
   'delete_session',
@@ -178,9 +177,6 @@ const CANNOT_BE_UNDONE: ReadonlySet<string> = new Set([
   'clear_background_tasks',
   'update_centralu',
   'answer_question',
-  'start_agent',
-  'ask_project',
-  'handoff_session',
 ])
 
 /** Tools whose kind is read from their arguments (`askedAct`, `stepKind`): an action, or who the mail is for */
@@ -191,7 +187,7 @@ export const CLASSIFIED = { reads: READS, undoable: UNDOABLE, handsOn: HANDS_ON,
 
 /**
  * How a step of a request's turn that changes something is taken (`AskedGate`): `undoable` runs without the request's card, `handsOn` runs without
- * it only within the asking session's own reach, and `asks` puts it to the person first. `asks` is everything else: what cannot be undone, every
+ * it unless the work goes to a session looser than the asking one, and `asks` puts it to the person first. `asks` is everything else: what cannot be undone, every
  * step of the CLI's own that is not a read, of another MCP server's or of an app's, which nobody here can tell can be undone (a command, a file
  * written or edited, an app's `queue_merge`), and every name no list holds
  */

@@ -1,7 +1,7 @@
 /**
  * A session asking the orchestrator, over the real manager (#1447, #1739, docs/plans/cited-requests.md): every request wakes it with host fields
  * only, and says whether it cites the person's message, which the host checked. In the turn it starts, a step that cannot be undone, and work
- * handed beyond the asking session's own reach, raise the person's card naming the session, under `auto` too, with Allow or Deny only; a step
+ * handed to a session looser than the asking one, raise the person's card naming the session, under `auto` too, with Allow or Deny only; a step
  * that can be undone runs, the cards it raises itself asking as in the person's own turn; every step that changed something is recorded in the
  * asking session. A turn that is not a session's request is as it was.
  */
@@ -153,7 +153,7 @@ describe('a session’s request wakes the orchestrator with host fields, and its
   })
 })
 
-// Since #1739 only a step that cannot be undone, and work handed beyond the asking session's reach, ask here; the name stays, which keeps its tests'
+// Since #1739 only a step that cannot be undone, and work handed to a session looser than the asking one, ask here; the name stays, which keeps its tests'
 describe('in the turn a request starts, every step that changes something asks the person, naming the session', () => {
   async function asked(trusted = true) {
     const acme = await project('Acme', trusted)
@@ -214,7 +214,7 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(recordsIn(asker)).toEqual([expect.stringContaining("the orchestrator did this for this session's request: run set_project_trust")])
   })
 
-  it('work handed on takes no request card only where the asking session could have handed it on itself: its own project, a session no looser than it (#1739)', async () => {
+  it('work handed on takes no request card when it goes to a session no looser than the asking one, wherever that is: where it goes is the orchestrator’s judgement, recorded (#1739)', async () => {
     const { asker, other, acme } = await asked()
     const beta = await project('Beta', true)
     // A session of its own project, under its own preset: no request card
@@ -227,13 +227,12 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(made).not.toMatchObject({ isError: true })
     expect(card()).toBeUndefined()
     expect(recordsIn(asker)).toEqual([expect.stringContaining('run send_to_session'), expect.stringContaining('run create_session')])
-    // Another project: the asking session would have met that project's consent card
-    const elsewhere = tool('create_session', { project: beta.id, firstMessage: 'start on it' })
-    await eventually(() => !!card())
-    expect(card()!.text).toContain('asked the orchestrator to run create_session')
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
-    expect((await elsewhere).isError).toBe(true)
-    expect(w.mgr.listSessions().filter((x) => x.projectId === beta.id)).toEqual([])
+    // Another project, at `normal` (no looser than the asking session's): no request card either, and recorded
+    const elsewhere = await settled(tool('create_session', { project: beta.id, firstMessage: 'start on it' }))
+    expect(elsewhere).not.toMatchObject({ isError: true })
+    expect(card()).toBeUndefined()
+    expect(w.mgr.listSessions().filter((x) => x.projectId === beta.id)).toHaveLength(1)
+    expect(recordsIn(asker).at(-1)).toContain(`run create_session {"project":"${beta.id}"`)
   })
 
   it('work handed on to a session under a looser preset than the asking session’s asks: the asking session could not have given it that work (#1739)', async () => {

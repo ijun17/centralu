@@ -912,7 +912,7 @@ that asks the person is the host's, and the rule behind it is code.
 **#1739 (a request citing the person's message).** The mail tool gets `cite`, a boolean with no description, and its own description
 says when to set it (", with cite=true only when the person's last message here asked for it": the definition is 907,
 `MAIL_BUDGET_CHARS` 820 → 910, and the reader seat's ceilings rise by 90). The orchestrator's line about requests now says to judge
-the request and the message it cites, and which steps still ask (about 100 characters more; its ceiling 9,910 → 10,010). The check of
+the request and the message it cites, and which steps still ask (about 110 characters more; its ceiling 9,910 → 10,030). The check of
 the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), so it costs nothing in a request.
 
 Every field but `action` is optional and has no description: each word rides in every Codex request, and the answers say

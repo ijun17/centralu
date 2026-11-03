@@ -16,8 +16,8 @@ function world(
     asker?: () => Asker | null
     answer?: 'allow' | 'deny' | null
     afterAsk?: () => void
-    /** Whether work handed on stays within the asking session's own reach (the manager's `inReach`) */
-    inReach?: boolean
+    /** Whether work handed on goes to a session no looser than the asking one (the manager's `noLooser`) */
+    noLooser?: boolean
   } = {},
 ) {
   const asked: string[] = []
@@ -34,7 +34,7 @@ function world(
       covered.push(true)
       return run()
     },
-    inReach: () => over.inReach ?? true,
+    noLooser: () => over.noLooser ?? true,
     done: (asker, act) => void records.push({ asker: asker.sessionId, seq: asker.cites?.seq ?? null, act }),
   }
   return { gate: new AskedGate(host), asked, covered, records }
@@ -154,15 +154,20 @@ describe('a step that can be undone runs, cited or not, and every step that chan
     { name: 'rename_session', args: { sessionId: 's', name: 'n' } },
     { name: 'set_project_trust', args: { project: 'p1', trusted: true } },
   ]
-  /** Work handed on, which runs without the request's card only within the asking session's own reach */
+  /** Work handed on, which runs without the request's card unless it goes to a session looser than the asking one, wherever that session is */
   const handsOn = [
     { name: 'create_session', args: { project: 'Acme', firstMessage: 'set it up' } },
+    // #1739's own case: a session on a linked machine
+    { name: 'create_session', args: { project: 'laptop/app', firstMessage: 'set it up there' } },
+    { name: 'start_agent', args: { task: 'go' } },
+    { name: 'ask_project', args: { project: 'Other', session: 's', task: 'go' } },
+    { name: 'handoff_session', args: { sessionId: 's' } },
     { name: 'send_to_session', args: { sessionId: 's', text: 'hi' } },
     { name: 'agent_session', args: { action: 'send', sessionId: 's', text: 'hi' } },
     { name: 'mail', args: { action: 'send', to: 'session:h/s2', text: 'hi' } },
   ]
 
-  it('registering, renaming, trusting, and work handed on within the asking session’s reach take no request card, cited or not; their own cards are not answered for them', async () => {
+  it('registering, renaming, trusting, and work handed on to a session no looser than the asking one take no request card, cited or not; their own cards are not answered for them', async () => {
     for (const asker of [ASKER, UNCITED]) {
       const w = world({ asker: () => asker })
       const r = ran()
@@ -175,17 +180,14 @@ describe('a step that can be undone runs, cited or not, and every step that chan
     }
   })
 
-  it('work handed on beyond the asking session’s reach asks, and so does what it could not hand on itself: an agent under the orchestrator’s preset, another project’s session, a handoff, an answer for the person', async () => {
-    const out = world({ inReach: false, answer: 'deny' })
+  it('work handed to a session looser than the asking one asks, and so do an answer for the person and a session stopped or deleted', async () => {
+    const out = world({ noLooser: false, answer: 'deny' })
     for (const step of handsOn) expect(await out.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
     expect(out.asked).toHaveLength(handsOn.length)
-    const within = world({ inReach: true, answer: 'deny' })
-    // Within the reach the same steps run without the card
+    const within = world({ noLooser: true, answer: 'deny' })
+    // No looser, the same steps run without the card
     for (const step of handsOn) expect(await within.gate.when('orc', step, undefined, ran().run, refused), step.name).toEqual({ text: 'did it' })
     const never = [
-      { name: 'start_agent', args: { task: 'go' } },
-      { name: 'ask_project', args: { project: 'Other', task: 'go' } },
-      { name: 'handoff_session', args: { sessionId: 's' } },
       { name: 'answer_question', args: { sessionId: 's', answers: ['yes'] } },
       { name: 'agent_session', args: { action: 'stop', sessionId: 's' } },
       { name: 'mail', args: { action: 'reply', thread: 'another-thread', text: 'x' } },

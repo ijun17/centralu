@@ -540,11 +540,6 @@ export class AgentStartFlow {
     return this.consents.ensureAgentConsent(...a)
   }
 
-  /** `AgentConsents.startsWithoutCard` (agent-consents.ts), kept on the flow for its callers */
-  startsWithoutCard(...a: Parameters<AgentConsents['startsWithoutCard']>): ReturnType<AgentConsents['startsWithoutCard']> {
-    return this.consents.startsWithoutCard(...a)
-  }
-
   /** `AgentConsents.agentConsentFrom` (agent-consents.ts), kept on the flow for its callers */
   agentConsentFrom(...a: Parameters<AgentConsents['agentConsentFrom']>): ReturnType<AgentConsents['agentConsentFrom']> {
     return this.consents.agentConsentFrom(...a)

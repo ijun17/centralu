@@ -464,38 +464,27 @@ export class SessionManager {
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      // Work handed on where the asking session could have handed it itself: its own project here, no looser preset (docs/plans/cited-requests.md §4)
-      inReach: (asker, call) => {
+      // Work handed on to a session no looser than the asking one, the one check about power (docs/plans/cited-requests.md §4); where it goes is the orchestrator's judgement
+      noLooser: (asker, call) => {
         const me = this.meta.get(asker.sessionId)
-        if (!me || me.projectId === null) return false
-        const mine = (s: SessionInfo | undefined): s is SessionInfo => s !== undefined && s.kind === 'worker' && s.projectId === me.projectId
-        const to = (v: unknown): SessionInfo | undefined => {
+        if (!me) return false
+        const seatId = this.orchestratorId()
+        const seat = (seatId === null ? undefined : this.meta.get(seatId))?.permissionPreset ?? 'safe'
+        // A session of this host by id or mail address; one on a linked machine is not known here, so its preset is not either
+        const of = (v: unknown): PermissionPreset | undefined => {
           if (typeof v !== 'string') return undefined
           const party = parseAddress(v.trim())
-          return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())
+          return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())?.permissionPreset
         }
-        if (call.name === 'create_session') {
-          const project = this.store.projects.listProjects().find((p) => p.id === me.projectId)
-          const named = typeof call.args.project === 'string' ? call.args.project.trim() : ''
-          const seatId = this.orchestratorId()
-          const seat = seatId === null ? undefined : this.meta.get(seatId)
-          // Where its own start_agent would have started one with no card (`AgentConsents`), and no looser than itself
-          return (
-            project !== undefined &&
-            (named === project.id || named === project.name) &&
-            presetWithin(createdPreset(seat?.permissionPreset ?? 'safe'), me.permissionPreset) &&
-            this.delegationFlow.starts.startsWithoutCard(me.id, project.id)
-          )
-        }
-        if (call.name === 'send_to_session' || call.name === 'agent_session') {
-          const s = to(call.args.sessionId)
-          return mine(s) && presetWithin(s.permissionPreset, me.permissionPreset)
-        }
-        // Mail the asking session could have sent itself: to a session of its own project, which acts on it under its own preset
-        if (call.name === 'mail') return mine(to(call.args.to))
-        return false
+        const preset =
+          call.name === 'create_session' ? createdPreset(seat) // here or on a linked machine, the same cap
+          : call.name === 'start_agent' ? seat // its child runs under the caller's preset (start-agent-flow.ts)
+          : call.name === 'handoff_session' ? (call.args.sessionId === undefined ? seat : of(call.args.sessionId)) // the new session keeps the old one's
+          : call.name === 'ask_project' ? of(call.args.session)
+          : call.name === 'mail' ? of(call.args.to)
+          : of(call.args.sessionId)
+        return preset !== undefined && presetWithin(preset, me.permissionPreset)
       },
-      // The record of a step a session's request had done, where the person reads that session (docs/plans/cited-requests.md §5; its words are the owner's call)
       done: (asker, act) => {
         const cites = asker.cites
         const cited = cites ? this.store.messages.loadMessagesFrom(asker.sessionId, cites.seq - 1, 1).find((r) => r.seq === cites.seq) : undefined
