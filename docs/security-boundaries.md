@@ -482,8 +482,9 @@ as the CLI's own input, never as a message of the person's.
 (`mail send` with `to: "orchestrator"`: a message from a session that answers no question or task of the orchestrator's, §7.6). The request is a session's text, so it
 is not the person's word. The request path's safety is the orchestrator's judgement, one floor in code, and a record the person reads afterwards (owner, 2026-11-03:
 what matters is what the person intends, which only the orchestrator can judge). These follow. (1) **A citation is evidence, checked by the host.** A request may cite the
-person's message (`cite: true`). In the send's own transaction the host takes the newest message the person typed in the asking session's own conversation (a transcript
-row with `byPerson`, which only the composer's path writes; a row with no source mark is not enough, since a caught-up CLI transcript, an app's text, a first prompt and a
+person's message (`cite: true`). In the send's own transaction the host takes the newest message the person sent in the asking session's own conversation (a transcript
+row with `byPerson`, which only the window's path writes: what the person typed in the composer, or the fixed handoff prompt or Continue text the window sends when
+the person clicks for it, which the header quotes as it is; a row with no source mark is not enough, since a caught-up CLI transcript, an app's text, a first prompt and a
 hub's text have none), and checks that it is at most 30 minutes old, not dated after now, and not cited before by this sender (`dedupe_key` `cite:<seq>` under the
 mailbox's `UNIQUE(sender, dedupe_key)`, in the store, so a restart or a swap keeps it). A session cannot name the message: the host finds it. A request that passes stores
 `facts.cites` (Centralu writes facts; a session cannot), and its header in `mail read` says, in Centralu's words, that it cites the person's message, verified, when it was
@@ -492,15 +493,21 @@ session's only. Cited or not, it wakes the orchestrator.
 (2) Its words never go inline: the wake lists host fields and calls the sender "a session asking you for something", and `mail read` quotes the words under a header
 Centralu writes from its own record (the session's name, its project, whether the project is trusted, the citation). The words are read in the turn mail starts for the
 request and in no other: read in the person's turn, or in another request's, they would be a session's words in a turn that has no card for them, so `mail read` gives
-only who the request is from there, and `mail inbox` lists a request by that header and not by the subject the session wrote. (3) **The floor and the record.** In a turn
-whose message is a request, a step that cannot be undone raises the person's card first, cited or not, naming the session and its project, under every preset
-(`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`): a delete, an archive's steps removed, a machine installed, removed, uninstalled,
-rolled back or set to start with the OS, an app removed or put back to an older version, agent versions applied, background work cleared, an update installed or applied,
-and every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP server's and of an app's, which nobody here can tell can be
-undone (`cannotBeUndone`, `sessions/asked-acts.ts`). Every other step that changes something runs, with the cards it raises itself covered for that call
-(`HostCards.cover`), and every step that changed something, cited or not, the ones the person allowed included, leaves a notice in the asking session, where the person
-reads it (label `request record`): what was done, and on which message of theirs, or that the request cited none. Reading, and answering in the request's own thread,
-are free. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
+only who the request is from there, and `mail inbox` lists a request by that header and not by the subject the session wrote. (3) **The floor and the record.** A request's turn is never looser than the
+person's own. The steps that can be undone are listed (`UNDOABLE`, `sessions/asked-acts.ts`: a project added or made, a machine added or its link changed, a trust or a
+setting changed, a session renamed or restored, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken away), and so is work
+handed on within the asking session's own reach (`create_session`, `send_to_session`, `agent_session send`, `mail send`: only to its own project on this computer, no
+looser than its own preset, and for a new session only where its own `start_agent` would need no card, `AskedGateHost.inReach`). These run without the request's card,
+and the cards they raise themselves ask as in the person's turn (the trust card, the project's card, the machine's card, the settings that ask, a start's consent): the
+turn never answers them. Every other step raises the person's card first, cited or not, naming the session and its project, under every preset (`alwaysAsk`, so `auto`
+does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`): a delete, an archive's steps removed, a machine installed, removed, uninstalled, rolled back or set to
+start with the OS, an app removed or put back to an older version, agent versions applied, background work cleared, an update installed or applied, an answer given for
+the person, work handed beyond the asking session's reach (another project, a linked machine, a looser preset, the orchestrator's own `start_agent`, `ask_project`, a
+handoff), every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP server's and of an app's, and every command no list names,
+so a command added later asks until it is listed (a test holds every definition to one list). Its Allow covers the cards that same call raises (`HostCards.cover`), so one
+step is one card. Every step that changed something, cited or not, the ones the person allowed included, leaves a notice in the asking session once it has run and not
+failed (a step of the CLI's own when the CLI says it ran, `PostToolUse`), where the person reads it (label `request record`): what was done, and on which message of
+theirs, or that the request cited none. Reading, and answering in the request's own thread, are free. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
 an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `queue_merge`); and the CLI's own
 tools, its shell, file edits, fetches and the rest (Claude: a `PreToolUse` hook, `adapters/claude/request-hook.ts`, which the CLI runs before every tool call in every permission mode and whose
 decision stands in for its own question, so the person is asked about each step whatever the preset, and an "always" the person once saved for such a step is not consulted. A narrower
@@ -516,7 +523,8 @@ Whose request the turn is is fixed when the turn begins
 or a thread the person gave) is as it was. **Where the orchestrator's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
 is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
 **Not covered, and named:** the orchestrator's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read
-hostile content can talk it into either. What it can pass back that the asker could not read itself is narrow, since under #984 a trusted asker reads every project's
+hostile content can talk it into either. The floor covers the orchestrator's own steps; a worker it starts runs under its own preset, as one the asker started itself would,
+which is why work handed on without the request's card stays within what the asker could hand on itself. What it can pass back that the asker could not read itself is narrow, since under #984 a trusted asker reads every project's
 ordinary sessions, here and on the linked machines, and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own conversation,
 coordinators' and app sessions' conversations, sessions with no project, and files the asker's stricter preset would ask about; for an asker in an untrusted project,
 anything outside its own project, though its requests are held until the person trusts the project. A hub's orchestrator, which holds this host's token, could send

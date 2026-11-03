@@ -14,7 +14,7 @@ type HookOutput = { hookSpecificOutput?: { permissionDecision?: string; permissi
 type HookCallback = (input: HookInputLike, id: string | undefined, o: { signal: AbortSignal }) => Promise<HookOutput>
 type Options = {
   canUseTool: (name: string, input: Record<string, unknown>) => Promise<{ behavior: string; message?: string }>
-  hooks?: { PreToolUse: { hooks: HookCallback[]; timeout?: number }[] }
+  hooks?: { PreToolUse: { hooks: HookCallback[]; timeout?: number }[]; PostToolUse: { hooks: HookCallback[] }[] }
 }
 const cli = vi.hoisted(() => ({ options: null as null | Options }))
 
@@ -45,7 +45,7 @@ afterEach(() => {
 const ALLOWED: RequestTurnAnswer = { allowed: true, asked: true }
 
 function world(preset: 'auto' | 'normal' = 'auto') {
-  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], answer: ALLOWED, fails: false }
+  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], answer: ALLOWED, fails: false, done: [] as string[] }
   const requestTurn: RequestTurn = {
     active: () => turn.active,
     ask: async (tool, input, signal) => {
@@ -53,6 +53,7 @@ function world(preset: 'auto' | 'normal' = 'auto') {
       if (turn.fails) throw new Error('the card could not be raised')
       return turn.answer
     },
+    done: (tool) => void turn.done.push(tool),
   }
   const events: NormalizedEvent[] = []
   const start = (sessionId: string) =>
@@ -64,8 +65,11 @@ function world(preset: 'auto' | 'normal' = 'auto') {
     return (tool: string, input: unknown = {}) => built({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input } as never, 'toolu_3', { signal: new AbortController().signal }) as Promise<HookOutput>
   }
   /** What the CLI’s hook says to a tool call */
-  const hook = (tool: string, input: unknown = {}) => cli.options!.hooks!.PreToolUse[0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, 'toolu_1', { signal: new AbortController().signal })
-  return { turn, events, start, hook, hookWithApps }
+  const hook = (tool: string, input: unknown = {}, id = 'toolu_1') => cli.options!.hooks!.PreToolUse[0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, id, { signal: new AbortController().signal })
+  /** The CLI saying a call ran (`PostToolUse`) or failed (`PostToolUseFailure`) */
+  const after = (event: 'PostToolUse' | 'PostToolUseFailure', tool: string, id: string) =>
+    cli.options!.hooks!.PostToolUse[0]!.hooks[0]!({ hook_event_name: event, tool_name: tool, tool_input: {} }, id, { signal: new AbortController().signal })
+  return { turn, events, start, hook, after, hookWithApps }
 }
 
 describe('a hook in front of every tool call of a session’s request', () => {
@@ -158,10 +162,29 @@ describe('a hook in front of every tool call of a session’s request', () => {
     await handle.dispose()
   })
 
+  it('a step the person allowed is recorded once the CLI says it ran; one that failed, or one the hook did not let through as asked, is not (#1739)', async () => {
+    const w = world('auto')
+    const handle = await w.start('h9c')
+    w.turn.active = true
+    await w.hook('Bash', { command: 'ls' }, 'toolu_ran')
+    await w.hook('Bash', { command: 'false' }, 'toolu_failed')
+    // Allowed and not yet run: no record
+    expect(w.turn.done).toEqual([])
+    await w.after('PostToolUseFailure', 'Bash', 'toolu_failed')
+    await w.after('PostToolUse', 'Bash', 'toolu_ran')
+    // A call the hook left to the CLI's own flow (a read) is not the request's step to record; nor is one heard of twice
+    w.turn.answer = { allowed: true, asked: false }
+    await w.hook('Read', { file_path: 'a' }, 'toolu_read')
+    await w.after('PostToolUse', 'Read', 'toolu_read')
+    await w.after('PostToolUse', 'Bash', 'toolu_ran')
+    expect(w.turn.done).toEqual(['Bash'])
+    await handle.dispose()
+  })
+
   it('a turn that cannot be told is refused, not let through: a hook that throws would let the tool run', async () => {
     const w = world('auto')
     const handle = await w.start('h9b')
-    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED } }, () => true)!.PreToolUse[0]!.hooks[0]!
+    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED, done: () => {} } }, () => true)!.PreToolUse[0]!.hooks[0]!
     const out = (await broken({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} } as never, 'toolu_4', { signal: new AbortController().signal })) as HookOutput
     expect(out).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await handle.dispose()

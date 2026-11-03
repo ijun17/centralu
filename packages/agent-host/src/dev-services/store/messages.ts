@@ -340,7 +340,8 @@ export class MessageRecords {
   }
 
   /**
-   * The newest message of this session the person typed in Centralu's composer (`byPerson`, docs/plans/cited-requests.md §3), or null. A row with no
+   * The newest message of this session the person sent from Centralu's window (`byPerson`: the composer, or the fixed text a click of theirs sends,
+   * docs/plans/cited-requests.md §3), or null. A row with no
    * source mark is not enough: a caught-up CLI transcript, an app's text and a first prompt have none either
    */
   newestPersonMessage(sessionId: string): { seq: number; ts: number; text: string } | null {

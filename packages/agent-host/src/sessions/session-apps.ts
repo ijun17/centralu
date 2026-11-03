@@ -574,8 +574,8 @@ class Attachment implements SessionApps {
   ): Promise<AppToolResult> {
     const gate = this.hub.opts.whenAsked
     if (!gate || this.closed || !this.find(server)) return this.callNow(server, tool, args, opts)
-    // A tool that only reads is not asked about, as for the CLI's own card (`readOnly`), but the gate hears of it: what it returns is a read. Anything else
-    // of an app asks when a session's request is the turn. Named with a dot so no app tool can pass for one of the orchestrator's own reading tools
+    // A tool that only reads is not asked about, as for the CLI's own card (`readOnly`). Anything else of an app asks when a session's request is the
+    // turn, and is recorded once it ran. Named with a dot so no app tool can pass for one of the orchestrator's own reading tools or undoable commands
     const call = { name: `${server}.${tool}`, args, ...(this.readOnly(server, tool) ? { readOnly: true as const } : {}) }
     return gate(this.session.id, call, opts.signal, () => this.callNow(server, tool, args, opts), failure)
   }

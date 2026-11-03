@@ -16,6 +16,8 @@ function world(
     asker?: () => Asker | null
     answer?: 'allow' | 'deny' | null
     afterAsk?: () => void
+    /** Whether work handed on stays within the asking session's own reach (the manager's `inReach`) */
+    inReach?: boolean
   } = {},
 ) {
   const asked: string[] = []
@@ -32,6 +34,7 @@ function world(
       covered.push(true)
       return run()
     },
+    inReach: () => over.inReach ?? true,
     done: (asker, act) => void records.push({ asker: asker.sessionId, seq: asker.cites?.seq ?? null, act }),
   }
   return { gate: new AskedGate(host), asked, covered, records }
@@ -113,6 +116,19 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
     expect(await allowing.gate.askCli('orc', 'Bash', { command: 'ls' })).toEqual({ allowed: true, asked: true })
   })
 
+  it('a step of the CLI’s own is recorded once the CLI says it ran, not when the person allowed it', async () => {
+    const w = world({ answer: 'allow' })
+    expect(await w.gate.askCli('orc', 'Bash', { command: 'false' })).toEqual({ allowed: true, asked: true })
+    // Allowed, and then it failed or a rule of the CLI's stopped it: the CLI never says it ran, so there is no record
+    expect(w.records).toEqual([])
+    w.gate.cliDone('orc', 'Bash', { command: 'ls' })
+    expect(w.records).toEqual([{ asker: 'asker', seq: 7, act: 'run Bash {"command":"ls"}' }])
+    // A read, and a turn that is nobody's request, are not recorded
+    w.gate.cliDone('orc', 'Read', { file_path: 'a' })
+    world({ asker: () => null }).gate.cliDone('orc', 'Bash', { command: 'ls' })
+    expect(w.records).toHaveLength(1)
+  })
+
   it('a step that would outlive the turn is refused without a question: a subagent, a scheduled prompt, a watched command', async () => {
     const w = world({ answer: 'allow' })
     for (const tool of ['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor', 'RemoteTrigger']) {
@@ -135,24 +151,45 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
 describe('a step that can be undone runs, cited or not, and every step that changed something is recorded (#1739)', () => {
   const undoable = [
     { name: 'add_project', args: { path: '/work/app', machine: 'laptop' } },
-    { name: 'create_session', args: { project: 'Acme', firstMessage: 'set it up' } },
     { name: 'rename_session', args: { sessionId: 's', name: 'n' } },
     { name: 'set_project_trust', args: { project: 'p1', trusted: true } },
-    { name: 'send_to_session', args: { sessionId: 's', message: 'hi' } },
-    { name: 'start_agent', args: { task: 'go' } },
+  ]
+  /** Work handed on, which runs without the request's card only within the asking session's own reach */
+  const handsOn = [
+    { name: 'create_session', args: { project: 'Acme', firstMessage: 'set it up' } },
+    { name: 'send_to_session', args: { sessionId: 's', text: 'hi' } },
+    { name: 'agent_session', args: { action: 'send', sessionId: 's', text: 'hi' } },
     { name: 'mail', args: { action: 'send', to: 'session:h/s2', text: 'hi' } },
   ]
 
-  it('registering, starting, renaming, trusting, sending and starting an agent take no card, the cards they raise themselves covered, cited or not', async () => {
+  it('registering, renaming, trusting, and work handed on within the asking session’s reach take no request card, cited or not; their own cards are not answered for them', async () => {
     for (const asker of [ASKER, UNCITED]) {
       const w = world({ asker: () => asker })
       const r = ran()
-      for (const step of undoable) expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toEqual({ text: 'did it' })
+      for (const step of [...undoable, ...handsOn]) expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toEqual({ text: 'did it' })
       expect(w.asked).toEqual([])
-      expect(r.calls).toHaveLength(undoable.length)
-      expect(w.covered).toHaveLength(undoable.length)
-      expect(w.records.map((x) => x.seq)).toEqual(undoable.map(() => asker.cites?.seq ?? null))
+      expect(r.calls).toHaveLength(undoable.length + handsOn.length)
+      // Nothing covered: a trust card, a project's card or a start's consent asks as in the person's own turn
+      expect(w.covered).toEqual([])
+      expect(w.records.map((x) => x.seq)).toEqual([...undoable, ...handsOn].map(() => asker.cites?.seq ?? null))
     }
+  })
+
+  it('work handed on beyond the asking session’s reach asks, and so does what it could not hand on itself: an agent under the orchestrator’s preset, another project’s session, a handoff, an answer for the person', async () => {
+    const out = world({ inReach: false, answer: 'deny' })
+    for (const step of handsOn) expect(await out.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
+    expect(out.asked).toHaveLength(handsOn.length)
+    const within = world({ inReach: true, answer: 'deny' })
+    const never = [
+      { name: 'start_agent', args: { task: 'go' } },
+      { name: 'ask_project', args: { project: 'Other', task: 'go' } },
+      { name: 'handoff_session', args: { sessionId: 's' } },
+      { name: 'answer_question', args: { sessionId: 's', answers: ['yes'] } },
+      { name: 'agent_session', args: { action: 'stop', sessionId: 's' } },
+      { name: 'mail', args: { action: 'reply', thread: 'another-thread', text: 'x' } },
+    ]
+    for (const step of never) expect(await within.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
+    expect(within.asked).toHaveLength(never.length)
   })
 
   it('only what cannot be undone asks, cited or not: a delete, an uninstall, an OS entry, an update applied, a command, a file written, an app’s step', async () => {
@@ -163,6 +200,8 @@ describe('a step that can be undone runs, cited or not, and every step that chan
       { name: 'set_machine_autostart', args: { machineId: 'm', enabled: true } },
       { name: 'update_centralu', args: { action: 'apply' } },
       { name: 'server.queue_merge', args: { pr: 1 } },
+      // A command nobody has said can be undone asks until someone does
+      { name: 'some_command_added_later', args: {} },
     ]
     for (const asker of [ASKER, UNCITED]) {
       const w = world({ asker: () => asker, answer: 'deny' })

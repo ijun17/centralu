@@ -1,14 +1,15 @@
 /**
- * A session asking the orchestrator, over the real manager (#1447, #1739, docs/plans/cited-requests.md): a request reaches it on the person's
- * word only, and wakes it with host fields only; in the turn it starts every step the word does not cover raises the person's card naming the
- * session, under `auto` too, with Allow or Deny only. Without the word the request goes to the person. A turn that is not a session's request is
- * as it was.
+ * A session asking the orchestrator, over the real manager (#1447, #1739, docs/plans/cited-requests.md): every request wakes it with host fields
+ * only, and says whether it cites the person's message, which the host checked. In the turn it starts, a step that cannot be undone, and work
+ * handed beyond the asking session's own reach, raise the person's card naming the session, under `auto` too, with Allow or Deny only; a step
+ * that can be undone runs, the cards it raises itself asking as in the person's own turn; every step that changed something is recorded in the
+ * asking session. A turn that is not a session's request is as it was.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ORCHESTRATOR_CHANGE, type ProjectInfo, type SessionInfo } from '@cc/protocol'
+import { ORCHESTRATOR_CHANGE, type ApprovalDetail, type ProjectInfo, type SessionInfo } from '@cc/protocol'
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON } from '../mail/address.js'
@@ -97,12 +98,23 @@ const requestsOf = (asker: SessionInfo): MailRow[] => read.between(addressOf(ask
 /** What the orchestrator sent the asker */
 const wordsTo = (asker: SessionInfo): string[] => read.between(addressOf(orc.id), addressOf(asker.id)).map((x) => x.body)
 const run = (command: string, args: Record<string, unknown> = {}) => w.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command, args })
+/** One of the orchestrator's own tools, called directly rather than as a command */
+const tool = (name: string, args: Record<string, unknown>) => w.mgr.runOrchestratorTool(orc.id, name, args)
 
 /** The card standing in the orchestrator, if it is one this feature raises */
 function card() {
   const pending = w.mgr.sessionInfo(orc.id)?.pendingApproval
   const d = pending?.detail
-  return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
+  return isRequestCard(d) ? { requestId: pending!.requestId, text: d.raw } : undefined
+}
+/** The request's card, which names the session that asked; a step's own card may share its `about` (the trust card does) */
+const isRequestCard = (d: ApprovalDetail | undefined): d is Extract<ApprovalDetail, { kind: 'other' }> =>
+  d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE && d.raw.startsWith('Session ')
+/** A card standing in the orchestrator that the step raised itself, as it would in the person's own turn (not the request's card) */
+function ownCard() {
+  const pending = w.mgr.sessionInfo(orc.id)?.pendingApproval
+  const d = pending?.detail
+  return pending && !isRequestCard(d) ? { requestId: pending.requestId, kind: d?.kind } : undefined
 }
 const nameOf = (id: string) => w.mgr.sessionInfo(id)?.name
 /** The records Centralu left in a session of steps a request of it had done (docs/plans/cited-requests.md §5) */
@@ -141,7 +153,7 @@ describe('a session’s request wakes the orchestrator with host fields, and its
   })
 })
 
-describe('in the turn a request starts, every step that changes something asks the person, naming the session', () => {
+describe('in the turn a request starts, a step that cannot be undone asks the person, naming the session', () => {
   async function asked(trusted = true) {
     const acme = await project('Acme', trusted)
     const asker = await sessionIn(acme)
@@ -186,16 +198,60 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(nameOf(third.id)).toBeUndefined()
   })
 
-  it('a step that can be undone takes no card, the one it raises itself covered: trusting a project, recorded where the session asked', async () => {
+  it('a step that can be undone takes no request card, and the card it raises itself still asks, as in the person’s turn: trusting a project, recorded where the session asked', async () => {
     const { asker, acme } = await asked()
     const wild = await project('Wild', false)
-    // Were the trust card raised, the call would wait on it for good
-    const r = await Promise.race([run('set_project_trust', { project: wild.id, trusted: true }), new Promise<'pending'>((res) => setTimeout(() => res('pending'), 3_000))])
-    expect(r).not.toBe('pending')
-    expect(w.mgr.sessionInfo(orc.id)?.pendingApproval ?? null).toBeNull()
+    const call = run('set_project_trust', { project: wild.id, trusted: true })
+    // The trust card, not answered for the person by the request's turn
+    await eventually(() => !!ownCard())
+    expect(card()).toBeUndefined()
+    expect(recordsIn(asker)).toEqual([])
+    w.mgr.respondApproval(orc.id, ownCard()!.requestId, 'allow')
+    expect((await call).isError).toBeFalsy()
     expect(((await w.rpc('projects.list', {})) as ProjectInfo[]).find((p) => p.id === wild.id)?.trusted).toBe(true)
     expect(acme.trusted).toBe(true)
     expect(recordsIn(asker)).toEqual([expect.stringContaining("the orchestrator did this for this session's request: run set_project_trust")])
+  })
+
+  it('work handed on takes no request card only where the asking session could have handed it on itself: its own project, a session no looser than it (#1739)', async () => {
+    const { asker, other, acme } = await asked()
+    const beta = await project('Beta', true)
+    // A session of its own project, under its own preset: no request card
+    const sent = await settled(tool('send_to_session', { sessionId: other.id, text: 'look at the login page' }))
+    expect(sent).toMatchObject({ text: expect.any(String) })
+    expect(sent).not.toMatchObject({ isError: true })
+    expect(card()).toBeUndefined()
+    // A new session there, which the asking session (normal, in a trusted project) would have started itself with no card
+    const made = await settled(tool('create_session', { project: acme.id, firstMessage: 'start on it' }))
+    expect(made).not.toMatchObject({ isError: true })
+    expect(card()).toBeUndefined()
+    expect(recordsIn(asker)).toEqual([expect.stringContaining('run send_to_session'), expect.stringContaining('run create_session')])
+    // Another project: the asking session would have met that project's consent card
+    const elsewhere = tool('create_session', { project: beta.id, firstMessage: 'start on it' })
+    await eventually(() => !!card())
+    expect(card()!.text).toContain('asked the orchestrator to run create_session')
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await elsewhere).isError).toBe(true)
+    expect(w.mgr.listSessions().filter((x) => x.projectId === beta.id)).toEqual([])
+  })
+
+  it('work handed on to a session under a looser preset than the asking session’s asks: the asking session could not have given it that work (#1739)', async () => {
+    const acme = await project('Acme', true)
+    const strict = (await w.rpc('agents.createSession', { projectId: acme.id, cwd: acme.path, tool: 'claude', permissionPreset: 'safe' })) as SessionInfo
+    await w.rpc('sessions.rename', { sessionId: strict.id, name: 'Strict asker' })
+    const other = await sessionIn(acme)
+    await askOrchestrator(w.mgr.sessionInfo(strict.id)!, 'please have the other session look at it')
+    await due(orc.id)
+    const call = tool('send_to_session', { sessionId: other.id, text: 'look at the login page' })
+    await eventually(() => !!card())
+    expect(card()!.text).toContain('asked the orchestrator to run send_to_session')
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await call).isError).toBe(true)
+    // And a new session there would run under `normal`, looser than `safe`
+    const made = tool('create_session', { project: acme.id, firstMessage: 'start on it' })
+    await eventually(() => !!card())
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await made).isError).toBe(true)
   })
 
   it('reading and answering the request need no card, and nor does mail to anyone else, which is recorded', async () => {
@@ -509,11 +565,15 @@ describe('a request’s citation is evidence for the orchestrator, checked by th
     await due(orc.id)
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'cc-asked-folder-')))
     dirs.push(folder)
-    // (it reads the folder's git facts first, so it is given longer than `settled` gives; a card would hold it for good)
-    const r = await Promise.race([run('add_project', { path: folder }), new Promise<'pending'>((res) => setTimeout(() => res('pending'), 10_000))])
+    const call = run('add_project', { path: folder })
+    // No request card; the project's own card asks, as it does in the person's turn, and nothing is recorded before it ran
+    await eventually(() => !!ownCard(), 10_000)
+    expect(card()).toBeUndefined()
+    expect(recordsIn(asker)).toEqual([])
+    w.mgr.respondApproval(orc.id, ownCard()!.requestId, 'allow')
+    const r = await call
     expect(r).toMatchObject({ text: expect.any(String) })
     expect(r).not.toMatchObject({ isError: true })
-    expect(w.mgr.sessionInfo(orc.id)?.pendingApproval ?? null).toBeNull()
     expect(((await w.rpc('projects.list', {})) as ProjectInfo[]).some((p) => p.path === folder)).toBe(true)
     expect(recordsIn(asker)).toEqual([
       cite ? expect.stringMatching(/^On your message from 1 min ago \("please: register the app folder as a project"\), the orchestrator did this for this session's request: run add_project/) : expect.stringMatching(/^For this session's request, which cites no message of yours, the orchestrator did this: run add_project/),
@@ -521,7 +581,7 @@ describe('a request’s citation is evidence for the orchestrator, checked by th
     return asker
   }
 
-  it('registering an existing folder takes no card on the person’s word, and the asking session shows what was done and on which word', async () => {
+  it('registering an existing folder takes no request card on the person’s word, and the asking session shows what was done and on which word', async () => {
     await registered(true)
   })
 

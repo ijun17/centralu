@@ -61,6 +61,8 @@ export type RequestTurn = {
    * would outlive the turn (a subagent, a scheduled prompt): it is refused, since the person's card belongs to the turn
    */
   ask(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
+  /** A step `ask` let through as asked has run and did not fail: its record (docs/plans/cited-requests.md §5). Not called for one that failed */
+  done(tool: string, input: Record<string, unknown>): void
 }
 
 export type CreateSessionOpts = {

@@ -45,6 +45,16 @@ export class AgentConsents {
     return this.agentConsentFrom(callerId, detail.project.id, await this.host.askHost(callerId, detail, signal, { requestId }))
   }
 
+  /**
+   * Whether the session would start an agent in its project now with no card: consent remembered for it or its project, the project's trust, or
+   * `auto`. A session's request has the orchestrator start work where its asker could have started it itself (`AskedGateHost.inReach`)
+   */
+  startsWithoutCard(callerId: string, projectId: string): boolean {
+    if (this.agentConsents.has(callerId) || this.host.store.permissions.getProjectConsent(projectId, projectId, 'agents')) return true
+    // Asked without a boundary, so nothing is logged as allowed: this only looks
+    return this.trustIsAgentConsent(callerId, projectId) || this.host.autoBoundaryOpen(callerId)
+  }
+
   /** A `normal` or `edits` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
   private trustIsAgentConsent(callerId: string, projectId: string): boolean {
     const preset = this.host.meta.get(callerId)?.permissionPreset

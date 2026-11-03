@@ -1,6 +1,6 @@
 import type { RequestTurnAnswer } from '../adapters/contract.js'
 import type { Asker } from '../mail/asked-by.js'
-import { askedAct, askedQuestion, cannotBeUndone, outlivesTheTurn, type AskedStep } from './asked-acts.js'
+import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } from './asked-acts.js'
 
 /**
  * The orchestrator's steps in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md §2).
@@ -9,16 +9,19 @@ import { askedAct, askedQuestion, cannotBeUndone, outlivesTheTurn, type AskedSte
  * they run at once, as before. In a request's turn the orchestrator judges, from the request and the person's message it may cite (checked by the
  * host at send), what to do, and these hold whatever it judges:
  *
- * - **A step that cannot be undone** (`cannotBeUndone`: a delete, an uninstall, an OS entry, a command, a file written, an app's step) raises the
- *   person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny does not.
+ * - **A step that can be undone** (`stepKind` `undoable`: a project added, a session renamed, a setting changed), and work handed on within the
+ *   asking session's own reach (`handsOn`, `inReach`), run without the request's card. The cards such a step raises itself ask as in the
+ *   person's own turn (a trust card, a project's card, a start's consent): a request's turn is never looser than the person's.
+ * - **Every other step** (`asks`: a delete, an uninstall, an OS entry, a command, a file written, an app's step, work handed beyond the asking
+ *   session's reach, a name no list holds) raises the person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny
+ *   does not.
  * - **A step that would outlive the turn** (a subagent, a scheduled prompt, a background command) is refused without a question.
- * - **Every other step that changes something** runs, with the cards it raises itself covered for that call, as the person's Allow covers them.
- * - **Every step that changed something leaves a record** in the asking session (`done`), so the person can see afterwards what a session's request
- *   had done and on which message of theirs, if any.
+ * - **Every step that changed something leaves a record** in the asking session (`done`), once it has run and not failed, so the person can see
+ *   afterwards what a session's request had done and on which message of theirs, if any. A step of the CLI's own is recorded when the CLI says it
+ *   ran (`cliDone`), not when it is allowed.
  *
- * One card for one step. The person's Allow is for exactly this call, so the cards the step would raise itself meanwhile (a trust card, a delete
- * card, a start_agent consent) are not raised a second time: they have an "always" this turn must not offer, and the answer to them is the one
- * just given.
+ * One card for one asked step. The person's Allow on the request's card is for exactly this call, so the cards it would raise itself meanwhile (a
+ * delete card) are not raised a second time: they have an "always" this turn must not offer, and the answer to them is the one just given.
  */
 
 export type AskedGateHost = {
@@ -26,8 +29,13 @@ export type AskedGateHost = {
   askedBy(orchestratorId: string): Asker | null
   /** The person's card with the question, Allow or Deny only; not covered by a step's own Allow */
   ask(orchestratorId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
-  /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given, or by the request's turn */
+  /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
   cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
+  /**
+   * Whether work handed on (`handsOn`: a session made with its first message, a message to a session's turn, mail to a session) stays where the
+   * asking session could have handed it on itself: its own project on this computer, and a session under no looser preset than its own
+   */
+  inReach(asker: Asker, call: { name: string; args: Record<string, unknown> }): boolean
   /** A step that changed something was done for a session's request: its record, in the asking session (docs/plans/cited-requests.md §5) */
   done(asker: Asker, act: string): void
 }
@@ -53,7 +61,8 @@ export class AskedGate {
 
   /**
    * The orchestrator's CLI is about to run a step of its own (a command, a file written, a page fetched): a read is left to the CLI's own flow
-   * (`asked: false`), a step that would outlive the turn is refused without a question, and every other one is put to the person
+   * (`asked: false`), a step that would outlive the turn is refused without a question, and every other one is put to the person. Its record is
+   * `cliDone`'s, once the CLI has run it
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
@@ -64,7 +73,15 @@ export class AskedGate {
         message: `Nothing was done: ${tool} would go on after this turn, where the person's card for the session's request no longer applies, so a request's turn does not start it. Do the work in this turn, or tell the session to ask the person.`,
       }
     }
-    return this.when<RequestTurnAnswer>(orchestratorId, { name: tool, args: input }, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
+    const step = askedAct(tool, input, asker.messageId)!
+    return this.put<RequestTurnAnswer>(orchestratorId, asker, step, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
+  }
+
+  /** The CLI ran a step of its own that `askCli` let through as asked, and it did not fail: its record, in the asking session */
+  cliDone(orchestratorId: string, tool: string, input: Record<string, unknown>): void {
+    const asker = this.host.askedBy(orchestratorId)
+    const step = asker ? askedAct(tool, input, asker.messageId) : null
+    if (asker && step) this.host.done(asker, 'act' in step ? step.act : `run ${tool}`)
   }
 
   async when<T>(
@@ -85,8 +102,10 @@ export class AskedGate {
       if (!failed) this.host.done(asker, 'act' in step ? step.act : `run ${call.name}`)
       return done
     }
-    if (cannotBeUndone(call.name, call.args)) return this.put(orchestratorId, asker, step, signal, recorded, refused)
-    return this.host.cover(orchestratorId, recorded, signal)
+    const kind = stepKind(call.name, call.args)
+    // Not covered: the cards the step raises itself ask as they would in the person's own turn
+    if (kind === 'undoable' || (kind === 'handsOn' && this.host.inReach(asker, call))) return recorded()
+    return this.put(orchestratorId, asker, step, signal, recorded, refused)
   }
 
   /** Puts a step to the person and runs it on Allow; Deny, no answer and a turn that has ended run nothing */

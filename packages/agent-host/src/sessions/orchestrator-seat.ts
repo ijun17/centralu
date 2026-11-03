@@ -6,7 +6,7 @@ import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
-import { presetWithin } from './start-agent.js'
+import { lowestPreset } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { DelegationForks } from './delegation-forks.js'
@@ -22,6 +22,14 @@ import type { HousekeepingAnswer, HousekeepingRequest } from './housekeeping-flo
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { LINE_WINDOW_CHARS, asPredecessor, budgetOf, fitLines, lineText, sessionLines, toolLinesOf, type SessionLine } from './session-lines.js'
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
+
+/**
+ * The preset of a session create_session makes (#838): never more than the seat's own permissions, and `normal` at most, since `auto` is the
+ * person's to give. Also what a request's turn compares with the asking session's own preset (`AskedGateHost.inReach`)
+ */
+export function createdPreset(seat: PermissionPreset): PermissionPreset {
+  return lowestPreset('normal', seat)
+}
 
 /**
  * What the orchestrator tools reach of the session manager (#428): its sessions and store, who owns whose work, and
@@ -366,8 +374,7 @@ export function orchestratorToolsFor(
        * it, with no card. `normal` stays the most it gets, as before: `auto` is the person's to give.
        */
       const seat = host.meta.get(orchestratorId)
-      const seatPreset = seat?.permissionPreset ?? 'safe'
-      const preset: PermissionPreset = presetWithin('normal', seatPreset) ? 'normal' : seatPreset
+      const preset = createdPreset(seat?.permissionPreset ?? 'safe')
       const sender = { sessionId: orchestratorId, name: seat?.name ?? 'Orchestrator' }
       /*
        * The first message is work this seat hands out (#1233): it is told when that turn ends unless it said not to, as
