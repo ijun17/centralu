@@ -795,7 +795,7 @@ function prePrCheckout() {
   writeFileSync(join(work, 'scripts/pre-pr.mjs'), "process.stdout.write(JSON.stringify({ error: 'the checkout copy of pre-pr ran' }) + '\\n')\n")
   return { work, low, tools }
 }
-const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[] }) : [])
+const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[]; script: string }) : [])
 const prePrAnswers = (a: unknown) => writeFileSync(join(root, 'pre-pr-answer.json'), JSON.stringify(a))
 /** The refs a call fetched under: refs/centralu-pre-pr/<one of its own>, read from its --head */
 const spaceOf = (args: string[]) => /^(refs\/centralu-pre-pr\/[^/]+)\/feat\/tools$/.exec(args[args.indexOf('--head') + 1]!)![1]!
