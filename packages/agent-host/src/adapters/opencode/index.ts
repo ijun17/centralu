@@ -7,6 +7,7 @@ import type { DetectResult } from '../contract.js'
 import { readOpenCodeConfigs } from './config-files.js'
 import { presetEnv } from './config.js'
 import { findOpenCode } from './install.js'
+import { openCodeRefusal } from './refusal.js'
 import { OPENCODE_SURFACE } from './surface.js'
 import { openCodeUsageReader } from './usage.js'
 
@@ -55,10 +56,11 @@ export function openCodeProfile(): AcpProfile {
     capabilities: CAPABILITIES,
     surface: OPENCODE_SURFACE,
     infersCompaction: true,
+    shape: { refusalOf: openCodeRefusal },
     localUsage,
     async launch(opts) {
       const l = findOpenCode()
-      return l ? { command: l.command, args: [...l.args, 'acp'], env: presetEnv(opts.permissionPreset, process.env, readOpenCodeConfigs(opts.cwd, process.env)) } : null
+      return l ? { command: l.command, args: [...l.args, 'acp', '--print-logs', '--log-level', 'ERROR'], env: presetEnv(opts.permissionPreset, process.env, readOpenCodeConfigs(opts.cwd, process.env)) } : null
     },
     installedVersion: version,
     async detect(): Promise<DetectResult> {

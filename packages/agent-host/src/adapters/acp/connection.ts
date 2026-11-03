@@ -39,6 +39,8 @@ export type AcpConnectionHandlers = {
   onExit(code: number | null, expected: boolean): void
   /** An answer to a request this connection never sent: the previous host's, after a swap (§4.4) */
   onStrayResponse?(id: RpcId, result: unknown, error: RpcError | null): void
+  /** A whole line the process wrote to stderr (`AcpToolShape.refusalOf` reads them) */
+  onStderrLine?(line: string): void
 }
 
 const FRAME = z.looseObject({
@@ -75,6 +77,11 @@ export class AcpConnection {
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
     logToolStderr(proc, label, stderrLine)
+    const { onStderrLine } = handlers
+    if (onStderrLine) {
+      const errors = lineSplitter(onStderrLine)
+      proc.stderr?.on('data', (chunk: Buffer | string) => errors.push(chunk))
+    }
     proc.on('exit', (code) => this.finish(code, null))
   }
 

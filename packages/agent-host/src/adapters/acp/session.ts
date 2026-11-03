@@ -242,6 +242,7 @@ class AcpWire implements ToolWire {
         onNotification: (method, params) => this.onNotification(method, params),
         onRequest: (id, method, params) => this.onRequest(id, method, params),
         onExit: () => {},
+        ...(this.deps.shape?.refusalOf ? { onStderrLine: (line: string) => this.onStderrLine(line) } : {}),
       },
       this.label,
       this.deps.shape?.stderrLine?.bind(this.deps.shape),
@@ -357,6 +358,15 @@ class AcpWire implements ToolWire {
     // `session/prompt` has no earlier answer: the write is the nearest the agent says it took the input (§2.3)
     this.io.inputAccepted(input.id)
     void this.prompt(turn)
+  }
+
+  /** The provider refused the running turn and the tool only retries (`AcpToolShape.refusalOf`): the turn ends now, and the tool stops retrying */
+  private onStderrLine(line: string): void {
+    const words = this.turn ? this.deps.shape?.refusalOf?.(line) : null
+    if (!this.turn || !words) return
+    const message = `${this.label}'s model refused the turn: ${words}`
+    this.conn.notify('session/cancel', { sessionId: this.conversation })
+    this.turn.core.end({ how: 'failed', error: { code: 'internal', message, retryable: false }, inputError: new Error(message) })
   }
 
   private async prompt(turn: Turn): Promise<void> {
