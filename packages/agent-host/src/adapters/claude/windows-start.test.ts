@@ -175,6 +175,43 @@ describe('where a Windows Claude session starts from (#353)', () => {
     await handle.dispose()
   })
 
+  /*
+   * #1640, measured on CLI 2.1.296: a plain interrupt answers `still_queued` with a message sent while the turn wrote its answer, and the CLI
+   * runs it as a new turn right after the Stop; with `cancelQueued` it answers `cancelled` and runs nothing. A Stop is a stop
+   */
+  it('stop empties what the CLI holds queued with no note waiting: the message is shown not delivered and runs no turn after it', async () => {
+    const { handle, cli, events } = await session(adapter())
+    handle.send('write a long essay')
+    await cli.input.next()
+    handle.send('then say PINEAPPLE')
+    cli.cancelled = [(await cli.input.next()).value!.uuid]
+    handle.interrupt()
+    await tick()
+    expect(cli.interrupts).toEqual([{ cancelQueued: true }])
+    expect(events.filter((e) => e.type === 'error')).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ message: '1 message(s) were still queued when the turn stopped and were not delivered — please resend' }) }),
+    ])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('mail that must not wake, which the Stop cancelled with the rest, goes again quiet: it is nobody’s to resend', async () => {
+    const { handle, cli, events } = await session(adapter())
+    handle.send('write a long essay')
+    await cli.input.next()
+    expect(handle.nudge!('the secret word is MANGO')).toBe(true)
+    const quiet = (await cli.input.next()).value as { uuid: string; shouldQuery?: boolean }
+    expect(quiet.shouldQuery).toBe(false)
+    cli.cancelled = [quiet.uuid]
+    handle.interrupt()
+    const again = (await cli.input.next()).value as { uuid: string; shouldQuery?: boolean; message: { content: { text: string }[] } }
+    expect(again).toMatchObject({ shouldQuery: false, message: { content: [{ text: 'the secret word is MANGO' }] } })
+    expect(again.uuid).not.toBe(quiet.uuid)
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    cli.end()
+    await handle.dispose()
+  })
+
   it('the next note turn becomes working and an intentional stop does not turn its result into a failure', async () => {
     const { handle, cli, events } = await session(adapter())
     handle.send('original')
