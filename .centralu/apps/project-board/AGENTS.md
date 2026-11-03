@@ -917,7 +917,7 @@ and refuses with every reason at once, sending nothing.
   is a warning naming it. The script that runs is **main's, as just fetched** (#1931), not the checkout's copy: the folder holding it is
   written from the fetched ref to a temporary folder of the call's own (through a temporary index, so the checkout's index and files are
   untouched) and removed with the refs, or named as left. A checkout out at an old commit ran its old script, and a check added since (lint) never ran, with nothing to say so. Main's, not the head's, so a pull request
-  cannot loosen its own checks; when main has no such script the call says so and runs nothing. Its findings refuse the pull request and nothing is sent; its warnings (a
+  cannot loosen its own checks; when main has no such script the call says so and runs nothing (another failure to read it says what failed, and the call answers that it could not run). Only the script's folder is written out (`scripts/`, which `scripts/pre-pr.mjs` must not import outside of; a script at the repository's root takes the whole tree). The folder is named for the call's process (`cc-board-pre-pr-<pid>-…`): a call killed outright leaves it, and the next call removes those of processes that have ended. Its findings refuse the pull request and nothing is sent; its warnings (a
   head behind main) do not, and go into Verified with the pass. `prePrExempt` leaves one check out
   (`tsc`, `orphans`, `deps`, `lint`, `store-step`, `guards`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
   Verified. It runs outside `oneAtATime`, with progress every minute, since a stack takes minutes; a
