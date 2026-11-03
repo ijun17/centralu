@@ -23,15 +23,18 @@ function writeState(path, text) {
   fs.renameSync(tmp, path)
 }
 
-/** The state, parsed. One that does not parse (half written, on Windows) is read again until the budget is spent; a missing file is an error at once */
-function readState(path) {
-  const end = Date.now() + READ_BUDGET_MS
+/**
+ * The state, parsed. One that does not parse (half written, on Windows) is read again until the budget is spent; a missing file is an
+ * error at once. `pause` and `now` are the wait between tries and the clock, for a test to stand in for.
+ */
+function readState(path, { pause = () => wait(20), now = Date.now } = {}) {
+  const end = now() + READ_BUDGET_MS
   for (;;) {
     try {
       return JSON.parse(fs.readFileSync(path, 'utf8'))
     } catch (e) {
-      if (e.code === 'ENOENT' || Date.now() > end) throw e
-      wait(20)
+      if (e.code === 'ENOENT' || now() > end) throw e
+      pause()
     }
   }
 }

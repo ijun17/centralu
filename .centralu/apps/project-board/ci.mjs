@@ -492,7 +492,7 @@ export function signaturePattern(sig) {
 }
 
 /** The test's own name in a failing line: without FAIL / × and vitest's project label. */
-const testName = (line) =>
+export const testName = (line) =>
   String(line ?? '')
     .replace(/^\s*(?:FAIL|×|✗|✘|❌)\s+/, '')
     .replace(/^\S+\s{2,}(?=\S+\.(?:test|spec)\.)/, '')

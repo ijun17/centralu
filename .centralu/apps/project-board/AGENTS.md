@@ -747,19 +747,35 @@ looked into).
   quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
   A bisect probe is read the same way (#1453): one that failed in a setup step (a timeout inside one included) or lost its runner has its failed jobs rerun once, and
   when it fails that way again the hunt ends with an issue saying the probe could not be judged, no commit blamed and nothing
-  reverted; a probe that fails in a test step, times out outside a setup step, is on the flaky list or lost its runner to a shutdown is red
-  only if its failed jobs fail again on that rerun (below).
+  reverted; a probe that fails in a test step, times out outside a setup step, is on the flaky list or lost its runner to a shutdown is red.
 - **A failure must repeat before a commit is blamed** (#1496, 2026-10-23): a flaky `fake-gh` test failed once on a commit that did
   not touch it, the hunt found a pass on the commit before and that one failure, and the queue opened a revert of reviewed work.
   A red is now a run whose failed jobs fail again when only they are rerun. Main's red run, when it failed in a test, has its failed jobs
-  rerun once (as an infrastructure failure does), before any commit is looked for; and a bisect probe that fails for any reason but a
-  runner shutdown is rerun once in the same way, and is red only if it fails again. A job that passes on its rerun makes the run green:
-  main is as it was, no hunt starts or goes on with that probe as red, no issue is filed and no session is told, and the guard
-  posts one comment on the known failures issue (`ci.knownFailuresIssue`) naming the job, the commit, the run and the first failing line
-  (`noteFlakes`, `guard.reruns[run].noted`). A rerun GitHub refuses or does not start in 10 minutes is reported, not hunted: a failure
-  that could not be confirmed reverts nothing. What this does not catch: a flake that makes a run pass when it should fail (the commit
-  after the real culprit is then blamed for the pass it got by chance). Each failed run costs one more run of its failed jobs, not of the
-  whole workflow.
+  rerun once (as an infrastructure failure does), before any commit is looked for. A job that passes on its rerun makes the run green:
+  main is as it was, no hunt starts, no issue is filed and no session is told. The guard marks the run (`guard.reruns[run].flaked`) and,
+  when the project has a known failures issue (`ci.knownFailuresIssue`), posts one comment on it naming the job, the commit, the run and the
+  first failing line. That comment starts with `<!-- main-guard note -->` (`GUARD_NOTE`), and `readIssueText` leaves such comments out:
+  the issue is the list of flakes a person judged, which `ci_status` matches a pull request's failure with, and a pass is not a judgement.
+  A rerun GitHub refuses or does not start in 10 minutes is reported, not hunted: a failure that could not be confirmed reverts nothing.
+  A rerun that fails in a step that sets the job up, when the first attempt failed in a test, confirms and clears nothing: the test failure
+  that was seen is reported and hunted, with its own job and line.
+  - **A failure that keeps passing its rerun is a break** (`FLAKE_REPEATS` 3, `FLAKE_WINDOW` 20): a race that fails half the time passes
+    its rerun as often as not, and a failure that a cache another job saved in the first attempt, or the clock, clears on a rerun passes every
+    time. The same job's same test (the first failing line without the time it took) that failed on main and passed its rerun twice within main's
+    newest 20 runs and fails a third time is hunted at once, with no further rerun, and from before the first of those flakes (a run that passed its
+    rerun is green to `mainVerdict`, but its commit may be the break): the issue says it failed three times within twenty runs. Chosen by
+    simulation of a test failing with probability p on each run, independently: runs until a failure is hunted (a failure is hunted when it
+    fails twice, or the third time with two passed reruns lately), p = 1%, 5%, 10%, 20%: 1443, 403, 102 and 26 with the rerun alone;
+    1317, 115, 34 and 12 with this. A 1% flake is hunted as seldom as before, a failure of 5% or more within about a hundred runs; two instead of three
+    hunted a 1% flake every 603 runs, four needed 235 runs at 5%. The cost: a flake of 5 to 10% is hunted about three times as often as under the
+    rerun alone, and nothing tells it from a break that fails as often.
+  - **Why the failed jobs only** and not the whole workflow: a rerun of the 24 jobs of the full tier costs a whole run of the
+    shared runners for each red, and does not remove what makes a rerun differ (the clock, a cache saved meanwhile, an artifact kept from the
+    first attempt). The count above is the guard against a rerun that passes for such a reason.
+  - **A probe is red on its first test failure**, as before: one that had to fail twice reads red a quarter of the time for a break that
+    fails half of them, and the bisect moves past the culprit and blames a later commit. What this does not catch: a flake that makes a
+    run pass when it should fail (the commit after the real culprit is then blamed for the pass it got by chance), and a probe that
+    fails once by chance in a hunt that is under way. Each failed run costs one more run of its failed jobs.
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or

@@ -1,11 +1,14 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+
+const { readState } = createRequire(import.meta.url)('./fake-gh-state.cjs') as { readState: (path: string, options?: { pause?: () => void; now?: () => number }) => unknown }
 
 const ANSWER = String.raw`
 if (args[0] === 'echo') { st.seen = [...(st.seen ?? []), stdin]; save(); process.stdout.write(JSON.stringify(st)) }
@@ -89,17 +92,21 @@ describe('the shared fake gh', { timeout: 30_000 * SLOW }, () => {
     expect(ended).toBe(199)
   })
 
-  it('waits for a state that is half written for longer than a loaded machine leaves its writer descheduled', () => {
+  // The read tries again for a budget of seconds, not a count of tries (50 tries 20 ms apart ran out on a loaded runner, #1496). The wait
+  // between tries and the clock are the test's, so nothing here waits for time to pass: the writer finishes on the 200th try, four
+  // seconds of 20 ms pauses, and the budget is spent when the clock says so
+  it('waits for a state that is half written through more tries than before, and gives up when its budget is spent', () => {
     make()
     writeFileSync(gh.statePath, '{"n": 1, "pad": "x')
-    // Whole again after 2.5 s, from another process: this one is blocked in the read, which tried 50 times in a second before
-    const finish = String.raw`setTimeout(() => require('node:fs').writeFileSync(process.argv[1], JSON.stringify({ n: 7 })), 2500)`
-    const writer = spawn(process.execPath, ['-e', finish, gh.statePath], { stdio: 'ignore', windowsHide: true })
-    try {
-      expect(gh.state()).toEqual({ n: 7 })
-    } finally {
-      writer.kill()
-    }
+    let tries = 0
+    expect(readState(gh.statePath, { pause: () => { if (++tries === 200) writeFileSync(gh.statePath, JSON.stringify({ n: 7 })) } })).toEqual({ n: 7 })
+    expect(tries).toBe(200)
+    writeFileSync(gh.statePath, '{"n": 1, "pad": "x')
+    let clock = 0
+    expect(() => readState(gh.statePath, { pause: () => (clock += 1000), now: () => clock })).toThrow(SyntaxError)
+    expect(clock).toBe(6000)
+    // A state that is not there is no half written one: it is an error at once
+    expect(() => readState(join(root, 'none.json'), { pause: () => expect.unreachable('it waited for a file that is not there') })).toThrow(/ENOENT/)
   })
 
   /*

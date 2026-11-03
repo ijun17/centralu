@@ -11,8 +11,8 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
-import { failingStepText } from './ci.mjs'
+import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { failingStepText, testName } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
@@ -154,20 +154,63 @@ const RERUNS_KEPT = 30
 export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
 
 /**
- * A test that failed on main and passed when only its failed jobs were rerun is intermittent (#1496): said once on the known
- * failures issue (project.json `ci.knownFailuresIssue`), with the run, and nothing was reverted. `noted` is written down before the
- * comment is posted, so a comment that fails is lost rather than posted again every tick.
+ * A failure that passed the rerun of its failed jobs is a flake for now (#1496): main is left alone. It is a break after all
+ * when it keeps coming (a race that fails half the time, or a failure that only a cache from the first attempt or the clock
+ * clears on a rerun, passes each rerun): the same job's same test failing a third (`FLAKE_REPEATS`) time within main's newest
+ * twenty runs (`FLAKE_WINDOW`) is hunted without another rerun.
+ *
+ * Why 3 and 20, from a simulation of a test failing with probability p on each run, independently of the commits (a run that
+ * fails is rerun once; the first rule hunts only a failure that fails twice): to be hunted took, on average, 1443 runs for
+ * p = 1%, 403 for 5%, 102 for 10% and 26 for 20% under the first rule alone; with 3 within 20 it takes 1317, 115, 34 and 12. So
+ * a 1% flake is hunted as seldom as before, and a failure that comes 5% of the time or more is hunted within about a hundred
+ * runs, a 20% one within a dozen. Two within 20 hunted a 1% flake every 603 runs (twice as often), four needed 235 runs at 5%.
+ * What this costs: a flake of 5 to 10% is now hunted about three times as often as under the first rule, and nothing tells it
+ * from a break that fails that often.
+ */
+export const FLAKE_REPEATS = 3
+export const FLAKE_WINDOW = 20
+
+/** Which test failed, for telling a failure from another in the same job: its first failing line without the time it took */
+const failureOf = (line) => testName(String(line ?? '').replace(/^\s*First failure:\s*/, '')).replace(/\s+\d+(?:\.\d+)?\s*m?s\b.*$/, '')
+
+/**
+ * The runs among main's newest `FLAKE_WINDOW` where the same failure (the same job, the same test) passed its rerun: the records in
+ * `reruns` that `noteFlakes` marked, as run ids. A failure whose line could not be read is never the same as another.
+ */
+export function earlierFlakes({ reruns, runs, names, line }) {
+  const test = failureOf(line)
+  if (!test) return []
+  const recent = new Set(runs.slice(0, FLAKE_WINDOW).map((r) => String(r.id)))
+  return Object.entries(reruns ?? {})
+    .filter(([id, r]) => r.flaked && recent.has(id) && failureOf(r.line) === test && (r.jobs ?? []).some((n) => names.includes(n)))
+    .map(([id]) => id)
+}
+
+/**
+ * Where the hunt for a failure that keeps coming starts: the newest run before the earliest of those flakes that passed first time
+ * (a run whose rerun passed is green in `mainVerdict`, but a break may have come with the commit it ran). Null when the runs read hold none.
+ */
+export function cleanGreen({ runs, reruns, flakes }) {
+  const oldest = Math.max(...flakes.map((id) => runs.findIndex((r) => String(r.id) === id)))
+  return runs.slice(oldest + 1).find((r) => r.status === 'completed' && r.conclusion === 'success' && !reruns?.[r.id]?.flaked)?.headSha ?? null
+}
+
+/**
+ * A test that failed on main and passed when only its failed jobs were rerun is marked (`guard.reruns[run].flaked`) and, when the
+ * project has a known failures issue (`ci.knownFailuresIssue`), said once on it, with the run, and nothing was reverted. The mark is
+ * written down before the comment is posted, so a comment that fails is lost rather than posted again every tick. The comment
+ * starts with `GUARD_NOTE`, which the reader of that issue leaves out: it lists flakes a person judged, and these are only passes.
  */
 async function noteFlakes({ repo, runs, g, update }) {
-  if (!CI.knownFailures) return
   for (const [id, r] of Object.entries(g.reruns ?? {})) {
     const run = runs.find((x) => String(x.id) === id)
-    if (!r.test || r.noted || run?.status !== 'completed' || run.conclusion !== 'success' || (run.attempt ?? 1) <= r.attempt) continue
-    r.noted = true
+    if (!r.test || r.flaked || run?.status !== 'completed' || run.conclusion !== 'success' || (run.attempt ?? 1) <= r.attempt) continue
+    r.flaked = true
     await update((fresh) => {
-      if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].noted = true
+      if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].flaked = true
     })
-    const body = `Intermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so no commit was blamed and nothing was reverted.${r.line ? ` The first failing line: "${r.line}"` : ''}`
+    if (!CI.knownFailures) continue
+    const body = `${GUARD_NOTE}\nIntermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so no commit was blamed and nothing was reverted.${r.line ? ` The first failing line: "${r.line}"` : ''}`
     await postComment(repo, CI.knownFailures, body).catch((e) => {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     })
@@ -246,7 +289,7 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
     save({})
     return { did: 'acted', outcome: hunt?.outcome ?? null }
   }
-  const greenSha = green ?? g.green ?? null
+  const lastGreen = green ?? g.green ?? null
   const jobs = await diagnose(repo, red, { failingLine })
   const line = jobs.first && failingLine ? await failingLine(repo, jobs.first) : ''
   const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, kind: jobs.kind, cause: jobs.cause, step: jobs.step ?? null, at: new Date(now).toISOString() }
@@ -266,7 +309,13 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   // One record per run (`guard.reruns`, by run id), not one for the newest: while a rerun of one red run is going, `mainVerdict`
   // shows the older red run, and a single slot would have each rerun the other for ever
   const rerun = g.reruns?.[red.id] ?? (g.rerun?.run === red.id ? g.rerun : null)
-  const unconfirmed = jobs.kind === 'test' && (!rerun || (red.attempt ?? 1) <= rerun.attempt)
+  // The same test has passed its rerun on main lately, often enough that this is no flake (`FLAKE_REPEATS`): hunted without another rerun
+  const flakes = jobs.kind === 'test' && !rerun ? earlierFlakes({ reruns: g.reruns, runs, names: jobs.names, line }) : []
+  const repeats = flakes.length >= FLAKE_REPEATS - 1 ? { times: flakes.length + 1, window: FLAKE_WINDOW } : null
+  if (repeats) base.repeats = repeats
+  // A failure that keeps coming is hunted from before the first of its flakes, not from the run that passed its rerun last
+  const greenSha = (repeats && cleanGreen({ runs, reruns: g.reruns, flakes })) || lastGreen
+  const unconfirmed = jobs.kind === 'test' && !repeats && (!rerun || (red.attempt ?? 1) <= rerun.attempt)
   if (jobs.kind === 'infrastructure' || unconfirmed) {
     const what = infraText(jobs.names, jobs.step, jobs.cause)
     const failure = jobs.kind === 'test' ? 'a test failure' : 'an infrastructure failure'
@@ -299,7 +348,10 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
     // memory or disk, and GitHub then says only that the runner was shut down. It is looked for as a test failure, and
     // reverted if the hunt finds it. The first time, and a different job's, are still the runner's: rerun, and reported.
     const again = jobs.shutdown === true && rerun.shutdown === true && jobs.names.some((name) => (rerun.jobs ?? []).includes(name))
-    if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
+    // The first attempt failed in a test, and the rerun failed before a test could run: that neither confirms the failure nor clears
+    // it. The test failure that was seen is hunted, not the setup's (the issue and the notice say what failed, not "the same way again")
+    if (rerun.test) Object.assign(base, { kind: 'test', jobs: rerun.jobs, line: rerun.line ?? '', cause: null, step: null })
+    else if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
       // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull
@@ -357,8 +409,8 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   }
   if (commits.length === 1 && !endCarries) return finish({ hunt: fresh, culprit: commits[0], how: 'the only commit since the last green one', ...ctx })
   // A suspect by the failed jobs' paths is confirmed with the full tier around it before anything is done about it
-  const byPaths = endCarries ? null : attributeByPaths(commits, jobs.names, QUEUE.guard.jobPaths)
-  const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${jobs.names.join(', ')}` } : null
+  const byPaths = endCarries ? null : attributeByPaths(commits, base.jobs, QUEUE.guard.jobPaths)
+  const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${base.jobs.join(', ')}` } : null
   return await stepHunt({ hunt: { ...fresh, confirm }, ...ctx })
 }
 
@@ -442,14 +494,14 @@ async function stepHunt(ctx) {
     return { did: 'waiting', sha: probe.sha }
   }
   // A probe that failed in a step that sets the job up, or lost its runner, says nothing about the commit (#1453, as #1435 for main's own
-  // run): rerun its failed jobs once, and when it fails that way again, end the hunt rather than blame a commit for the runner's outage.
-  // Any other failure is red only if it fails again on that rerun (#1496, as for main's own run): a pass makes the probe green
+  // run): rerun its failed jobs once, and when it fails that way again, end the hunt rather than blame a commit for the runner's outage
   if (!['success', 'cancelled', 'skipped'].includes(run.conclusion)) {
     const why = await diagnose(repo, run, { failingLine })
-    // Only the setup's and the runner's (as for main's own run) end the hunt when they come again: a timeout outside a setup step, a job on
-    // the flaky list, a runner shutdown or a test may be the commit's (it hangs, it exhausts the runner, it breaks), so that probe stays red
-    const runners = why.kind === 'infrastructure' && !why.shutdown && (why.cause === 'setup' || why.cause === 'runner' || why.inSetup)
-    if (runners || !probe.rerun) {
+    // Only the setup's and the runner's (as for main's own run): a timeout outside a setup step, a job on the flaky list or a runner shutdown
+    // may be the commit's (it hangs, it exhausts the runner), so that probe stays red. So does a failed test, on its first failure (#1496):
+    // a probe that had to fail twice would read red a quarter of the time for a break that fails half of them, and the bisect would
+    // move past it and blame a later commit
+    if (why.kind === 'infrastructure' && !why.shutdown && (why.cause === 'setup' || why.cause === 'runner' || why.inSetup)) {
       const what = infraText(why.names, why.step, why.cause)
       if (probe.rerun) return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${what}, the same way again after one rerun. No commit is blamed, and nothing was reverted.`)
       if (renew && !renew()) return { did: 'yielded' }
