@@ -184,6 +184,11 @@ describe('what the merge queue decides for one poll', () => {
     expect(classifyRun(failedRun, [job('e2e (webkit 1/5)', 'failure', { ...secondTry, notes: [...firstTry, "The action 'Install WebKit system libraries, second try' has timed out after 3 minutes."] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step: 'Install WebKit system libraries, second try' })
     // The job's own limit is the job's whoever the earlier steps were
     expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled', { ...testsFailed, steps: testsFailed.steps.map((x) => (x.name.startsWith('pnpm') ? { ...x, conclusion: 'cancelled' } : x)), notes: [...firstTry, 'The job has exceeded the maximum execution time of 25 minutes.'] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: false })
+    // The step that keeps the results (an artifact upload, named by hand or not, a post step) failing alone is the service's, a test that failed before it is not
+    const stored = (name: string) => ({ steps: [{ name: 'pnpm test', conclusion: 'success' }, { name, conclusion: 'failure' }] })
+    for (const name of ['Upload the test times', 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'])
+      expect(classifyRun(failedRun, [job('macos tests', 'failure', stored(name))])).toMatchObject({ real: false, cause: 'setup', step: name })
+    expect(classifyRun(failedRun, [job('macos tests', 'failure', { steps: [{ name: 'pnpm test', conclusion: 'failure' }, { name: 'Upload the test times', conclusion: 'failure' }] })])).toMatchObject({ real: true, cause: 'test', step: 'pnpm test' })
     // A test's own timeout is a test failure
     expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
     // #1503: the step the limit ended says where. e2e (webkit 1/5) of 2026-10-23: the job's limit hit inside `Install WebKit`
@@ -4233,6 +4238,8 @@ function landedPr(commit: string, pr = 90) {
  * source answered 403, then the artifact upload that runs after a failure complained too, and was the line quoted.
  */
 const WEBKIT_INSTALL_LOG = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-webkit-install-403.txt'), 'utf8')
+/** The artifact upload of `macos tests` on 2026-11-03 (job 125945853592): it kept the test times, and GitHub's artifact service could not be reached */
+const UPLOAD_ENOTFOUND_LOG = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-artifact-upload-enotfound.txt'), 'utf8')
 
 describe("the main guard does not revert a commit for the runner's own failure (#1435)", { timeout: 120_000 * SLOW }, () => {
   /** e2e (webkit 4/5) as it ended on 2026-10-21: the browser install failed, the test step never ran, the upload that runs after a failure failed too */
@@ -4275,6 +4282,51 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(issues()).toEqual([])
     expect(mainRedNotices()).toEqual([])
     expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+  })
+
+  // 2026-11-03: every test step of `macos tests` passed; only the artifact upload that keeps the test times failed ("Failed to
+  // FinalizeArtifact ... ENOTFOUND"). It was read as a test failure: the only commit since the last green one was blamed and a revert opened.
+  // The job is rerun first, as for any failure; the commit was hunted when the upload failed again.
+  it('reports a job whose only failed step is the upload that keeps the test times, failing again after the rerun, and reverts nothing', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    const ok = (name: string) => ({ name, conclusion: 'success' })
+    const macosJob = {
+      id: 33,
+      name: 'macos tests',
+      status: 'completed',
+      conclusion: 'failure',
+      steps: [
+        ok('Set up job'),
+        ok('Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'),
+        ok('Run ./.github/actions/setup'),
+        ok('Run pnpm install --frozen-lockfile'),
+        ok('Say which Node runs the tests'),
+        { name: 'pnpm test (the tests that touch the OS)', conclusion: 'skipped' },
+        ok('pnpm test (host, protocol, launcher)'),
+        ok('Say which test files took longest'),
+        { name: 'Upload the test times', conclusion: 'failure' },
+        ok('Post Run ./.github/actions/setup'),
+        ok('Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'),
+        ok('Complete job'),
+      ],
+    }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [macosJob] },
+      logs: { '33': UPLOAD_ENOTFOUND_LOG },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await polls(11)
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain('The step that failed first: "Upload the test times"')
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'infrastructure', outcome: 'reported' })
   })
 
   it('reports an infrastructure failure that fails the same way again, once, quoting the step that failed first, and reverts nothing', async () => {

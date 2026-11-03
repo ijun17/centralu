@@ -1,0 +1,15 @@
+2026-11-03T13:45:52.3744180Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+2026-11-03T13:45:52.3745530Z with:
+2026-11-03T13:45:52.3746510Z   name: macos-test-times
+2026-11-03T13:45:52.3747290Z   path: ${{ runner.temp }}/vitest-times.json
+2026-11-03T13:45:52.3748260Z   retention-days: 30
+2026-11-03T13:45:52.3748930Z   if-no-files-found: warn
+2026-11-03T13:45:52.3756010Z ##[endgroup]
+2026-11-03T13:45:53.0781480Z With the provided path, there will be 1 file uploaded
+2026-11-03T13:45:53.3850230Z Uploading artifact: macos-test-times.zip
+2026-11-03T13:45:53.8170000Z Uploaded bytes 518146
+2026-11-03T13:45:53.8616560Z Finished uploading artifact content to blob storage!
+2026-11-03T13:45:53.8618510Z Finalizing artifact upload
+2026-11-03T13:48:53.9614960Z Attempt 1 of 5 failed with error: Request timeout: /twirp/github.actions.results.api.v1.ArtifactService/FinalizeArtifact. Retrying request in 8000 ms...
+2026-11-03T13:49:32.0008260Z ##[error]Failed to FinalizeArtifact: Unable to make request: ENOTFOUND
+2026-11-03T13:49:32.0409060Z Post job cleanup.

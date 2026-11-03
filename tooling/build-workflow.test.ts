@@ -138,7 +138,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(unit).not.toMatch(/vitest run[^\n]*--shard/)
     // Each shard keeps its file times, which refresh tooling/test-durations.json, even when a test failed
     const keep = unit.slice(test)
-    expect(keep).toMatch(/- name: Keep the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
+    expect(keep).toMatch(/- name: Upload the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
     expect(keep).toContain('name: windows-test-times-${{ matrix.shard }}\n')
     expect(keep).toContain('path: ${{ runner.temp }}\\vitest-times.json\n')
     // Nowhere else is the selection used: the Linux jobs run every test

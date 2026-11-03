@@ -20,7 +20,10 @@ const OK = new Set(['success', 'neutral', 'skipped'])
  * runner, checking out, setting up pnpm or Node, a toolchain or a cache, downloading an artifact, installing the
  * system libraries or a browser. A job that fails in one of these failed before any test or build of the commit ran:
  * the runner's or a package source's failure (2026-10-21: packages.microsoft.com answered 403 to `playwright install
- * --with-deps webkit`), not the code's.
+ * --with-deps webkit`), not the code's. The steps that only store what the job made (an artifact upload, a cache save,
+ * the post steps) are listed too: they run after the tests and, as the first step to fail, say the service was
+ * unreachable, not that a test broke (2026-11-03: `Failed to FinalizeArtifact: ... ENOTFOUND` after every test passed).
+ * A step named by hand has to say so in its name: `Upload the test times`.
  */
 const SETUP_STEP = [
   /^Set up job$/i,
@@ -29,6 +32,9 @@ const SETUP_STEP = [
   /^Run pnpm\/action-setup@/i,
   /^Run \.\/\.github\/actions\/setup$/i, // build.yml's composite of the pnpm and Node setup: GitHub lists it as one step
   /^Run (?:dtolnay\/rust-toolchain|swatinem\/rust-cache)@/i,
+  /^Run actions\/(?:upload-artifact|cache\/save)@/i,
+  /^Upload /i,
+  /^Post /i,
   /^(?:Install|Set up) .*\b(?:WebKit|Chromium|Firefox|browsers?|Playwright|system dependencies)\b/i,
 ]
 /** A step that fetches packages: a setup step only when the failure names the network or a package source */
