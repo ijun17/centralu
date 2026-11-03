@@ -619,6 +619,102 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(JSON.stringify(r)).not.toContain('the person may be using it')
     expect(notes()).toHaveLength(0)
   })
+
+  /*
+   * #1682: the work's last turn was reported finished, so nothing is owed of the turn the child's tool starts after it. That turn
+   * is not tied to the assignment (nothing on its start names one), and a note is not put into it: with `ifBusy: "queue"` the hub
+   * holds the note and sends it as new work once the child is at rest, as a local child's queue does
+   */
+  describe('a note held for a child busy with a turn that is not the caller\'s (#1682)', () => {
+    const queue = { text: note.text, ifBusy: 'queue' }
+    /** The work's turns are reported finished, and the tool starts another by itself */
+    async function reportedThenBusy(): Promise<void> {
+      await paused()
+      await followUp()
+      machine.selfTurnEnds()
+      await flush()
+      expect(hub.delivered).toHaveLength(2)
+      expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+      machine.selfStarts()
+      await flush()
+    }
+
+    it('refuses a note into that turn, and says a queue holds it', async () => {
+      await reportedThenBusy()
+      const r = await hub.act('send', note)
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
+      expect((r as { error: string }).error).toContain('ifBusy "queue"')
+      expect(notes()).toHaveLength(0)
+    })
+
+    it('holds a queued note, and sends it as new work the caller owns once the child is at rest', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued', position: 1 })
+      // The same words again are the one held
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued', position: 1 })
+      await flush()
+      expect(notes()).toHaveLength(0)
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(1)
+      expect(machine.turn).toBe('hub')
+      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+      machine.callerTurnEnds()
+      await flush()
+      expect(hub.delivered).toHaveLength(3)
+      expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    })
+
+    it('keeps it across a hub restart and a link that dropped while the turn ended, and sends it once the link is back', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      linkDown()
+      hub.boot()
+      machine.selfTurnEnds()
+      await linkUp()
+      expect(notes()).toHaveLength(1)
+      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    })
+
+    it("holds it behind the person's turn there too, and nothing of their turn reaches the caller", async () => {
+      await started()
+      machine.callerTurnEnds()
+      await flush()
+      machine.personSays()
+      await flush()
+      hub.mark()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      machine.personTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(1)
+      expect(JSON.stringify(hub.seen())).not.toContain(PERSON.words)
+    })
+
+    it("is dropped by the caller's stop", async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      expect(await hub.act('stop')).toMatchObject({ ok: true, state: 'stopped' })
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
+
+    it('tells the caller when a held note is refused at the time it would go, and holds nothing more', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      // What a send rests on is read again at delivery
+      store.projects.setProjectTrusted('p1', false)
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+      expect(hub.told.join(' ')).toContain('The note you queued for "Child"')
+      store.projects.setProjectTrusted('p1', true)
+      machine.selfStarts()
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
+  })
 })
 
 /*
