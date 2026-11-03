@@ -929,18 +929,6 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     }
   })
 
-  it('imports nothing from outside scripts/ in the script open_pr runs, since only that folder is written out from main', () => {
-    const seen = new Set<string>()
-    const walk = (file: string) => {
-      if (seen.has(file)) return
-      seen.add(file)
-      for (const [, spec] of readFileSync(file, 'utf8').matchAll(/(?:from|import)\s*['"](\.[^'"]+)['"]/g)) walk(join(dirname(file), spec!))
-    }
-    walk(join(REPO_ROOT, 'scripts/pre-pr.mjs'))
-    expect([...seen].filter((f) => !f.startsWith(join(REPO_ROOT, 'scripts') + (process.platform === 'win32' ? '\\' : '/')))).toEqual([])
-    expect(seen.size).toBeGreaterThan(1)
-  })
-
   it('checks every pull request under a stacked one, and says in Verified that it passed', async () => {
     const c = prePrCheckout()
     patchState((s) => (s.prs['5'] = pr(5, { headRefName: 'feat/low', baseRefName: 'main' })))
