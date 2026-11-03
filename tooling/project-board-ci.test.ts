@@ -413,7 +413,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
   save()
   out({ id: 5, node_id: 'IC_5', html_url: 'https://github.com/ijun17/centralu/pull/77#issuecomment-5', user: { login: 'contributor' }, created_at: '2026-10-17T10:00:00Z', body })
 } else if (args[0] === 'issue' && args[1] === 'view') {
-  out({ body: st.issue, comments: (st.issueComments ?? []).map((body) => ({ body })), state: 'OPEN' })
+  out({ body: st.issue, comments: [], state: 'OPEN' })
 } else if (path === R) {
   out({ permissions: st.permissions, default_branch: 'main' })
 } else if (path === R + '/branches/main/protection/required_status_checks') {
@@ -548,19 +548,6 @@ describe('the project board app: ci_status', { timeout: 30_000 * SLOW }, () => {
     expect(r.data.verdict).toBe('failing')
     // Read-only: nothing merged, nothing deleted
     expect(ghCalls().filter((a) => a[1] === 'merge' || a.includes('DELETE'))).toEqual([])
-  })
-
-  // The main guard comments on the known failures issue when a test passed its rerun (#1496), quoting the failing line. That is a
-  // pass, not a judgement: a later pull request failing the same test must not be told to rerun it because of it
-  it("leaves the main guard's notes on the known failures issue out of what it matches a failure with", async () => {
-    const failing = { checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('notify', 'success', 14)]], issue: 'Known intermittent failures.' }
-    const line = firstFailure(VITEST_LOG).line as string
-    const note = `Intermittent failure: windows tests failed on main and passed when its failed jobs were rerun. The first failing line: "${line}"`
-    runtime(ghState({ ...failing, issueComments: [`<!-- main-guard note -->\n${note}`] }))
-    expect((await call('ci_status', { pr: 77 })).text).not.toContain('known intermittent failure?')
-    // The same words from a person are a known flake
-    runtime(ghState({ ...failing, issueComments: [note] }))
-    expect((await call('ci_status', { pr: 77 })).text).toContain('known intermittent failure? #368')
   })
 
   it('keeps green checks to one short line unless detail is full', async () => {

@@ -113,7 +113,7 @@ export function redIssue({ red, culprit, how, why, did, ref }) {
     `## What failed`,
     '',
     `The full tier on main failed at ${red.red}${red.url ? ` (${red.url})` : ''}: ${red.jobs?.length ? red.jobs.join(', ') : 'see the run'}.`,
-    ...(kindText(red) ? ['', `Kind of failure: **${kindText(red)}**${red.kind === 'infrastructure' ? ' (the runner or its setup, not a commit)' : red.kind === 'setup' ? ` (a step that sets the job up failed on both attempts, and a commit since the last green one changed what it installs${red.touched?.length ? `: ${red.touched.join(', ')}` : ''})` : ' (a step of the job ran and failed)'}.${red.step ? ` The step that failed first: "${red.step}".` : ''}${red.repeats ? ` The same test failed ${red.repeats.times} times on main within its last ${red.repeats.window} runs and passed a rerun of its failed jobs each time before this one, so it is not taken for a flake.` : ''}`] : []),
+    ...(kindText(red) ? ['', `Kind of failure: **${kindText(red)}**${red.kind === 'infrastructure' ? ' (the runner or its setup, not a commit)' : red.kind === 'setup' ? ` (a step that sets the job up failed on both attempts, and a commit since the last green one changed what it installs${red.touched?.length ? `: ${red.touched.join(', ')}` : ''})` : ' (a step of the job ran and failed)'}.${red.step ? ` The step that failed first: "${red.step}".` : ''}`] : []),
     ...(red.line ? ['', '```', red.line, '```'] : []),
     '',
     `## The culprit`,

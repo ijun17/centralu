@@ -493,17 +493,13 @@ export async function readJobLog(repo, jobId) {
   }
 }
 
-/** What starts a comment the main guard posts on the known failures issue (#1496): a note of its own, not a flake a person judged */
-export const GUARD_NOTE = '<!-- main-guard note -->'
-
-/** An issue's body and comments as one text, and its state; the main guard's notes (`GUARD_NOTE`) are not part of it. */
+/** An issue's body and comments as one text, and its state. */
 export async function readIssueText(repo, number) {
   checkRepo(repo)
   const out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'body,comments,state'])
   const j = parseJson(out)
   if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
-  const comments = (j.comments ?? []).map((c) => c?.body ?? '').filter((b) => !b.startsWith(GUARD_NOTE))
-  return { text: [j.body ?? '', ...comments].join('\n\n'), state: j.state ?? null }
+  return { text: [j.body ?? '', ...(j.comments ?? []).map((c) => c?.body ?? '')].join('\n\n'), state: j.state ?? null }
 }
 
 /**
