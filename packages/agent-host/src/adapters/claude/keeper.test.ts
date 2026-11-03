@@ -204,6 +204,16 @@ describe('claude under the keeper', () => {
     expect(events.some((e) => e.type === 'error')).toBe(false)
   })
 
+  /** A call still open in the kept CLI means a turn was running at the swap: the CLI going silent then is not rest */
+  it('a CLI the keeper kept that exits with a call still open is a crash', async () => {
+    const { events, spawn } = await adoptedSession([{ callId: 'c1', tool: 'Bash' }])
+    spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })
+    sdk.end()
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true))
+    expect(events.find((e) => e.type === 'error')).toMatchObject({ error: { code: 'adapter_crashed' } })
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+  })
+
   /** The SDK adds a CLI's stderr to its error only for a process it spawned itself; the keeper's was left without (#428) */
   it('a crash of the keeper\'s CLI carries the end of its stderr', async () => {
     const { events, adopted, handle, spawn } = await adoptedSession([])

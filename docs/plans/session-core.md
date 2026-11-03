@@ -634,7 +634,7 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | ACP caps inline images (`inlineImageEvent`) | §2.9 | now |
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
-| Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `MidTurnLedger.exited` with Claude's `inFlight` since PR 7, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything (a CLI the keeper kept counts from adoption: it says nothing until its next turn) |
+| Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `MidTurnLedger.exited` with Claude's `inFlight` since PR 7, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything (a CLI the keeper kept counts from adoption: it says nothing until its next turn, unless a call it runs is still open) |
 | Codex gets the Stop confirmation timer | §2.4 | done after 7 (§9.2): one bound and words for every tool, confirmed by the turn's end |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
