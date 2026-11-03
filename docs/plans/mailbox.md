@@ -712,6 +712,7 @@ task is never reminded: its report settles it.
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
+| `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `mailbox.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key
 survives a read. `docs/stored-shapes.md` gets the row for `mail.facts` in M1.
@@ -1072,6 +1073,11 @@ message.
   §9.7). A worker answering the orchestrator's question, asking about the orchestrator's task, or reporting it is not
   asking for anything. A reply to an orchestrator message that did not need a reply is a request: the orchestrator did
   not ask for it, so the person's cards apply.
+- **On the person's word only** (#1739, [cited-requests.md](cited-requests.md), replacing the read gate of #1516 and
+  #1926's reply cards). `send` checks a request's `cite` against the person's newest message in the sender's own
+  conversation (typed in the composer, at most 30 minutes old, cited once: `dedupe_key` `cite:<seq>`) and stores
+  `facts.cites`. A request without one that passes goes to the person instead, and the sender's result says why. A
+  request stored uncited anyway (an older build, a moved one, a reminder's turn) gets a turn where nothing leaves.
 - **One asker per wake.** `drain` for the orchestrator keeps the requests of one session (the person's words and
   urgent mail first, then needsReply requests, then the oldest). Requests from other sessions wait for the next turn.
   Mail that is not a request rides along.

@@ -2,7 +2,9 @@ import type Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { parseAddress, sessionAddress } from './address.js'
-import { MessageService, type SendInput, type SendResult, type TurnNow } from './messages.js'
+import type { SendInput, SendResult, TurnNow } from './messages.js'
+import { MessageService } from './messages.js'
+import { citing, freshWord } from './persons-word.test-helpers.js'
 import { mailReach, type ReachHost } from './reach.js'
 import { refusalReason } from './rules.js'
 
@@ -59,7 +61,7 @@ export function world() {
   const clock = { t: NOW }
   const turns = new Map<string, TurnNow>()
   const reach = mailReach(host)
-  const mail = new MessageService(store.mailbox, reach, { hostId: HOST, now: () => clock.t, turn: (a) => turns.get(a) ?? null })
+  const mail = citing(new MessageService(store.mailbox, reach, { hostId: HOST, now: () => clock.t, turn: (a) => turns.get(a) ?? null, personSaid: freshWord(() => clock.t) }))
 
   /** The session is in a turn that `starter` started (a row in `mail_turns`, as `MailTurns.begin` writes it) */
   function startTurn(session: string, starter: string | null, over: Partial<TurnNow> = {}): TurnNow {

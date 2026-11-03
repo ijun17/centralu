@@ -909,6 +909,12 @@ the definition is 811, `MAIL_BUDGET_CHARS` 800 → 820, and the reader seat's ce
 mailed request is not the person's word and is answered in its thread (about 130 characters; its ceiling 9,710 → 9,910, resident in the commands tier too). Nothing else is added to a request: the card
 that asks the person is the host's, and the rule behind it is code.
 
+**#1739 (a request on the person's word).** The mail tool gets `cite`, a boolean with no description, and its own description
+says when to set it (", with cite=true when the person asked for it": the definition is 882, `MAIL_BUDGET_CHARS` 820 → 890,
+and the reader seat's ceilings rise by 70). The orchestrator's line about requests now says the request carries the person's word,
+to read the message it cites, and which steps still ask (about 50 characters more; its ceiling 9,910 → 9,960). The check of the
+citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), so it costs nothing in a request.
+
 Every field but `action` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds

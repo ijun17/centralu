@@ -1,12 +1,13 @@
 import { oneLineText } from '@cc/protocol'
 
 /**
- * Which acts of the orchestrator ask the person when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
+ * Which acts of the orchestrator ask the person when a session asked for them (#1447, #1739, docs/plans/cited-requests.md).
  *
- * A turn whose thread a session opened is that session's request, and a session's words are not the person's. So in such a turn every
- * step the orchestrator could not take from an untrusted text alone raises the person's card, whatever the orchestrator's own preset:
- * anything that changes sessions, projects, settings, machines, installations or apps, starts agents, deletes, runs a command or writes a
- * file. Reading, and answering in the thread that asked, need no card.
+ * A turn whose message a session sent is that session's request, and a session's words are not the person's. A request reaches the orchestrator
+ * on the person's word (it cites their message), and in its turn every step the orchestrator could not take from that word alone raises the
+ * person's card, whatever the orchestrator's own preset: anything that changes sessions, projects, settings, machines, installations or apps,
+ * starts agents, deletes, runs a command or writes a file, except the reversible steps the word covers (`onPersonsWord`). Reading, and answering
+ * in the thread that asked, need no card.
  *
  * **Fail closed.** The reading acts are listed; every other tool or command asks, so a command added later asks until someone says it only reads.
  */
@@ -114,16 +115,27 @@ function argsLine(args: Record<string, unknown>, cut: boolean): string {
 }
 
 /** What the person is asked to allow: the step as one line, or that it does not fit a card */
-export type AskedStep = { act: string; afterRead?: true } | { tooLong: true }
+export type AskedStep = { act: string } | { tooLong: true }
+
+/**
+ * The steps a request on the person's word takes with no card (docs/plans/cited-requests.md §2, owner 2026-11-03): reversible ones only, registering
+ * an existing folder as a project and starting a session, here or on a linked machine. Every other step still asks, so a step added later asks until
+ * it is listed here
+ */
+const ON_PERSONS_WORD: ReadonlySet<string> = new Set(['add_project', 'create_session'])
+
+/** Whether a step runs with no card in a turn whose request cites the person's word */
+export const onPersonsWord = (name: string): boolean => ON_PERSONS_WORD.has(name)
+
+/** Whether a call posts words in a thread (an answer, an update): what a turn with no word of the person's may not send the asker */
+export const postsInThread = (name: string, args: Record<string, unknown>): boolean => name === 'mail' && (args.action === 'reply' || args.action === 'update' || args.action === 'close')
 
 /**
  * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post
- * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks.
- * `reached` says what the orchestrator's conversation read that the asking session could not read itself (`AskedGate`): after that every word to a
- * session asks, the answer in the thread included, with its text shown whole, since it could carry what was read to the session. The thread is
+ * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks. The thread is
  * compared as the mail tool takes it, trimmed
  */
-export function askedAct(name: string, args: Record<string, unknown>, thread: string, reached: string | null = null): AskedStep | null {
+export function askedAct(name: string, args: Record<string, unknown>, thread: string): AskedStep | null {
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
@@ -131,22 +143,16 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     const action = args.action
     if (action === 'inbox' || action === 'read') return null
     const inThread = typeof args.thread === 'string' && args.thread.trim() === thread
-    const toPerson = action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person'
-    if (reached !== null && !toPerson && (action === 'reply' || action === 'update' || action === 'close' || action === 'send')) {
-      const act = `${inThread ? 'answer it' : 'write to a session'}, though the orchestrator has read what this session could not read itself (${reached}): run mail ${argsLine(args, false)}`
-      return act.length > CLI_ACT_MAX ? { tooLong: true } : { act, afterRead: true }
-    }
     // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
     if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && inThread) return null
-    if (toPerson) return null
+    if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
-  // After such a read any step that passes words on shows them whole, as the mail does
-  return stepOf(name, args, reached !== null)
+  return stepOf(name, args)
 }
 
 /** The step as the card shows it, whatever the call is: `run <name> <arguments>`, or that it does not fit */
-export function stepOf(name: string, args: Record<string, unknown>, whole = false): AskedStep {
-  const cli = isCliTool(name) || whole
+export function stepOf(name: string, args: Record<string, unknown>): AskedStep {
+  const cli = isCliTool(name)
   const shown = argsLine(args, !cli)
   const act = `run ${name} ${shown === '{}' ? '' : shown}`.trim()
   return act.length > (cli ? CLI_ACT_MAX : ACT_MAX) ? { tooLong: true } : { act }

@@ -53,6 +53,8 @@ export const MailFacts = z.looseObject({
   /** On a chain's root: how the person last closed the chain (Mark done `finished`, Drop `dropped`), which the window shows while it stays done */
   closed: z.object({ outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), at: z.number() }).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
+  /** On a request to the orchestrator: the person's message in the sender's conversation that Centralu checked it cites (docs/plans/cited-requests.md §3) */
+  cites: z.object({ seq: z.number(), at: z.number() }).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
 
@@ -217,6 +219,11 @@ export class MailboxRecords {
   /** One unit of work. `immediate`, so a read then write cannot interleave with another writer */
   transaction<T>(fn: () => T): T {
     return this.db.transaction(fn).immediate()
+  }
+
+  /** Whether `sender` has a message stored under `dedupeKey` */
+  hasDedupe(sender: string, dedupeKey: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM mail WHERE sender = ? AND dedupe_key = ?`).get(sender, dedupeKey) !== undefined
   }
 
   // ── Writing ──

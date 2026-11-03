@@ -1,6 +1,8 @@
 import { parseAddress } from './address.js'
 import { MailDelivery, type MailDeliveryOptions, type MailInput, type MailSessions, type ReceiverState } from './delivery.js'
-import { MessageService, type SendInput, type SendResult } from './messages.js'
+import type { SendInput, SendResult } from './messages.js'
+import { MessageService } from './messages.js'
+import { citing, freshWord } from './persons-word.test-helpers.js'
 import { world as messageWorld } from './messages.test-helpers.js'
 import { MailTurns } from './turns.js'
 
@@ -71,14 +73,15 @@ export function deliveryWorld(opts: { heartbeat?: number | null; delivery?: Mail
   const beat = { value: opts.heartbeat ?? null }
   // Filled once the turns exist: the service reads a session's turn through it
   const box: { turns?: MailTurns } = {}
-  const mail = new MessageService(store.mailbox, reach, {
+  const mail = citing(new MessageService(store.mailbox, reach, {
     hostId: 'hub-aaaaaaaa',
     now: () => clock.t,
+    personSaid: freshWord(() => clock.t),
     turn: (address) => {
       const party = parseAddress(address)
       return (party?.kind === 'session' && box.turns?.current(party.sessionId)) || null
     },
-  })
+  }))
   box.turns = new MailTurns(store.mailbox, {
     now: () => clock.t,
     ...(opts.keepOpen ? { keepOpen: opts.keepOpen } : {}),

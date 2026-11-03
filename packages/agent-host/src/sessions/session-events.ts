@@ -619,8 +619,9 @@ export class SessionEvents {
         kind: 'text',
         // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
         // image bytes back in
-        // The input id it goes in under, what the person meant and whether it is a report (#1639): the record of whose a turn it starts is
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(intent !== 'ask' ? { intent } : {}), ...(relayed ? { relayed: true } : {}) },
+        // The input id it goes in under, what the person meant and whether it is a report (#1639): the record of whose a turn it starts is.
+        // `byPerson`: typed in the composer, the one mark a request's citation of the person's word accepts (docs/plans/cited-requests.md §3)
+        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(intent !== 'ask' ? { intent } : {}), ...(relayed ? { relayed: true } : {}) },
         ts: Date.now(),
       },
     ])

@@ -17,6 +17,8 @@ export type Asker = {
   name: string
   project: string | null
   trusted: boolean
+  /** The person's message the request cites, which Centralu checked when it was sent (docs/plans/cited-requests.md), or null: the turn is not on their word */
+  cites: { seq: number; at: number } | null
 }
 
 export type AskedByHost = {
@@ -26,6 +28,8 @@ export type AskedByHost = {
   project(projectId: string): { name: string } | undefined
   /** §7.2's rule: no project is trusted, a known project reads its flag, an unknown id is not */
   untrusted: MailReach['untrusted']
+  /** The checked citation a message carries (`facts.cites`), or null */
+  cites(messageId: string): { seq: number; at: number } | null
 }
 
 /** The facts the person decides on for a session; a gone session's project is unknown, so it is not trusted (fail closed) */
@@ -41,5 +45,5 @@ export function askedBy(host: AskedByHost, turns: Pick<MailTurns, 'current'>, or
   const turn = turns.current(orchestratorId)
   const asker = turn?.asker ? parseAddress(turn.asker) : undefined
   if (!turn?.messageId || asker?.kind !== 'session') return null
-  return { messageId: turn.messageId, sessionId: asker.sessionId, turn: turn.turnSeq, ...askerFacts(host, asker.sessionId) }
+  return { messageId: turn.messageId, sessionId: asker.sessionId, turn: turn.turnSeq, ...askerFacts(host, asker.sessionId), cites: host.cites(turn.messageId) }
 }

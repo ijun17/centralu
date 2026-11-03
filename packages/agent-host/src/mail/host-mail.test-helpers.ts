@@ -1,4 +1,5 @@
 import type { SessionInfo } from '@cc/protocol'
+import { citing, freshWord } from './persons-word.test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { sessionAddress } from './address.js'
 import { deliveryCore, turnEnder } from './delivery.test-helpers.js'
@@ -42,6 +43,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     mailCommand: () => false,
     keptInTurn: (id) => opts.kept?.has(id) ?? false,
     oldOwes: opts.oldOwes ?? (() => false),
+    personSaid: freshWord(() => clock.t),
     mailSessions: () => ({
       receiver: (id) => (SESSIONS[id] ? (states.get(id) ?? { kind: 'ready', live: true, quiet: true }) : { kind: 'gone' }),
       note: () => {},
@@ -54,5 +56,5 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     delivery: { schedule },
   })
   const row = (id: string, recipient: string) => store.mailbox.recipient(id, recipient)
-  return { store, clock, states, delivered, behaviour, advance, endTurn: turnEnder(m.turns), to, row, ...m, mail: m.service, stop: () => m.delivery.stop() }
+  return { store, clock, states, delivered, behaviour, advance, endTurn: turnEnder(m.turns), to, row, ...m, mail: citing(m.service), stop: () => m.delivery.stop() }
 }

@@ -78,6 +78,7 @@ import {
   alwaysAllowKey,
   errorMessage,
   ORCHESTRATOR_CHANGE,
+  oneLineText,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -461,14 +462,19 @@ export class SessionManager {
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      reach: (sessionId) => {
-        const m = this.meta.get(sessionId)
-        const folders = [this.store.sessions.sessionCwd(sessionId), m?.projectId ? this.projectRegistry.cwdOf(m.projectId) : null, m?.worktree?.path, ...(this.readGrants.get(sessionId) ?? [])]
-        return { folders: folders.filter((f): f is string => typeof f === 'string' && f !== ''), project: m?.projectId ?? null, projectName: this.projectRegistry.projectRow(m?.projectId)?.name ?? null }
-      },
-      projectOf: (sessionId) => {
-        const m = this.meta.get(sessionId)
-        return m ? (m.projectId ?? null) : undefined
+      // The record of a step done on the person's word, where they wrote it (docs/plans/cited-requests.md §5; its words are the owner's call)
+      onPersonsWord: (asker, act) => {
+        const cited = this.store.messages.loadMessagesFrom(asker.sessionId, asker.cites.seq - 1, 1).find((r) => r.seq === asker.cites.seq)
+        const words = cited && typeof cited.payload === 'object' && cited.payload !== null && 'text' in cited.payload ? String(cited.payload.text) : ''
+        const ago = Math.max(1, Math.round((Date.now() - asker.cites.at) / 60_000))
+        this.events.onEvent({
+          type: 'notice',
+          sessionId: asker.sessionId,
+          level: 'info',
+          from: 'Centralu',
+          label: 'on your word',
+          text: `On your message from ${ago} min ago (${JSON.stringify(oneLineText(words, 60))}), the orchestrator did this for this session's request without asking you again: ${oneLineText(act, 300)}`,
+        })
       },
     })
     this.linkedReports = new LinkedReports(this.parts())
@@ -1965,8 +1971,7 @@ export class SessionManager {
       refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
-      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {

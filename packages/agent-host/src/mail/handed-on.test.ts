@@ -8,20 +8,22 @@ import { parseAddress } from './address.js'
 import { reportRecorder, type ReportDraft } from './delegation.js'
 import { A, B, C, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
+import { citing, freshWord } from './persons-word.test-helpers.js'
 import { MailTurns } from './turns.js'
 
 function setup(owed: Set<string>) {
   const w = world()
   // Filled once the turns exist: the service reads a session's turn through it
   const box: { turns?: MailTurns } = {}
-  const mail = new MessageService(w.store.mailbox, w.reach, {
+  const mail = citing(new MessageService(w.store.mailbox, w.reach, {
     hostId: 'hub-aaaaaaaa',
     now: () => w.clock.t,
+    personSaid: freshWord(() => w.clock.t),
     turn: (address) => {
       const party = parseAddress(address)
       return (party?.kind === 'session' && box.turns?.current(party.sessionId)) || null
     },
-  })
+  }))
   box.turns = new MailTurns(w.store.mailbox, { now: () => w.clock.t })
   const t = box.turns
   const oldOwes = (sender: string, recipient: string) => owed.has(`${sender}>${recipient}`)

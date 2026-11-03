@@ -339,7 +339,7 @@ describe('quiet answers (D3)', () => {
     const ask = w.send(A, { to: [B], text: 'a question' }).message
     const answer = w.send(B, { replyTo: ask.id, text: 'the answer' })
     expect(answer.quiet).toBe(false)
-    expect(answer.message.facts).toEqual({})
+    expect(answer.message.facts.quiet).toBeUndefined()
     // An answer that asks something back is not quiet either
     const q = w.send(A, { to: [B], text: 'another note', needsReply: false }).message
     expect(w.send(B, { replyTo: q.id, text: 'and you?', needsReply: true }).quiet).toBe(false)
@@ -750,7 +750,7 @@ describe('what the deep review of #1899 found', () => {
     const note = w.send(ORC, { to: [W], text: 'carry on', needsReply: false }).message
     const answer = w.send(W, { replyTo: note.id, text: 'ok' })
     expect(answer.quiet).toBe(false)
-    expect(answer.message.facts).toEqual({})
+    expect(answer.message.facts.quiet).toBeUndefined()
     w.clock.t += 10_000
     expect(w.mail.drain(ORC)).toMatchObject({ wake: true, workMessage: answer.message.id, asker: W, quieted: [] })
     // Between two ordinary sessions the same answer is quiet

@@ -339,6 +339,23 @@ export class MessageRecords {
     return isObj(payload) && payload.callId === callId ? payload.input : undefined
   }
 
+  /**
+   * The newest message of this session the person typed in Centralu's composer (`byPerson`, docs/plans/cited-requests.md §3), or null. A row with no
+   * source mark is not enough: a caught-up CLI transcript, an app's text and a first prompt have none either
+   */
+  newestPersonMessage(sessionId: string): { seq: number; ts: number; text: string } | null {
+    const row = this.db
+      .prepare<unknown[], { seq: number; ts: number; payload: string }>(
+        `SELECT seq, ts, payload FROM messages
+         WHERE session_id = ? AND role = 'user' AND kind = 'text' AND json_valid(payload) AND json_extract(payload, '$.byPerson') = 1
+           AND json_type(payload, '$.from') IS NULL AND json_type(payload, '$.fromApp') IS NULL AND json_type(payload, '$.fromScript') IS NULL
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(sessionId)
+    const payload = row ? parseJson(row.payload) : undefined
+    return row && isObj(payload) ? { seq: row.seq, ts: row.ts, text: typeof payload.text === 'string' ? payload.text : '' } : null
+  }
+
   nextSeq(sessionId: string): number {
     const row = oneRow(this.db.prepare<unknown[], { m: number }>(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`).get(sessionId))
     return row.m + 1

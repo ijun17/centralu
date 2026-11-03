@@ -31,20 +31,8 @@ export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | '
     if (input.hook_event_name !== 'PreToolUse') return {}
     const name = input.tool_name
     try {
-      if (!request.active()) {
-        // The person's own turn: nothing is asked, but what is read is kept, as a later request's reply could carry it to a session
-        try {
-          request.seen(name, isRecord(input.tool_input) ? input.tool_input : {})
-        } catch (err) {
-          console.error(`[claude] a read could not be noted: ${err instanceof Error ? err.message : String(err)}`)
-        }
-        return {}
-      }
-      if (name === 'AskUserQuestion') {
-        // Answered by the person with no card of this gate, and the answer is text the asker could have got the person to type: read, for the record
-        request.seen(name, isRecord(input.tool_input) ? input.tool_input : {})
-        return {}
-      }
+      // The person's own turn: the CLI's own flow decides. The person's answer to a question is theirs, with no card of this gate
+      if (!request.active() || name === 'AskUserQuestion') return {}
       if (isOrchestratorTool(name) && ownServer()) return {}
       // An attached app's tool asks in the call itself (`SessionApps.call`), naming the session: allowed here so the CLI does not put a card of its own first
       const app = appToolOf(name)

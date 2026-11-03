@@ -4,7 +4,7 @@ import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
-import type { HoldReason, MessageService, ReadItem, SendResult } from './messages.js'
+import { CITE_MS, type HoldReason, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
 
@@ -26,6 +26,7 @@ export type MailToolArgs = {
   unblock?: number | undefined
   urgent?: boolean | undefined
   follows?: string[] | undefined
+  cite?: boolean | undefined
 }
 
 export type MailToolResult = { text: string; isError?: boolean }
@@ -91,12 +92,12 @@ export class MailTool {
         return this.handled(me.address, this.target(me.address, this.need(a.thread, 'thread')))
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
-        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}) })
+        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}) })
         return this.sent(sent)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
-        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}) })
+        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}) })
         return this.sent(sent)
       }
       case 'update':
@@ -150,6 +151,12 @@ export class MailTool {
     const name = this.reach.labelOf(to)
     const answered = r.answered === null ? undefined : this.records.message(r.answered)
     const lines = [`Sent ${m.id} to ${name}${name === to ? '' : ` (${to})`}.`]
+    if (r.toPerson) {
+      lines.push(
+        `It went to the person, not the orchestrator: ${r.toPerson}. Without the person's word the orchestrator does nothing for a session, so do yourself what you can; the rest is the person's, and it is in their Inbox. To have the orchestrator act on the person's word, send with cite=true within ${CITE_MS / 60_000} minutes of the person's message asking for it.`,
+      )
+    }
+    if (r.cited) lines.push(`Centralu checked the citation: the orchestrator reads the person's message ${r.cited.seq} in this session as their word for this request.`)
     if (answered) lines.push(`It answers ${answered.id} from ${this.reach.labelOf(answered.sender)}.`)
     if (r.asWork) lines.push(`As an answer to a question about the work you gave ${name}, it is given as work: ${name}'s turn on it is reported to you.`)
     else if (r.quiet) lines.push(`It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`)
@@ -242,7 +249,12 @@ export class MailTool {
     const facts = party?.kind === 'session' ? this.host.askerOf(party.sessionId) : undefined
     if (!facts) return ''
     const plain = (t: string) => JSON.stringify(escapeFrameTags(oneLineText(t, 200)))
-    return ` Asked by session ${plain(facts.name)}, ${facts.project === null ? 'no project' : `project ${plain(facts.project)}, ${facts.trusted ? 'trusted' : 'NOT trusted'}`}.`
+    const asked = ` Asked by session ${plain(facts.name)}, ${facts.project === null ? 'no project' : `project ${plain(facts.project)}, ${facts.trusted ? 'trusted' : 'NOT trusted'}`}.`
+    // Centralu's words on the person's word, from the check at send (docs/plans/cited-requests.md §3): never the session's
+    const cites = i.message.facts.cites
+    return cites && party?.kind === 'session'
+      ? `${asked} The person's word: Centralu checked that the person typed message ${cites.seq} of this session ${this.age(cites.at)} ago. Read around it with read_session(sessionId="${party.sessionId}", around=${cites.seq}) and do only what it covers.`
+      : `${asked} It cites no word of the person's, so nothing you write reaches the session in this turn and nothing is changed for it.`
   }
 
   private replyState(i: ReadItem): string {
