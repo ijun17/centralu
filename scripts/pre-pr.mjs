@@ -1,5 +1,7 @@
 // The mechanical checks before a pull request opens (#1181): `pnpm pre-pr`.
 //
+// open_pr runs main's copy of this folder (`scripts/`, written out on its own, #1931): import nothing from outside `scripts/`.
+//
 // About a quarter of what reviewers sent back could have been caught by a machine before the pull
 // request opened, and most merge-queue trouble was a branch that no longer fit main. So, on the
 // commits a pull request carries (never the working tree, which a pull request does not carry):
