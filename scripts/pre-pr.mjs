@@ -25,11 +25,14 @@
 //             the first line of the failure, as warnings (they go into Verified). Each day's guards broke a
 //             queued pull request an hour after landing; the author fixes those in the same change, or tells
 //             their authors. Bounded: a time limit (--guards-limit), only the guards the branch changed, and a
-//             pull request that does not merge cleanly (or needs other dependencies) is skipped and said so.
+//             pull request that does not merge cleanly (or needs other dependencies) is skipped and said so. A
+//             pull request is started only with as much time left as the revert check's run of the changed
+//             tests took, since a run cut off half way says nothing.
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
-//             request count; one that was already there passing is no news.
+//             request count; one that was already there passing is no news. Which tests the base's
+//             version of a file had is read by listing them (`vitest list`), not by running them again.
 //   tier      never a refusal: the pull request's risk tier by the paths it changes over its base, by
 //             main's .centralu/tiers.json (scripts/tier.mjs, #1259); deep when there are no rules or
 //             they cannot be read. The board writes it into Verified and labels the pull request tier:<name>.
@@ -485,9 +488,11 @@ export const PHASE_MIN_MS = 60_000
  * Runs `guards` (files of this branch) against each of `prs` (open, not the stack's own) with this branch
  * merged in: a commit of the pull request's head and `head`, made from a merge that did not conflict. Answers
  * `{ failing, skipped, unchecked }`; never throws for one pull request's trouble. `makeWorktree(commit)`
- * answers a worktree, or null when its dependencies would need an install.
+ * answers a worktree, or null when its dependencies would need an install. `needMs` is how long one run of the guards is known to
+ * take: a pull request is not started with less time than that left, since a run cut off half way says nothing and costs all of
+ * it; it is listed as not reached. `perPrMs` is the most one run may take.
  */
-export function runGuards({ root, remote, runId, runners, prs, head, guards, makeWorktree, dropWorktree, limitMs, now, log, check }) {
+export function runGuards({ root, remote, runId, runners, prs, head, guards, makeWorktree, dropWorktree, limitMs, now, log, check, needMs = 0, perPrMs = GUARDS_PER_PR_MS }) {
   const failing = []
   const skipped = []
   const unchecked = []
@@ -502,7 +507,7 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
     }
     for (const pr of prs) {
       check()
-      if (now() >= deadline) {
+      if (deadline - now() < Math.max(needMs, 1)) {
         unchecked.push(pr)
         continue
       }
@@ -526,9 +531,12 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
         const present = guards.filter((g) => existsSync(join(wt, g)))
         if (!present.length) continue
         log(`guards against #${pr.number}`)
-        const report = runners.vitest(wt, present, { timeoutMs: Math.max(1000, Math.min(GUARDS_PER_PR_MS, deadline - now())) })
+        const timeoutMs = Math.max(1000, Math.min(perPrMs, deadline - now()))
+        const started = now()
+        const report = runners.vitest(wt, present, { timeoutMs })
         if (!report) {
-          skipped.push({ pr, why: 'vitest gave no report (it ran out of time, or did not start)' })
+          const took = now() - started
+          skipped.push({ pr, why: took >= timeoutMs - 1000 ? `vitest was stopped after ${Math.round(took / 1000)} s, the most it was given, before the guards had finished` : 'vitest gave no report (it did not start, or crashed)' })
           continue
         }
         const fails = failuresOf(report, wt)
@@ -849,6 +857,8 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
     }
 
     // revert: the changed tests, at the head, with everything else the pull request changed put back.
+    // How long one run of them took, which is the least one run of the guards (some of them) needs
+    let testRunMs = 0
     const tests = changed.filter((c) => c.status !== 'D' && isVitestFile(c.path))
     if (skip('revert')) {
       // nothing: the exemption and its reason are in the answer
@@ -877,7 +887,9 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         failed = failuresOf(report, top).length
         return vitestTests(report, top)
       }
+      const startedRun = now()
       const reverted = run(tests.map((t) => t.path))
+      testRunMs = now() - startedRun
       const failing = failed
       // The second pass only tells which passing tests the base's version of a file already had, so it only needs their names,
       // which `vitest list` finds in seconds where running them would take as long again. A file that is new (added) has none
@@ -912,7 +924,7 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         if (prs) {
           const guardsMs = Math.min(guardsLimitMs, left())
           log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsMs / 1000)} s`)
-          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsMs, now, log, check })
+          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsMs, now, log, check, needMs: testRunMs, perPrMs: Math.max(GUARDS_PER_PR_MS, Math.ceil(testRunMs * 1.5)) })
           warnings.push(...guardWarnings(res, guards))
           notes.push(`${guards.join(', ')} run against ${prs.length} open pull request(s): ${res.failing.length} would fail, ${res.skipped.length} skipped, ${res.unchecked.length} not reached.`)
         }

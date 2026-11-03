@@ -943,6 +943,52 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
   })
 
+  // #1816: one run of project-board-queue.test.ts takes more than the five minutes a pull request was given, so the guards spent
+  // their ten minutes cutting two runs off half way and learned nothing. A run of the changed tests took as long as one run of
+  // the guards needs at the least: a pull request is started with that much time left or not at all, and given more than five minutes when it took more.
+  const withRevert = (rs: ReturnType<typeof runners>, over: Record<string, unknown> = {}) =>
+    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, ...over })
+
+  it('starts a pull request only with as much time left as one run of the changed tests took', () => {
+    addGuard()
+    step = 30_000
+    const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
+    // 100 s in all: the revert check's run takes 30 s, and the guards have 70 s left. #21 runs (40 s left), #22 runs (10 s left), and #26 would be cut off
+    const r = withRevert(runners(prs), { limitMs: 100_000 })
+    expect(vitestCalls).toHaveLength(3)
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
+  })
+
+  it('gives a guard run more than five minutes when the changed tests took longer, and says when it was cut off', () => {
+    addGuard()
+    const prs = [openPr(21, { 'src/p21.txt': 'fine\n' })]
+    const given: (number | undefined)[] = []
+    // The revert check's run takes 400 s; the guards' run is stopped at the limit it is given
+    const cutOff = (clockStep: number) => {
+      let calls = 0
+      return runners(prs, {
+        vitest: (dir: string, files: string[], o?: { timeoutMs?: number }) => {
+          if (calls++ === 0) {
+            clock.t += clockStep
+            return { testResults: files.map((file) => ({ name: join(dir, file), status: 'passed', assertionResults: [{ ancestorTitles: [], title: 'no banned in src', status: 'passed' }] })) }
+          }
+          given.push(o?.timeoutMs)
+          clock.t += o?.timeoutMs ?? 0
+          return null
+        },
+      })
+    }
+    const slow = withRevert(cutOff(400_000))
+    expect(given).toEqual([600_000])
+    expect(guardsOf(slow)).toEqual(['tooling/guard.test.ts was not run against: #21 (vitest was stopped after 600 s, the most it was given, before the guards had finished).'])
+    // Quick tests keep the five minutes a pull request always had
+    clock.t = 0
+    given.length = 0
+    const quick = withRevert(cutOff(1_000))
+    expect(given).toEqual([300_000])
+    expect(guardsOf(quick)[0]).toContain('vitest was stopped after 300 s')
+  })
+
   it('asks nothing of GitHub when the branch changes no guard or the check is exempted, and leaves no ref behind', () => {
     write('src/x.txt', 'fine\n')
     commit('feat: not a guard')
