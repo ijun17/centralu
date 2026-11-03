@@ -1340,7 +1340,8 @@ original's things is in this table; the bullets below say how.
   section listing what moved: name, state, handle, and what the new session can actually do with it, which depends on
   what moved (#693 review). A child it now started: `agent_session` works on it, and its report comes when one is owed.
   A finished child of the original's own project has no line of its own: one line counts them and says
-  `agent_session(action="list")` lists them with their names, handles and states, so the note stays short however many
+  `agent_session(action="list")` lists them with their names, handles and states, and so does the count for the reports they
+  had not been read yet (Centralu's mail about them: the mail tool's inbox lists those), so the note stays short however many
   there are; a child with something going (working, waiting, owing a report) and every other piece keeps its line.
   Another project's session: `ask_project` with no task waits for the answer, and the cards of the turn it now owns
   are told to it. A same-project session it did not start (a turn it now owns): the report and the cards, while
