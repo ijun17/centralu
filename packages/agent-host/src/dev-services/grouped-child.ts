@@ -23,7 +23,8 @@ export type GroupedChild = {
   spawnedAt: number
   /**
    * When the host saw it exit (its `'exit'`), or null while it runs: the other end of the window in which what it
-   * left was created. Not the time of the sweep: by then Windows may have given its pid to another program, whose
+   * left was created (`orphansOf` adds a clock tick: this clock runs behind the one that stamps creation times). Not the
+   * time of the sweep: by then Windows may have given its pid to another program, whose
    * children would fall inside the window and be ended (#1650 review).
    */
   exitedAt(): number | null

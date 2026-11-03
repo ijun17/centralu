@@ -38,6 +38,24 @@ describe('the sweep after a child exits', () => {
     expect(started.exitedAt()).toBe(2000)
   })
 
+  // #1773: the host's clock can be a clock tick behind the one that stamps a process's creation, so a grandchild started
+  // as its parent exited can be stamped after the exit as recorded
+  it("windows: ends a grandchild stamped 2 ms after the exit the host recorded (main's CI run)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1793687827086)
+    const child = fakeChild(8092)
+    const started = tracked(child, 1793687827086)
+    vi.setSystemTime(1793687827165)
+    child.emit('exit', 0, null)
+    const killed: number[] = []
+    const ended = await sweepLeftovers(started, 'win32', {
+      listProcesses: async () => [{ pid: 6416, ppid: 8092, created: 1793687827167 }],
+      taskkill: (pid) => void killed.push(pid),
+    })
+    expect(ended).toEqual([6416])
+    expect(killed).toEqual([6416])
+  })
+
   it('sweeps nothing for a child that never started', async () => {
     const child = fakeChild(undefined)
     const listProcesses = vi.fn(async () => [])

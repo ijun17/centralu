@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { CLOCK_TICK_MS, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -362,8 +362,15 @@ describe('leftovers of an ended process on Windows', () => {
     expect(orphansOf(table('200 100 999\n'), root)).toEqual([])
   })
 
-  it('a child created after the root was seen to end belongs to a later holder of that number', () => {
-    expect(orphansOf(table('200 100 5001\n'), root)).toEqual([])
+  it('a child created after the root was seen to end, by more than the two clocks can differ, belongs to a later holder of that number', () => {
+    expect(orphansOf(table(`200 100 ${root.exitedAt + Math.ceil(CLOCK_TICK_MS) + 1}\n`), root)).toEqual([])
+  })
+
+  // #1773: Node's `Date.now()` can be up to a clock tick behind the creation times Windows stamps. The first row is main's CI log
+  it('a child created a few ms after the exit as the host read it is still the root\'s own', () => {
+    const ci = { pid: 8092, spawnedAt: 1793687827086, exitedAt: 1793687827165 }
+    expect(orphansOf(table('6416 8092 1793687827167\n'), ci).map((r) => r.pid)).toEqual([6416])
+    expect(orphansOf(table(`6416 8092 ${ci.exitedAt + Math.floor(CLOCK_TICK_MS)}\n`), ci).map((r) => r.pid)).toEqual([6416])
   })
 
   it('a deeper process older than the parent now holding its parent id is someone else\'s', () => {
@@ -412,9 +419,9 @@ describe('leftovers of an ended process on Windows', () => {
 
   it('says on stderr which children of the root the time window turned away', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const os = { listProcesses: async () => table('200 100 1500\n300 100 5001\n400 100 999\n'), taskkill: () => {} }
+    const os = { listProcesses: async () => table('200 100 1500\n300 100 5100\n400 100 999\n'), taskkill: () => {} }
     expect(await collectOrphansWindows(root, os)).toEqual([200])
-    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 100 ran from 1000 to 5000.*left alone: 300 \(created 5001\), 400 \(created 999\)/)])
+    expect(logged.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/process 100 ran from 1000 to 5000.*left alone: 300 \(created 5100\), 400 \(created 999\)/)])
     logged.mockRestore()
   })
 })

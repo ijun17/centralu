@@ -341,20 +341,35 @@ export const parseWinProcs = (out: string): WinProcRow[] => numberRows(out).map(
 export type EndedRoot = { pid: number; spawnedAt: number; exitedAt: number }
 
 /**
+ * How far Node's `Date.now()` can lie behind the creation time Windows stamps on a process, in ms: the system clock's
+ * coarsest tick (`GetSystemTimeAdjustment`, 15.625 ms; a program that raises the timer resolution shortens it).
+ *
+ * V8 on Windows reads the system time (`GetSystemTimeAsFileTime`, which only moves on a tick) at most once a minute and
+ * counts the time between with the performance counter (`base::Clock`, V8's time.cc). That reading is rounded down to a
+ * tick, so `Date.now()` stays up to one tick behind real time until the next one. The creation time in the process
+ * table is not behind. A process created just before the root exited can therefore be stamped after the `exitedAt` the
+ * host took (#1773: 2 ms in main's CI run; up to 7.4 ms on an idle Windows 11 machine, 30 of 360 runs outside, each
+ * with a fresh clock). It does not go the other way at the start: `spawnedAt` is behind too, and no creation time was
+ * before it in those runs. A pid is not handed out again for 2.5 s at the soonest (measured, 774 reuses), so a tick of
+ * slack at the end cannot reach a later holder's children.
+ */
+export const CLOCK_TICK_MS = 15.625
+
+/**
  * What an ended process left running, on Windows (#14) — every process descended from it by parent links.
  *
  * Windows never re-parents an orphan: a process keeps the parent id it was born with after that parent is gone, so the
  * tree can still be walked from a dead root. What it does not keep is a guarantee that the number still means the same
  * process, so each link is also checked by creation time:
- *   - a child of the root was created after we started the root and before we saw it end. An earlier holder of the
- *     root's number left children created before the spawn; a later one could only start children after the root
- *     ended. Both are outside the window.
+ *   - a child of the root was created after we started the root and before we saw it end (`exitedAt`, at most
+ *     `CLOCK_TICK_MS` early). An earlier holder of the root's number left children created before the spawn; a later
+ *     one could only start children after the root ended. Both are outside the window.
  *   - every deeper child was created no earlier than its parent. A process listed under a reused parent id is older
  *     than the parent now holding that number.
  */
 export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProcRow[] {
   const found: WinProcRow[] = []
-  const queue: WinProcRow[] = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && r.created >= root.spawnedAt && r.created <= root.exitedAt)
+  const queue: WinProcRow[] = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && r.created >= root.spawnedAt && r.created <= root.exitedAt + CLOCK_TICK_MS)
   const seen = new Set<number>([root.pid])
   for (let r = queue.shift(); r !== undefined; r = queue.shift()) {
     if (seen.has(r.pid)) continue
