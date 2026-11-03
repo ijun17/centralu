@@ -150,21 +150,6 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread?.messages.map((m) => m.body)).toEqual(['which?'])
   })
 
-  it('unblocks, and reassigns with the words that go with it', async () => {
-    const platform = attached()
-    const id = platform.seedMail({ subject: 'work', from: worker, body: 'do it', kind: 'assign' })
-    platform.mockMail.block(id, 'waiting for a design')
-    await useStore.getState().openMailThread(id)
-    expect(useStore.getState().mailThread?.blockers).toMatchObject([{ n: 1, resolved: false }])
-    expect(await useStore.getState().unblockMail(1)).toBe(true)
-    expect(useStore.getState().mailThread?.blockers).toMatchObject([{ n: 1, resolved: true }])
-    expect(useStore.getState().mailThread?.thread.state).toBe('open')
-
-    expect(await useStore.getState().reassignMail('s2', 'please take it')).toBe(true)
-    expect(useStore.getState().mailThread?.thread.assignee).toMatchObject({ sessionId: 's2' })
-    expect(useStore.getState().mailThread?.messages.at(-1)).toMatchObject({ kind: 'assign', body: 'please take it' })
-  })
-
   it('closing a thread a session is working on reads back the host’s close: done as dropped, no longer working', async () => {
     const platform = attached()
     const id = platform.seedMail({ subject: 'work', from: worker, body: 'do it', kind: 'assign', state: 'running', assignee: worker, working: true })

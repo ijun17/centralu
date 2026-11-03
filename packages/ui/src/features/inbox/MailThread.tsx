@@ -6,20 +6,17 @@ import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
-import { canGiveWorkTo, partyName, replyKind, threadStateLabel } from './mailLabels.js'
+import { partyName, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
- * One thread of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what stands in its way, what was
- * said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
+ * One thread of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
  * the person's own are marked as theirs. Centralu's lines (a state moved, a party joined) are small and plain.
  */
 export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: string) => void }) {
   const view = useStore((s) => s.mailThread)
   const back = useStore((s) => s.closeMailThread)
   const close = useStore((s) => s.closeMail)
-  const unblock = useStore((s) => s.unblockMail)
   const older = useStore((s) => s.loadOlderMail)
-  const [giving, setGiving] = useState(false)
   // Closing a thread whose turn is going stops that turn: asked once first, with no way to close and leave it running (3.10)
   const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
   const list = useRef<HTMLOListElement>(null)
@@ -63,21 +60,6 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         </span>
         {thread.next && <span className="truncate text-ink-muted">Next: {thread.next}</span>}
       </div>
-
-      {view.blockers.some((b) => !b.resolved) && (
-        <ul className="flex flex-col gap-1 px-4 pb-2" aria-label="Blockers" data-testid="mail-blockers">
-          {view.blockers
-            .filter((b) => !b.resolved)
-            .map((b) => (
-              <li key={b.n} className="flex items-center gap-2 rounded-field border border-line px-3 py-1.5 text-xs text-ink-muted">
-                <span className="min-w-0 truncate">{blockerText(b)}</span>
-                <Button size="sm" variant="quiet" className="ml-auto shrink-0" onClick={() => void unblock(b.n)} data-testid={`mail-unblock-${b.n}`}>
-                  Unblock
-                </Button>
-              </li>
-            ))}
-        </ul>
-      )}
 
       <ol ref={list} className="flex max-h-[calc(40vh/var(--text-zoom))] min-h-0 flex-col gap-2 overflow-y-auto px-4 py-2" data-testid="mail-messages">
         {view.older && (
@@ -128,20 +110,11 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
             <Button size="sm" variant="quiet" onClick={() => (thread.working ? setConfirming('dropped') : void close('dropped'))} data-testid="mail-drop">
               Drop
             </Button>
-            <Button size="sm" variant="quiet" className="ml-auto" onClick={() => setGiving((g) => !g)} aria-expanded={giving} data-testid="mail-give">
-              Give to another session…
-            </Button>
           </div>
-          {giving && <Reassign onDone={() => setGiving(false)} />}
         </>
       )}
     </div>
   )
-}
-
-function blockerText(b: { kind: string; ref: string | null; text: string }): string {
-  const what = b.kind === 'text' ? b.text : [b.kind, b.ref, b.text].filter(Boolean).join(' ')
-  return `Waiting for ${what}`
 }
 
 function Message({ m }: { m: MailMessage }) {
@@ -210,51 +183,6 @@ function Reply() {
       <Button size="md" variant="primary" disabled={!text.trim()} busy={sending} onClick={() => void send()} data-testid="mail-send">
         Send
       </Button>
-    </div>
-  )
-}
-
-/** Gives the work to another session with the words that go with it: the sessions the host would accept it for (`canGiveWorkTo`), other than those in the thread */
-function Reassign({ onDone }: { onDone: () => void }) {
-  const sessions = useStore((s) => s.sessions)
-  const view = useStore((s) => s.mailThread)
-  const reassign = useStore((s) => s.reassignMail)
-  const [to, setTo] = useState('')
-  const [text, setText] = useState('')
-  if (!view) return null
-  const inIt = new Set(view.parties.map((p) => p.party.sessionId))
-  const options = Object.values(sessions).filter((x) => canGiveWorkTo(x) && !inIt.has(x.id))
-  const submit = async () => {
-    if (!to || !text.trim()) return
-    if (await reassign(to, text.trim())) onDone()
-  }
-  return (
-    <div className="flex flex-col gap-2 border-t border-line/60 px-4 py-2" data-testid="mail-reassign">
-      <select value={to} onChange={(e) => setTo(e.target.value)} aria-label="Session to give it to" className="rounded-field border border-line bg-surface-raised px-2 py-1 text-sm text-ink" data-testid="mail-reassign-to">
-        <option value="">Choose a session…</option>
-        {options.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      <textarea
-        rows={2}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="What it should do"
-        aria-label="Words that go with the work"
-        className="resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-        data-testid="mail-reassign-text"
-      />
-      <div className="flex justify-end gap-1.5">
-        <Button size="sm" variant="quiet" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button size="sm" variant="primary" disabled={!to || !text.trim()} onClick={() => void submit()} data-testid="mail-reassign-send">
-          Give it
-        </Button>
-      </div>
     </div>
   )
 }

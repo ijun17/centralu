@@ -1788,7 +1788,8 @@ Entities, in `entities/mail.ts`:
 |---|---|
 | `mail.list` | `{ threads: [], held, waiting }`: the held and sleeping lists as today, no threads |
 | `mail.thread {threadId}` | when `threadId` is a legacy thread id: its messages read from the v61 tables (`legacyChain`) in the old message shape, `parties: []`, `blockers: []`, `follows: []`. Else `refused`, `removed` |
-| `mail.reply`, `mail.close`, `mail.reassign`, `mail.unblock` | `refused`, `data.reason = 'removed'` |
+| `mail.reply`, `mail.close` | `refused`, `data.reason = 'removed'` |
+| `mail.reassign`, `mail.unblock` | retired (owner decision on #1914, Q-M3a-34): the unknown-method error (protocol.md §3.2) |
 
 M6's UI ships in the same release as M3a, so an older window is only seen across a swap.
 
@@ -2365,7 +2366,7 @@ and passes on its own; the stack lands together.
 - **`mail/asked-by.ts`** reads the turn's message; `askerFacts.trusted` is `!reach.untrusted(projectId)` (§7.2).
 - **`mail/person.ts`** (M3a-person, as built: Q-M3a-20). The window's methods (`mail.list`, `mail.thread`,
   `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
-  its root; `mail.reassign` and `mail.unblock` refused `removed`. The five methods of §12.2 and
+  its root; `mail.reassign` and `mail.unblock` retired with the window's controls (Q-M3a-34). The five methods of §12.2 and
   `mail.resume { messageId }` come with M6's screen, which calls them.
 - **`mail/frame.ts`.** `COMMAND_CALLS` and `PLAIN_CALLS` come from `mailCalls(1, form)`; the delivery uses
   `buildMessageFrame`.
@@ -2498,7 +2499,7 @@ orchestrator or the owner)
 | Q-M3a-17 | A handoff that keeps the original: the original's task to a moved child is from the original, and the child's report goes to the successor | The report finds no task from the successor and is `none` (the old path tells the successor); the next ready settles the task, since no old path owes it to the original. Nothing is lost; the task row lags one ready |
 | Q-M3a-18 | `pair_rate` (5 new conversations an hour per pair) is reached before `ask_rate` (5 requests an hour per group) by one session alone | Kept as written: `ask_rate` bounds a group of sessions, `pair_rate` one session |
 | Q-M3a-19 | The host-wide cap's wait (§7.5) against the 30 s sweep, which tries every mailbox with due mail | The sweep still looks (a cheap drain); the log line that the mail waits is written once per wait, not on every look |
-| Q-M3a-20 | §12.2's five methods against the window this build ships, which draws threads and has no caller for them until M6 | M3a-person serves the window's own methods from the message tables: a thread is a chain of replies named by its root message's id, and an old thread's id names the chains moved from it (newest first). The five methods, `mail.resume { messageId }` and their protocol, platform and mock parts come with M6's screen, so no method ships without a caller. §12.2's older-window answers (`threads: []`, `removed`) are not needed: a window from before the switch reads chains the same way. `mail.reassign` and `mail.unblock` are refused `removed` (owner wording) |
+| Q-M3a-20 | §12.2's five methods against the window this build ships, which draws threads and has no caller for them until M6 | M3a-person serves the window's own methods from the message tables: a thread is a chain of replies named by its root message's id, and an old thread's id names the chains moved from it (newest first). The five methods, `mail.resume { messageId }` and their protocol, platform and mock parts come with M6's screen, so no method ships without a caller. §12.2's older-window answers (`threads: []`, `removed`) are not needed: a window from before the switch reads chains the same way. `mail.reassign` and `mail.unblock` are retired with their controls (Q-M3a-34) |
 | Q-M3a-21 | What Mark done and Drop mean on a chain, and when the window draws it done | As on main, after the owner's decision on #1914: both act on the whole chain (root and every reply) and on every chain an old thread's id names. They settle `done` every row to the person in the chain that is open, `legacy` or `answered`, end the wait of the person's own questions in it, and close the person's tasks in it (rows settled `done`, not `withdrawn`, so what the person sent is still delivered, and the turn's end reports nothing that would open the chain again). A session whose turn is on the chain (the turn records name a message of it as the turn's work, or its starter; `working`) is stopped as `agent_session stop` stops it, with the background work that turn started, after the window's confirm "<session> is working on this. Stop its work and close the thread?". It, and each session a task of the person's in it went to that has not reported, is told once without a wake in main's words ("The person dropped / marked done thread <id>; its work was stopped. Do not continue it."). Drop and Mark done stay apart: the words differ, and the chain shows `Done (dropped)` or `Done` (`facts.closed` on its root). The chain is done when the person closed it and nothing in it waits for the person or for an answer to them; a new message to the person opens it again, and the last close stands. The close is recorded on the root (`facts.closed`), so a chain with no row to the person, or whose task went to a session gone since, closes too. Every window with one of the chains open reads it again |
 | Q-M3a-22 | The window's Release on a row held `policy`, and its Dismiss on any hold | Release is refused `untrusted_project`, naming the project, while it is untrusted, and refused whole before any row changes when the rows it names mix such a project with others: the one hold lets a project's mail go when the person trusts the project (§7.4), and the per-row Release would bypass it. On a project trusted since, Release lets that project's held mail go, in order. Release of `uncertain`, `failed` and `budget` rows goes as before (`budget` released for good). Dismiss works on every hold the window shows: the row is never delivered and is settled `withdrawn`, so its sender waits on it no longer, a held answer's question is open again (D8), and the sender is not told, as the old window's Dismiss did (the project-wide Dismiss of M6 tells them, S13) |
 | Q-M3a-23 | A row an older build held `policy` after telling its recipient of it (delivered quietly, still unread) | Trusting the project lets it go as unread mail to deliver again (`letGo` clears `delivered_at` while `read_at` is null), as the older build's Release did; otherwise it would stay delivered-and-unread and never wake its recipient |
@@ -2512,6 +2513,7 @@ orchestrator or the owner)
 | Q-M3a-31 | A task an older build had pending for a session trashed there (its giver was told the session was gone) | Moved settled `gone`, so a restored session is never handed it |
 | Q-M3a-32 | A moved question its recipient read and did not answer (settled `legacy`, D26) against the agent's `inbox` and `read` | It is listed as waiting for a reply and reads "not answered yet", as on the older build: `inbox` lists needsReply rows with no answer, settled or `legacy`; an answer or a done settles a `legacy` row (`answered`, `done`). It is still never reminded (D26). The old thread above a moved message shows only what the reader sent or was delivered unheld, before that message (`legacyChainFor`) |
 | Q-M3a-33 | A row the person released on the older build (`released`) from a project still not trusted | Never held again (§6.3): the move records the recipients on the message (`facts.releasedTo`), and the drain exempts those rows from the one hold, as it exempts any `released` row from the depth. A row that moves to another recipient (the orchestrator's role, a handoff) carries the release with it |
+| Q-M3a-34 | The window's controls for what went with threads: Give to another session, Unblock, and the Blocked state (owner decisions on #1914) | Removed, window and host: the button, the panel and `canGiveWorkTo`, the blocker list, the store's `reassignMail` and `unblockMail` with their toasts, the platform and mock methods, and `mail.reassign` and `mail.unblock` (retired, protocol.md §3.2; no refusal path is left). `MailThreadView.blockers` and `MailThreadRow.blocked` stay in the protocol, empty and 0, for an older window. The state pill keeps Running and In review, from the task rows and the turn: running while a session's turn is on the chain or a task the person gave in it is not reported, in review once such a task is reported and the chain is not closed, open otherwise. The session the confirm names is the one whose turn is on the chain |
 
 **M3a-host lands only with M3a-person.** M3a-host is not merged alone: it lands in one merge with M3a-person stacked
 on it (the stack is forward-fix only). Between the two the person's side ran on the old tables (Q-M3a-1); M3a-person
@@ -2530,7 +2532,7 @@ covers each of these, with a test in `mail/person.test.ts` unless named:
    done, releases and resumes with the v61 tables dropped.
 6. Mark done and Drop on a chain a session works on stop its turn and tell it, as on main (Q-M3a-21, also over the
    real manager in `sessions/mail-turn-report.test.ts`), and the state shows Running and In review from the task
-   rows and the turn (`e2e/inbox-mail.spec.ts`).
+   rows and the turn; Give to another session, Unblock and Blocked are gone (Q-M3a-34, `e2e/inbox-mail.spec.ts`).
 
 Also: a purged session's rows in the message tables go (Q-M3a-29, `store-mail.test.ts`).
 
@@ -2740,7 +2742,7 @@ trust card, delivery after trust, and a chain opened and answered.
 
 1. The Inbox matches §12.3's sketch, with the wording the owner approves (Q2).
 2. Released rows (§10.6) appear in the feed.
-3. No UI code calls `mail.list`, `mail.thread`, `mail.reply`, `mail.close`, `mail.reassign` or `mail.unblock`.
+3. No UI code calls `mail.list`, `mail.thread`, `mail.reply` or `mail.close` (`mail.reassign` and `mail.unblock` are gone, Q-M3a-34).
 
 ### M8. One record of an owed report
 
@@ -2825,8 +2827,8 @@ checked by the orchestrator at merge.
 4. `mail_turns.thread_id` stays: dropping a column is a table rebuild, and no reader is left.
 
 **Deletes.** `movePendingThreadMail` and `legacyChain` and their call sites, `writeLegacyMarks`, §9.5's `ready` step,
-the older-window answers of `mail.list`, `mail.thread`, `mail.reply`, `mail.close`, `mail.reassign` and
-`mail.unblock` (the methods stay in the protocol and answer `removed`). The version-1 tool mapping stays for M7b.
+the older-window answers of `mail.list`, `mail.thread`, `mail.reply` and `mail.close` (the methods stay in the protocol
+and answer `removed`; `mail.reassign` and `mail.unblock` left it in M3a, Q-M3a-34). The version-1 tool mapping stays for M7b.
 
 **Tests**
 

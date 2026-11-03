@@ -346,8 +346,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'mail.thread': 'window',
   'mail.reply': 'window',
   'mail.close': 'window',
-  'mail.reassign': 'window',
-  'mail.unblock': 'window',
   'mail.held': 'window',
   'mail.resume': 'window',
   'mail.wake': 'window',

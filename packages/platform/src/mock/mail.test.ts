@@ -47,7 +47,7 @@ describe('the mock mailbox', () => {
     await expect(p.mail.thread('nope')).rejects.toMatchObject({ code: 'refused' })
   })
 
-  it('shows held mail with its reason until the person releases or dismisses it, and a blocker until it is resolved', async () => {
+  it('shows held mail with its reason until the person releases or dismisses it, and has no blocker to resolve or work to give away', async () => {
     const p = createMockPlatform()
     const id = p.seedMail({ subject: 'work', from: mockSessionParty('s0', 'Boss'), body: 'do it', kind: 'assign', held: { reason: 'loop', recipient: worker } })
     const { held, threads } = await p.mail.list()
@@ -55,11 +55,10 @@ describe('the mock mailbox', () => {
     expect(threads[0]!.held).toBe(1)
     expect(await p.mail.held('release', worker.address, [held[0]!.messageId])).toEqual({ changed: 1 })
     expect((await p.mail.list()).held).toEqual([])
-
-    p.mockMail.block(id, 'waiting for a design')
-    expect((await p.mail.list()).threads[0]).toMatchObject({ state: 'blocked', blocked: 1 })
-    expect((await p.mail.unblock(id, 1)).state).toBe('open')
-    await expect(p.mail.unblock(id, 1)).rejects.toMatchObject({ code: 'refused' })
+    expect((await p.mail.list()).threads[0]).toMatchObject({ id, blocked: 0 })
+    // Both went with threads (Q-M3a-34): the mock, like the port, has neither
+    expect(['reassign', 'unblock'].filter((m) => m in p.mail)).toEqual([])
+    expect('block' in p.mockMail).toBe(false)
   })
 
   it('closing a thread a session is working on stops that session and tells it, as the host does; one not working is closed alone', async () => {

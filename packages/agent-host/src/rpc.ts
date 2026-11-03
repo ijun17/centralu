@@ -437,8 +437,6 @@ export function createRpcHandler(
       return requireMail().reply(threadId, text, kind)
     },
     'mail.close': async ({ threadId, outcome }) => requireMail().close(threadId, outcome),
-    'mail.reassign': async () => requireMail().removed('Giving a thread to another session'),
-    'mail.unblock': async () => requireMail().removed("A thread's blockers"),
     'mail.held': async ({ action, recipient, messageIds }) => {
       return requireMail().held(action, recipient, messageIds)
     },

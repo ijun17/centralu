@@ -170,11 +170,6 @@ describe('the window reads and writes no thread table', () => {
     expect(bodies(w, 'a')).toContain(mine)
     expect(w.store.mailbox.watchedFrom(PERSON)).toEqual([])
   })
-
-  it("giving a thread to another session and a thread's blockers are refused: they went with threads", () => {
-    const w = ready(hostWorld())
-    expect(refusedFor(() => w.person.removed('Giving a thread to another session'))).toBe('removed')
-  })
 })
 
 describe('the window against chains that change while it is open', () => {

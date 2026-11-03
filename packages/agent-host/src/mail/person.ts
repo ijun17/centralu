@@ -197,11 +197,6 @@ export class MailPerson {
     return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
   }
 
-  /** Giving a thread's work to another session and a thread's blockers went with threads (§12.2) */
-  removed(what: string): never {
-    throw refuse('removed', `${what} went with threads: write to the session instead, or give it work from its own conversation.`)
-  }
-
   /**
    * The person's Release (Send again, Retry) or Dismiss of held rows. A row held for a session's budget goes as the mail it is and is not held again. A
    * row held for its project's trust goes when the person trusts the project (§7.4): its Release says so. A dismissed answer leaves its question open (D8)

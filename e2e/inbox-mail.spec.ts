@@ -134,17 +134,18 @@ test('Mail: held mail says why and is freed from the list; a crowd of sleeping s
   await expect(page.getByTestId('mail-held')).toHaveCount(0)
 })
 
-test('Mail: work is offered only to the sessions the host would accept it for', async ({ page }) => {
+test('Mail: an open thread offers no way to give its work to another session and no Unblock (both went with threads)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'Clean up')
   const id = await seed(page, { subject: 'Land #12', from: PARSER, body: 'ready for review', kind: 'report' })
   await page.getByTestId('counter').click()
   await page.getByTestId(`mail-thread-${id}`).click()
-  await page.getByTestId('mail-give').click()
-  const options = await page.getByTestId('mail-reassign-to').locator('option').allTextContents()
-  // The ordinary session in a project is offered; the orchestrator is not
-  expect(options.slice(1)).toHaveLength(1)
-  expect(options.slice(1)[0]?.trim()).toBeTruthy()
+  await expect(page.getByTestId('mail-finish')).toBeVisible()
+  await expect(page.getByTestId('mail-give')).toHaveCount(0)
+  await expect(page.getByTestId('mail-reassign')).toHaveCount(0)
+  await expect(page.getByTestId('mail-blockers')).toHaveCount(0)
+  await expect(page.getByText('Give to another session')).toHaveCount(0)
+  await expect(page.getByText('Unblock')).toHaveCount(0)
 })
 
 // #1772: however much mail there is, the panel stays inside the window and the mail scrolls inside it

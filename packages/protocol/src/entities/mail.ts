@@ -35,7 +35,7 @@ export const MailThreadRow = z.object({
   unread: z.number().default(0),
   /** Mail in the thread held for the person to act on (a loop, a spent budget, a policy, a delivery that failed), for any receiver */
   held: z.number().default(0),
-  /** Standing blockers */
+  /** Standing blockers: none since blockers went with threads (§12.2); kept for a window of an older build, which reads it */
   blocked: z.number().default(0),
   /** A turn of this thread is going in its assignee: closing it stops that turn, so the Inbox asks first (3.10) */
   working: z.boolean().optional(),
@@ -96,6 +96,7 @@ export type MailBlocker = z.infer<typeof MailBlocker>
 export const MailThreadView = z.object({
   thread: MailThreadRow,
   parties: z.array(z.object({ party: MailParty, role: z.string() })),
+  /** None since blockers went with threads (§12.2): kept, as a window of an older build requires it */
   blockers: z.array(MailBlocker),
   messages: z.array(MailMessage),
   /** More messages exist after the last one returned */

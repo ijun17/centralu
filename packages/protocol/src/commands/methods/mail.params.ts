@@ -24,14 +24,6 @@ export const mailParams = {
     threadId: z.string(),
     outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']).optional(),
   }),
-  /** The person gives the work to another session, with the words that go with it */
-  'mail.reassign': z.object({
-    threadId: z.string(),
-    sessionId: z.string(),
-    text: z.string().min(1).max(16_000),
-  }),
-  /** The person resolves a blocker */
-  'mail.unblock': z.object({ threadId: z.string(), n: z.number().int().min(1) }),
   /** The person sends held mail now (`release`: Release / Resend / Retry) or lets it go undelivered (`dismiss`) */
   'mail.held': z.object({
     action: z.enum(['release', 'dismiss']),
