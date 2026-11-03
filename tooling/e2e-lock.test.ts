@@ -535,7 +535,7 @@ describe('the runners (real processes)', () => {
     const result = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('close', (code, signal) => resolve({ code, signal })))
     const done = result.then((r) => r.code)
     // A killed runner's child keeps its pipes open, so `close` waits for it; `exit` does not
-    const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()))
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })))
     return { child, done, result, exited, stderr: () => err }
   }
   it('hands the command what follows a -- without the -- itself (#1692)', () => {
@@ -779,13 +779,16 @@ describe('the runners (real processes)', () => {
     'passes a SIGTERM that reaches it while the command runs on to the command, ends with 143, and gives the lock back',
     async () => {
       const running = runner('setInterval(() => {}, 1000)')
-      await eventually(() => {
+      const command = await eventually(() => {
         const h = top()
-        return h !== null && h !== 'unreadable' && h.child ? true : undefined
+        return h !== null && h !== 'unreadable' && h.child ? h.child.pid : undefined
       }, 60_000)
+      // The command never ends by itself: if the signal ended the runner outright (#1681), it would be left running
+      if (command !== undefined) pids.push(command)
       process.kill(running.child.pid ?? 0, 'SIGTERM')
-      // Windows has no signal: the runner is ended outright, and its job object ends the command
-      expect(await running.result).toEqual(win ? { code: 1, signal: null } : { code: 143, signal: null })
+      // Windows has no signal: the runner is ended outright, and its job object ends the command. `exited`, not `result`: a
+      // command the runner left holding its pipes keeps `close` from coming, and this case then waited its 120 s
+      expect(await running.exited).toEqual(win ? { code: 1, signal: null } : { code: 143, signal: null })
       if (!win) {
         expect(lockFiles()).toEqual([])
       }
