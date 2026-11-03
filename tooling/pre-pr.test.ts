@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, listedTests, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -32,7 +32,7 @@ type Report = { testResults: { name: string; assertionResults: { ancestorTitles:
  * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
  */
 function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: boolean; linkTo?: string } = {}) {
-  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], timeouts: [] as (number | undefined)[] }
+  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], names: [] as string[][], timeouts: [] as (number | undefined)[] }
   return {
     calls,
     runners: {
@@ -75,6 +75,17 @@ function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: bo
               }),
           })),
         }
+      },
+      // `vitest list`: the tests of the files as they are now, none of them run
+      vitestNames: (dir: string, files: string[], o?: { timeoutMs?: number }) => {
+        calls.timeouts.push(o?.timeoutMs)
+        calls.names.push(files)
+        return files.flatMap((file) =>
+          readFileSync(join(dir, file), 'utf8')
+            .split('\n')
+            .filter((l) => l.includes(' :: '))
+            .map((l) => ({ file: join(dir, file).split('\\').join('/'), name: l.split(' :: ')[0]!.trim() })),
+        )
       },
     },
   }
@@ -133,6 +144,14 @@ describe('what pre-pr reads', () => {
     expect(tests[0]).toEqual({ file: 'a/x.test.ts', name: 'outer > one', status: 'passed' })
     expect(passingNewTests({ reverted: tests, base: [{ file: 'a/x.test.ts', name: 'three', status: 'passed' }] })).toEqual([tests[0]])
   })
+
+  it('lists the tests of a file with the real vitest, named as a run names them, without running one', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+    const listed = listedTests(realRunners.vitestNames(root, ['tooling/fake-gh.test.ts'], { timeoutMs: 60_000 * SLOW }), root)
+    expect(listed?.length).toBeGreaterThan(1)
+    expect(listed?.every((t: { file: string; name: string }) => t.file === 'tooling/fake-gh.test.ts' && t.name.startsWith('the shared fake gh > '))).toBe(true)
+    expect(listedTests(null, root)).toBe(null)
+  }, 90_000 * SLOW)
 
   it('mirrors the checkout\'s dependencies into a worktree with the same lockfile, workspace packages pointing at the worktree, and unlinks them without touching the checkout (#1254)', () => {
     const base = mkdtempSync(join(tmpdir(), 'cc-prepr-deps-'))
@@ -347,12 +366,14 @@ describe('pre-pr on a stack of two pull requests', () => {
     commit('solo')
     const solo = run({ head: 'solo' })
     expect(solo.calls.vitest).toEqual([['src/a.test.mjs']])
+    expect(solo.calls.names).toEqual([])
     expect(solo.findings).toEqual([])
     // One that passes asks, and its new test is named
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nstill exports :: src/a.mjs :: export\n')
     commit('solo: a test that guards nothing')
     const loose = run({ head: 'solo' })
-    expect(loose.calls.vitest).toEqual([['src/a.test.mjs'], ['src/a.test.mjs']])
+    expect(loose.calls.vitest).toEqual([['src/a.test.mjs']])
+    expect(loose.calls.names).toEqual([['src/a.test.mjs']])
     expect(loose.findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
   })
 
@@ -386,10 +407,13 @@ describe('pre-pr on a stack of two pull requests', () => {
     const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: () => null } })
     expect(first.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(first.findings[0].message).toMatch(/not run: vitest gave no report/)
-    // The second pass: no report, and no test of the first looks new
-    let n = 0
-    const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: (dir: string, files: string[]) => (n++ ? null : fake.runners.vitest(dir, files)) } })
-    expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: no report/.test(f.message)])).toEqual([['revert', true]])
+    // ...and one that used up the time it was given says that, so the step that ran out is named
+    const clock = { now: 0 }
+    const outOfTime = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: { ...fake.runners, vitest: () => ((clock.now = 300_000), null) } })
+    expect(outOfTime.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: vitest ran out of time \(stopped at the limit\)/)])
+    // The base's list of tests: none, and no test of the first pass looks new
+    const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitestNames: () => null } })
+    expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: no list of its tests/.test(f.message)])).toEqual([['revert', true]])
   })
 
   it('reports each new test that passes with the other changes reverted, and none that fails or was there', () => {
@@ -398,8 +422,9 @@ describe('pre-pr on a stack of two pull requests', () => {
       'src/a.test.mjs: "still exports" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
       'src/b.test.mjs: "has a" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
     ])
-    // The changed file ran at the head's version, then at the base's to learn which tests were there
-    expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs'], ['src/a.test.mjs']])
+    // The changed files ran once, at the head's version; the base's version was only listed, to learn which tests were there
+    expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs']])
+    expect(r.calls.names).toEqual([['src/a.test.mjs']])
     expect(r.ok).toBe(false)
   })
 

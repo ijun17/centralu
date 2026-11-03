@@ -116,6 +116,11 @@ export function vitestTests(report, root) {
   )
 }
 
+/** `vitest list --json`: every test as `{ file, name }`, the file relative to `root` with `/`; null when there was no list */
+export function listedTests(list, root) {
+  return Array.isArray(list) ? list.map((t) => ({ file: relative(root, t.file).split('\\').join('/'), name: t.name })) : null
+}
+
 /** The tests that pass with the source changes reverted and were not in the base's version of their file. */
 export function passingNewTests({ reverted, base }) {
   const before = new Set(base.map((t) => `${t.file}\0${t.name}`))
@@ -309,17 +314,26 @@ export const realRunners = {
     return nodeBin(dir, 'tsx/dist/cli.mjs', ['tooling/lint.ts', ...files], {}, timeoutMs)
   },
   vitest(dir, files, { timeoutMs = 0 } = {}) {
-    const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
-    const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
-    try {
-      // Failing tests exit non-zero, which is an answer here, not an error
-      nodeBin(dir, 'vitest/vitest.mjs', ['run', '--reporter=json', `--outputFile=${out}`, ...files], { CC_DATA_DIR: data }, timeoutMs)
-      return existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null
-    } finally {
-      rmSync(join(out, '..'), { recursive: true, force: true })
-      rmSync(data, { recursive: true, force: true })
-    }
+    // Failing tests exit non-zero, which is an answer here, not an error
+    return vitestJson(dir, (out) => ['run', '--reporter=json', `--outputFile=${out}`, ...files], timeoutMs)
   },
+  /** The tests the files hold, found without running them (`vitest list`: seconds where a run takes minutes); null with no list */
+  vitestNames(dir, files, { timeoutMs = 0 } = {}) {
+    return vitestJson(dir, (out) => ['list', `--json=${out}`, ...files], timeoutMs)
+  },
+}
+
+/** Runs vitest of the worktree with a data folder of its own; answers the JSON file the arguments name, or null when it wrote none */
+function vitestJson(dir, args, timeoutMs) {
+  const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
+  const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
+  try {
+    nodeBin(dir, 'vitest/vitest.mjs', args(out), { CC_DATA_DIR: data }, timeoutMs)
+    return existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null
+  } finally {
+    rmSync(join(out, '..'), { recursive: true, force: true })
+    rmSync(data, { recursive: true, force: true })
+  }
 }
 
 // --- Worktrees, and taking them away again ---------------------------------------------------------
@@ -865,15 +879,17 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       }
       const reverted = run(tests.map((t) => t.path))
       const failing = failed
-      // The second pass only tells which passing tests the base's version of a file already had: a file that is
-      // new (added) has none to ask, and one with no passing test in the first pass has nothing to compare
+      // The second pass only tells which passing tests the base's version of a file already had, so it only needs their names,
+      // which `vitest list` finds in seconds where running them would take as long again. A file that is new (added) has none
+      // to ask, and one with no passing test in the first pass has nothing to compare
       const passing = new Set((reverted ?? []).filter((t) => t.status === 'passed').map((t) => t.file))
       const existed = tests.filter((t) => t.status !== 'A' && passing.has(t.path)).map((t) => t.path)
       for (const p of existed) git(top, ['checkout', fork, '--', p])
       let before = []
-      if (reverted && existed.length) before = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed)
-      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, 'vitest gave no report (it ran out of time, or did not start)')
-      else if (!before) notRun('revert', `The base's version of ${existed.join(', ')}`, 'no report, so no test was judged')
+      if (reverted && existed.length) before = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : listedTests(runners.vitestNames(top, existed, { timeoutMs: left() }), top)
+      // The pass was given what was left, so a pass that ends with none left was stopped by the limit
+      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, left() < 1000 ? 'vitest ran out of time (stopped at the limit)' : 'vitest gave no report (it did not start, or crashed)')
+      else if (!before) notRun('revert', `The base's version of ${existed.join(', ')}`, 'no list of its tests, so no test was judged')
       // Without the base's answer every passing test would look new: say nothing of them
       const loose = reverted && before ? passingNewTests({ reverted, base: before }) : []
       for (const t of loose) {
