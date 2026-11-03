@@ -132,7 +132,7 @@ export const noReport = (timedOut, limitMs) =>
  * everything that ran between them in the shared pass.
  */
 export function filesRunMs(report, root, files) {
-  return Math.max(0, ...(report?.testResults ?? []).filter((f) => files.includes(relFile(root, f.name))).map((f) => f.endTime - f.startTime))
+  return Math.max(0, ...(report?.testResults ?? []).filter((f) => files.includes(relFile(root, f.name))).map((f) => f.endTime - f.startTime || 0))
 }
 
 /** The tests that pass with the source changes reverted and were not in the base's version of their file. */
@@ -887,7 +887,8 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       // Answers the tests and the pass (see realRunners.vitest) and the limit it was given; the tests are null when vitest gave no report
       const run = (files, options = {}) => {
         check()
-        const limitMs = left()
+        // At least a second: an install before this may have used the time up, and a limit of 0 or less means none to the runner
+        const limitMs = Math.max(1000, left())
         const pass = runners.vitest(top, files, { timeoutMs: limitMs, ...options })
         return { ...pass, limitMs, tests: pass.report ? vitestTests(pass.report, top) : null }
       }
@@ -903,12 +904,14 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       const passing = new Set((reverted ?? []).filter((t) => t.status === 'passed').map((t) => t.file))
       const existed = tests.filter((t) => t.status !== 'A' && passing.has(t.path)).map((t) => t.path)
       for (const p of existed) git(top, ['checkout', fork, '--', p])
-      // null when there was no time to ask (said already)
-      let named = { tests: [] }
-      if (reverted && existed.length) named = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed, { namesOnly: true })
-      const before = named?.tests ?? null
+      // The base's test names; null when there was no time to ask (said already) or vitest gave no report (said below)
+      let before = []
+      if (reverted && existed.length) {
+        const named = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed, { namesOnly: true })
+        before = named?.tests ?? null
+        if (named && !before) notRun('revert', `The base's version of ${existed.join(', ')}`, `${noReport(named.timedOut, named.limitMs)}, so no test was judged`)
+      }
       if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, noReport(first.timedOut, first.limitMs))
-      else if (named && !before) notRun('revert', `The base's version of ${existed.join(', ')}`, `${noReport(named.timedOut, named.limitMs)}, so no test was judged`)
       // Without the base's answer every passing test would look new: say nothing of them
       const loose = reverted && before ? passingNewTests({ reverted, base: before }) : []
       for (const t of loose) {

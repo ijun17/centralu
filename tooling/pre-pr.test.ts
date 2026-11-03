@@ -179,6 +179,8 @@ describe('what pre-pr reads', () => {
     expect(filesRunMs(report, root, ['a.test.ts'])).toBe(4000)
     expect(filesRunMs(report, root, ['other.test.ts'])).toBe(0)
     expect(filesRunMs(null, root, ['a.test.ts'])).toBe(0)
+    // A file with no time in the report counts for nothing, not for NaN (which no gate and no limit would take as a number)
+    expect(filesRunMs({ testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000 }, { name: join(root, 'b.test.ts'), startTime: 0, endTime: 3000 }] }, root, ['a.test.ts', 'b.test.ts'])).toBe(3000)
   })
 
   it('mirrors the checkout\'s dependencies into a worktree with the same lockfile, workspace packages pointing at the worktree, and unlinks them without touching the checkout (#1254)', () => {
@@ -440,6 +442,26 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.ok).toBe(false)
     // Two tsc (300 s, then 200 s left) and the first vitest pass (100 s left)
     expect(fake.calls.timeouts).toEqual([300_000, 200_000, 100_000, 100_000])
+  })
+
+  it('gives the changed tests at least a second when an install before them used the time up: a limit of 0 or less would mean none', () => {
+    git(repo, 'checkout', '-q', '-b', 'deps', 'top')
+    write('package.json', '{}\n')
+    commit('deps')
+    const clock = { now: 0 }
+    const fake = fakeRunners()
+    const limits: (number | undefined)[] = []
+    const runners = {
+      ...fake.runners,
+      // The revert check's install (the dependencies changed) comes after the lint check, and takes more than the whole time
+      prepare: (dir: string) => {
+        fake.runners.prepare(dir)
+        if (fake.calls.lint.length) clock.now = 400_000
+      },
+      vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean }) => (limits.push(o?.timeoutMs), fake.runners.vitest(dir, files, o)),
+    }
+    prePr({ cwd: repo, head: 'deps', main: 'main', fetch: false, runners, limitMs: 300_000, now: () => clock.now })
+    expect(limits[0]).toBe(1000)
   })
 
   it('does not judge a test when a vitest pass gave no report or a tool was stopped, and says so', () => {
