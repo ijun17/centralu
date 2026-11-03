@@ -999,9 +999,11 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     expect(own.starterOf('s')).toEqual({ by: 'person' })
   })
 
-  it('a turn whose opening was not named (a card was up) is decided by the inputs its end names', () => {
+  it('a turn whose opening was not named (a card was up) is decided by the inputs its end names, however long they waited', () => {
+    vi.useFakeTimers()
     own.noteMessage('s', 'person', false, false, false, 'person-1')
     own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    vi.advanceTimersByTime(20_000)
     own.turnStarted('s')
     expect(own.turnEnded('s', ['person-1', 'caller-1'])).toEqual({ by: 'work', wrote: true })
   })
