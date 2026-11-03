@@ -784,7 +784,7 @@ describe('the runners (real processes)', () => {
         return h !== null && h !== 'unreadable' && h.child ? h.child.pid : undefined
       }, 60_000)
       // The command never ends by itself: if the signal ended the runner outright (#1681), it would be left running
-      pids.push(command)
+      if (command !== undefined) pids.push(command)
       process.kill(running.child.pid ?? 0, 'SIGTERM')
       // Windows has no signal: the runner is ended outright, and its job object ends the command. `exited`, not `result`: a
       // command the runner left holding its pipes keeps `close` from coming, and this case then waited its 120 s
