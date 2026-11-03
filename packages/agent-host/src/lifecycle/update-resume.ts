@@ -1,5 +1,6 @@
 import { errorMessage } from '@cc/protocol'
 import { sleepSync } from '../timing.js'
+import { ENDED_MAX_AGE_MS, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
@@ -23,6 +24,10 @@ import { readStopped, type Stopped } from './update-stopped.js'
  * the cards that waited for the person (`update-stopped.ts`), under the same mark. The next host tells the agent in a note,
  * and wakes a session at rest for it. An older host reads `turns` only and leaves the rest.
  *
+ * **The terminals and Run commands the stop ended** (#1902 part B) are listed by the same host, in its first step and in a list of
+ * its own (`recordUpdateEnded`): they are no session's, so no mark applies; the first start after it takes them whole
+ * (`UpdateResumeLists.takeEnded`) and the list goes.
+ *
  * **A list that cannot be read at the start** is tried again a few times when it is held (`EBUSY`, a virus scanner that
  * opened the file just written; `READ_TRIES`), each failure said. One still unreadable stays where it is for a later start,
  * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
@@ -44,7 +49,7 @@ const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 export type CutTurn = { id: string; seq: number }
 
 /** What one stop lists: the turns it cut, and what else it ended in sessions (#1902) */
-export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[] }
+export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended; /** When the stop wrote it (ms), 0 when the list does not say */ at: number }
 
 /** The data folder, as the hosts reach the lists in it: their names, each one's text (null once gone), a new one, a removal */
 export type UpdateResumeFolder = {
@@ -95,7 +100,7 @@ export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
   }
   const listedStopped: unknown[] = 'stopped' in o && Array.isArray(o.stopped) ? o.stopped : []
   const stopped = listedStopped.map(readStopped).filter((x): x is Stopped => x !== null && ID.test(x.id))
-  return { turns: turns.slice(0, MAX_TURNS), stopped: stopped.slice(0, MAX_TURNS) }
+  return { turns: turns.slice(0, MAX_TURNS), stopped: stopped.slice(0, MAX_TURNS), ended: readEnded(o), at: 'at' in o && typeof o.at === 'number' ? o.at : 0 }
 }
 
 /**
@@ -111,6 +116,20 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
     folder.add(`${JSON.stringify({ v: 1, turns, stopped })}\n`)
   } catch (err) {
     console.error(`[agent-host] the turns this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
+  }
+}
+
+/**
+ * Writes the terminals and Run commands this stop ends, as a list of its own (#1902). Never fatal, as `recordUpdateCut` is: they
+ * are then lost as they always were
+ */
+export function recordUpdateEnded(folder: UpdateResumeFolder, ended: Ended, now = Date.now()): void {
+  if (!ended.terminals.length && !ended.runs.length) return
+  try {
+    folder.add(`${JSON.stringify({ v: 1, turns: [], stopped: [], at: now, ...ended })}
+`)
+  } catch (err) {
+    console.error(`[agent-host] the terminals and commands this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
   }
 }
 
@@ -154,7 +173,7 @@ export class UpdateResumeLists {
       if (text === null) continue
       const turns = parseUpdateResume(text)
       if (turns === 'other') continue
-      if (turns === 'torn') this.removeList(name)
+      if (turns === 'torn') this.removeList(name, 'it is not read, and a later start removes it')
       else this.lists.set(name, turns)
     }
   }
@@ -167,6 +186,28 @@ export class UpdateResumeLists {
   /** Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then */
   cut(id: string, lastSeq: number): boolean {
     return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq))
+  }
+
+  /**
+   * The terminals and Run commands the stops listed, once. Each list is removed before anything in it is brought back, and one that
+   * cannot be removed is left alone: it would otherwise open them again at every start. A list older than `ENDED_MAX_AGE_MS` is
+   * removed and not used: a rollback to a host from before this never removes it, and a start days later must not open terminals
+   * and run commands nobody expects
+   */
+  takeEnded(now = Date.now()): Ended {
+    const taken: Ended = { terminals: [], runs: [] }
+    for (const [name, l] of [...this.lists]) {
+      if (!l.ended.terminals.length && !l.ended.runs.length) continue
+      this.lists.delete(name)
+      if (!this.removeList(name, 'it is not used at this start, and a later start tries again')) continue
+      if (now - l.at > ENDED_MAX_AGE_MS) {
+        console.error(`[agent-host] ${name}: the terminals and commands an update ended are not brought back, the list is too old`)
+        continue
+      }
+      taken.terminals.push(...l.ended.terminals)
+      taken.runs.push(...l.ended.runs)
+    }
+    return taken
   }
 
   /** What a stop ended in this session besides a turn (#1902), when its conversation still ends where it did then: the same mark */
@@ -189,15 +230,18 @@ export class UpdateResumeLists {
       const named = [...l.turns, ...l.stopped]
       if (!named.some((t) => t.id === id) || !named.every((t) => this.dealt.has(t.id))) continue
       this.lists.delete(name)
-      this.removeList(name)
+      this.removeList(name, 'the turns it names are over, and a later start removes it')
     }
   }
 
-  private removeList(name: string): void {
+  /** Whether the list is gone; one that is not is said in the log with what that means */
+  private removeList(name: string, then: string): boolean {
     try {
       this.folder.remove(name)
+      return true
     } catch (err) {
-      console.error(`[agent-host] ${name} could not be removed (${errorMessage(err)}); the turns it names are over, and a later start removes it`)
+      console.error(`[agent-host] ${name} could not be removed (${errorMessage(err)}); ${then}`)
+      return false
     }
   }
 }

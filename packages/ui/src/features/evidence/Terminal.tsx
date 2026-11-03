@@ -9,6 +9,7 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { CommandLogView } from '../../components/CommandLogView.jsx'
 import { mountXterm } from '../../components/xterm.js'
 import { useStore } from '../../store/store.js'
+import { resyncsOf } from '../../store/machines.js'
 import { TabActions } from './tabActions.jsx'
 
 /**
@@ -101,12 +102,13 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   }, [platform, projectId])
 
   /*
-   * A reconnect that had to resync, or a host swap, reads the terminals again and mounts them fresh (#842 item 4). The
+   * A reconnect that had to resync, a host swap, or a resync of the project's machine (an update restarted its host, #1902) reads
+   * the terminals again and mounts them fresh (#842 item 4). The
    * views on screen were attached to a connection that is gone: output from the gap was missing, a shell that died
    * meanwhile never got its exit (so no Restart), and a shell the new host did not keep took keys that went nowhere.
    * A fresh list carries each shell's scrollback and whether it is alive, and drops the ones that are gone.
    */
-  const hostResyncs = useStore((s) => s.hostResyncs)
+  const hostResyncs = useStore((s) => resyncsOf(s, projectId))
   const resyncs = useRef(hostResyncs)
   resyncs.current = hostResyncs
 

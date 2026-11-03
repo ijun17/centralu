@@ -26,6 +26,8 @@ export function signalMode(heldChildren: boolean): LeaveMode {
 export type HostParts = {
   /** Writes the open app views down for the next host (view-handover.ts) */
   handOverViews: () => void
+  /** An update's stop lists the terminals and Run commands it is about to end, for the next host (#1902, update-ended.ts) */
+  recordEnded: () => void
   terminals: { disposeAll(): void; detachAll(): Promise<void> }
   commands: { disposeAll(): void; detachAll(): Promise<void> }
   updates: { stop(): void }
@@ -74,6 +76,8 @@ export function stopPlan(mode: LeaveMode, handOver: boolean, p: HostParts): Step
   const steps: Step[] = []
   if (handOver) steps.push({ name: 'handing the open app views over', run: p.handOverViews })
   if (mode === 'stop') {
+    // Before the shells go: it reads their screens
+    steps.push({ name: 'listing the terminals and commands an update ends', run: p.recordEnded })
     steps.push(
       { name: 'ending the terminals', run: () => p.terminals.disposeAll() },
       { name: 'ending the commands', run: () => p.commands.disposeAll() },

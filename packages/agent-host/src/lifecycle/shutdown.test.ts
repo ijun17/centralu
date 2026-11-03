@@ -65,6 +65,7 @@ function parts() {
   const rec = (what: string) => () => void did.push(what)
   const p: HostParts = {
     handOverViews: rec('hand over views'),
+    recordEnded: rec('record ended'),
     terminals: { disposeAll: rec('terminals end'), detachAll: async () => void did.push('terminals detach') },
     commands: { disposeAll: rec('commands end'), detachAll: async () => void did.push('commands detach') },
     updates: { stop: rec('updates') },
@@ -96,7 +97,19 @@ describe('the stop plan (HO8)', () => {
     const f = parts()
     f.p.links = { stop: () => (f.did.push('links'), f.never) }
     void runSteps(stopPlan('stop', false, f.p), () => {})
-    expect(f.did.slice(0, 2)).toEqual(['terminals end', 'commands end'])
+    expect(f.did.slice(0, 3)).toEqual(['record ended', 'terminals end', 'commands end'])
+  })
+
+  it('an update lists the terminals and commands before the shells go, and a detach, which ends none, lists nothing (#1902)', async () => {
+    const stop = parts()
+    stop.releaseSessions()
+    await runSteps(stopPlan('stop', false, stop.p), () => {})
+    expect(stop.did).toContain('record ended')
+    expect(stop.did.indexOf('record ended')).toBeLessThan(stop.did.indexOf('terminals end'))
+    const detach = parts()
+    detach.releaseSessions()
+    await runSteps(stopPlan('detach', false, detach.p), () => {})
+    expect(detach.did).not.toContain('record ended')
   })
 
   it('app processes stop while the sessions are still cleaning up, not after', async () => {

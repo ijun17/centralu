@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import { commandShell, type Pty, type PtyModule } from './terminal.js'
+import type { EndedRun } from '../lifecycle/update-ended.js'
 import { idNumber, type CommandTag } from '../keeper/tags.js'
 import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
 
@@ -97,13 +98,17 @@ export class CommandRunner {
     e.slot.stop()
   }
 
-  /** Runs the command. If the same command is already running, kills it and starts fresh (the owner's decision) */
-  run(cwd: string, command: string, cols = 100, rows = 30): CommandRun {
+  /**
+   * Runs the command. If the same command is already running, kills it and starts fresh (the owner's decision). `before` is a line
+   * the log opens with: an update's stop ended this run and it starts again (#1902)
+   */
+  run(cwd: string, command: string, cols = 100, rows = 30, before = ''): CommandRun {
     const existing = this.entries.get(this.key(cwd, command))
     if (existing) this.stopEntry(existing)
 
     const entry = this.entry(cwd, command, `run-${++this.counter}`, Date.now())
     this.entries.set(this.key(cwd, command), entry)
+    if (before) entry.slot.append(before)
     this.start(entry, cols, rows)
     return this.toRun(entry)
   }
@@ -154,6 +159,11 @@ export class CommandRunner {
     let n = 0
     for (const e of this.entries.values()) if (e.slot.alive) n++
     return n
+  }
+
+  /** The runs still running, as an update's stop records them (#1902) */
+  runningSnapshot(): EndedRun[] {
+    return [...this.entries.values()].filter((e) => e.slot.alive).map((e) => ({ cwd: e.cwd, command: e.command }))
   }
 
   disposeAll(): void {

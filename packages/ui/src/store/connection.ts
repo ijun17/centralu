@@ -30,7 +30,7 @@ import {
   watchLiveEvents,
 } from './sessionList.js'
 import { holdPinnedViews } from './apps.js'
-import { machinesHoldingMirror } from './machines.js'
+import { machinesHoldingMirror, reloadCommandRuns } from './machines.js'
 import { settleUnsureSends } from './sessions/send.js'
 
 /**
@@ -439,7 +439,11 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
          * conversation being viewed).
          */
         const resync = connection === 'resync_required'
-        if (resync) set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
+        if (resync) {
+          set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
+          // A host that was updated starts its Run commands again with new run ids (#1902)
+          reloadCommandRuns(get)
+        }
         // A host that comes back may be another process (a restart, a swap): what its install and sign-in said before is not its word now
         else set(connection === 'connected' ? { connection } : { connection, toolSetups: {} })
         /*

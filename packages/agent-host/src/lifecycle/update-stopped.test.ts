@@ -57,7 +57,7 @@ describe("what an update's stop lists beside the turns (#1902)", () => {
     const text = JSON.stringify({ v: 1, turns: [{ id: 'a', seq: 1 }], stopped: [entry, { id: '../bad id', seq: 1 }] })
     expect(parseUpdateResume(text)).toMatchObject({ turns: [{ id: 'a', seq: 1 }], stopped: [{ id: 's1' }] })
     // A list from before this (turns only) still reads
-    expect(parseUpdateResume(JSON.stringify({ v: 1, turns: [{ id: 'a', seq: 1 }] }))).toEqual({ turns: [{ id: 'a', seq: 1 }], stopped: [] })
+    expect(parseUpdateResume(JSON.stringify({ v: 1, turns: [{ id: 'a', seq: 1 }] }))).toEqual({ turns: [{ id: 'a', seq: 1 }], stopped: [], ended: { terminals: [], runs: [] }, at: 0 })
   })
 
   it('a stop that ended only tasks still writes a list; a session is taken by its mark, and the list goes once all it names are dealt with', () => {

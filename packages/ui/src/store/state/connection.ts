@@ -12,6 +12,8 @@ export type ConnectionSlice = {
    * (AppFrame): the new host may serve it at another address, or not at all.
    */
   hostResyncs: number
+  /** The same for one linked machine (`machine_resync`), by machine id: its host was another process, or its link came back (#1902) */
+  machineResyncs: Record<string, number>
   /**
    * The first lists have arrived and the last screen has been restored (owner, 2026-10-18). Until then the window
    * does not know which screen to show, so it shows none: the orchestrator's intro and "No projects yet" used to flash

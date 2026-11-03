@@ -1,7 +1,7 @@
 import { unheard, type NormalizedEvent } from '@cc/protocol/client'
 import { machineAway } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
-import { resyncOwed } from '../machines.js'
+import { reloadCommandRuns, resyncOwed } from '../machines.js'
 import { trackWorkingSince } from '../sessionList.js'
 
 /**
@@ -30,6 +30,9 @@ export function machineEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): 
   }
   // What the UI holds about one machine has to be read again (#82): its own recovery, not the whole app's
   if (e.type === 'machine_resync') {
+    // The views that keep its terminals and runs read them again: a machine that was updated starts them over (#1902)
+    set((s) => ({ machineResyncs: { ...s.machineResyncs, [e.machineId]: (s.machineResyncs[e.machineId] ?? 0) + 1 } }))
+    reloadCommandRuns(get, e.machineId)
     void get().recoverMachine(e.machineId)
     return true
   }

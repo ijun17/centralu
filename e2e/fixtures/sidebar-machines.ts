@@ -18,7 +18,7 @@ async function setup(page: Page): Promise<void> {
 }
 
 /** Links a mock machine: it stands as connected at once and its `machine_status` reaches the store */
-async function link(page: Page, name: string): Promise<string> {
+export async function link(page: Page, name: string): Promise<string> {
   const id = await page.evaluate(
     async (n) => ((await (window as unknown as MockWindow).__mock.machines.add({ name: n, sshTarget: `me@${n.toLowerCase()}`, shell: 'posix' })) as { id: string }).id,
     name,
@@ -33,7 +33,7 @@ async function setMachine(page: Page, id: string, patch: Record<string, unknown>
 }
 
 /** A folder on a linked machine as a project, the way the person adds one: Add project, the machine, its path */
-async function addOn(page: Page, machine: string, path: string): Promise<void> {
+export async function addOn(page: Page, machine: string, path: string): Promise<void> {
   await page.getByTestId('add-project').click()
   await page.getByTestId(`add-project-on-${machine}`).click()
   await expect(page.getByTestId('add-project-machines')).toHaveCount(0)

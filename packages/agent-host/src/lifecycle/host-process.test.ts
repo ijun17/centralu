@@ -283,6 +283,59 @@ describe('the host process, started for real', () => {
     expect(await host.exited).toBe(0)
   }, 60_000 * SLOW)
 
+  /*
+   * #1902: an update's stop (host.stop { forUpdate }, what a linked hub sends) ends every terminal and Run command; the host
+   * that starts next on the data folder opens the terminals again and starts the commands again. Which stop lists them, and
+   * that the start brings them back before it listens, are about the order main.ts takes its steps in, so it is asked of two real
+   * hosts: a plain stop must bring back nothing.
+   */
+  it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', async () => {
+    const s = setup()
+    const token = 'token-handed-on-stdin-0123456789'
+    const project = join(s.dir, 'project')
+    mkdirSync(project)
+    // A command that stays running. `sleep` is on every login shell's PATH (node is not, on a runner that installs it elsewhere)
+    const run = posix ? 'sleep 600' : 'node -e "setInterval(() => {}, 1000)"'
+    const boot = async () => {
+      // The host runs a Run command through `$SHELL -lc`: setup()'s SHELL is a script that only answers the PATH probe and ends,
+      // so a command run through it ends at once and is not one the stop can list. A real shell, as a person's is
+      const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_SERVE: '1', ...(posix ? { SHELL: '/bin/sh' } : {}) })
+      host.p.stdin.write(`${JSON.stringify({ token })}
+`)
+      return { ...host, port: await host.ready }
+    }
+    const state = async (port: number, projectId: string) => ({
+      terminals: ((await rpc(port, token, 'terminal.list', { projectId })) as { terminals: { title: string; history: string }[] }).terminals,
+      runs: ((await rpc(port, token, 'commands.state', { projectId })) as { runs: { command: string; running: boolean }[] }).runs,
+    })
+
+    const first = await boot()
+    const { id } = (await rpc(first.port, token, 'projects.add', { path: project })) as { id: string }
+    await rpc(first.port, token, 'terminal.create', { projectId: id, cols: 90, rows: 20 })
+    await rpc(first.port, token, 'commands.run', { projectId: id, command: run })
+    // It is running when the stop comes: what the stop lists is what is running
+    expect((await state(first.port, id)).runs).toEqual([expect.objectContaining({ command: run, running: true })])
+    expect(await rpc(first.port, token, 'host.stop', { forUpdate: true })).toMatchObject({ ok: true })
+    expect(await first.exited).toBe(0)
+
+    // The update's stop listed them: the next host has a terminal with nothing in it but its own start, and the command running again
+    const second = await boot()
+    const back = await state(second.port, id)
+    expect(back.terminals.map((t) => t.title)).toEqual(['Terminal 1'])
+    expect(back.runs).toEqual([expect.objectContaining({ command: run, running: true })])
+    const log = (await rpc(second.port, token, 'commands.log', { projectId: id, command: run })) as { run: { history: string } | null }
+    expect(log.run?.history.startsWith('Started again after the update.')).toBe(true)
+
+    // A plain stop, then a start: nothing comes back, and no list was left behind
+    expect(await rpc(second.port, token, 'host.stop', {})).toMatchObject({ ok: true })
+    expect(await second.exited).toBe(0)
+    expect(readdirSync(s.dir).filter((n) => n.startsWith('update-resume.'))).toEqual([])
+    const third = await boot()
+    expect(await state(third.port, id)).toEqual({ terminals: [], runs: [] })
+    expect(await rpc(third.port, token, 'host.stop', {})).toMatchObject({ ok: true })
+    expect(await third.exited).toBe(0)
+  }, 180_000 * SLOW)
+
   it('without --watch-parent the end of stdin means nothing, and a signal still shuts it down (HO7)', async () => {
     const s = setup()
     const host = startHost(s, [])

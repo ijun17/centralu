@@ -4,6 +4,7 @@ import { whichTool } from '../env-path.js'
 import { commandInterpreter, systemTool } from '../os.js'
 import { PtySlot, isPtyModule, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import { idNumber, type TerminalTag } from '../keeper/tags.js'
+import type { EndedTerminal } from '../lifecycle/update-ended.js'
 
 /**
  * The project terminal (M2.7).
@@ -174,6 +175,14 @@ export class TerminalService {
       this.byId.delete(e.id)
     }
     this.byCwd.delete(cwd)
+  }
+
+  /**
+   * Every open terminal as an update's stop records it (#1902): its folder and size, in the order they were opened. Read before the
+   * shells are killed
+   */
+  snapshot(): EndedTerminal[] {
+    return [...this.byId.values()].map((e) => ({ cwd: e.cwd, cols: e.cols, rows: e.rows }))
   }
 
   /** Open terminals with a live shell — counted by the keeper's idle rule (#280, keeper-link.ts) */

@@ -143,6 +143,7 @@ import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
+import type { Ended } from '../lifecycle/update-ended.js'
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
@@ -1261,6 +1262,11 @@ export class SessionManager {
    */
   stopForUpdate(): void {
     this.stoppingForUpdate = true
+  }
+
+  /** The terminals and Run commands an update's stop left in the lists, once (#1902): the lists that held them go */
+  takeUpdateEnded(): Ended {
+    return this.updateLists?.takeEnded() ?? { terminals: [], runs: [] }
   }
 
   /** The turns this host continues after an update cut them (#1618), for the hello a linked hub reads */
