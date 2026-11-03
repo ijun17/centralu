@@ -155,7 +155,7 @@ describe('a step that can be undone runs, cited or not, and every step that chan
     }
   })
 
-  it('what cannot be undone asks, cited or not: a delete, an uninstall, an OS entry, an update applied, a command, a file written, an app’s step', async () => {
+  it('only what cannot be undone asks, cited or not: a delete, an uninstall, an OS entry, an update applied, a command, a file written, an app’s step', async () => {
     const floor = [
       { name: 'delete_session', args: { sessionId: 's' } },
       { name: 'delete_all_archived', args: {} },
@@ -174,6 +174,11 @@ describe('a step that can be undone runs, cited or not, and every step that chan
       for (const tool of ['Bash', 'PowerShell', 'Write', 'Edit', 'mcp__other__drop']) expect(await w.gate.askCli('orc', tool, { command: 'rm -rf x', file_path: '/x' }), tool).toMatchObject({ allowed: false })
       expect(w.asked).toHaveLength(floor.length + 5)
       expect(w.records).toEqual([])
+      // The floor is the line: a rename, which can be undone, runs in the same turn without asking
+      const rename = ran()
+      await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's', name: 'n' } }, undefined, rename.run, refused)
+      expect(rename.calls).toHaveLength(1)
+      expect(w.asked).toHaveLength(floor.length + 5)
     }
   })
 
