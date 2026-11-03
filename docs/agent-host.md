@@ -736,10 +736,14 @@ local child's approval, never answers one on another computer, even when its chi
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there, or one the
 tool started after the work was reported finished, which nothing on its start ties to the assignment) it is refused, and a fork
-does not reach another machine. `ifBusy: "queue"` holds the note in the child's record on the hub (`RemoteAgent.queued`, a restart
-or a link's loss loses none) and sends it as new work the caller owns, as a send at rest, once the child is in no turn: after a turn's
-end seen, and when the machine's link is back; a note refused then (the caller's trust or depth read again) is told to the caller. The
-caller's stop drops what is held. A note the tool did not read in the turn it went into
+does not reach another machine. `ifBusy: "queue"` holds the note in the child's record on the hub (`RemoteAgent.queued`) and sends it as new
+work the caller owns (`sendAtRest`, the send at rest), once the child is in no turn: after a turn's end seen, and when the machine's link is back. The
+note stays in the record until the machine has it, so a link that drops as it goes loses none, and a restart in the middle of a send may send it twice,
+as a local queue's does. Held notes go first: a send at rest meanwhile is refused, or held behind them with `ifBusy: "queue"`. A note refused at the
+time it would go (the caller's trust or depth read again) is told to the caller, with the error's kind for the model, as a local queued request's is.
+The caller's stop drops what is held. A held note is dropped with the child when it is deleted on its machine or its machine is removed, as a local
+queue's is with a trashed session, and the caller is not told. A stop served by the build before this one during a swap leaves the field, so the
+note goes once the link resyncs. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
 names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id
 (`ChildOwnership` `noteInputOrigin`: into a running turn or at rest, in the order given, at most 64 a session, in the app
