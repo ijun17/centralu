@@ -768,11 +768,14 @@ describe('what a turn that opens ran for', () => {
     expect(new ChildOwnership(store).turnNamed('s', ['note-id'])).toBeUndefined()
   })
 
-  it('writes the most recent sixty-four held for a build before #1639, not every one for the life of the session', () => {
+  it('writes for a build before #1639 the hub messages still held, the most recent sixty-four', () => {
     for (let i = 0; i < 70; i++) hub(`id-${i}`, i)
-    const written = JSON.parse(store.settings.appSetting('input_origins:s')!) as [string, unknown][]
-    expect(written).toHaveLength(64)
-    expect(written.at(-1)).toEqual(['id-69', { ...note, seq: 69 }])
+    const written = () => JSON.parse(store.settings.appSetting('input_origins:s')!) as [string, unknown][]
+    expect(written()).toHaveLength(64)
+    expect(written().at(-1)).toEqual(['id-69', { ...note, seq: 69 }])
+    // A turn ran for those up to id-10: what is written is what the tool still holds
+    own.turnNamed('s', ['id-10'])
+    expect(written().map(([id]) => id)).toEqual(Array.from({ length: 59 }, (_, i) => `id-${11 + i}`))
   })
 
   it('takes off the same when the tool cannot tell what a turn took in (an older Claude Code, a turn lost in a swap)', () => {
