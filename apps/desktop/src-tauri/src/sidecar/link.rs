@@ -116,15 +116,7 @@ impl KeeperLink {
             Some(Host::Bundle) => bundled,
             _ => None,
         };
-        let exe = std::env::current_exe().unwrap_or_default();
-        let app_build = match &host_dir {
-            Some(dir) => BuildSource::from_host_dir(
-                dir,
-                Some(client::bundle_of(&exe).to_string_lossy().to_string()),
-                Some(app_version.clone()),
-            ),
-            None => BuildSource::dev(),
-        };
+        let app_build = super::relaunch::app_build(host_dir.as_deref(), &app_version);
         let dev_data = dev || std::env::var("CC_DEV").as_deref() == Ok("1");
         let data = crate::keeper::data_dir_with(dev_data);
         KeeperLink {
@@ -186,19 +178,7 @@ impl KeeperLink {
     /// bundle the update did not touch (`pnpm app:open` opens the build output in place) or from
     /// no bundle at all (`pnpm app:dev`).
     pub fn relaunch_info(&self) -> RelaunchInfo {
-        let exe = std::env::current_exe().unwrap_or_default();
-        let bundle = client::bundle_of(&exe);
-        let in_bundle = bundle != exe;
-        let on_disk = self
-            .host_dir
-            .as_ref()
-            .filter(|d| !self.dev && d.join("main.mjs").is_file() && exe.is_file())
-            .map(|d| BuildSource::from_host_dir(d, Some(bundle.to_string_lossy().to_string()), None));
-        let mut info = super::relaunch_decision(&self.app_build, on_disk.as_ref(), in_bundle, &bundle.to_string_lossy());
-        if info.ready {
-            info.version = super::bundle_version(&bundle);
-        }
-        info
+        super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev))
     }
 
     pub fn announce_relaunch(&self) -> Result<u64, String> {

@@ -76,16 +76,19 @@ export function viewPort(frontDoor: string | undefined, port: number | undefined
 /** The longest control line accepted. The real ones are tens of bytes */
 const MAX_LINE = 64 * 1024
 
-export type ControlMessage = { op: string; timeoutMs?: number }
+export type ControlMessage = { op: string; timeoutMs?: number; forUpdate?: boolean }
 
 /**
  * Control lines on the host's stdin. One handler per op; `next(op)` waits for one. The stream
- * ending (the keeper went away) rejects every waiter; the caller decides what that means.
+ * ending (the keeper went away) rejects every waiter; the caller decides what that means. A line
+ * that arrives before its handler is registered is kept (the last one per op) and given to it then.
  */
 export class ControlChannel {
   private handlers = new Map<string, (m: ControlMessage) => void>()
   private waiters = new Map<string, { resolve: (m: ControlMessage) => void; reject: (e: Error) => void }[]>()
   private ended = false
+  /** The last line of an op that came before anything took it: the host is still starting while the window may already speak */
+  private early = new Map<string, ControlMessage>()
 
   constructor(input: Readable) {
     // A peer that never sends a newline does not get to grow this without bound: past MAX_LINE, its line is not JSON
@@ -104,6 +107,9 @@ export class ControlChannel {
 
   on(op: string, handler: (m: ControlMessage) => void): void {
     this.handlers.set(op, handler)
+    const early = this.early.get(op)
+    this.early.delete(op)
+    if (early) handler(early)
   }
 
   next(op: string): Promise<ControlMessage> {
@@ -125,7 +131,9 @@ export class ControlChannel {
       for (const w of waiting) w.resolve(m)
       return
     }
-    this.handlers.get(m.op)?.(m)
+    const handler = this.handlers.get(m.op)
+    if (handler) handler(m)
+    else this.early.set(m.op, m)
   }
 
   private end(): void {

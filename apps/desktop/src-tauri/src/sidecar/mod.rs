@@ -35,8 +35,6 @@ mod link;
 mod relaunch;
 
 use launch::direct_launcher;
-#[cfg(unix)]
-use relaunch::{bundle_version, relaunch_decision};
 
 /// What the UI is told about the builds involved (`host_build`, and the `host-build` event).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -105,6 +103,10 @@ pub struct RelaunchInfo {
     /// The bundle the relaunch starts from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_path: Option<String>,
+    /// The relaunch stops the host and the next one continues what it ended (#1895), where a keeper would hold it through
+    /// the relaunch.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub restarts_host: bool,
 }
 
 #[derive(Clone, Default)]
@@ -220,16 +222,20 @@ impl Supervisor {
     pub fn start(&self, app: AppHandle) {
         let start = start_plan(&app);
         #[cfg(unix)]
-        if start.plan.mode.keeper() {
-            if let Ok(mut c) = self.inner.lock() {
-                *c = Choice::Keeper;
+        {
+            // What "Apply now" compares the bundle on disk with (#1895); the bundled host only, not one `centralu serve` runs
+            relaunch::remember(start.bundled.clone().filter(|_| start.plan.host == Some(Host::Bundle)), &app.package_info().version.to_string());
+            if start.plan.mode.keeper() {
+                if let Ok(mut c) = self.inner.lock() {
+                    *c = Choice::Keeper;
+                }
+                let link = Arc::new(link::KeeperLink::new(start.facts, start.bundled, start.resources, app.package_info().version.to_string()));
+                if let Ok(mut k) = self.keeper.lock() {
+                    *k = Some(link.clone());
+                }
+                link.start(app);
+                return;
             }
-            let link = Arc::new(link::KeeperLink::new(start.facts, start.bundled, start.resources, app.package_info().version.to_string()));
-            if let Ok(mut k) = self.keeper.lock() {
-                *k = Some(link.clone());
-            }
-            link.start(app);
-            return;
         }
         if let Ok(mut c) = self.inner.lock() {
             *c = Choice::Direct;
@@ -302,9 +308,10 @@ impl Supervisor {
         }
     }
 
-    /// Whether "Apply now" can relaunch this window into the update just installed (#352). Only
-    /// with the keeper: in direct mode the host is this process's child and a relaunch would stop
-    /// every agent, exactly the quit the update is meant to avoid.
+    /// Whether "Apply now" can relaunch this window into the update just installed (#352). With the
+    /// keeper, which holds the host and every agent through it. Where this window starts the host
+    /// itself (`os::RELAUNCH_WITHOUT_KEEPER`), the relaunch stops the host for an update first and the next one continues what
+    /// it ended (#1895). Elsewhere a relaunch would only be the quit the update is meant to avoid.
     pub fn relaunch_info(&self) -> RelaunchInfo {
         match self.choice() {
             #[cfg(unix)]
@@ -312,14 +319,23 @@ impl Supervisor {
                 reason: Some("not attached to the background keeper".into()),
                 ..Default::default()
             }),
-            _ => RelaunchInfo {
-                reason: Some(
-                    "This build holds the agent host itself, so relaunching would stop running agents. Quit and open Centralu again to finish."
-                        .into(),
-                ),
-                ..Default::default()
-            },
+            #[cfg(unix)]
+            Choice::Direct if centralu_keeper_core::os::RELAUNCH_WITHOUT_KEEPER => relaunch::direct_info(),
+            // Where nothing relaunches into the new build (a quit and open is the update): no reason, as before the port was offered here
+            _ => RelaunchInfo::default(),
         }
+    }
+
+    /// Where this window is the host's parent: stops the host for an update, as `host.stop { forUpdate }` stops a
+    /// `centralu serve` host, and starts no other (#1895). The host the relaunched window starts continues the turns it
+    /// ended and opens its terminals and Run commands again. False with a keeper, which holds the host through a
+    /// relaunch (`announce_relaunch`).
+    pub fn stop_host_for_update(&self) -> bool {
+        if self.choice() != Choice::Direct {
+            return false;
+        }
+        self.direct.stop_for_update(host_proc::STOP_FOR_UPDATE_WAIT);
+        true
     }
 
     /// Tells the keeper the window is about to relaunch (#352), so it holds the host and agents

@@ -8,6 +8,9 @@ use std::os::unix::net::UnixStream;
 
 use super::children::{ExitStatus, Seen, Watch};
 
+/// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
+pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
+
 pub const RECV_FLAGS: libc::c_int = 0;
 
 /// No portable way to ask: a zombie counts as alive here, as it always did.

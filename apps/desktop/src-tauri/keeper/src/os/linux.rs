@@ -9,6 +9,9 @@ use std::os::unix::net::UnixStream;
 
 use super::children::{parse_proc_exit, set_cloexec, ExitStatus, Seen, Watch};
 
+/// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
+pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
+
 /// Received descriptors are close-on-exec from the moment they exist.
 pub const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 

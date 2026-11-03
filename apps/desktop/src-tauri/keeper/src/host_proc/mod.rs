@@ -195,6 +195,13 @@ pub const STABLE_UPTIME: Duration = Duration::from_secs(30);
 /// The old 300ms finished the process off before its WAL checkpoint had completed.
 pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
+/// The line that asks a host the window started to stop for an update (agent-host `main.ts`, #1895)
+pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
+
+/// How long a host asked to stop for an update gets before it is stopped the usual way. The host ends its shutdown after
+/// 10 s whatever is left (`SHUTDOWN_BOUND_MS`), so this is that and a margin
+pub const STOP_FOR_UPDATE_WAIT: Duration = Duration::from_secs(15);
+
 /// What the watcher does after one host run ended.
 #[derive(Debug, PartialEq)]
 pub enum AfterExit {
@@ -335,6 +342,30 @@ impl Supervisor {
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "no host is running"))?;
         stdin.write_all(format!("{line}\n").as_bytes())?;
         stdin.flush()
+    }
+
+    /**
+     * Stops the host for good, after asking it to stop for an update (#1895): the window applying an update is this host's
+     * parent, so it asks by a line on the host's stdin (`STOP_FOR_UPDATE_LINE`), which the host takes as it takes
+     * `host.stop { forUpdate }` from a linked hub, and waits up to `wait` for it to finish. It lists what it ends for the
+     * host that starts next, and exits. No restart follows. A host that did not finish in time, or that no line reached, is
+     * stopped the usual way (`shutdown`), which lists nothing: its turns end as a quit's.
+     */
+    pub fn stop_for_update(&self, wait: Duration) {
+        let pid = match self.inner.lock() {
+            Ok(mut inner) => {
+                inner.shutting_down = true;
+                inner.child.as_ref().map(|c| c.id())
+            }
+            Err(_) => None,
+        };
+        if let Some(pid) = pid {
+            // The watcher takes the child out when its stdout closes, which is when the host has exited
+            if self.send_line(STOP_FOR_UPDATE_LINE).is_ok() {
+                wait_until(wait, || self.pid() != Some(pid));
+            }
+        }
+        self.shutdown();
     }
 
     /// Stops the running host the usual way (TERM, a grace period, then its group) without telling
@@ -677,6 +708,18 @@ pub fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// Polls the condition until it holds or the wait is over; whether it held
+fn wait_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + wait;
+    while Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
 /**
  * TERM to the host alone, a grace period, then TERM to its whole group.
  *
@@ -694,7 +737,7 @@ pub fn stop_child(child: &mut Child) {
  * `host.lock` (#14). On unix stdin is kept open until the end, so EOF does not race the signal
  * into a second `shutdown()`.
  */
-fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl FnMut() -> bool) {
+fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, gone: impl FnMut() -> bool) {
     let _stdin_until_the_end = if os::CLOSE_STDIN_TO_STOP {
         drop(stdin);
         None
@@ -702,15 +745,7 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl Fn
         stdin
     };
     kill_pid(pid);
-    let deadline = Instant::now() + STOP_GRACE;
-    let mut ended = false;
-    while Instant::now() < deadline {
-        if gone() {
-            ended = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
+    let ended = wait_until(STOP_GRACE, gone);
     // A host still running pins its group's number, so the group is signalled. One that ended:
     // unix signals the group (its orphans) only while the number cannot be someone else's
     // (`os::group_signal_after_exit_is_safe`: no new process lives under the leader's pid);

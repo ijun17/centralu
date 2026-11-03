@@ -18,6 +18,9 @@ pub fn serve_launcher() -> Option<PathBuf> {
     [data.join("remote").join("bin").join("centralu.cmd"), data.join("bin").join("centralu.cmd")].into_iter().find(|p| p.is_file())
 }
 
+/// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
+pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
+
 /// Windows has no TERM: closing the host's stdin is the request to stop. The host runs with
 /// `--watch-parent`, so EOF runs the same `shutdown()` a TERM does (`stop_pid_gracefully`).
 pub const CLOSE_STDIN_TO_STOP: bool = true;

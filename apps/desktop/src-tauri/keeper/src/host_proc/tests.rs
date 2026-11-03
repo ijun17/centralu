@@ -359,6 +359,63 @@ fn a_host_launched_while_quitting_is_stopped_at_once() {
     assert!(!watching && !running, "a host started while quitting runs on (pid {pid:?}, watched: {watching})");
 }
 
+/// #1895: the window applying an update asks its host to stop for an update by a line on stdin and waits for it to be done;
+/// the host is not started again. A host that does not finish in the time given is stopped the usual way.
+#[cfg(unix)]
+#[test]
+fn a_host_is_asked_to_stop_for_an_update_and_not_started_again() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    struct Quiet;
+    impl StatusSink for Quiet {
+        fn status(&self, _: &HostStatus) {}
+    }
+    // The first host answers the line the way the real one does (ends when it has stopped); the second never reads it
+    let run = |name: &str, script: &str, wait: Duration| {
+        let file = std::env::temp_dir().join(format!("cc-host-stop-update-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let launches = Arc::new(AtomicU32::new(0));
+        let launcher: Launcher = {
+            let (launches, file, script) = (launches.clone(), file.to_string_lossy().to_string(), script.to_string());
+            Arc::new(move || {
+                launches.fetch_add(1, Ordering::SeqCst);
+                Ok(HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), script.clone()], env: vec![("F".into(), file.clone())], token: None })
+            })
+        };
+        let sup = Supervisor::new();
+        assert!(sup.start(Arc::new(Quiet), launcher));
+        let end = Instant::now() + Duration::from_secs(10);
+        while sup.info().is_none() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let started = Instant::now();
+        sup.stop_for_update(wait);
+        let took = started.elapsed();
+        let end = Instant::now() + Duration::from_secs(10);
+        while sup.is_running() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let (told, running, launched) = (std::fs::read_to_string(&file).unwrap_or_default(), sup.is_running(), launches.load(Ordering::SeqCst));
+        let _ = std::fs::remove_file(&file);
+        (told, took, running, launched)
+    };
+
+    let ready = r#"echo '{"ready":true,"port":1,"token":"t"}'"#;
+    let (told, took, running, launched) = run(
+        "reads",
+        &format!(r#"{ready}; while read l; do case "$l" in *'"op":"stop"'*'"forUpdate":true'*) echo asked >> "$F"; exit 0;; esac; done"#),
+        Duration::from_secs(10),
+    );
+    assert_eq!(told.trim(), "asked", "the host was not asked to stop for an update");
+    assert!(took < Duration::from_secs(5), "it waited out the host's grace instead of for its exit: {took:?}");
+    assert!(!running && launched == 1, "the host was started again (launches {launched}, watched {running})");
+
+    // Never reads the line: stopped the usual way once the time is up, and still not started again
+    let (told, took, running, launched) = run("deaf", &format!(r#"{ready}; while :; do sleep 0.05; done"#), Duration::from_millis(300));
+    assert_eq!(told, "");
+    assert!(took >= Duration::from_millis(300), "it did not wait for the host: {took:?}");
+    assert!(!running && launched == 1, "the host was started again (launches {launched}, watched {running})");
+}
+
 #[test]
 fn no_restart_while_the_app_is_quitting() {
     let sup = Supervisor::new();

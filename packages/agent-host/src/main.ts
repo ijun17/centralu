@@ -141,10 +141,10 @@ const { values } = parseArgs({
 })
 
 /*
- * Control lines from the keeper on stdin (#280 step 3). Only under a keeper: anyone else's stdin is
- * not ours to read.
+ * Control lines on stdin: the keeper's (#280 step 3) and the desktop window's, the host's parent, which stops it for an
+ * update this way (#1895). From no one else: anyone else's stdin is not ours to read.
  */
-const control = launch.underKeeper ? new ControlChannel(process.stdin) : null
+const control = launch.underKeeper || launch.startedBy === 'app' ? new ControlChannel(process.stdin) : null
 
 const token = values.token || handedToken || randomBytes(16).toString('hex')
 /* The token is the keeper's only when the keeper started this host and handed it over (#280 step 4, below) */
@@ -571,18 +571,21 @@ if (launch.underKeeper) {
  */
 let stopNow: (() => void) | null = null
 let stopAsked = false
-/** The stop that is asked for is a linked hub's update (`host.stop { forUpdate }`): what it ends is listed for the next host */
+/** The stop is an update's (a linked hub's `host.stop { forUpdate }`, the window's stop line, a swap that holds no agents): what it ends is listed for the next host */
 let stoppingForUpdate = false
-const stopFromRequest = (o: { forUpdate: boolean }) => {
-  console.error(`[agent-host] asked to stop (centralu serve --stop${o.forUpdate ? ', for an update' : ''})`)
-  // A linked hub's update: the turns this stop ends are listed for the host it starts next (#1618)
-  if (o.forUpdate) {
-    mgr.stopForUpdate()
-    stoppingForUpdate = true
-  }
+/** The one start of a stop for an update: the turns it ends are listed for the host that starts next (#1618) */
+const beginStopForUpdate = () => {
+  mgr.stopForUpdate()
+  stoppingForUpdate = true
+}
+const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop') => {
+  console.error(`[agent-host] asked to stop (${by}${o.forUpdate ? ', for an update' : ''})`)
+  if (o.forUpdate) beginStopForUpdate()
   if (stopNow) stopNow()
   else stopAsked = true
 }
+// The window stops the host it started for an update by a line on its stdin: it speaks no WebSocket, and `host.stop` is refused to a host the app runs (#1895)
+if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromRequest({ forUpdate: m.forUpdate === true }, 'the window'))
 /*
  * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
  * the hosts of other machines the person linked, each over the person's own ssh. The router stands
@@ -967,13 +970,18 @@ held?.children.on('stop', endings.keeperStop)
  * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
  * detach, let go of the lock, say so, exit. The next host takes over from there.
  */
-if (control) {
+if (control && launch.underKeeper) {
   onDrain(control, {
     drain: hostDrain,
     // A swap: the next host is already waiting, and it takes the open views over whether or not it
     // takes the agents. With the keeper's child service a detach really hands agents, terminals and
     // commands over (step 2); a signal arriving mid-drain runs no second, different ending.
-    detach: () => shutdown.stopServices(signalMode(held !== null), true),
+    detach: () => {
+      const mode = signalMode(held !== null)
+      // A swap that holds no agents ends them: that is an update's stop, so the next host continues what it ends (#1895)
+      if (mode === 'stop') beginStopForUpdate()
+      return shutdown.stopServices(mode, true)
+    },
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
     release: ownership.release,
     write: (line) => void writeSync(1, `${line}\n`),
