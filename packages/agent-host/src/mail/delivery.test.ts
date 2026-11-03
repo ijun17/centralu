@@ -285,6 +285,38 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     expect(w.turns.current('orc')).toEqual({ turnSeq: 4, by: 'mail', starter: r.message.id, messageId: r.message.id, asker: A, startedAt: NOW })
     expect(turnRows(w.store, 'b')[0]).toMatchObject({ outcome: 'lost' })
   })
+
+  /*
+   * #1916: A asked B, B's turn on it ran, and the host was killed and started again (not an update's stop, so nothing continues the turn). The
+   * question was delivered and read, so it is never given again; unanswered and unreleased, nobody heard. The start closes the turn lost, and
+   * each question that turn had and did not answer is released `cut`: its sender is told in the gathered notice (D25) and can ask again
+   */
+  it('a turn cut by a plain restart releases the questions it had unanswered, and their senders are told once', () => {
+    const w = deliveryWorld()
+    const before = w.send(C, { to: [B], text: 'an older question' }).message
+    w.store.mailbox.markDelivered(B, [before.id], NOW, 1)
+    w.store.mailbox.markRead(B, [before.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 1, messageId: null, starterId: before.id, startedBy: 'mail', startedAt: NOW })
+    w.store.mailbox.endTurn('b', 1, NOW, 'acted')
+    const asked = w.send(A, { to: [B], text: 'what does the build need?' }).message
+    const note = w.send(A, { to: [B], text: 'fyi', needsReply: false }).message
+    w.store.mailbox.markDelivered(B, [asked.id, note.id], NOW, 2)
+    w.store.mailbox.markRead(B, [asked.id, note.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 2, messageId: null, starterId: asked.id, startedBy: 'mail', startedAt: NOW })
+
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    expect(turnRows(w.store, 'b')[1]).toMatchObject({ outcome: 'lost' })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedWhy: 'cut', toldAt: w.clock.t, settled: null })
+    // Not a question, or a question of a turn that ended: nothing to tell
+    expect(w.rowOf(note.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.rowOf(before.id, B)).toMatchObject({ releasedAt: null })
+    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
+    expect(told).toHaveLength(1)
+    expect(told[0]?.message).toMatchObject({ sender: 'centralu', facts: { unanswered: [{ id: asked.id, recipient: B, why: 'cut' }] } })
+    expect(told[0]?.message.body).toContain(`- ${asked.id} to beta (${B}): its turn on it was cut when Centralu stopped, so ask again if you still need the answer.`)
+    expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])
+  })
 })
 
 describe('the pair loop guard (§7.5)', () => {
