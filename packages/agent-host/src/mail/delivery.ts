@@ -150,8 +150,8 @@ export class MailDelivery {
   start(): void {
     if (this.running) return
     this.running = true
-    // A turn the last host left that nothing continues (a crash or a plain restart): what it had to answer is told to its senders (#1916)
-    for (const t of this.turns?.closeStale() ?? []) this.service.turnCut(this.service.sessionAddress(t.sessionId), t.turnSeq)
+    // Turns the last host left that nothing continues (a crash or a plain restart): what they had to answer is told to its senders, once (#1916)
+    this.service.turnsLost((this.turns?.closeStale() ?? []).map((t) => ({ address: this.service.sessionAddress(t.sessionId), turnSeq: t.turnSeq })))
     this.sayWhatWasLeftHalfDone()
     const last = this.heartbeat?.read() ?? null
     if (last !== null && this.now() - last > this.o.catchUpAfterMs) {

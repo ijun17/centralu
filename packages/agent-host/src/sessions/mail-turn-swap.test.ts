@@ -317,10 +317,35 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
     expect(b.claude.handles.get(helper)?.sent ?? []).toEqual([])
     const told = read().between('centralu', addressOf(asker), 'notice')
     expect(told).toHaveLength(1)
-    expect(told[0]).toMatchObject({ facts: { unanswered: [{ id: question.id, recipient: addressOf(helper), why: 'cut' }] } })
-    expect(read().row(question.id, addressOf(helper))).toMatchObject({ releasedWhy: 'cut', settled: null })
+    expect(told[0]).toMatchObject({ facts: { unanswered: [{ id: question.id, recipient: addressOf(helper), why: 'lost' }] } })
+    expect(read().row(question.id, addressOf(helper))).toMatchObject({ releasedWhy: 'lost', settled: null })
     // A later start tells nobody again: the turn is closed
     await deliverTo(wireHostMail(b.mgr, store), addressOf(helper))
     expect(read().between('centralu', addressOf(asker), 'notice')).toHaveLength(1)
+  })
+
+  /*
+   * #1916 review: the asker also started the session (`askedBy`), so #698's quit report could tell it of the same cut turn. The task it gave
+   * was reported when its turn ended: the quit report has no open work to go into (`closed`), and the notice is the one word it gets
+   */
+  it('tells an asker that also started the session once, by the notice, not a second time by a quit report', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('first turn')
+    const reports = () => read().between('centralu', addressOf(parent), 'report')
+    await until(() => reports().length === 1)
+    const question = a.m.service.send(addressOf(parent), { to: [addressOf(child)], text: 'what does the build need?' }).message
+    const due = wireHostMail(a.mgr, store, { now: () => Date.now() + 60_000 })
+    await deliverTo(due, addressOf(child))
+    expect(due.turns.current(child)).toMatchObject({ by: 'mail', starter: question.id })
+    await a.mgr.detachAll()
+
+    const b = host()
+    await deliverTo(b.m, addressOf(child))
+    // The quit's notices go out once the start's moment is over
+    await until(() => b.mgr.sessionInfo(child)?.interruption?.reason === 'quit')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(read().between('centralu', addressOf(parent), 'notice')).toEqual([expect.objectContaining({ facts: { unanswered: [{ id: question.id, recipient: addressOf(child), why: 'lost' }] } })])
+    expect(reports()).toHaveLength(1)
   })
 })
