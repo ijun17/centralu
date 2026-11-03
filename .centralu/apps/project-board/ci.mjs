@@ -354,6 +354,8 @@ const FAILS = [
   /\berror\s+TS\d+:/, // tsc
   /^\s*\d+:\d+\s+error\s+/, // eslint
 ]
+/** Whether a log line is a failing test's (or check's) own line: the lines `firstFailure` quotes, not a step's bare error */
+export const isTestFailure = (line) => FAILS.some((re) => re.test(line))
 const BUNDLE_ERROR = /^\s*failed to bundle project:/
 const ERROR = /^\s*(?:→\s+\S|(?:[A-Z]\w*)?Error\b:?|AssertionError|thread '.*' panicked|panicked at|Caused by:|expected\b|failed to bundle project:)/
 
@@ -492,7 +494,7 @@ export function signaturePattern(sig) {
 }
 
 /** The test's own name in a failing line: without FAIL / × and vitest's project label. */
-const testName = (line) =>
+export const testName = (line) =>
   String(line ?? '')
     .replace(/^\s*(?:FAIL|×|✗|✘|❌)\s+/, '')
     .replace(/^\S+\s{2,}(?=\S+\.(?:test|spec)\.)/, '')
