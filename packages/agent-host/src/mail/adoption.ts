@@ -16,7 +16,8 @@ export type AdoptedSession = { askedBy?: string | null; state: SessionInfo['stat
  * 1. **Marks with no task.** A report mark whose caller has no unsettled task to its session gets one, delivered (the old build delivered the work),
  *    with the origin the mark implies (`start_agent` when the caller started the session, else `send_to_session`).
  * 2. **Tasks no mark owes.** An unsettled task from a session to a session the old paths no longer owe (`oldOwes`), whose child is here and not in a
- *    turn and has no undelivered mail from the owner, is settled `reported`, with no report message: the old path told the owner.
+ *    turn and has no undelivered mail from the owner, is settled `reported`, with no report message: the old path told the owner. Mail delivered
+ *    and not read holds nothing (#1458): delivery never gives it again, so a parent would wait on it for good.
  *
  * Neither starts a turn nor wakes anyone. A crash between the old path's write and the task row's is mended at the next `ready` the same way.
  */
