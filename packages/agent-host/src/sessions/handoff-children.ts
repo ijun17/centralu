@@ -24,8 +24,9 @@ export type MovedChild = {
    */
   app?: boolean
   /**
-   * A finished child of the original's own project that it started (#1475): the note and the original's notice say how many there are, not
-   * each of them, since `agent_session` with `list` shows each with its name, handle and state. Any other piece keeps its line
+   * A finished child of the original's own project that it started (#1475), or an unread report of one (a mail message about it): the note and
+   * the original's notice say how many there are, not each of them, since `agent_session` with `list` shows each child with its name, handle and
+   * state and the mail tool's inbox shows each report. Any other piece keeps its line
    */
   folded?: boolean
 }
@@ -41,7 +42,8 @@ const NOT_ATTACHED = 'not attached to you'
  */
 export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): string {
   const work = moved.some((c) => !c.app)
-  const folded = moved.filter((c) => c.folded).length
+  const folded = moved.filter((c) => c.folded && !c.message).length
+  const reports = moved.filter((c) => c.folded && c.message).length
   return [
     '## Work handed over with this note (added by Centralu)',
     '',
@@ -68,7 +70,8 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
     ...(folded > 0
       ? [
           `- ${folded} finished session${folded === 1 ? '' : 's'} — ${SETTLED_CHILD}. agent_session(action="list") lists ${folded === 1 ? 'it' : 'them'} with ${folded === 1 ? 'its' : 'their'} names, handles and states. ` +
-            `${folded === 1 ? 'It answers' : 'They answer'} to you as ${folded === 1 ? 'a session' : 'sessions'} you started: agent_session works on ${folded === 1 ? 'it' : 'each'} (status, wait, send, stop, delete), and a send gives more work, whose report comes to you.`,
+            `${folded === 1 ? 'It answers' : 'They answer'} to you as ${folded === 1 ? 'a session' : 'sessions'} you started: agent_session works on ${folded === 1 ? 'it' : 'each'} (status, wait, send, stop, delete), and a send gives more work, whose report comes to you.` +
+            (reports > 0 ? ` ${reports === 1 ? 'A report' : `${reports} reports`} the previous session had not read came with ${folded === 1 ? 'it' : 'them'} as mail: the mail tool's inbox lists ${reports === 1 ? 'it' : 'them'}.` : ''),
         ]
       : []),
     '',
@@ -251,7 +254,9 @@ export class HandoffChildren {
       return []
     }
     const childCount = moved.length
-    moved.push(...threads.map((t) => movedMessage(t)))
+    // The unread report of a finished child, which is listed as a count, is no line of its own either
+    const foldedSessions = new Set(moved.filter((c) => c.folded).map((c) => c.handle))
+    moved.push(...threads.map((t) => movedMessage(t, t.kind === 'report' && t.about !== undefined && foldedSessions.has(t.about))))
     if (!moved.length) return []
     /*
      * The unread mail that moved waits for the successor. One being created takes it at the end of its first turn, after the note;
@@ -289,7 +294,7 @@ export class HandoffChildren {
     } else {
       // A finished child has no line of its own here: how many there are, and the new session lists them
       const items = moved.filter((c) => !c.folded).map((c) => `${movedLabel(c)} (${c.state})`)
-      const folded = moved.length - items.length
+      const folded = moved.filter((c) => c.folded && !c.message).length
       const finished = `${folded} finished session${folded === 1 ? '' : 's'}`
       this.host.onEvent({
         type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff',
@@ -326,11 +331,11 @@ export class HandoffChildren {
  * A message the handoff moved (#1574, docs/plans/mailbox.md §7.7), as the note lists it: its first line, whether it waits for the successor's
  * answer or report, and what to do with it. The handle is the message's id, for the `mail` tool
  */
-function movedMessage(m: HandedOverMessage): MovedChild {
+function movedMessage(m: HandedOverMessage, folded = false): MovedChild {
   const state = m.kind === 'task' ? 'work given to the previous session, now yours' : m.unread ? 'unread, now waiting for you' : 'waiting for an answer'
   const can =
     m.kind === 'task'
       ? 'The work is yours to do now, and its report goes to whoever gave it. Read it with the mail tool.'
       : 'It was addressed to the previous session and is yours to read and answer now. Read it with the mail tool.'
-  return { handle: m.messageId, name: m.firstLine, state, can, message: true }
+  return { handle: m.messageId, name: m.firstLine, state, can, message: true, ...(folded ? { folded: true } : {}) }
 }

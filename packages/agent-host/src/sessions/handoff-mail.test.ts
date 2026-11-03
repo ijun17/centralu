@@ -196,7 +196,11 @@ describe("a handoff moves the original's mail to the session that took over (#15
     const heir = await handOff(h, project, parent, false)
     expect(read.row(report.id, at(heir))).toMatchObject({ readAt: null, deliveredAt: null })
     expect(read.row(report.id, at(parent))).toBeUndefined()
-    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`mail message "${report.body.split('\n')[0]!.slice(0, 40)}`)
+    // The finished child and its unread report are one count in the note, with no line of their own
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).toContain('1 finished session')
+    expect(note).toContain('A report the previous session had not read came with it as mail')
+    expect(note).not.toContain(report.id)
   })
 
   it('case 5 (guard), a settled child given more work by the successor reports to the successor', async () => {
