@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
+import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -319,6 +320,65 @@ describe('consent per pair of projects, through the card', () => {
     expect(store.permissions.getProjectConsent(alpha, beta, 'apps')).toBeNull()
     void tool(s.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(s.id))
+  })
+})
+
+describe('a handoff carries the attached apps (#1638)', () => {
+  /** The handoff as the window does it: the note on disk, then the successor created from the original */
+  async function handOff(from: SessionInfo, t: ToolName, removesOriginal = false) {
+    await writeHandoffNote(alpha, from.id, 'NOTE BODY')
+    return mgr.createSession({
+      projectId: alpha, cwd: join(root, 'alpha'), tool: t, permissionPreset: 'normal', initialPrompt: 'You are taking over.',
+      handoff: { from: 'Planner', note: 'NOTE BODY', fromSessionId: from.id, ...(removesOriginal ? { removesOriginal: true } : {}) },
+    })
+  }
+
+  async function withTwoApps(t: ToolName) {
+    plantApp(join(root, 'beta', ...PROJECT_APPS), 'ledger', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
+    rt.refresh()
+    allowedBefore()
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    await rpc('apps.setShared', { appId: 'ledger', projectId: beta, shared: true })
+    const s = await create(alpha, t)
+    expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBeFalsy()
+    expect((await tool(s.id, 'attach_app', { app: 'beta/ledger' })).isError).toBeFalsy()
+    return s
+  }
+
+  it.each(['claude', 'codex'] as const)('%s: the successor starts with both apps, their tools callable, the original keeps its own, and the note lists them', async (cli) => {
+    const adapter = cli === 'claude' ? claude : codex
+    const s = await withTwoApps(cli)
+    const original = adapter.last()
+    const heir = await handOff(s, cli)
+
+    const opened = adapter.last()
+    expect(opened.sessionId).toBe(heir.id)
+    expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
+    expect((await opened.apps!.call('app-ledger', 'peek', {})).isError).toBe(false)
+    // A copy: the original keeps its own, and detaching there leaves the successor's alone
+    expect(servers(original)).toEqual(['app-board', 'app-ledger'])
+    expect(await tool(s.id, 'detach_app', { app: 'beta/board' })).toMatchObject({ isError: false })
+    expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
+    const note = readFileSync(handoffNotePath(alpha, s.id), 'utf8')
+    expect(note).toContain('The previous session had these apps attached. They are attached to you too')
+    expect(note).toContain('- app "beta/board" — attached to you too — handle: app-board.')
+    expect(note).toContain('- app "beta/ledger" — attached to you too — handle: app-ledger.')
+  })
+
+  it('a successor of a session that attached nothing gets no apps section', async () => {
+    const s = await create(alpha, 'claude')
+    await handOff(s, 'claude')
+    expect(readFileSync(handoffNotePath(alpha, s.id), 'utf8')).toBe('NOTE BODY')
+  })
+
+  it('keeps the apps with the original when it goes, and the successor holds them under its own trust', async () => {
+    const s = await withTwoApps('claude')
+    const heir = await handOff(s, 'claude', true)
+    expect(servers(claude.last())).toEqual(['app-board', 'app-ledger'])
+    // Revoking the pair's consent takes them from the successor as from any session that attached them
+    await rpc('projectConsents.revoke', { fromProjectId: alpha, toProjectId: beta, kind: 'apps' })
+    await waitFor(() => servers(claude.last())!.length === 0)
+    expect(mgr.listSessions().some((x) => x.id === heir.id)).toBe(true)
   })
 })
 

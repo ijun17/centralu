@@ -145,27 +145,53 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(false)
   })
 
-  it('leaves a settled child with an original that stays and lists only the moved ones in the note', async () => {
+  it('moves a settled child with the live ones when the original stays, and lists both in the note (#1475)', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
+    h.mgr.rename(settled, 'Quick check')
     h.claude.handles.get(settled)!.answer('checked')
     await eventually(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const live = await startChild(h, parent, 'long work')
     h.mgr.rename(live, 'Port the parser')
     const heir = await handOff(h, project, parent, false)
 
-    expect(owner(settled)).toBe(parent)
+    expect(owner(settled)).toBe(heir)
     expect(owner(live)).toBe(heir)
     const note = readFileSync(handoffNotePath(project, parent), 'utf8')
     expect(note).toContain('Work handed over with this note')
     expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you. agent_session works on it as on a session you started`)
-    expect(note).not.toContain(settled)
+    expect(note).toContain(`"Quick check" — finished; waiting for more work — handle: ${settled}. Give it more work with agent_session (send)`)
     // The note the person wrote follows, whole; the marker keeps the same text
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
     expect(marker(heir)?.note).toBe(note)
     expect(store.children.listReportMarks()).toEqual([{ sessionId: live, callerSessionId: heir }])
-    expect(await h.mgr.agentSession(parent, { sessionId: settled, action: 'status' })).toMatchObject({ ok: true, sessionId: settled })
+    // The original is told, and asking about the child says where it went
+    expect(events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: parent, text: expect.stringContaining('"Quick check"') }))
+    expect(await h.mgr.agentSession(parent, { sessionId: settled, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('took over from this one') })
+  })
+
+  it('lets the new session list and archive the finished children of an original that stays, and still refuses a session the original did not start (#1475)', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const finished: string[] = []
+    for (const name of ['First job', 'Second job']) {
+      const child = await startChild(h, parent, name)
+      h.claude.handles.get(child)!.answer('done')
+      await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
+      finished.push(child)
+    }
+    const working = await startChild(h, parent, 'long work')
+    const stranger = (await h.mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const heir = await handOff(h, project, parent, false)
+
+    const listed = (await h.mgr.runOrchestratorTool(heir, 'agent_session', { action: 'list' })).text
+    for (const id of [working, ...finished]) expect(listed).toContain(id)
+    expect(listed).not.toContain(stranger)
+    expect(await h.mgr.agentSession(heir, { sessionId: finished[0]!, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+    expect(h.mgr.listSessions().some((s) => s.id === finished[0])).toBe(false)
+    expect(await h.mgr.agentSession(heir, { sessionId: stranger, action: 'delete' })).toMatchObject({ ok: false })
+    expect(h.mgr.listSessions().some((s) => s.id === stranger)).toBe(true)
   })
 
   it('names a child blocked on a question as waiting on one in the note (#428)', async () => {
@@ -201,17 +227,17 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(store.children.listReportMarks()).toEqual([])
   })
 
-  it('moves nothing and leaves the note alone when every child is settled', async () => {
+  it('moves a settled child even when nothing else is live (#1475), and says so in the note', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
     h.claude.handles.get(settled)!.answer('checked')
     await eventually(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const heir = await handOff(h, project, parent, false)
-    expect(owner(settled)).toBe(parent)
-    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
-    expect(marker(heir)?.note).toBe('NOTE BODY: where things stand')
-    expect(events.filter((e) => e.type === 'session_owner')).toEqual([])
+    expect(owner(settled)).toBe(heir)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`finished; waiting for more work — handle: ${settled}.`)
+    expect(marker(heir)?.note).toContain(settled)
+    expect(events.filter((e) => e.type === 'session_owner')).toEqual([expect.objectContaining({ sessionId: settled, askedBy: heir })])
   })
 
   it('moves a request the original queued for a busy child: it is delivered as the new session\'s turn', async () => {
