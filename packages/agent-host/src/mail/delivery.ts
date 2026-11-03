@@ -1,10 +1,9 @@
 import { errorMessage } from '@cc/protocol'
-import type { MailRecords, MessageRow, ReceiptRow } from '../dev-services/store/mail.js'
+import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, parseAddress } from './address.js'
-import { needsReceiver } from './rules.js'
-import { holdsInbound } from './policy.js'
+import { HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE, HOUR_MS, needsReceiver } from './rules.js'
 import type { MailTurns } from './turns.js'
-import type { DrainOptions, MailService } from './service.js'
+import type { DrainOptions, DrainResult, MessageService } from './messages.js'
 
 /**
  * Waking is the mailbox's job (docs/plans/mailbox.md §5): a sender only posts, and `MailDelivery` hands each receiver its mail.
@@ -25,7 +24,7 @@ export type ReceiverState =
   /**
    * At rest: idle or in error (woken the same way). `live` is whether its process runs; asleep, it is
    * resumed. `quiet`: it can take mail without a turn, which is a live process of a tool that takes quiet input (Claude). `auto`: it
-   * runs without asking, so mail from another session or an app is held, not a reason to wake it (§7.7)
+   * runs without asking; since mail without threads nothing is held for that (D10), and the field stays for the receiver's other readers
    */
   | { kind: 'ready'; live: boolean; quiet: boolean; auto?: boolean }
 
@@ -48,7 +47,7 @@ export type MailInput = {
   /** The compact line the conversation keeps of it (§9.2), in Centralu's words */
   line: string
   /**
-   * The turn this starts is the work of a thread the session is the assignee of, owned by this session (§6): the end of the turn is reported to it,
+   * The turn this starts is the work of a task this session gave, or of its request to the orchestrator (§7.6): the end of the turn is reported to it,
    * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
    */
   reportTo?: string
@@ -79,10 +78,11 @@ export type MailDeliveryOptions = {
   maxRetryMs?: number
   /** After this many failed tries mail is held for the person (Inbox: Retry) */
   maxAttempts?: number
-  /** The loop and token guards (§7.9); without them mail is held by nothing but the receiver's policy */
+  /** The turns mail starts, the pair loop and token guards and the host-wide cap (§7.5); without them nothing is counted or held by them */
   turns?: MailTurns
-  /** Whether a session's project is one nobody trusted: its requests to the orchestrator are held until the person releases them (§9.7). Without it none is */
-  untrustedAsker?: (senderAddress: string) => boolean
+  /** Mail-started turns an hour on the host, and the share of them a session keeps (§7.5) */
+  hostCap?: number
+  hostShare?: number
   /** When the delivery last ran, kept by the host: how long it was off tells how to start (§7.9) */
   heartbeat?: { read(): number | null; write(ms: number): void }
   /** A host that was off longer than this wakes a sleeping session only for mail that needs it (30 minutes) */
@@ -93,15 +93,14 @@ export type MailDeliveryOptions = {
   resumeAtOnce?: number
 }
 
-const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2 }
+const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2, hostCap: HOST_MAIL_TURNS_PER_HOUR, hostShare: HOST_SHARE }
 
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'untrustedAsker'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns'>>
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
   private readonly turns: MailTurns | undefined
-  private readonly untrustedAsker: MailDeliveryOptions['untrustedAsker']
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
   private readonly inFlight = new Set<string>()
   private readonly again = new Set<string>()
@@ -109,6 +108,8 @@ export class MailDelivery {
   private readonly timers = new Map<string, () => void>()
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
+  /** Until when a mailbox's wake waits for the host-wide cap, as last said in the log: the sweep tries it again meanwhile, and says nothing new */
+  private readonly capUntil = new Map<string, number>()
   /**
    * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A sleeping session is then woken only for mail that
    * needs it, among what came due before; the rest waits for its next turn. Null in a host that was running a moment ago
@@ -127,8 +128,8 @@ export class MailDelivery {
   private running = false
 
   constructor(
-    private readonly service: MailService,
-    private readonly records: MailRecords,
+    private readonly service: MessageService,
+    private readonly records: MailboxRecords,
     private readonly sessions: MailSessions,
     opts: MailDeliveryOptions = {},
   ) {
@@ -141,9 +142,8 @@ export class MailDelivery {
         return () => clearTimeout(t)
       })
     this.heartbeat = opts.heartbeat
-    this.untrustedAsker = opts.untrustedAsker
     this.turns = opts.turns
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'untrustedAsker')) }
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns')) }
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -214,11 +214,13 @@ export class MailDelivery {
     }
     this.lastSweepAt = now
     this.moveOnWorkOfGoneSessions()
-    const recipients = this.records.recipientsWithMail()
+    const recipients = this.records.dueRecipients()
     if (this.catchUpPending) {
       this.catchUpPending = false
       await this.catchUp(recipients)
     } else await this.processAll(recipients)
+    // Mail not due yet (moved at ready, or a debounce no event will end) is looked at when it is
+    for (const r of recipients) this.look(r)
     // After the catch-up, so a host that stops while the crowd waits is read as it was when it started (a restart asks again)
     if (!this.crowd) this.heartbeat?.write(now)
   }
@@ -251,7 +253,7 @@ export class MailDelivery {
       const state = this.sessions.receiver(party.sessionId)
       if (state.kind === 'ready' && !state.live) {
         const d = this.service.drain(recipient, { skip: this.skipOld })
-        if (d.messageIds.length > 0) asleep.push({ recipient, rank: d.immediate ? 0 : d.asks ? 1 : 2 })
+        if (d.messageIds.length > 0) asleep.push({ recipient, rank: d.immediate ? 0 : d.needsReply ? 1 : 2 })
       } else awake.push(recipient)
     }
     asleep.sort((a, b) => a.rank - b.rank)
@@ -287,23 +289,23 @@ export class MailDelivery {
   }
 
   /** For a session in the crowd or left for its next turn: everything but the person's words written since the host came back */
-  private readonly skipUnlessPersonSince = (message: MessageRow, receipt: ReceiptRow): boolean =>
-    message.sender !== PERSON || (this.cutoff !== null && receipt.dueAt <= this.cutoff)
+  private readonly skipUnlessPersonSince = (message: MailRow, row: RecipientRow): boolean =>
+    message.sender !== PERSON || (this.cutoff !== null && row.dueAt <= this.cutoff)
 
-  /** What a host that was off a long while does not wake a sleeping session for (`cutoff`) */
-  private readonly skipOld = (message: MessageRow, receipt: ReceiptRow): boolean =>
-    this.cutoff !== null && receipt.dueAt <= this.cutoff && !needsReceiver(parseAddress(message.sender)?.kind ?? 'session', message)
+  /** What a host that was off a long while does not wake a sleeping session for (`cutoff`): what came due before and needs no one */
+  private readonly skipOld = (message: MailRow, row: RecipientRow): boolean =>
+    this.cutoff !== null && row.dueAt <= this.cutoff && !needsReceiver(message)
 
   /**
-   * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `sessionGone`,
-   * or the call failed) still holds work: it is moved on now (§3.3). Cheap: only the owners and assignees of open threads
+   * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `partyGone`, or the call
+   * failed) still holds watched mail: it is settled now (§7.7). Cheap: only the parties of watched rows not settled
    */
   private moveOnWorkOfGoneSessions(): void {
-    for (const address of this.records.partiesOfOpenThreads()) {
+    for (const address of this.records.openParties()) {
       const party = parseAddress(address)
       if (party?.kind !== 'session' || this.sessions.receiver(party.sessionId).kind !== 'gone') continue
       try {
-        this.service.sessionGone(party.sessionId)
+        this.service.partyGone(address)
       } catch (e) {
         console.error(`[mail] ${address}: the work it held could not be moved on (${errorMessage(e)})`)
       }
@@ -315,13 +317,13 @@ export class MailDelivery {
     const attempts = this.records.attemptsOf(recipient, messageIds)
     if (attempts >= this.o.maxAttempts) {
       this.records.transaction(() => {
-        this.records.failAttempt(recipient, messageIds, error, this.now())
-        this.hold(recipient, messageIds, 'failed')
+        this.records.failedTry(recipient, messageIds, error, this.now())
+        this.service.hold(recipient, messageIds.map((messageId) => ({ messageId, reason: 'failed' })))
       })
       return
     }
     const retryIn = Math.min(this.o.maxRetryMs, this.o.retryBaseMs * 2 ** Math.max(0, attempts - 1))
-    this.records.transaction(() => this.records.failAttempt(recipient, messageIds, error, this.now() + retryIn))
+    this.records.transaction(() => this.records.failedTry(recipient, messageIds, error, this.now() + retryIn))
     this.look(recipient)
   }
 
@@ -329,7 +331,7 @@ export class MailDelivery {
    * The tool failed a wake after the wait for it ran out and the wake was counted as taken (§7.6.2). Counted as taken, the mail was
    * delivered and read; failed, it must not stay so. It is not sent again by itself, though: a failure told this late (the session was
    * stopped or closed, a turn that took the input among others ended in an error) does not prove the tool never ran it, and sending
-   * work twice is worse than asking. So it is treated as a restart's uncertain delivery (§7.6.5, `MailService.deliveryFailedLate`): unread
+   * work twice is worse than asking. So it is treated as a restart's uncertain delivery (§7.6.5, `MessageService.deliveryFailedLate`): unread
    * and undelivered again, held `uncertain` for the person (Inbox: Send again), said in the thread to the sender and in the receiver's
    * conversation, and never sent again by itself, unless it is news that starts no work. Only the receipts that wake delivered:
    * mail delivered again since by another wake, handled, or held is left alone
@@ -368,6 +370,11 @@ export class MailDelivery {
     const now = this.now()
     // Mail already due is delivered now; mail that falls due later is looked at then
     if (this.records.hasDue(recipient, now)) void this.process(recipient)
+    this.lookLater(recipient, now)
+  }
+
+  /** Looks at a mailbox again when its next mail falls due: what the sweep and an event leave for later (a move's rows, a debounce) */
+  private lookLater(recipient: string, now: number): void {
     const due = this.records.nextDue(recipient, now)
     if (due === null) return
     this.timers.get(recipient)?.()
@@ -417,18 +424,21 @@ export class MailDelivery {
     const now = this.now()
     const plan = this.records.transaction(() => {
       const skip = waiting ? this.skipUnlessPersonSince : state.live ? undefined : this.skipOld
-      const drained = this.service.drain(recipient, { ...(skip ? { skip } : {}), ...this.guardsFor(recipient, state) })
-      if (drained.heldBack.length > 0) this.records.transaction(() => this.holdBack(recipient, drained.heldBack))
+      const drained = this.service.drain(recipient, { ...(skip ? { skip } : {}), ...this.guardsFor(recipient) })
+      this.service.hold(recipient, drained.heldBack)
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
       // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9)
       if (drained.wake && !drained.immediate) {
         const gap = (this.lastWake.get(recipient) ?? -Infinity) + this.o.minWakeGapMs - now
         if (gap > 0) return { drained, go: false as const, waitMs: gap }
       }
+      // The host-wide cap (§7.5): a wake that would start a turn waits while the host is over it and its receiver over its share
+      const capWait = drained.wake ? this.overHostCap(recipient, sessionId, drained, now) : 0
+      if (capWait > 0) return { drained, go: false as const, waitMs: capWait }
       // Quiet mail goes into a process that takes it; asleep, or in a tool that cannot, it waits for the next wake, which carries it.
       // What was to be told of and held (a policy, a spent budget) is listed for the person now: no wake may come to carry it
       if (!drained.wake && !state.quiet) {
-        this.holdBack(recipient, drained.quieted)
+        this.service.hold(recipient, drained.quieted)
         return { drained, go: false as const, waitMs: 0 }
       }
       this.records.markAttempt(recipient, drained.messageIds, now)
@@ -442,12 +452,12 @@ export class MailDelivery {
     const quiet = !drained.wake
 
     // A turn mail starts is known before the session's first event of it, and forgotten if the tool does not take the input
-    const turn = quiet ? undefined : this.turns?.begin(sessionId, drained.workThread ?? drained.threads[0] ?? null)
+    const turn = quiet ? undefined : this.turns?.begin(sessionId, { workMessage: drained.workMessage, starter: this.starterOf(drained), asker: drained.asker })
     const cancelTurn = () => {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }
     const delivered: { at?: number } = {}
-    const reportTo = quiet ? undefined : this.reportTarget(recipient, drained.workThread, drained.messageIds)
+    const reportTo = quiet ? undefined : this.reportTarget(recipient, drained)
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, ...(reportTo ? { reportTo } : {}) }, (e) => {
         cancelTurn()
@@ -457,7 +467,7 @@ export class MailDelivery {
     } catch (e) {
       cancelTurn()
       if (e instanceof MailNotAtRest) {
-        this.records.undoAttempt(recipient, drained.messageIds)
+        this.records.takeBack(recipient, drained.messageIds)
         return
       }
       this.failedTry(recipient, drained.messageIds, errorMessage(e))
@@ -467,19 +477,12 @@ export class MailDelivery {
     const deliveredAt = this.now()
     delivered.at = deliveredAt
     this.records.transaction(() => {
-      // A turn it started has begun (no work thread, no move, for mail that starts none): the thread it is the work of is running from here (§3.3)
-      try {
-        this.service.turnStarted(recipient, drained.workThread, drained.messageIds)
-      } catch (e) {
-        // The input is in: a failure here must not roll the delivery back and send it twice (§7.6.5)
-        console.error(`[mail] could not move the thread of a turn that began in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
-      }
+      // Delivered in the turn this began, or quietly into the one running (§8.2): the rows name it, which the pair guard and a request's end read
+      this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
       // Told of and held is not read: the person finds it in the Inbox, with Release, until they have seen it
       const heldIds = new Set(drained.quieted.map((q) => q.messageId))
-      this.records.markDelivered(recipient, drained.messageIds, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
-      for (const reason of new Set(drained.quieted.map((q) => q.reason))) {
-        this.hold(recipient, drained.quieted.filter((q) => q.reason === reason).map((q) => q.messageId), reason)
-      }
+      this.records.markRead(recipient, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
+      this.service.hold(recipient, drained.quieted)
     })
     if (!quiet) this.lastWake.set(recipient, this.now())
     // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
@@ -491,74 +494,92 @@ export class MailDelivery {
     }
   }
 
-  /** The session that gave the work a turn of this delivery is, if a session did: its end is that session's to hear (§6) */
-  private reportTarget(recipient: string, workThread: string | null, messageIds: readonly string[]): string | undefined {
-    const thread = workThread === null ? undefined : this.records.thread(workThread)
-    if (!thread || thread.assignee !== recipient || !this.service.givesWork(thread, messageIds)) return undefined
-    const owner = parseAddress(thread.owner)
-    return owner?.kind === 'session' ? owner.sessionId : undefined
+  /**
+   * The session whose work the turn this delivery starts is, if a session's: the sender of its task (an answer to a clarification included, §9.7),
+   * or for the orchestrator the session asking (§7.6). Its end is that session's to hear
+   */
+  private reportTarget(recipient: string, drained: Pick<DrainResult, 'workMessage' | 'asker'>): string | undefined {
+    const work = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
+    const from = drained.asker ?? (work?.kind === 'task' && this.records.recipient(work.id, recipient) ? work.sender : undefined)
+    const party = from === undefined ? undefined : parseAddress(from)
+    return party?.kind === 'session' ? party.sessionId : undefined
   }
 
-  /** What the receiver's guards say about its mail (§7.7, §7.9) */
-  private guardsFor(recipient: string, state: { auto?: boolean }): Pick<DrainOptions, 'quiet' | 'holdBack'> {
+  /**
+   * The message that starts the turn a wake begins (§8.2): its work message, else the person's words when it carries them (the person's word resets
+   * the depth and counts toward no guard, D9, D13), else its first item
+   */
+  private starterOf(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): string | null {
+    return drained.workMessage ?? drained.messageIds.find((id) => this.records.message(id)?.sender === PERSON) ?? drained.messageIds[0] ?? null
+  }
+
+  /**
+   * How long a wake waits for the host-wide cap (§7.5), or 0. Over `hostCap` mail-started turns on the host in the hour, a wake waits when its
+   * receiver had its share (`hostShare`) and it carries neither the person's words nor a report. It is tried again once the receiver's oldest counted
+   * turn leaves the hour, and the person is told once an hour while the cap applies
+   */
+  private overHostCap(recipient: string, sessionId: string, drained: Pick<DrainResult, 'messageIds'>, now: number): number {
+    if (!this.turns) return 0
+    const since = now - HOUR_MS
+    if (this.turns.mailStartedSince(since) < this.o.hostCap || this.turns.mailStartedSince(since, sessionId) < this.o.hostShare) return 0
+    if (drained.messageIds.some((id) => {
+      const m = this.records.message(id)
+      return m?.sender === PERSON || m?.kind === 'report'
+    })) return 0
+    this.service.notice(PERSON, {
+      body: `Mail between sessions started ${this.o.hostCap} turns in the last hour; more wait until the hour has room.`,
+      facts: { hostCap: true },
+      dedupeKey: `hostcap:${PERSON}:${Math.floor(now / HOUR_MS) * HOUR_MS}`,
+    })
+    const until = (this.records.oldestMailStartedSince(since, sessionId) ?? now) + HOUR_MS
+    if (this.capUntil.get(recipient) !== until) console.error(`[mail] ${recipient}: the host has had ${this.o.hostCap} mail-started turns this hour; its mail waits`)
+    this.capUntil.set(recipient, until)
+    return Math.max(1_000, until - now)
+  }
+
+  /** What the receiver's guards say about its mail (§7.5): a pair whose mail ran away is held `loop`, a session over its budget is not woken */
+  private guardsFor(recipient: string): Pick<DrainOptions, 'quiet' | 'holdBack'> {
     const session = parseAddress(recipient)
     const spent = this.turns && session?.kind === 'session' && this.turns.budgetSpent(session.sessionId)
     return {
-      holdBack: (message, receipt, thread) => {
-        // The person's words and Centralu's own are never held (a report is not a session answering a session: a turn that ends sends one
-        // however many a thread has had), and mail the person released has been looked at
-        if (!this.turns || receipt.held === 'released' || message.sender === PERSON || message.sender === CENTRALU) return null
-        return this.turns.loopSpent(thread.id) ? 'loop' : null
+      holdBack: (message, row) => {
+        // The person's words and Centralu's own are never held (a report is not a session answering a session), and mail the person released has
+        // been looked at. Only two sessions make a pair
+        if (!this.turns || row.held === 'released' || parseAddress(message.sender)?.kind !== 'session') return null
+        return this.turns.pairLoopSpent(recipient, message.sender) ? 'loop' : null
       },
-      quiet: (message, receipt, thread) => {
-        // The person's words and Centralu's own are never held. Another session's or an app's, to a session that runs without asking,
-        // is told of and never a reason to wake it, until the person releases it
-        if (state.auto && receipt.held !== 'released' && holdsInbound(message, thread)) return 'policy'
-        // A request to the orchestrator from a session of a project nobody trusted may be planted text: it waits for the person's Release, whatever the orchestrator's preset (§9.7)
-        // (the session that asked, not the thread's owner now: a session in the trash left the thread to the person, and its words are its still)
-        const asker = receipt.held !== 'released' ? this.service.requestedBy(thread) : undefined
-        if (asker !== undefined && message.sender === this.service.sessionAddress(asker) && this.untrustedAsker?.(message.sender)) return 'policy'
-        // A session whose mail has used up its budget is told of what comes, and not woken for it (Centralu's own are never held)
-        if (spent && receipt.held !== 'released' && message.sender !== PERSON && message.sender !== CENTRALU) return 'budget'
+      quiet: (message, row) => {
+        // A session whose mail has used up its budget is told of what comes, and not woken for it (the person's and Centralu's are never held)
+        if (spent && row.held !== 'released' && message.sender !== PERSON && message.sender !== CENTRALU) return 'budget'
         return null
       },
     }
   }
 
-  private holdBack(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
-    for (const reason of new Set(held.map((h) => h.reason))) {
-      this.hold(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
-    }
-  }
-
-  /** Mail held for the person to act on: written, and the Inbox is told (it lists it with the button that frees it) */
-  private hold(recipient: string, messageIds: readonly string[], reason: string): void {
-    this.records.setHeld(recipient, messageIds, reason)
-    this.service.announceMessages(messageIds)
-  }
-
   /** The question about sleeping sessions came up, or was answered or went away: the Inbox is told */
   private crowdChanged(): void {
-    this.service.announce('')
+    this.service.announce()
   }
 
   /** The person pressed Resume on a session whose mail was paused for its budget: counted anew, and what was held goes now */
   resumeSession(sessionId: string): void {
     this.turns?.resumeBudget(sessionId)
     const recipient = this.service.sessionAddress(sessionId)
-    this.releaseHeld((r) => r.recipient === recipient && r.held === 'budget')
+    const ids = this.records.heldRows().flatMap((r) => (r.recipient === recipient && r.held === 'budget' ? [r.messageId] : []))
+    if (ids.length > 0) this.service.resendHeld(recipient, ids, ['budget'])
   }
 
-  /** The person pressed Resume on a thread paused for its turns: counted from now, and what was held goes now */
-  resumeThread(threadId: string): void {
-    this.turns?.resumeLoop(threadId)
-    this.releaseHeld((r) => r.held === 'loop' && this.records.message(r.messageId)?.threadId === threadId)
-  }
-
-  private releaseHeld(which: (r: ReceiptRow) => boolean): void {
-    const byRecipient = new Map<string, string[]>()
-    for (const r of this.records.heldReceipts().filter(which)) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), r.messageId])
-    for (const [recipient, ids] of byRecipient) this.service.resendHeld(recipient, ids)
+  /**
+   * The person pressed Resume on a chain whose mail was paused (`mail.resume`, §12.1): each pair with mail held `loop` in that chain is counted from
+   * now, and each row held `loop` goes and is not held again, for its pair or its depth (§7.5): the person's word on that chain
+   */
+  resumeRoot(rootId: string): void {
+    const rows = this.records.heldRows().filter((r) => r.held === 'loop' && this.records.message(r.messageId)?.rootId === rootId)
+    for (const r of rows) {
+      const sender = this.records.message(r.messageId)?.sender
+      if (sender) this.turns?.resumePair(r.recipient, sender)
+    }
+    for (const id of new Set(rows.map((r) => r.messageId))) this.service.resumeDepth(id)
   }
 
   /** Looks at the mailbox again after `ms` */

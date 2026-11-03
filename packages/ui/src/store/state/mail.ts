@@ -20,12 +20,8 @@ export type MailSlice = {
   closeMailThread: () => void
   /** The person's words in the open thread; true when it was sent, false (with the host's words in a toast) when it was refused */
   replyMail: (text: string, kind?: 'note' | 'answer' | 'question') => Promise<boolean>
-  /** Closes the open thread with an outcome */
+  /** Closes the open thread: Mark done (`finished`) or Drop (`dropped`). A session working on it is stopped and told (the host's close, 3.10) */
   closeMail: (outcome?: 'finished' | 'failed' | 'stopped' | 'dropped') => Promise<boolean>
-  /** Resolves one blocker of the open thread */
-  unblockMail: (n: number) => Promise<boolean>
-  /** Gives the open thread to another session */
-  reassignMail: (sessionId: string, text: string) => Promise<boolean>
   /** Sends held mail now, or lets it go */
   heldMail: (action: 'release' | 'dismiss', row: Pick<MailHeldRow, 'recipient' | 'messageId'>) => Promise<boolean>
   /** Lifts a pause for a session's budget, or a thread's turns */

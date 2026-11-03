@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MailParty } from '@cc/protocol'
-import { canGiveWorkTo, crowdText, heldLabel, heldResume, partyName, replyKind, threadStateLabel } from './mailLabels.js'
+import { crowdText, heldLabel, heldResume, partyName, replyKind, threadStateLabel } from './mailLabels.js'
 
 const party = (over: Partial<MailParty>): MailParty => ({ address: 'x', kind: 'session', sessionId: null, name: null, state: null, ...over })
 
@@ -17,7 +17,10 @@ describe('naming the parties', () => {
 
 describe('the thread’s state', () => {
   it('is a word, with how it ended when it is done and did not finish, and a word a newer host wrote as it wrote it', () => {
+    expect(threadStateLabel({ state: 'running', outcome: null })).toBe('Running')
     expect(threadStateLabel({ state: 'review', outcome: null })).toBe('In review')
+    // Blockers went with threads: an older host's word is shown as it wrote it, not as a state this window has
+    expect(threadStateLabel({ state: 'blocked', outcome: null })).toBe('blocked')
     expect(threadStateLabel({ state: 'done', outcome: 'finished' })).toBe('Done')
     expect(threadStateLabel({ state: 'done', outcome: 'dropped' })).toBe('Done (dropped)')
     expect(threadStateLabel({ state: 'parked', outcome: null })).toBe('parked')
@@ -42,18 +45,6 @@ describe('held mail', () => {
     expect(heldResume({ reason: 'budget', threadId: 't1', recipient })).toEqual({ sessionId: 's1' })
     expect(heldResume({ reason: 'budget', threadId: 't1', recipient: party({}) })).toBeNull()
     expect(heldResume({ reason: 'failed', threadId: 't1', recipient })).toBeNull()
-  })
-})
-
-describe('who work can be given to', () => {
-  it('is an ordinary session of this computer in a project; not the orchestrator, a coordinator, a builder, an app’s agent or another machine’s', () => {
-    expect(canGiveWorkTo({ kind: 'worker', projectId: 'p1' })).toBe(true)
-    expect(canGiveWorkTo({ kind: 'worker', projectId: 'p1', appId: null, machine: null })).toBe(true)
-    expect(canGiveWorkTo({ kind: 'orchestrator', projectId: null })).toBe(false)
-    expect(canGiveWorkTo({ kind: 'coordinator', projectId: 'p1' })).toBe(false)
-    expect(canGiveWorkTo({ kind: 'worker', projectId: 'p1', appId: 'board' })).toBe(false)
-    expect(canGiveWorkTo({ kind: 'worker', projectId: 'p1', machine: 'laptop' })).toBe(false)
-    expect(canGiveWorkTo({ kind: 'worker', projectId: null })).toBe(false)
   })
 })
 

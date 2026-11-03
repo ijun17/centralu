@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 and v66. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v67. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -104,6 +104,20 @@ export class StepsV65 extends MigrationRange {
          */
         run: () => {
           this.db.exec(`CREATE INDEX IF NOT EXISTS mail_recipients_held ON mail_recipients(held) WHERE held IS NOT NULL`)
+        },
+      },
+      {
+        to: 67,
+        breaksOlderReaders: false,
+        /**
+         * The person's window numbers a chain's messages (docs/plans/mailbox.md §12, Q-M3a-26) and pages by those numbers (`after`): a number
+         * must never name a second message, and `mail`'s rowid does (SQLite gives a deleted top row's number to the next row). Each message
+         * gets its number here the first time the window reads its chain, in the order stored, and `AUTOINCREMENT` never gives one twice.
+         *
+         * **Expand only (#292's rule).** One table; an older build never names it.
+         */
+        run: () => {
+          this.db.exec(`CREATE TABLE IF NOT EXISTS mail_numbers (n INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL UNIQUE)`)
         },
       },
     ]

@@ -315,7 +315,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   - A `task` row is never released: it covers only while it is unsettled (and, until M8, still owed by the old paths),
     because a task that runs long is working, not unanswered.
 - **D26. Mail moved from threads is never reminded or awaited** (settled `legacy`). An update must not wake a crowd
-  of sessions over questions from before it.
+  of sessions over questions from before it. A moved question still shows its recipient that it waits for a reply (Q-M3a-32).
 
 ### 1.5 Tools, store, the person
 
@@ -559,6 +559,11 @@ named again on trust** (D12, Q7 (b)). Left:
    Recommended: the proposals as written. One effect to know: until M7 copies the last 30 days, the new Inbox feed
    shows no mail from before the switch; an old thread is reached only by opening a moved message (its chain reads the
    thread, `legacyChain`, §6.3).
+2. **Q8. The word `orchestrator` on a linked machine.** The orchestrator lives on the hub. A session on a linked
+   machine that sends to `orchestrator` is refused "there is no orchestrator to ask yet", and neither §11.1's
+   `resolveTo` nor §14 says whether the word reaches the hub's orchestrator through the link. No code before this
+   is decided.
+
 Q6 (the label's lifetime) is gone with the label (D11). Q7 (a delegation from an untrusted project) is decided as
 option (b), refuse and tell on trust (D12, §7.4).
 
@@ -827,8 +832,9 @@ replaced is gone. A host that fails before its ready line falls back to the olde
 so the move never runs during startup. In one transaction:
 
 1. Read every `mail_receipts` row that is pending: `handled_at IS NULL`, not `held = 'dismissed'` (the person said
-   never), and either `delivered_at IS NULL`, or `read_at IS NULL` on a `question` or `assign` (an old message that
-   waited for its reader), with `created_at` within retention (180 days). Joined to its message and thread. (M1: a
+   never), and `delivered_at IS NULL`, or `read_at IS NULL` (any kind: an answer or a report delivered and not read
+   yet is still unread after the switch), or a `question` (read and not answered: `reply` on its thread still
+   answers it), with `created_at` within retention (180 days). Joined to its message and thread. (M1: a
    handled receipt is done in the v61 build, delivered or not, so it is not moved.)
 2. For each such message, `INSERT OR IGNORE INTO mail` with the mapping below, and its receipt into
    `mail_recipients` with `settled = 'legacy'` (never awaited or reminded, D26).
@@ -845,7 +851,8 @@ tables, so nothing in them is pending a second time, and what is not pending sta
 **The mapping**, for a message `m` of thread `t`:
 
 - `id = m.id`, `sender = m.sender`, `urgent = m.urgent`, `body = m.body`, `created_at = m.created_at`;
-- `sender_project = t.project_id` when `m.sender` is the thread's owner and a session, else null;
+- `sender_project`: for a session's message, the session's project (the old tool never wrote `t.project_id`), else
+  `t.project_id` when `m.sender` is the thread's owner; null for anyone else. The one hold judges it at drain;
 - `kind`: `assign` becomes `task` when `t.origin` is in `DELEGATION_ORIGINS` or is `person`, else `message`;
   `question` becomes `message` with `needs_reply = 1`; `answer` and `note` become `message` with `needs_reply = 0`;
   `report` stays `report`; `notice` and `event` become `notice`;
@@ -858,9 +865,19 @@ tables, so nothing in them is pending a second time, and what is not pending sta
   `cause_id` null, `depth` 0.
 
 For the receipt: `attempt_at`, `delivered_at`, `read_at` as the receipt has them (`read_at = COALESCE(r.read_at,
-r.handled_at)`); `held` only for `uncertain`, `failed`, `loop` and `budget` (an old `policy` hold is re-decided by
-§7.4 at drain), and the person's `released` (their Resend of a `policy` or `budget` hold: sent as it is, never held
-again).
+r.handled_at)`); `held` as it is for every recipient hold (`uncertain`, `failed`, `loop`, `budget` and `policy`, told
+of or not: the move releases nothing held), and the person's `released` (their Resend of a `policy` or `budget`
+hold: sent as it is, never held again).
+
+**One transaction, not chunked.** The move blocks the host once, after its ready line: measured at 0.74 s for 20,000
+pending receipts and 3.8 s for 100,000. It runs on the first start of the switch build only (a second finds nothing),
+and chunks would let a tool call or the delivery see a thread half moved (a `reply` to an old thread whose message is
+not moved yet is refused `unknown_message`). A store that old builds left with that many pending receipts is not
+expected; one transaction keeps the move all or nothing.
+
+**An app's moved mail.** No record of an app's callers exists before the apps' mail API (§13), but the old thread
+the app wrote into was one: `appCalledBy(app, session)` is true when a message of the app moved from an old thread has
+a row for that session, so that mail is delivered and nothing new is allowed.
 
 **A moved request** (round 5). A moved pending message from a session to the orchestrator is a request by §7.6 like
 any other: settled `legacy` changes what is awaited, not what is work. So it is a work candidate for `pickWork`, its
@@ -1030,7 +1047,7 @@ message.
 
 | Guard today | Keep? | Becomes | Why |
 |---|---|---|---|
-| — (new, F3) | **add** | **Cascade depth:** a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` is held `loop`. **Only the person's Resume lets it go**: `mail.resume { messageId }` (M3a-person; `MessageService.resumeDepth(messageId)`, which sets `held = 'released'` on its `loop` rows, so neither `holdFor` nor the guards' `holdBack` holds them again (§7.4), and settles the question it answers), shown in the Inbox as a held row with Resume (M6). The person's word in its sender makes that sender's later sends start at depth 0; it does not let the held row go. Its sender is told with S4's depth line, and its asker, when it is an answer, with S14 | A ring or fan-out that never repeats a pair passes the pair guard; a pair's back-and-forth is the pair guard's |
+| — (new, F3) | **add** | **Cascade depth:** a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` is held `loop`. **Only the person's Resume lets it go**: `mail.resume { messageId }` (M6; `MessageService.resumeDepth(messageId)`, which sets `held = 'released'` on its `loop` rows, so neither `holdFor` nor the guards' `holdBack` holds them again (§7.4), and settles the question it answers), shown in the Inbox as a held row with Resume (M6). The person's word in its sender makes that sender's later sends start at depth 0; it does not let the held row go. Its sender is told with S4's depth line, and its asker, when it is an answer, with S14 | A ring or fan-out that never repeats a pair passes the pair guard; a pair's back-and-forth is the pair guard's |
 | — (new, F3) | **add** | **Host-wide:** `HOST_MAIL_TURNS_PER_HOUR = 120` mail-started turns in the last hour across this host, counted from `mail_turns` (`MailTurns.mailStartedSince(since)`, which counts turns whose starter is a message from a session or a Centralu follow-up, not the person's words or a report). Over it, the delivery defers a wake that would start a turn, **except** when the wake carries the person's words or a Centralu report, or its recipient had fewer than `HOST_SHARE = 10` mail-started turns in the hour (`MailTurns.mailStartedSince(since, sessionId)`). A deferred row stays due, quiet mail still rides along, and the next attempt is when the recipient's oldest counted turn of the hour leaves the window. The person gets one Centralu notice (`facts.hostCap`) per hour while it applies, shown in the feed (wording Q2) | A bound no per-pair or per-session guard gives, and one pair cannot starve the orchestrator: each session keeps its share |
 | Loop guard: 20 mail-started turns an hour per **thread**, no word from the person (`turns.ts:230`) | **keep, re-keyed** | per **unordered session pair**: turns of A started by B's mail plus turns of B started by A's mail, counted by `MailboxRecords.pairTurnsSince(a, b, since)` (M1) since the latest of 1 hour ago, the person's last word to either (a person turn in `mail_turns` or a message from `person`), and the pair's Resume. Over 20, mail between the two is held `loop` | Two agents answering each other must not run up usage unseen. The pair is what a thread stood for |
 | Token guard: 200,000 new input tokens an hour, or 3 empty mail-started turns in a row, per session (`turns.ts:69-75`) | **keep** | unchanged. Reminder turns are mail-started and count | Not about threads |
@@ -1073,14 +1090,15 @@ message.
 
 ### 7.7 Roles, handoffs, a party gone
 
-- **`roleMoved(from, to)`** runs where the crown moves (`sessions/orchestrator-slot.ts`). Every unsettled watched row,
-  and every undelivered row, with `via = 'orchestrator'` addressed to `from` is moved to `to` and delivered afresh:
+- **`roleMoved(to)`** runs where an orchestrator is made (`sessions/orchestrator-slot.ts`). Every unsettled watched row,
+  and every undelivered row, with `via = 'orchestrator'` addressed to another session (the one before it, trashed,
+  deleted or replaced: the role knows no "before" once that one is in the trash) is moved to `to` and delivered afresh:
   `delivered_at`, `read_at`, `attempt_at`, `turn_seq` are cleared and `attempts = 0`, whether or not `from` had read it.
   A request the old orchestrator read never started a turn of the new one, so keeping it read would strand it (#1683).
   Each moved row gets a notice for `to` with `facts.handedOver` (key §6.5).
 - **`handOver(from, to, scope)`** (the handoff, `ChildOwnershipRecords.moveChildren`, run inside its transaction as
   today; `scope` is today's `HandOverScope`, `'all' | { assignees: readonly string[] }`, `service.ts:177`, re-keyed to
-  `{ recipients: readonly string[] }`: the recipients of `from`'s tasks that move):
+  `{ senders: readonly string[] }`: the senders of the mail to `from` that moves, the children whose tasks move):
   - every unsettled watched row **to** `from` moves to `to`, undelivered again unless read;
   - when `to` already has a row for the same message, `to`'s row stays as it is and `from`'s is deleted;
   - a later reply to a message **from** `from` goes to the nearest living heir when `from` is gone
@@ -1256,7 +1274,7 @@ assignee" goes: each delegation is its own task.
 
 ### 9.2 Which task a turn's end reports
 
-The turn's work message (`MailTurns.messageOf(child)`) when it is a task from the owner to the child; else the newest
+The turn's work message (`MailTurns.latest(child)?.messageId`) when it is a task from the owner to the child; else the newest
 unsettled task from the owner to the child (`MailboxRecords.newestTask(owner, child)`, replacing `latestBetween`); else,
 for the orchestrator's turn, the request the turn was for (`askedOf`, re-keyed). None: `ReportedAs` `none`.
 
@@ -1739,7 +1757,8 @@ checked strictly (`orchestrator-tools.ts:619-626`).
 - The person's words are theirs, by the host's account of who asks, never by a field of the call.
 - `mail.held` keeps Resend / Dismiss for `uncertain` and `failed`; `mail.resume` and `mail.wake` keep their meaning.
 - `mail.resume {threadId}` resolves `threadId` as a root id and lifts the loop hold of every pair with mail held `loop`
-  in that chain; from M3a-person it also takes `{ messageId }`, which lets one row held `loop` for depth go (§7.5).
+  in that chain, for its pairs and its depth (Q-M3a-24); from M6 it also takes `{ messageId }`, which lets one row held
+  `loop` go (§7.5).
 
 ### 12.2 Host methods (M3a, D29) and older windows
 
@@ -1769,7 +1788,8 @@ Entities, in `entities/mail.ts`:
 |---|---|
 | `mail.list` | `{ threads: [], held, waiting }`: the held and sleeping lists as today, no threads |
 | `mail.thread {threadId}` | when `threadId` is a legacy thread id: its messages read from the v61 tables (`legacyChain`) in the old message shape, `parties: []`, `blockers: []`, `follows: []`. Else `refused`, `removed` |
-| `mail.reply`, `mail.close`, `mail.reassign`, `mail.unblock` | `refused`, `data.reason = 'removed'` |
+| `mail.reply`, `mail.close` | `refused`, `data.reason = 'removed'` |
+| `mail.reassign`, `mail.unblock` | retired (owner decision on #1914, Q-M3a-34): the unknown-method error (protocol.md §3.2) |
 
 M6's UI ships in the same release as M3a, so an older window is only seen across a swap.
 
@@ -1889,7 +1909,7 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 | M1 | the new tables, `sessions.mail_args`, `MailboxRecords`, the pending move; unused | main |
 | M2 | `MessageService`, `reach.ts`, the frame builder, `workTasks`, all constants; unused | M1 |
 | M3a-host | the host on the new tables: delivery, turns, cause and depth, delegation and its refusal, clarifications, reach, the one hold, the guards, §9.5; the **old** tool surface mapped | forward-fix only after its first `ready` (D28) |
-| M3a-person | the person's host methods (§12.2), the older-window answers, protocol, platform and mock | with the stack (forward-fix) |
+| M3a-person | the person's window on the message tables (as built: Q-M3a-20), the trust and project-delete calls, the old service deleted | with the stack (forward-fix) |
 | M6 | the Inbox, option B | with the stack (forward-fix) |
 | M3b | the version-2 tool, `mailArgs`, sentences S4 to S9, `sessions`, name resolution, the budget | the stack |
 | M3c | deletions: `service.ts`, `relations.ts`, `policy.ts`, the v61 readers but the move's and `legacyChain`, thread tests | M3b |
@@ -1970,7 +1990,7 @@ export type RecipientRow = {
 export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }   // rootId only for mail from another machine
 export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
   Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
-export type HandOverScope = 'all' | { recipients: readonly string[] }   // today's, service.ts:177, re-keyed
+export type HandOverScope = 'all' | { senders: readonly string[] }   // today's, service.ts:177, re-keyed
 ```
 
 A stored kind this build does not know reads as `notice`, and a stored `settled` word it does not know reads as
@@ -2028,7 +2048,7 @@ semantics. Every method that changes rows runs in one transaction.
 - Handoff and trash: `moveRows(from, to, scope: HandOverScope)` (`from`'s rows that are watched and unsettled, or
   unread whether settled or not, so a moved `legacy` row goes too,
   as today's `moveUnreadReceipts` moves every unread receipt, so a child's unread report reaches the heir; with
-  `{ recipients }`, only those of mail from these recipients; the heir's existing row wins, and a row of the heir's own
+  `{ senders }`, only those of mail from these senders; the heir's existing row wins, and a row of the heir's own
   message stays with `from`; §7.7),
   `moveRole(from, to)` (resets delivery fields, §7.7), `purgeParty(address)`.
 - Retention: `sweep(limits)`.
@@ -2186,7 +2206,7 @@ class MessageService {
   partyGone(address: string): void
   handOver(from: string, to: string, scope: HandOverScope): HandedOverMessage[]
   handOverPreview(from: string, to: string, scope?: HandOverScope): HandedOverMessage[]
-  roleMoved(from: string, to: string): number
+  roleMoved(to: string): number
   sweep(): { messages: number }
   onChange(listener: (c: { messageId: string; rootId: string; recipients: string[] }) => void): () => void
 }
@@ -2283,9 +2303,10 @@ or overruled by the orchestrator or the owner)
 
 ### M3a. The host runs on messages, with the old tool surface (two PRs: M3a-host, M3a-person)
 
-M3a is two pull requests in the switch stack with M6 (§16's order). **M3a-person** is: `mail/person.ts`, the protocol
-additions, `packages/platform`, the mock, and the `projects.setTrusted` and `projects.delete` calls into
-`trustChanged` and `dismissProject`. **M3a-host** is
+M3a is two pull requests in the switch stack with M6 (§16's order). **M3a-person** is: `mail/person.ts` (the
+window's methods on the message tables, Q-M3a-20), the `projects.setTrusted` and `projects.delete` calls into
+`trustChanged` and `dismissProject`, the purge of a session's rows (Q-M3a-29) and the old service's deletion
+(Q-M3a-28); the protocol additions, `packages/platform` and the mock go with M6. **M3a-host** is
 everything else below. M3a-host's tests run against the host methods through `MessageService` directly, so it builds
 and passes on its own; the stack lands together.
 
@@ -2317,7 +2338,7 @@ and passes on its own; the stack lands together.
   - `begin(sessionId, { workMessage, starter }): number` (the turn's seq; writes `message_id` and `starter_id`), `current(sessionId): TurnNow | undefined`
     (§8.2 step 6, with `startedAt`), `mailStartedSince(since, sessionId?): number` (turns whose starter is a message
     from a session or a Centralu follow-up), `attach(sessionId, messageId, owner)`,
-    `messageOf(sessionId)` (replaces `threadOf`), `lastEnded(sessionId): { by: TurnStartedBy; endedAt: number;
+    `latest(sessionId)` (the running turn, else the last ended; replaces `threadOf`), `lastEnded(sessionId): { by: TurnStartedBy; endedAt: number;
     stoppedByPerson: boolean } | undefined`, `lastPersonTurn(sessionId): number | null`.
   - `loopSpent(threadId)` becomes `pairLoopSpent(a, b)` over `MailboxRecords.pairTurnsSince`; `resumeLoop(threadId)`
     becomes `resumePair(a, b)`; `askerOf(messageId)`.
@@ -2343,9 +2364,10 @@ and passes on its own; the stack lands together.
   `finishRecorder` go. `reportRecorder` returns `ReportedAs` per §9.3's table.
 - **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5.
 - **`mail/asked-by.ts`** reads the turn's message; `askerFacts.trusted` is `!reach.untrusted(projectId)` (§7.2).
-- **`mail/person.ts`** (M3a-person). The five methods of §12.2, `mail.resume { messageId }` (§7.5, §12.1), and the
-  older-window answers. `mail.inbox`'s `held` lists today's `uncertain` and `failed` rows and the person's view of
-  depth-held rows (`loop`), each with its message id.
+- **`mail/person.ts`** (M3a-person, as built: Q-M3a-20). The window's methods (`mail.list`, `mail.thread`,
+  `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
+  its root; `mail.reassign` and `mail.unblock` retired with the window's controls (Q-M3a-34). The five methods of §12.2 and
+  `mail.resume { messageId }` come with M6's screen, which calls them.
 - **`mail/frame.ts`.** `COMMAND_CALLS` and `PLAIN_CALLS` come from `mailCalls(1, form)`; the delivery uses
   `buildMessageFrame`.
 - **`sessions/manager.ts`.**
@@ -2354,7 +2376,7 @@ and passes on its own; the stack lands together.
   - The mail hooks (`manager.ts:100-130`): `delegated` calls `mail.task`; `waitingOn` counts per §9.4; `handOver` and
     `handOverPreview` take the message forms; `openWork` returns `{ unanswered: string[]; owed: string[] }`, first
     lines quoted, for the archive card (#1512).
-- **`sessions/orchestrator-slot.ts`**: `mail.roleMoved(from, to)` where the crown moves.
+- **`sessions/orchestrator-slot.ts`**: `mail.roleMoved(to)` where an orchestrator is made.
 - **The protocol** (additions only): the methods and entities of §12.2; `mail_changed.messageId?` and `rootId?`; the
   refusal reasons `removed`, `trust_project`, `untrusted_project`.
 - **`packages/platform`**: the five methods in the mail port, the web client (`platform/src/web/index.ts`) and the
@@ -2384,7 +2406,7 @@ export type MailToolHost = {
 - The tool's advertised schema and its definition text.
 - The cards and gates of request turns (`request-hook.ts`, `asked-acts.ts`, `asked-gate.ts`, `asked-reach.ts`), except
   where they read "the turn's thread": there they read the turn's message.
-- `mail/service.ts` stays in the tree, unused (M3c deletes it).
+- `mail/service.ts` stays in the tree, unused, until M3a-person deletes it (Q-M3a-28).
 
 **Tests** (in `sessions/` and `mail/`; ✗ means the test fails on main)
 
@@ -2452,6 +2474,67 @@ login).
 4. The delegation reports read as before: the same words, the same pause rules, the person's turns unreported.
 5. A process from before the slice reads and answers with its old tool.
 6. Every §9.3 case answers the `ReportedAs` the table gives.
+
+**Design questions** (found while building M3a-host; each keeps mail delivered and nothing lost, to be confirmed or overruled by the
+orchestrator or the owner)
+
+| # | Question | Choice made |
+|---|---|---|
+| Q-M3a-1 | M3a-host lands before M3a-person in the stack: what serves the person's window in between | The old `MailService` stays constructed for `MailPerson` alone (the window's methods over the thread tables) until M3a-person; the host's mail, delivery, tool and recorders run on the message tables. The stack is merged as one, so no build ships this state. Ended by M3a-person: the window runs on the message tables and the old service is gone |
+| Q-M3a-2 | S9 `removed` says "sessions started from now on use mail(action="send", id="…")", which is not true until M3b | M3a's sentence names the old tool's calls only: `… so "<action>" is gone. Answer a message with mail(action="reply", thread="<message id>", text="…"), and mark one that needs nothing with mail(action="handled", thread="<message id>").` M3b adds the version-2 clause |
+| Q-M3a-3 | §8.2 step 6 (a turn continued after an update writes no row) against `keptInTurn`, which only knew the keeper's kept sessions | `SessionManager.keptInTurn` is also true for a session whose turn an update cut and this host continued (`continuedAfterUpdate`), so `MailTurns.closeStale` reads its row back instead of closing it `lost`. A report of the old path's `resumed` outcome (a cut turn that goes on) is `ReportedAs` `none`: the old path says it, and the task stays open |
+| Q-M3a-4 | §7.5 "a deferred row stays due, quiet mail still rides along" | A wake the host-wide cap defers waits whole: its quiet items ride the next wake. Nothing is lost; a quiet item is delivered at most one wake later |
+| Q-M3a-5 | §9.6 `answerRecorder`: "the reports replying to the task are marked read; no state" | It also writes the report the call gave, as told (delivered and read), which settles the task, as the old path's told report moved the thread to review. Without it a task given with `wait=true` stayed open until the next ready. With work handed on still owed, the report is `waiting` and the task stays open |
+| Q-M3a-6 | The old path's outcome words (`limit_reached`, `network`, `interrupted`, `quit`, `swapped`, `took_over`, `settled`) against §5.4's five | `finished` (also `settled`), `failed` (also `limit_reached`), else `stopped`; the old word is kept in `facts.reason` when they differ, and taking the session over is `stopped`, `taken_over` |
+| Q-M3a-7 | `openWork` and the handoff's message forms change words the person and the agent see | The archive card and the handoff note name messages and tasks (owner items in the PR); the protocol is unchanged |
+| Q-M3a-8 | `MailTurns.lastEnded` and `lastPersonTurn` in the M3a list | `lastPersonTurn` is the store's (the pair guard reads it). `MailTurns` keeps each session's last ended turn: a report or a request's end that comes after the turn ended reads its number, start and work message from it |
+| Q-M3a-9 | A request turn's card skips "answering in the request's own thread": which message is the request's own | The turn's work message (`Asker.messageId`). An answer to another request of the same asker in that turn asks the person (conservative) |
+| Q-M3a-10 | §9.5 step 1 writes `facts.paused` on an adopted mark's task | Not written: nothing reads a task's `facts.paused` before M8 |
+| Q-M3a-11 | A script's first message: origin and the credential's label | The task's origin is `script`; the label stays on the conversation's message, not on the task |
+| Q-M3a-12 | D9 (the starter is the wake's first item) against D13 (the person's words count toward no guard) when one wake carries both | The starter is the work message, else the person's message when the wake carries one, else the first item: the turn is the person's, counts toward neither the cap nor the pair guard, and what it sends starts at depth 0. Mail delivered quietly into a turn the person started (their words or their message) is stamped with that turn's number but is not a turn of the pair: `pairTurnsSince` counts only turns a session's message started |
+| Q-M3a-13 | §9.4 counts only handed-on tasks the old paths still owe, but a task not delivered yet (an answer to a clarification, stored as a task) is marked only when the delivery gives it | A handed-on task row not delivered yet counts too: otherwise the first owner was told `finished` while the work it caused was about to run |
+| Q-M3a-14 | D15 (the role's mail follows the role) against `partyGone` (a trashed session's watched rows are `gone`) | `partyGone` leaves rows sent to the role (`via = 'orchestrator'`), and the sweep does not count them as the gone session's; when the next orchestrator is made, `roleMoved(to)` gives it every such row another session holds (trashed, deleted or replaced), delivered afresh. Until then the asker's inbox lists the request as waiting |
+| Q-M3a-15 | `MAIL_SWITCH_VERSION` | `0.1.0-beta.46`, the release after the last tag; the stack's release check confirms or changes it |
+| Q-M3a-16 | `ask_project` from an untrusted project: the old trust refusal came before the target was known, so S15 could not be written | The trust check runs once the target is resolved; until then every resolution error an untrusted caller meets reads as the old trust sentence, so it learns nothing of other projects. A linked `send_to_session` is refused out of an untrusted project whether or not it asks for a report |
+| Q-M3a-17 | A handoff that keeps the original: the original's task to a moved child is from the original, and the child's report goes to the successor | The report finds no task from the successor and is `none` (the old path tells the successor); the next ready settles the task, since no old path owes it to the original. Nothing is lost; the task row lags one ready |
+| Q-M3a-18 | `pair_rate` (5 new conversations an hour per pair) is reached before `ask_rate` (5 requests an hour per group) by one session alone | Kept as written: `ask_rate` bounds a group of sessions, `pair_rate` one session |
+| Q-M3a-19 | The host-wide cap's wait (§7.5) against the 30 s sweep, which tries every mailbox with due mail | The sweep still looks (a cheap drain); the log line that the mail waits is written once per wait, not on every look |
+| Q-M3a-20 | §12.2's five methods against the window this build ships, which draws threads and has no caller for them until M6 | M3a-person serves the window's own methods from the message tables: a thread is a chain of replies named by its root message's id, and an old thread's id names the chains moved from it (newest first). The five methods, `mail.resume { messageId }` and their protocol, platform and mock parts come with M6's screen, so no method ships without a caller. §12.2's older-window answers (`threads: []`, `removed`) are not needed: a window from before the switch reads chains the same way. `mail.reassign` and `mail.unblock` are retired with their controls (Q-M3a-34) |
+| Q-M3a-21 | What Mark done and Drop mean on a chain, and when the window draws it done | As on main, after the owner's decision on #1914: both act on the whole chain (root and every reply) and on every chain an old thread's id names. They settle `done` every row to the person in the chain that is open, `legacy` or `answered`, end the wait of the person's own questions in it, and close the person's tasks in it (rows settled `done`, not `withdrawn`, so what the person sent is still delivered, and the turn's end reports nothing that would open the chain again). A session whose turn is on the chain (the turn records name a message of it as the turn's work, or its starter; `working`) is stopped as `agent_session stop` stops it, with the background work that turn started, after the window's confirm "<session> is working on this. Stop its work and close the thread?". It, and each session a task of the person's in it went to that has not reported, is told once without a wake in main's words ("The person dropped / marked done thread <id>; its work was stopped. Do not continue it."). Drop and Mark done stay apart: the words differ, and the chain shows `Done (dropped)` or `Done` (`facts.closed` on its root). The chain is done when the person closed it and nothing in it waits for the person or for an answer to them; a new message to the person opens it again, and the last close stands. The close is recorded on the root (`facts.closed`), so a chain with no row to the person, or whose task went to a session gone since, closes too. Every window with one of the chains open reads it again |
+| Q-M3a-22 | The window's Release on a row held `policy`, and its Dismiss on any hold | Release is refused `untrusted_project`, naming the project, while it is untrusted, and refused whole before any row changes when the rows it names mix such a project with others: the one hold lets a project's mail go when the person trusts the project (§7.4), and the per-row Release would bypass it. On a project trusted since, Release lets that project's held mail go, in order. Release of `uncertain`, `failed` and `budget` rows goes as before (`budget` released for good). Dismiss works on every hold the window shows: the row is never delivered and is settled `withdrawn`, so its sender waits on it no longer, a held answer's question is open again (D8), and the sender is not told, as the old window's Dismiss did (the project-wide Dismiss of M6 tells them, S13) |
+| Q-M3a-23 | A row an older build held `policy` after telling its recipient of it (delivered quietly, still unread) | Trusting the project lets it go as unread mail to deliver again (`letGo` clears `delivered_at` while `read_at` is null), as the older build's Release did; otherwise it would stay delivered-and-unread and never wake its recipient |
+| Q-M3a-24 | Resume on a chain (`mail.resume { threadId }`) against the depth hold, which only `resumeDepth` lets go | Resume on a chain lets every row held `loop` in it go for good (`resumeDepth`: `released`, delivered again while unread as in Q-M3a-23, the question it answers answered), whichever guard held it, and counts each of its pairs from now: the person's word on that chain |
+| Q-M3a-25 | Whom the person's reply in a chain goes to | An answer to the newest question to the person that waits for their answer, else to the newest message sent to them, to its sender; when there is none, a word more to the recipients of the person's newest message who are still kept. Passed over: Centralu's messages, a message only held for the person to act on or hidden from them, and a sender that is gone (a trashed or deleted session). On an old thread's id, every chain moved from it is looked at. A question needs a reply; an answer or a note does not (D3) |
+| Q-M3a-26 | What the person reads in a chain, and how the window pages it | Their own messages, rows to them not held out, and messages held for them to act on; other messages of the chain are left out (no phantom line, so no new wording). Each message is numbered in `mail_numbers` (store step v67, expand only), given the first time the window reads its chain, in the order stored, with `AUTOINCREMENT`: a number is the message's own for good and never given to another, so a message that comes, goes (a dismissed project's, a purge's, the sweep's) or stops being readable leaves the others' numbers as they were and the window's `after` misses nothing. `mail`'s rowid would not do: SQLite gives a deleted top row's number to the next row. An old thread's earlier messages show read-only above the chain (numbered 0, -1, …) |
+| Q-M3a-27 | `projects.delete` drops the project's held mail before or after the deletion | After the project is gone, so a deletion refused before it removes the project keeps the mail; also after a deletion that failed part way once the project is gone, so its held mail never waits for a trust that cannot come and Release never names it by its id. The project's name is read first, so the notice its senders get still names it (`dismissProject(projectId, label)`) |
+| Q-M3a-28 | The old `MailService` has no caller once the window moves: keep it for M3c | Deleted in M3a-person with what only it used: `mail/relations.ts`, the thread rules (`mayPostKind`, `settableStates`, `mayEditTask`, `stateAfterUnblocked`, `reopensReview`, `flowsDown`, `pickWorkThread`, the thread limits) and the `MailRecords` methods kept for it (`setHeld`, `markAttempt`, `markDelivered`, `markHandledIds`, `startTurn`, `endTurn`, `turnsOf`, `recipientsWithMail`, `hasMailInHand`). Tests write an older build's mail into the v61 tables as it stored it (`mail/v61.test-helpers.ts`). `MailRecords`, the v61 retention and the old frame stay for M3c. Nothing sweeps the v61 tables any more (as on M3a-host) until M7 drops them. After the deep review, also `MailboxRecords.turnsOf` (tests read `mail_turns` through a helper), `MessageService.watchedFrom` and `MailDelivery.releaseHeld` (folded into `resumeSession`). Kept with no caller yet: `MessageService.feed` and `heldByProject`, which M6's `mail.inbox` returns (§12.2), and M1's `covering` and `followUpsTo`, which M5's reminders read (§10.3, D24) |
+| Q-M3a-29 | A purged session's rows in `mail_recipients` (`purgeParty` had no caller) | `TrashRecords.purgeSession` calls `MailboxRecords.purgeParty` in its transaction: the session's rows go, and each message left with no row but the person's own, which stays in their window |
+| Q-M3a-30 | A session's request to the orchestrator that an older build left pending when the orchestrator is trashed: moved to a recipient that is gone | The move sends a row to the role (`via = 'orchestrator'`) when its recipient is the old thread's assignee, is not its owner, and is the central orchestrator or a trashed one (`sessions.is_orchestrator`); `moveRole` takes a moved row that is unread, held or not, so the next orchestrator gets it and judges the hold again. A trashed project orchestrator assigned a session's thread would be taken for the central one: no build sent it requests |
+| Q-M3a-31 | A task an older build had pending for a session trashed there (its giver was told the session was gone) | Moved settled `gone`, so a restored session is never handed it |
+| Q-M3a-32 | A moved question its recipient read and did not answer (settled `legacy`, D26) against the agent's `inbox` and `read` | It is listed as waiting for a reply and reads "not answered yet", as on the older build: `inbox` lists needsReply rows with no answer, settled or `legacy`; an answer or a done settles a `legacy` row (`answered`, `done`). It is still never reminded (D26). The old thread above a moved message shows only what the reader sent or was delivered unheld, before that message (`legacyChainFor`) |
+| Q-M3a-33 | A row the person released on the older build (`released`) from a project still not trusted | Never held again (§6.3): the move records the recipients on the message (`facts.releasedTo`), and the drain exempts those rows from the one hold, as it exempts any `released` row from the depth. A row that moves to another recipient (the orchestrator's role, a handoff) carries the release with it |
+| Q-M3a-34 | The window's controls for what went with threads: Give to another session, Unblock, and the Blocked state (owner decisions on #1914) | Removed, window and host: the button, the panel and `canGiveWorkTo`, the blocker list, the store's `reassignMail` and `unblockMail` with their toasts, the platform and mock methods, and `mail.reassign` and `mail.unblock` (retired, protocol.md §3.2; no refusal path is left). `MailThreadView.blockers` and `MailThreadRow.blocked` stay in the protocol, empty and 0, for an older window. The state pill keeps Running and In review, from the task rows and the turn: running while a session's turn is on the chain or a task the person gave in it is not reported, in review once such a task is reported and the chain is not closed, open otherwise. The session the confirm names is the one whose turn is on the chain |
+
+**M3a-host lands only with M3a-person.** M3a-host is not merged alone: it lands in one merge with M3a-person stacked
+on it (the stack is forward-fix only). Between the two the person's side ran on the old tables (Q-M3a-1); M3a-person
+covers each of these, with a test in `mail/person.test.ts` unless named:
+
+1. The window reads the person's moved rows: an old question unread by the person is unread in the window after the
+   move, and opening it (by its root or its old thread id) reads it, with the old thread's earlier messages above it.
+2. What the person writes in the window after ready goes through the message service and is delivered at once; the
+   thread tables are not written.
+3. Mail held for `policy` or `budget`, told of or not, is listed with why and its chain; Release and Dismiss act on the
+   moved rows, `projects.setTrusted` lets a project's held mail go in order (told-of rows too, Q-M3a-23) and
+   `projects.delete` drops it (Q-M3a-22).
+4. Resume passes the moved message's root, or resolves an old thread id to the chains moved from it, and the rows it
+   lets go are not held again (Q-M3a-24).
+5. The old `MailService` and the store methods kept for it are gone (Q-M3a-28); the window lists, reads, answers, marks
+   done, releases and resumes with the v61 tables dropped.
+6. Mark done and Drop on a chain a session works on stop its turn and tell it, as on main (Q-M3a-21, also over the
+   real manager in `sessions/mail-turn-report.test.ts`), and the state shows Running and In review from the task
+   rows and the turn; Give to another session, Unblock and Blocked are gone (Q-M3a-34, `e2e/inbox-mail.spec.ts`).
+
+Also: a purged session's rows in the message tables go (Q-M3a-29, `store-mail.test.ts`).
 
 ### M3b. The version-2 tool
 
@@ -2659,7 +2742,7 @@ trust card, delivery after trust, and a chain opened and answered.
 
 1. The Inbox matches §12.3's sketch, with the wording the owner approves (Q2).
 2. Released rows (§10.6) appear in the feed.
-3. No UI code calls `mail.list`, `mail.thread`, `mail.reply`, `mail.close`, `mail.reassign` or `mail.unblock`.
+3. No UI code calls `mail.list`, `mail.thread`, `mail.reply` or `mail.close` (`mail.reassign` and `mail.unblock` are gone, Q-M3a-34).
 
 ### M8. One record of an owed report
 
@@ -2744,8 +2827,8 @@ checked by the orchestrator at merge.
 4. `mail_turns.thread_id` stays: dropping a column is a table rebuild, and no reader is left.
 
 **Deletes.** `movePendingThreadMail` and `legacyChain` and their call sites, `writeLegacyMarks`, §9.5's `ready` step,
-the older-window answers of `mail.list`, `mail.thread`, `mail.reply`, `mail.close`, `mail.reassign` and
-`mail.unblock` (the methods stay in the protocol and answer `removed`). The version-1 tool mapping stays for M7b.
+the older-window answers of `mail.list`, `mail.thread`, `mail.reply` and `mail.close` (the methods stay in the protocol
+and answer `removed`; `mail.reassign` and `mail.unblock` left it in M3a, Q-M3a-34). The version-1 tool mapping stays for M7b.
 
 **Tests**
 

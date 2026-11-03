@@ -36,7 +36,7 @@ import type { HostCards } from './host-cards.js'
 import type { SessionRecord } from './session-record.js'
 import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
-import type { HandOverPreview } from '../mail/service.js'
+import type { HandedOverMessage } from '../mail/messages.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -55,12 +55,12 @@ export type SessionTrashHost = {
   forgetCardRest: (sessionId: string) => void
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
-  /** The mail it held: the work it was given or gave moves on (#1347, `MailService.sessionGone`). Never throws */
+  /** The mail it held: its watched rows are settled and their senders told (#1347, `MessageService.partyGone`). Never throws */
   mailGone: (sessionId: string) => void
-  /** The unfinished mail threads it is assigned or owns (what `mailGone` moves on); null when the mailbox could not be read */
-  mailWork: (sessionId: string) => { assigned: string[]; owned: string[] } | null
-  /** What a handoff's move would do with its mail if it went now with `heir` inheriting (`MailService.handOverPreview`); null when the mailbox could not be read */
-  mailHandOverPreview: (sessionId: string, heir: string) => HandOverPreview | null
+  /** The first lines of the messages that wait for its answer and of the tasks it owes a report of (what `mailGone` settles); null when the mailbox could not be read */
+  mailWork: (sessionId: string) => { unanswered: string[]; owed: string[] } | null
+  /** What a handoff's move would give `heir` of its mail if it went now (`MessageService.handOverPreview`); null when the mailbox could not be read */
+  mailHandOverPreview: (sessionId: string, heir: string) => HandedOverMessage[] | null
   /** The session is back: the mail that waited for it may go (#1347). Never throws */
   mailPoke: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
@@ -256,47 +256,32 @@ export class SessionTrash {
       out.push('What the person allowed it (reading other sessions, starting agents) is dropped; a restored session asks again.')
     }
     /*
-     * Work in the mailbox (#1512): restoring does not hand a thread back. An assigned one went open with nobody on it, and its
-     * owner was told the work stopped; an owned one became the person's. A session that handed over gives both to the session
-     * that inherited its handoff instead (#1574, `moveChildren` in `trashSessionOnce`), which the lines name.
+     * Work in the mailbox (#1512, mailbox §7.7): restoring does not bring it back. What waited for its answer is settled `gone` and its
+     * senders are told; a task it owed a report of is reported as stopped by the old path. A session that handed over gives all of it to
+     * the session that inherited its handoff instead (#1574, `moveChildren` in `trashSessionOnce`), which the lines name.
      */
     const heir = this.host.handoffHeir(sessionId)
     const plan = heir ? this.host.mailHandOverPreview(sessionId, heir) : null
     const mail = heir && plan ? null : this.host.mailWork(sessionId)
     const listed = (list: { subject: string }[]) => list.slice(0, 3).map((x) => plainQuoted(x.subject, 60)).join(', ') + (list.length > 3 ? ', …' : '')
-    const threads = (n: number, what = 'unfinished mail thread') => (n === 1 ? `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what}` : `${n} ${what}s`)
     if (heir && plan) {
-      // Exactly what the move would do (#1574): what goes to the heir, and what stays to move on as before
-      const goes = plan.moved
-      if (goes.length) {
-        const of = (role: string) => goes.filter((g) => g.role === role).length
+      // Exactly what the move would do (#1574, mailbox §7.7): every message it holds that waits for it goes to the heir
+      if (plan.length) {
+        const tasks = plan.filter((m) => m.kind === 'task').length
         const parts = [
-          ...(of('assignee') ? [`is the assignee of ${threads(of('assignee'))}`] : []),
-          ...(of('owner') ? [`owns ${threads(of('owner'))}`] : []),
-          ...(of('member') ? [`is in ${threads(of('member'))} as a member`] : []),
+          ...(tasks ? [`${tasks === 1 ? 'a task it was given' : `${tasks} tasks it was given`}`] : []),
+          ...(plan.length - tasks ? [`${plan.length - tasks === 1 ? 'a message' : `${plan.length - tasks} messages`} waiting for it`] : []),
         ]
-        const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
-        out.push(`It ${joined} (${listed(goes)}); ${goes.length === 1 ? 'it goes' : 'they go'} to ${name(heir)}, which took over from it, and ${goes.length === 1 ? 'stays' : 'stay'} there if it is restored.`)
-      }
-      if (plan.closed.length) {
-        out.push(`It has unread mail in ${threads(plan.closed.length, 'closed mail thread')} (${listed(plan.closed)}); that mail goes to ${name(heir)}.`)
-      }
-      const ownedLeft = plan.left.filter((l) => l.role === 'owner')
-      if (ownedLeft.length) {
-        out.push(`It owns ${threads(ownedLeft.length)} whose assignee is ${name(heir)} (${listed(ownedLeft)}); ${ownedLeft.length === 1 ? 'it becomes' : 'they become'} the person's.`)
-      }
-      const assignedLeft = plan.left.filter((l) => l.role === 'assignee')
-      if (assignedLeft.length) {
-        out.push(`It is the assignee of ${threads(assignedLeft.length)} ${name(heir)} owns (${listed(assignedLeft)}); ${assignedLeft.length === 1 ? 'it goes' : 'they go'} back to open with nobody on ${assignedLeft.length === 1 ? 'it' : 'them'}.`)
+        out.push(`It holds ${parts.join(' and ')} (${listed(plan.map((m) => ({ subject: m.firstLine })))}); ${plan.length === 1 ? 'it goes' : 'they go'} to ${name(heir)}, which took over from it, and ${plan.length === 1 ? 'stays' : 'stay'} there if it is restored.`)
       }
     } else if (!mail) out.push('Its mailbox could not be read, so what it holds there is not known.')
     else {
       const subjects = (list: string[]) => list.slice(0, 3).map((x) => plainQuoted(x, 60)).join(', ') + (list.length > 3 ? ', …' : '')
-      if (mail.assigned.length) {
-        out.push(`${mail.assigned.length === 1 ? 'It is the assignee of an unfinished mail thread' : `It is the assignee of ${mail.assigned.length} unfinished mail threads`} (${subjects(mail.assigned)}); ${mail.assigned.length === 1 ? 'it goes' : 'they go'} back to open with nobody on it, and ${mail.assigned.length === 1 ? 'its' : 'their'} owner is told the work stopped.`)
+      if (mail.unanswered.length) {
+        out.push(`${mail.unanswered.length === 1 ? 'A message waits for its answer' : `${mail.unanswered.length} messages wait for its answer`} (${subjects(mail.unanswered)}); ${mail.unanswered.length === 1 ? 'its sender is' : 'their senders are'} told it is gone.`)
       }
-      if (mail.owned.length) {
-        out.push(`${mail.owned.length === 1 ? 'It owns an unfinished mail thread' : `It owns ${mail.owned.length} unfinished mail threads`} (${subjects(mail.owned)}); ${mail.owned.length === 1 ? 'it becomes' : 'they become'} the person's.`)
+      if (mail.owed.length) {
+        out.push(`${mail.owed.length === 1 ? 'It was given a task it has not been reported on' : `It was given ${mail.owed.length} tasks it has not been reported on`} (${subjects(mail.owed)}); ${mail.owed.length === 1 ? 'whoever gave it is' : 'whoever gave them is'} told the work stopped.`)
       }
     }
     return out

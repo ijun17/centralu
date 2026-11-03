@@ -391,8 +391,10 @@ Where it is stored:
 ### 2.5 The mailbox
 
 The one durable channel for work and talk between sessions, apps and the person, designed in
-[plans/mailbox.md](plans/mailbox.md) (#1347). **Slice 2: the model (store v61) is delivered. The `mail` tool lets a session post and read, the person's Inbox lists
-and answers, and the delivery engine (`mail/delivery.ts`) wakes the receiver. Apps, the task board and linked machines are later slices.**
+[plans/mailbox.md](plans/mailbox.md) (#1347, #1684). **Since M3a the host's mail is messages without threads (`mail`, `mail_recipients`): the message
+service (`mail/messages.ts`) stores and answers, `mail/reach.ts` says who may write to whom and what is held, the delivery engine (`mail/delivery.ts`)
+wakes the receiver, and the `mail` tool keeps its older schema, mapped onto the messages. The thread tables below are read-only history, read by the
+move of pending thread mail and an old thread's history only. Apps, the task board and linked machines are later slices.**
 
 | Concept | Meaning |
 |---|---|
@@ -411,20 +413,23 @@ Where it is stored:
 - `mail_messages`: the posts, with Centralu's `facts` and the key that keeps a change from being posted twice.
 - `mail_receipts`: each recipient's progress with each message.
 - `mail_turns`: the thread each turn of a session belonged to. Since v65 also `message_id`, the turn's work message, and
-  `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how`; nothing writes
-  them yet.
+  `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how` (written from M5).
+  From M3a the host writes `message_id` and `starter_id` and leaves `thread_id` NULL; a turn continued after a restart
+  or an update keeps its row.
 - `mail`: mail without threads (v65, [plans/mailbox.md](plans/mailbox.md) §6.1, #1684): one message, its sender, kind
   (`message`, `task`, `report`, `notice`), whether it needs a reply, the message it answers and the first of that chain,
   the message that started the sender's turn and how many hops led to it, and Centralu's `facts`. `legacy_thread` names
-  the thread a message was moved from. Read by nothing yet: the host moves to it in a later slice.
+  the thread a message was moved from. The host's mail since M3a; after each ready the thread mail an older build left
+  pending is moved here once (§6.3).
 - `mail_recipients`: one recipient's row for a message in `mail`: the delivery fields a receipt has, the turn the
   delivery started, whether and how it was settled (`answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy`), its
   reminders, and when it was released and its sender told.
+- `mail_numbers`: the number the person's window gives each message of a chain, given once and never again (v67).
 
-An older build serving the same store during a swap never names these tables (steps v61 and v65 only add), and a session deleted for good
+An older build serving the same store during a swap never names these tables (steps v61, v65 and v67 only add), and a session deleted for good
 from the session archive takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
-and 180 days, read notices after 14) is `MailService.sweep`, which the host runs with the delivery's 60 s sweep ([plans/mailbox.md](plans/mailbox.md) §4.4). The heartbeat the delivery keeps
-to tell how long the host was off is the setting `mail.heartbeat`, written only on a host that has threads.
+and 180 days, read notices after 14) is `MessageService.sweep`, which the host runs with the delivery's 60 s sweep ([plans/mailbox.md](plans/mailbox.md) §6.4). The heartbeat the delivery keeps
+to tell how long the host was off is the setting `mail.heartbeat`.
 
 ## 3. Session state
 

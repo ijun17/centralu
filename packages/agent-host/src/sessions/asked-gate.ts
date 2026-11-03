@@ -93,7 +93,7 @@ export class AskedGate {
   private readIn(orchestratorId: string, asker: Asker): string | null {
     if (!this.begun.has(orchestratorId)) return 'an earlier conversation of the orchestrator, not seen from its beginning'
     try {
-      const reach = { ...this.host.reach(asker.sessionId), thread: asker.threadId }
+      const reach = { ...this.host.reach(asker.sessionId), thread: asker.messageId }
       for (const { name, scope } of this.reads.get(orchestratorId) ?? []) {
         const what = outOfReach(name, scope, reach, (id) => this.host.projectOf(id))
         if (what !== null) return what
@@ -115,7 +115,7 @@ export class AskedGate {
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
-    if (!asker || askedAct(tool, input, asker.threadId) === null) {
+    if (!asker || askedAct(tool, input, asker.messageId) === null) {
       this.noteRead(orchestratorId, tool, input)
       return { allowed: true, asked: false }
     }
@@ -151,7 +151,7 @@ export class AskedGate {
       this.noteRead(orchestratorId, call.name, call.args)
       return run()
     }
-    const step = askedAct(call.name, call.args, asker.threadId, this.readIn(orchestratorId, asker))
+    const step = askedAct(call.name, call.args, asker.messageId, this.readIn(orchestratorId, asker))
     // Noted after the step is judged: what it gives back cannot be in its own words
     this.noteRead(orchestratorId, call.name, call.args)
     if (step === null) return run()
@@ -166,7 +166,7 @@ export class AskedGate {
     const answer = await this.host.ask(orchestratorId, askedQuestion(asker, step.act), signal)
     // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
     const now = this.host.askedBy(orchestratorId)
-    if (answer === 'allow' && (now?.threadId !== asker.threadId || now.turn !== asker.turn)) {
+    if (answer === 'allow' && (now?.messageId !== asker.messageId || now.turn !== asker.turn)) {
       return refused('Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.')
     }
     if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)

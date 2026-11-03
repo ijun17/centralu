@@ -6,6 +6,7 @@ import type { LinkInstaller } from './link-deps.js'
 import { LinkedMachineConnection } from './linked-machine-connection.js'
 import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './node-floor.js'
 import { installVersion, type InstallVersion } from './registry.js'
+import { mailSwitchRollbackText, rollbackCrossesMailSwitch } from './mail-switch.js'
 import { RemoteClient } from './remote-client.js'
 import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, type RemoteRun } from './tunnel.js'
 import { answersAs, rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
@@ -381,6 +382,8 @@ export class LinkedMachine extends LinkedMachineConnection {
     const current = this.installed?.current
     const previous = this.installed?.previous
     if (!current || !previous) return Promise.reject(linkError(`There is no earlier version installed on ${this.name} to go back to`))
+    // Across the mail switch it would strand the mail waiting there (docs/plans/mailbox.md D28): refused before anything runs
+    if (rollbackCrossesMailSwitch(current.version, previous.version)) return Promise.reject(linkError(mailSwitchRollbackText(this.name, previous.version, current.version)))
     return this.operate('rollback', previous.version, async (c) => {
       const r = await rollbackRemote(c, { current, previous })
       this.deps.log?.(`[links] ${this.name}: rolled back to Centralu ${r.current.version}`)

@@ -8,6 +8,7 @@ import { CommandRunner } from './dev-services/commands.js'
 import { heldFileIndexes, invalidateFileIndex } from './dev-services/file-search.js'
 import { Store } from './dev-services/store.js'
 import { TerminalService } from './dev-services/terminal.js'
+import type { MailPerson } from './mail/person.js'
 import { SessionManager } from './sessions/manager.js'
 import { createRpcHandler } from './rpc.js'
 
@@ -129,5 +130,55 @@ describe('watch sets per window, through the RPC door (#842 item 6)', () => {
 
     mgr.forgetWatchHolder(2)
     expect(mgr.watchedDirCount(a.id)).toBe(1)
+  })
+})
+
+/**
+ * The project doors and the person's mail (docs/plans/mailbox.md §7.4, Q-M3a-27): trusting a project lets its held mail go once the trust is written,
+ * and deleting one drops its held mail once it is gone, under the name it had, also when the deletion fails part way. `mail` records what it was told
+ */
+function withMail() {
+  const store = new Store()
+  const manager = new SessionManager(store, new Map<ToolName, AgentAdapter>(), () => {})
+  const there = (projectId: string) => store.projects.listProjects().find((p) => p.id === projectId)
+  const calls: { call: string; projectId: string; name?: string; projectThere: boolean; trusted?: boolean }[] = []
+  const mail = {
+    projectName: (projectId: string) => there(projectId)?.name ?? projectId,
+    projectDeleted: (projectId: string, name: string) => calls.push({ call: 'deleted', projectId, name, projectThere: there(projectId) !== undefined }),
+    trusted: (projectId: string) => calls.push({ call: 'trusted', projectId, projectThere: true, trusted: there(projectId)?.trusted ?? false }),
+  } as unknown as MailPerson
+  return { mgr: manager, calls, rpc: createRpcHandler(manager, new Map(), { mail }) }
+}
+
+describe("a project's held mail at its doors", () => {
+  it('a deleted project’s held mail is dropped once it is gone, under the name it had', async () => {
+    const { calls, rpc } = withMail()
+    const a = (await rpc('projects.add', { path: join(fixture, 'a') })) as { id: string; name: string }
+    await rpc('projects.delete', { projectId: a.id })
+    expect(calls).toEqual([{ call: 'deleted', projectId: a.id, name: a.name, projectThere: false }])
+  })
+
+  it('a deletion refused before the project goes leaves its held mail; one that fails part way, once it is gone, drops it under its name', async () => {
+    const { mgr, calls, rpc } = withMail()
+    const a = (await rpc('projects.add', { path: join(fixture, 'a') })) as { id: string; name: string }
+    const real = mgr.deleteProject.bind(mgr)
+    const del = vi.spyOn(mgr, 'deleteProject').mockRejectedValueOnce(new Error('refused'))
+    await expect(rpc('projects.delete', { projectId: a.id })).rejects.toThrow('refused')
+    expect(calls).toEqual([])
+    del.mockImplementationOnce(async (id) => {
+      await real(id)
+      throw new Error('a later clean-up failed')
+    })
+    await expect(rpc('projects.delete', { projectId: a.id })).rejects.toThrow('a later clean-up failed')
+    expect(calls).toEqual([{ call: 'deleted', projectId: a.id, name: a.name, projectThere: false }])
+  })
+
+  it('trusting a project lets its held mail go once the trust is written; taking trust away does not', async () => {
+    const { calls, rpc } = withMail()
+    const a = (await rpc('projects.add', { path: join(fixture, 'a') })) as { id: string }
+    await rpc('projects.setTrusted', { projectId: a.id, trusted: true })
+    expect(calls).toEqual([{ call: 'trusted', projectId: a.id, projectThere: true, trusted: true }])
+    await rpc('projects.setTrusted', { projectId: a.id, trusted: false })
+    expect(calls).toHaveLength(1)
   })
 })

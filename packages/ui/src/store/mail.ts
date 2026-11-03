@@ -10,7 +10,7 @@ import type { AppState, StoreGet, StoreSet } from './state.js'
 
 type MailActions = Pick<
   AppState,
-  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'unblockMail' | 'reassignMail' | 'heldMail' | 'resumeMail' | 'wakeMail'
+  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail'
 >
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
@@ -127,31 +127,6 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       return act('close that thread', async () => {
         await platform.mail.close(open.thread.id, outcome)
         await refreshThread(get, set, open.thread.id)
-        void get().loadMail()
-      })
-    },
-
-    async unblockMail(n) {
-      const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
-      return act('unblock that thread', async () => {
-        await platform.mail.unblock(open.thread.id, n)
-        const fresh = await platform.mail.thread(open.thread.id, { after: open.messages.at(-1)?.seq ?? 0 })
-        const now = get().mailThread
-        if (get().platform === platform && now?.thread.id === open.thread.id) set({ mailThread: merged(now, fresh) })
-        void get().loadMail()
-      })
-    },
-
-    async reassignMail(sessionId, text) {
-      const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
-      return act('give that work to another session', async () => {
-        const view = await platform.mail.reassign(open.thread.id, sessionId, text)
-        const now = get().mailThread
-        if (get().platform === platform && now?.thread.id === open.thread.id) set({ mailThread: merged(now, view) })
         void get().loadMail()
       })
     },

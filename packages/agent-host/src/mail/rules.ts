@@ -1,6 +1,7 @@
+import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { MessageKind, ThreadState } from '../dev-services/store/mail.js'
+import type { MessageKind } from '../dev-services/store/mail.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 
@@ -11,9 +12,6 @@ import { PERSON, parseAddress } from './address.js'
 
 /** What a sender is, from its address */
 export type SenderClass = 'session' | 'app' | 'person' | 'centralu'
-
-/** What a sender is in a thread. `person` and `centralu` are not roles in it: they have the powers of their class */
-export type Standing = 'person' | 'centralu' | 'owner' | 'assignee' | 'member'
 
 /** Why a call was refused, for the caller to act on (the message says it in words) */
 const REFUSALS = [
@@ -83,64 +81,6 @@ export const ASKS_PER_HOUR = 5
 /** The same words from the same sender in the same thread within this long are one post (§7.9) */
 export const REPEAT_WINDOW_MS = 10 * 60_000
 
-export const SUBJECT_MAX = 200
-export const NEXT_MAX = 300
-export const MAX_BLOCKERS = 5
-
-/**
- * Whether a sender may post a kind (§3.2 and §9.4). `assign` is the owner's act on a thread (`MailService.assign`) and
- * `event` is Centralu's alone, so neither is a kind a plain post may carry
- */
-export function mayPostKind(sender: SenderClass, standing: Standing, kind: MessageKind): string | null {
-  switch (kind) {
-    case 'event':
-      return sender === 'centralu' ? null : 'only Centralu writes an event'
-    case 'assign':
-      return 'work is given with assign, not posted'
-    case 'notice':
-      return sender === 'app' || sender === 'centralu' ? null : 'a notice comes from an app or from Centralu'
-    case 'report':
-      return sender === 'centralu' || standing === 'assignee' ? null : 'only the assignee reports on a thread'
-    case 'question':
-    case 'answer':
-    case 'note':
-      return null
-    default:
-      return `unknown kind ${String(kind)}`
-  }
-}
-
-/** The states a party may set with `mail update` (§3.3): the owner and the person any, the assignee the four of its own */
-export function settableStates(standing: Standing): readonly ThreadState[] {
-  if (standing === 'centralu' || standing === 'person' || standing === 'owner') return ['open', 'running', 'review', 'blocked', 'done']
-  if (standing === 'assignee') return ['running', 'review', 'blocked', 'done']
-  return []
-}
-
-/** May this party change the task's other fields (next step, links, subject, blockers)? */
-export function mayEditTask(standing: Standing): boolean {
-  return standing !== 'member'
-}
-
-/** What a thread goes back to when its last blocker is resolved: `running` if a turn of it is going, else `open` (§3.3) */
-export function stateAfterUnblocked(turnGoing: boolean): ThreadState {
-  return turnGoing ? 'running' : 'open'
-}
-
-/** Whether a post by this party sends a `review` thread back to `running`: the owner or the person sends more (§3.3) */
-export function reopensReview(standing: Standing, kind: MessageKind): boolean {
-  return (standing === 'owner' || standing === 'person') && (kind === 'note' || kind === 'question' || kind === 'answer')
-}
-
-/**
- * Words that flow down (§7.3): an assign, note or answer from the thread's owner, a session, to its assignee, and anything
- * from the person. An app's words never do, whatever its place in the thread
- */
-export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean, recipientIsAssignee: boolean, kind: MessageKind): boolean {
-  if (senderIsPerson) return true
-  return senderIsOwnerSession && recipientIsAssignee && (kind === 'assign' || kind === 'note' || kind === 'answer')
-}
-
 /**
  * Whether a message wakes a receiver at rest (§3.2, §9.5). Mail from a session, the person or Centralu does; an app's notice does
  * not unless the app marked it `needsOwner` (or asked for it), and an app can ask for no wake at all. An `event` is never mail
@@ -156,52 +96,17 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
 }
 
 /**
- * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, work given or
- * asked in its own threads (an assign, a question, an answer), a report its owner is waiting on, and an app's `needsOwner` post. The rest waits for
- * the session's next turn
+ * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, a task, a report, a
+ * message that needs a reply and an app's post the receiver must see. The rest waits for the session's next turn
  */
-export function needsReceiver(sender: SenderClass, m: { kind: MessageKind; needsOwner: boolean }): boolean {
-  // The person's words are never the kind that can wait out a stop: they decide
-  if (sender === 'person') return true
-  switch (m.kind) {
-    case 'assign':
-    case 'question':
-    case 'answer':
-      return true
-    case 'report':
-      return true
-    case 'notice':
-      return sender === 'app' && m.needsOwner
-    default:
-      return false
-  }
+export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts'>): boolean {
+  return m.sender === PERSON || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
 /** How long a thread's mail may wait behind other threads' before it comes first (§5, §7.10): a question 5 minutes, anything else 15 */
 export const HOLD_QUESTION_MS = 5 * 60_000
 export const HOLD_OTHER_MS = 15 * 60_000
-
-/** One due message in a thread of the receiver's work, as far as choosing the thread goes */
-export type WorkCandidate = {
-  threadId: string
-  /** The person's words, or urgent mail: they decide (§7.1) */
-  decides: boolean
-  question: boolean
-  /** When the message fell due */
-  dueAt: number
-}
-
-/**
- * The one thread of the receiver's work that a wake carries (§5, §6): `pickWork` over the threads' due mail, the question class being a
- * thread with a question. M3c deletes it with the threads (docs/plans/mailbox.md §8.2 step 3)
- */
-export function pickWorkThread(candidates: readonly WorkCandidate[], now: number): string | null {
-  return pickWork(
-    candidates.map((c) => ({ key: c.threadId, decides: c.decides, needsReply: c.question, dueAt: c.dueAt })),
-    now,
-  )
-}
 
 export const DEBOUNCE_MS = 2_000
 
@@ -227,6 +132,8 @@ export const MAX_DEPTH = 4
 /** Mail-started turns an hour on the host before a wake that would start one is deferred, and the share a quiet session keeps (D13) */
 export const HOST_MAIL_TURNS_PER_HOUR = 120
 export const HOST_SHARE = 10
+/** Mail-started turns an hour between one pair of sessions, with no word from the person, before their mail is held `loop` (D13) */
+export const PAIR_TURNS_PER_HOUR = 20
 /** The unanswered reminder's limits (§10.4), counted from the store so a swap or restart does not reset them */
 export const REMINDER = {
   /** After a session came to rest, before the first reminder */
@@ -265,6 +172,9 @@ export const REFUSAL_TEXT = {
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,
 } as const
 
+/** The text of a task written for a report mark an earlier build left with no task (§9.5) */
+export const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
+
 /** The line an over-long task ends with once cut: the full text stays in the session's conversation */
 export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
 
@@ -272,6 +182,11 @@ export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session'
 export function cutTask(text: string, limit: number): string {
   const task = text.trim()
   return task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
+}
+
+/** The first line of a text on one line, cut at `max`: how a message or a call is quoted in a notice, a card or a record */
+export function firstLineOf(text: string, max = Infinity): string {
+  return oneLineText(text.split(/\r\n|[\n\r]/)[0] ?? '', max)
 }
 
 /**

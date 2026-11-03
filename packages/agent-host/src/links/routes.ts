@@ -312,8 +312,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'mail.thread': HUB,
   'mail.reply': HUB,
   'mail.close': HUB,
-  'mail.reassign': HUB,
-  'mail.unblock': HUB,
   'mail.held': HUB,
   'mail.resume': HUB,
   'mail.wake': HUB,

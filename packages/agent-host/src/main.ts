@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeSync } from 'node:fs'
-import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -19,19 +19,8 @@ import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
-import { MailService } from './mail/service.js'
-import { MailDelivery } from './mail/delivery.js'
-import { askedBy, askerFacts, type AskedByHost } from './mail/asked-by.js'
-import { parseAddress } from './mail/address.js'
 import { MailPerson } from './mail/person.js'
-import { takeOverFromEarlierBuild } from './mail/adoption.js'
-import { pausedReportKey, readPausedTasks } from './sessions/child-ownership.js'
-import { answerRecorder, closingRecorder, delegationRecorder, finishRecorder, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
-import { recordedAgentDepth } from './sessions/agent-depth.js'
-import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
-import { MailTool } from './mail/tool.js'
-import { MailTurns } from './mail/turns.js'
-import { mailRelations } from './mail/relations.js'
+import { hostMail, mailSessionsOf } from './mail/host-mail.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -397,107 +386,30 @@ const userAppAdoption = new UserAppAdoption({
   changed: () => events.push({ type: 'projects_changed' }),
 })
 /*
- * The mailbox (#1347, docs/plans/mailbox.md): its model, and the delivery that wakes a receiver with its mail (§5), which starts
- * once the host is ready (below). The host's id is read from the setting a hub already keeps, and only when mail needs it.
+ * The mailbox (docs/plans/mailbox.md, M3a): messages addressed to parties, the reach and the one hold, the turns and guards, the delivery that
+ * wakes a receiver with its mail and the version-1 tool mapped onto the message service. Delivery starts once the host is ready (below).
  */
-const mail = new MailService(store.mail, {
-  hostId: () => hubSelfId(store),
-  // Who may write to whom (§9.1), read from the sessions that are here
-  policy: mailRelations({
-    session: (id) => mgr.sessionInfo(id),
-    orchestratorAsks: () => mgr.orchestratorAsks(),
-    ...mgr.mailSeats(() => commandsFor('orchestrator').includes('mail')),
-    inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
-  }),
-})
-// What the host knows of a session and its project, for the cards and headers over a session's request to the orchestrator (§9.7)
-const askedByHost: AskedByHost = {
-  session: (id) => {
-    const s = mgr.sessionInfo(id)
-    return s && { name: s.name, projectId: s.projectId }
-  },
-  project: (id) => store.projects.listProjects().find((p) => p.id === id),
-}
-// The loop and token guards (§7.9): what turns mail started, and what they used
-const mailTurns = new MailTurns(store.mail, {
-  keepOpen: (id) => mgr.keptInTurn(id),
-  // Whose request a turn is, fixed when it begins (§9.7)
-  askerOf: (threadId) => {
-    const thread = store.mail.thread(threadId)
-    return thread ? mail.requestedBy(thread) : undefined
-  },
-})
-const mailTool = new MailTool(
-  mail,
-  store.mail,
-  (id) => (mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail') ? COMMAND_CALLS : PLAIN_CALLS),
-  (id) => askerFacts(askedByHost, id),
-  () => mgr.orchestratorId(),
-  (id) => mailTurns.current(id)?.threadId ?? null,
-)
-const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
-  turns: mailTurns,
-  // A request to the orchestrator from a project nobody trusted waits for the person's Release (§9.7)
-  untrustedAsker: (address) => {
-    const from = parseAddress(address)
-    return from?.kind === 'session' && !askerFacts(askedByHost, from.sessionId).trusted
-  },
-  // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions (§7.9). A setting the previous build never reads
-  heartbeat: {
-    read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
-    write: (ms) => {
-      if (store.mail.hasThreads()) store.settings.setAppSetting('mail.heartbeat', String(ms))
-    },
-  },
-})
-// The person's side of the mailbox (§10.1) and the news that a thread changed, for the Inbox to read again
-const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
+const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('orchestrator').includes('mail')), { hostId: hubSelfId(store) })
+const mailDelivery = hostMailbox.delivery
+hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
+mgr.useMail(hostMailbox.hooks)
+// The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
+const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
   session: (id) => {
     const s = mgr.sessionInfo(id)
     return s ? { name: s.name, state: s.state } : undefined
   },
-})
-mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
-// A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
-// to rest, answers a card or is restored may now take the mail it was holding
-mgr.useMail({ askedBy: (id) => askedBy(askedByHost, mailTurns, id), sessionGone: (id) => void mail.sessionGone(id), handOver: (from, to, which) => mail.handOver(from, to, which), handOverPreview: (from, to) => mail.handOverPreview(from, to), openWork: (id) => mail.openWorkOf(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
-  // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
-  delegated: delegationRecorder(
-    mail,
-    (id) => {
-      const s = mgr.sessionInfo(id)
-      return s && { projectId: s.projectId, depth: recordedAgentDepth(store.settings, id) }
-    },
-    mailTurns,
-  ),
-  waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
-  answered: answerRecorder(mail, store.mail),
-  finishedWith: finishRecorder(mail),
-  // A session a script or the RPC started with a first message: the person owns the work, and its turn is reported to their Inbox (§8.1)
-  personWork: {
-    started: personWorkRecorder(mail, (id) => {
-      const s = mgr.sessionInfo(id)
-      return s && { projectId: s.projectId, depth: recordedAgentDepth(store.settings, id) }
-    }),
-    owes: (id) => mail.personOwes(mail.sessionAddress(id)),
-    report: personReportRecorder(mail, store.mail),
+  legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
+  projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
+  untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
+  // A session's turn on a chain, from the turn records while the session is in a turn: what Mark done and Drop ask about and stop (3.10)
+  turnOn: (id) => {
+    const s = mgr.sessionInfo(id)
+    const turn = s && inTurn(s.state) ? hostMailbox.turns.current(id) : undefined
+    return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
   },
-  // A turn's end is a report in the thread, and the owner is told as mail when it can read it (§8.1)
-  report: reportRecorder(mail, store.mail, (id) => mailTurns.threadOf(id)),
-  // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)
-  turnStarted: turnRecorder(mail, store.mail, mailTurns),
+  closed: (c) => void mgr.mailWorkClosed(c),
 })
-// A thread whose work was going and is closed stops its running turn and tells the helper once (3.10)
-mail.useClosing(
-  closingRecorder(mailTurns, {
-    inTurn: (id) => {
-      const s = mgr.sessionInfo(id)
-      return !!s && inTurn(s.state)
-    },
-    paused: (id, ownerId) => mgr.pausedFor(id, ownerId),
-    workClosed: (c) => void mgr.workClosed(c),
-  }),
-)
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
@@ -948,17 +860,8 @@ setTimeout(() => {
  * is gone, so only one host delivers (§4.2). The sweep is delivery's own, every 60 s.
  */
 setTimeout(() => {
-  // What an older build did while it served this store (§4.2): its report marks become threads, and the work it finished is closed here
-  try {
-    takeOverFromEarlierBuild(mail, store, {
-      info: (id) => mgr.sessionInfo(id),
-      depth: (id) => recordedAgentDepth(store.settings, id),
-      paused: (id) => readPausedTasks(store.settings.appSetting(pausedReportKey(id)))?.length ?? null,
-    })
-  } catch (e) {
-    console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
-  }
-  mailDelivery.start()
+  // What an older build left (§6.3, §9.5): its pending thread mail moves, its report marks and tasks come in step, then delivery starts
+  hostMailbox.afterReady()
 }, 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a

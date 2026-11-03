@@ -6,8 +6,8 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
-import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
-import { MailService } from '../mail/service.js'
+import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
+import { MAIL_HOST, addressOf, wireHostMail } from './host-mail.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
@@ -345,37 +345,29 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 
-  it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and closes the thread', async () => {
+  it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and settles the task', async () => {
     const a = host()
     const project = await a.mgr.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
-    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
-    personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 }))(s.id, 'a long job')
+    // The person's task is written as the RPC writes it, before the first message goes in; this host's mail is not wired
+    hostMail(store, mailSessionsOf(a.mgr, () => true), { hostId: MAIL_HOST }).hooks.personWork!.started(s.id, 'a long job')
     await a.mgr.send(s.id, 'a long job')
-    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(true)
+    const task = store.mailbox.newestTask(PERSON, addressOf(s.id))!
+    expect(task).toBeDefined()
 
     const b = host()
     // The mailbox is wired in the same tick as the host is made, before the start's first moment
-    b.mgr.useMail({
-      sessionGone: () => {},
-      sessionChanged: () => {},
-      sessionEvent: () => {},
-      personWork: {
-        started: personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 })),
-        owes: (id) => mail.personOwes(mail.sessionAddress(id)),
-        report: personReportRecorder(mail, store.mail),
-      },
-    })
-    const thread = () => store.mail.latestBetween(PERSON, mail.sessionAddress(s.id))!
-    await eventually(() => thread().state === 'review')
-    const report = store.mail.messagesAfter(thread().id, 0).find((m) => m.sender === 'centralu' && m.kind === 'report')!
-    expect(report.facts).toMatchObject({ outcome: 'quit' })
-    expect(report.body).toContain('Centralu quit or restarted during its turn')
-    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(false)
+    wireHostMail(b.mgr, store)
+    const reports = () => store.mailbox.reportsOn(task.id).filter((m) => m.sender === 'centralu')
+    await eventually(() => reports().length === 1)
+    expect(reports()[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'quit' })
+    expect(reports()[0]!.body).toContain('Centralu quit or restarted during its turn')
+    expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: 'reported' })
+    expect(store.mailbox.newestTask(PERSON, addressOf(s.id))).toBeUndefined()
     // The start after that finds the session at rest and says nothing more
     host()
     await startNoticesRan()
-    expect(store.mail.messagesAfter(thread().id, 0).filter((m) => m.sender === 'centralu' && m.kind === 'report')).toHaveLength(1)
+    expect(reports()).toHaveLength(1)
   })
 
   it('a session at rest is left alone by the next start', async () => {
@@ -489,6 +481,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626 review)
     expect(sentTo(b, child)).toHaveLength(0)
     expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
+    // The mail turn of the cut turn is read back, not closed lost (mailbox §8.2 step 6, Q-M3a-3)
+    expect(b.mgr.keptInTurn(child)).toBe(true)
     await eventually(() => sentTo(b, child).length === 1)
     expect(sentTo(b, child)[0]).toContain('Centralu on this machine was updated while your turn was running')
     expect(sentTo(b, child)[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
@@ -785,32 +779,23 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     const a = host({ updateResume: f })
     const project = await a.mgr.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
-    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
-    personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 }))(s.id, 'a long job')
+    hostMail(store, mailSessionsOf(a.mgr, () => true), { hostId: MAIL_HOST }).hooks.personWork!.started(s.id, 'a long job')
     await a.mgr.send(s.id, 'a long job')
+    const task = store.mailbox.newestTask(PERSON, addressOf(s.id))!
     await stopForUpdate(a)
 
     const b = host({ updateResume: f })
     // The mailbox is wired in the same tick as the host is made, before the start's first moment
-    b.mgr.useMail({
-      sessionGone: () => {},
-      sessionChanged: () => {},
-      sessionEvent: () => {},
-      personWork: {
-        started: personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 })),
-        owes: (id) => mail.personOwes(mail.sessionAddress(id)),
-        report: personReportRecorder(mail, store.mail),
-      },
-    })
-    const reports = () =>
-      store.mail.messagesAfter(store.mail.latestBetween(PERSON, mail.sessionAddress(s.id))!.id, 0).filter((m) => m.sender === 'centralu' && m.kind === 'report')
+    wireHostMail(b.mgr, store)
+    const reports = () => store.mailbox.reportsOn(task.id).filter((m) => m.sender === 'centralu')
     await eventually(() => sentTo(b, s.id).length === 1)
     await startNoticesRan()
     expect(reports()).toHaveLength(0)
-    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(true)
+    expect(store.mailbox.newestTask(PERSON, addressOf(s.id))?.id).toBe(task.id)
     b.claude.handles.get(s.id)!.answer('done')
     await eventually(() => reports().length === 1)
-    expect(reports()[0]!.facts).not.toMatchObject({ outcome: 'quit' })
+    expect(reports()[0]!.facts).toMatchObject({ outcome: 'finished' })
+    expect(reports()[0]!.facts.reason).toBeUndefined()
   })
 
   it("one that cannot be continued ends as a quit's does: marked stopped, its parent told, and it leaves the list", async () => {

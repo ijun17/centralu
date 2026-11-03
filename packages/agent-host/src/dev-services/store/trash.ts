@@ -4,6 +4,7 @@ import type { WorktreeRecovery } from '../worktree-recovery.js'
 import type { SessionInfo } from '@cc/protocol'
 import { indexedText } from './search-index.js'
 import { type SessionRecords } from './sessions.js'
+import type { MailboxRecords } from './mailbox.js'
 import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 import { SESSION_SETTING_OF } from './settings.js'
@@ -71,7 +72,11 @@ const DELETE_CHUNK = 250
 
 /** The session archive (#204, `trash` in the code): moving a session out of the live list and back, deleting it for good, and deleting a project */
 export class TrashRecords {
-  constructor(private readonly db: Database.Database, private readonly sessions: SessionRecords) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly sessions: SessionRecords,
+    private readonly mailbox: Pick<MailboxRecords, 'purgeParty'>,
+  ) {}
 
   // ── The trash (#204) ──
   //
@@ -202,10 +207,9 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       /*
-       * The mail it was a party to (#1347): its receipts, its place in threads and its turns go with the session, as its
-       * marks do. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay, as the thread's history. A
-       * thread that named it as owner or assignee is moved on when it goes to the trash (mail/service.ts `partyGone`, which the
-       * manager must call by slice 2, before the `mail` tool can open a thread that names a session)
+       * The mail it was a party to (#1347): its receipts and rows, its place in old threads and its turns go with the
+       * session, as its marks do. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay while another
+       * party has a row. What waited on it was settled when it went to the trash (`MessageService.partyGone`)
        */
       const host = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value
       if (host) {
@@ -213,6 +217,8 @@ export class TrashRecords {
         const address = `session:${host}/${sessionId}`
         this.db.prepare(`DELETE FROM mail_receipts WHERE recipient = ?`).run(address)
         this.db.prepare(`DELETE FROM mail_participants WHERE address = ?`).run(address)
+        // Its rows in the message tables too, and each message left with no row (docs/plans/mailbox.md §6)
+        this.mailbox.purgeParty(address)
       }
       this.db.prepare(`DELETE FROM mail_turns WHERE session_id = ?`).run(sessionId)
       // Every setting kept for it (`<name>:<sessionId>`, `SESSION_SETTING_OF` in store/settings.ts)

@@ -10,6 +10,7 @@ import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { DelegationForks } from './delegation-forks.js'
+import type { DelegationHost } from './delegation-host.js'
 import type { AppSessions } from './app-sessions.js'
 import type { ProjectCreation } from './project-creation.js'
 import type { MachineAnswer, MachineRequest } from './machine-flow.js'
@@ -29,7 +30,7 @@ import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcrip
  */
 export type OrchestratorSeatHost = Pick<DelegationForks, 'forkFor'> &
   Pick<ProjectCreation, 'createProjectAsked' | 'askAppProject' | 'createProjectOnMachine' | 'addFolderAsked' | 'addFolderOnMachine'> &
-  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & {
+  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation'> & {
   /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
@@ -373,6 +374,14 @@ export function orchestratorToolsFor(
        * start_agent's caller is. It used to be a plain send, owed to nobody, and the orchestrator heard nothing.
        */
       const reportBack = opts.reportBack !== false
+      // §7.4: work given with the new session is the mailbox's to refuse before the session is made
+      const target = remote[0] ?? local[0]
+      if (opts.firstMessage && target) {
+        const refused = host.refusesDelegation(orchestratorId, remote[0] ? { linked: true } : { projectId: target.id }, {
+          tool: 'create_session', target: remote[0] ? `a session on ${remote[0].machine}` : target.name, text: opts.firstMessage,
+        })
+        if (refused) return { ok: false, error: refused }
+      }
       if (reader && remote[0]) {
         const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset })
         if (!r.ok) return r
@@ -642,9 +651,19 @@ export function orchestratorToolsFor(
         return { ok: false, error: 'Cannot send to itself' }
       }
       const remote = remoteOf(sessionId)
-      if (remote) return sendLinked(remote, sessionId, text, reportBack)
+      if (remote) {
+        // §7.4: asked before anything goes over the link
+        const refused = host.refusesDelegation(orchestratorId, { sessionId, linked: true }, { tool: 'send_to_session', target: `a session on ${remote.machineOf(sessionId) ?? 'a linked machine'}`, text })
+        if (refused) return { ok: false, error: refused }
+        return sendLinked(remote, sessionId, text, reportBack)
+      }
       const target = host.meta.get(sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+      // §7.4: work given with a report asked is a delegation, the mailbox's to refuse before anything is sent, queued or forked
+      if (reportBack) {
+        const refused = host.refusesDelegation(orchestratorId, { sessionId, projectId: target.projectId }, { tool: 'send_to_session', target: target.name || target.id, text })
+        if (refused) return { ok: false, error: refused }
+      }
       /*
        * Busy with a turn that is not this seat's (#677): this seat chooses. A note goes in as before (auto only,
        * #606); a queue holds it for a new turn when the running one ends; a fork copies the session's conversation

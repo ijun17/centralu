@@ -10,8 +10,7 @@ import { SessionManager } from './manager.js'
 import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
-import { MailService } from '../mail/service.js'
-import { openBy } from '../mail/mail.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * The orchestrator's session archive commands (#1219): listing, restoring and moving subagent steps to the session archive act at once;
@@ -284,20 +283,17 @@ describe('delete_session', () => {
     expect(await listed()).toContain(waited.id)
   })
 
-  it('asks when the session is the assignee of an unfinished mail thread, naming it: restoring does not hand the thread back', async () => {
-    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
-    mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), openWork: (id) => mail.openWorkOf(id), sessionChanged: () => {} })
+  it('asks when the session was given a task it has not been reported on, naming it: restoring does not bring the task back', async () => {
+    const m = wireHostMail(mgr, store)
     const orc = await mgr.orchestrator()
     const worker = await newSession('Worker')
     const giver = await newSession('Giver')
-    const a = mail.sessionAddress(worker.id)
-    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #12', body: 'please', assignee: a })
-    mail.update(thread.id, a, { state: 'running' })
+    const task = m.service.task(addressOf(giver.id), addressOf(worker.id), { text: 'Land #12', origin: 'agent_session', delivered: true })
     const denied = await answered(orc.id, 'delete_session', { sessionId: worker.id }, 'deny')
-    expect(denied.question).toContain('It is the assignee of an unfinished mail thread ("Land #12")')
+    expect(denied.question).toContain('It was given a task it has not been reported on ("Land #12"); whoever gave it is told the work stopped.')
     expect(denied.r.isError).toBe(true)
     expect(await listed()).toContain(worker.id)
-    expect(store.mail.thread(thread.id)).toMatchObject({ assignee: a, state: 'running' })
+    expect(mailReader(store).taskRow(task.id, worker.id)).toMatchObject({ settled: null })
   })
 
   it('asks for a session on a linked machine, which that machine decides on its own: the guard on `local`', async () => {

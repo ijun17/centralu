@@ -19,10 +19,6 @@ export interface MailPort {
   /** The person's words in a thread; answers the new message */
   reply(threadId: string, text: string, kind?: 'note' | 'answer' | 'question'): Promise<MailThreadView>
   close(threadId: string, outcome?: 'finished' | 'failed' | 'stopped' | 'dropped'): Promise<MailThreadRow>
-  /** Gives the work to another session, with the words that go with it */
-  reassign(threadId: string, sessionId: string, text: string): Promise<MailThreadView>
-  /** Resolves a blocker of the thread */
-  unblock(threadId: string, n: number): Promise<MailThreadRow>
   /** Sends held mail now (`release`: Release, Resend, Retry) or lets it go undelivered (`dismiss`) */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): Promise<{ changed: number }>
   /** Lifts a pause: a session whose mail stopped for its budget, or a thread whose mail stopped for its turns (§7.9) */

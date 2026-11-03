@@ -94,22 +94,14 @@ describe('the thread in the inbox', () => {
     expect(render(view()).html).not.toContain('data-testid="mail-earlier"')
   })
 
-  it('lists what stands in its way, each with Unblock, and none that is resolved', () => {
-    const { html, text } = render(
-      view({
-        blockers: [
-          { n: 1, kind: 'text', ref: null, text: 'waiting for a design', resolved: false },
-          { n: 2, kind: 'thread', ref: 't9', text: '', resolved: false },
-          { n: 3, kind: 'text', ref: null, text: 'an old reason', resolved: true },
-        ],
-      }),
-    )
-    expect(text).toContain('Waiting for waiting for a design')
-    expect(text).toContain('Waiting for thread t9')
-    expect(text).not.toContain('an old reason')
-    expect(html).toContain('data-testid="mail-unblock-1"')
-    expect(html).toContain('data-testid="mail-unblock-2"')
-    expect(html).not.toContain('data-testid="mail-unblock-3"')
+  it('offers no way to give the work to another session and draws no blocker, even from a host of an older build that sends one', () => {
+    const { html, text } = render(view({ blockers: [{ n: 1, kind: 'text', ref: null, text: 'waiting for a design', resolved: false }] }))
+    expect(html).not.toContain('data-testid="mail-give"')
+    expect(html).not.toContain('data-testid="mail-reassign"')
+    expect(html).not.toContain('data-testid="mail-blockers"')
+    expect(text).not.toContain('Give to another session')
+    expect(text).not.toContain('waiting for a design')
+    expect(text).not.toContain('Unblock')
   })
 
   it('has a reply box and the person’s acts while it is open, and neither once it is done', () => {

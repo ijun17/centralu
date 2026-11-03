@@ -75,6 +75,7 @@ beforeEach(() => {
     builderRefOf: vi.fn(() => null),
     checkApp: vi.fn(),
     createApp: vi.fn(),
+    refusesDelegation: vi.fn(() => null),
   }
 })
 afterEach(() => store.close())

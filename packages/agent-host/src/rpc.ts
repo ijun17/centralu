@@ -436,15 +436,7 @@ export function createRpcHandler(
     'mail.reply': async ({ threadId, text, kind }) => {
       return requireMail().reply(threadId, text, kind)
     },
-    'mail.close': async ({ threadId, outcome }) => {
-      return requireMail().close(threadId, outcome)
-    },
-    'mail.reassign': async ({ threadId, sessionId, text }) => {
-      return requireMail().reassign(threadId, sessionId, text)
-    },
-    'mail.unblock': async ({ threadId, n }) => {
-      return requireMail().unblock(threadId, n)
-    },
+    'mail.close': async ({ threadId, outcome }) => requireMail().close(threadId, outcome),
     'mail.held': async ({ action, recipient, messageIds }) => {
       return requireMail().held(action, recipient, messageIds)
     },
@@ -681,7 +673,22 @@ export function createRpcHandler(
       } catch {
         // No such project — nothing to clean up
       }
-      await mgr.deleteProject(projectId)
+      // Its name before it goes, for the notice the senders of its held mail get once it is gone (§7.4)
+      const name = mail?.projectName(projectId)
+      const gone = () => {
+        try {
+          mgr.cwdOfProject(projectId)
+          return false
+        } catch {
+          return true
+        }
+      }
+      try {
+        await mgr.deleteProject(projectId)
+      } finally {
+        // Also after a deletion that failed part way, once the project is gone: its held mail must not wait for a trust that cannot come
+        if (name !== undefined && gone()) mail?.projectDeleted(projectId, name)
+      }
       if (cwd !== null) {
         terminals?.closeCwd(cwd)
         commands?.stopCwd(cwd)
@@ -694,6 +701,8 @@ export function createRpcHandler(
     'projects.setTrusted': async ({ projectId, trusted }) => {
       // The toggle answers at once; the project's idle sessions restart behind it (#663)
       void mgr.setProjectTrusted(projectId, trusted).catch((err) => console.error('[sessions] restarting for a trust change failed:', err))
+      // The trust is written by now: what the project's sessions sent that waited for it goes, in order (§7.4)
+      if (trusted) mail?.trusted(projectId)
       externalApps?.refresh()
       return { ok: true as const }
     },

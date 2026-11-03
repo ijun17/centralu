@@ -4,40 +4,28 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PERSON } from '../mail/address.js'
-import { answerRecorder, delegationRecorder, finishRecorder, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
-import { MailService } from '../mail/service.js'
-import { MailTurns } from '../mail/turns.js'
+import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
-let mail: MailService
+let m: HostMail
+let read: ReturnType<typeof mailReader>
 let rpc: ReturnType<typeof createRpcHandler>
-/** Whether the person's thread existed when each session first went to work: the thread is written before the message goes in */
-let threadAtFirstWork: Map<string, boolean>
+/** Whether the person's task existed when each session first went to work: the task is written before the message goes in */
+let taskAtFirstWork: Map<string, boolean>
 
 beforeEach(async () => {
   w = await crossWorld()
-  mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa' })
-  const turns = new MailTurns(w.store.mail)
-  threadAtFirstWork = new Map()
-  w.mgr.useMail({
-    sessionGone: (id) => void mail.sessionGone(id),
-    sessionChanged: () => {},
-    delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
-    answered: answerRecorder(mail, w.store.mail),
-    report: reportRecorder(mail, w.store.mail),
-    waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
-    finishedWith: finishRecorder(mail),
-    turnStarted: turnRecorder(mail, w.store.mail, turns),
-    sessionEvent: (e, ended) => {
-      if (e.type === 'state_change' && e.state === 'working' && e.sessionId && !threadAtFirstWork.has(e.sessionId)) threadAtFirstWork.set(e.sessionId, !!threadOf(e.sessionId))
-      turns.observe(e, ended)
-    },
-    personWork: {
-      started: personWorkRecorder(mail, (id) => w.mgr.sessionInfo(id)),
-      owes: (id) => mail.personOwes(mail.sessionAddress(id)),
-      report: personReportRecorder(mail, w.store.mail),
+  read = mailReader(w.store)
+  taskAtFirstWork = new Map()
+  m = wireHostMail(w.mgr, w.store, {
+    hooks: {
+      sessionEvent: (e, ended) => {
+        if (e.type === 'state_change' && e.state === 'working' && e.sessionId && !taskAtFirstWork.has(e.sessionId)) taskAtFirstWork.set(e.sessionId, !!taskOf(e.sessionId))
+        m.hooks.sessionEvent?.(e, ended)
+      },
     },
   })
   rpc = createRpcHandler(w.mgr, w.adapters)
@@ -51,76 +39,83 @@ const params = (extra: Record<string, unknown> = {}) => ({ projectId: w.caller.i
 const start = async (extra: Record<string, unknown>, rights?: 'full' | 'limited', label: string | null = 'ci runner') =>
   (await rpc('agents.createSession', params(extra), { client: 1, ...(rights ? { rights } : {}), label })) as { id: string }
 const storedFirst = (id: string) => w.store.messages.loadMessages(id, 5).find((m) => m.role === 'user')!
-const threadOf = (id: string) => w.store.mail.latestBetween(PERSON, mail.sessionAddress(id))
-const reportsIn = (threadId: string) => w.store.mail.messagesAfter(threadId, 0).filter((m) => m.kind === 'report')
+/** The person's newest task to the session, settled or not */
+const taskOf = (id: string) => read.tasks(PERSON, id).at(-1)
+const reportsOf = (id: string) => read.reportsOn(taskOf(id)!.id)
+/** The task row: open (null) while the work goes on, `reported` once its end was reported */
+const settledOf = (id: string) => read.taskRow(taskOf(id)!.id, id)?.settled
+const owes = (id: string) => m.hooks.personWork!.owes(id)
+/** The person's task, as a script's or the RPC's first message writes it */
+const personTask = (id: string, text = 'Run the export') => m.service.task(PERSON, addressOf(id), { text, origin: 'create_session', delivered: true })
+const personTasks = () => w.store.mailbox.feedOf(PERSON, { limit: 50 }).filter((x) => x.kind === 'task' && x.sender === PERSON)
 
 describe('a script starts a session with a first message', () => {
-  it('the work is the person’s: a running thread with the first message as its assign, written before the message goes in', async () => {
+  it('the work is the person’s: an open task from the person with the first message as its words, written before the message goes in', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    expect(threadOf(s.id)).toMatchObject({ state: 'running', owner: PERSON, assignee: mail.sessionAddress(s.id), origin: 'create_session' })
+    expect(taskOf(s.id)).toMatchObject({ sender: PERSON, kind: 'task', body: 'Run the export' })
+    expect(read.taskRow(taskOf(s.id)!.id, s.id)).toMatchObject({ settled: null, deliveredAt: expect.any(Number), readAt: expect.any(Number) })
     expect(handleOf(s.id)!.sent).toHaveLength(1)
     expect(handleOf(s.id)!.sent[0]).toContain('> Run the export')
-    expect(threadAtFirstWork.get(s.id)).toBe(true)
-    expect(w.store.mail.messagesAfter(threadOf(s.id)!.id, 0)[0]).toMatchObject({ sender: PERSON, kind: 'assign', body: 'Run the export' })
+    expect(taskAtFirstWork.get(s.id)).toBe(true)
   })
 
-  it('its first turn is reported in the person’s Inbox, Centralu’s words and the session’s own beside them, and the thread is in review', async () => {
+  it('its first turn is reported in the person’s Inbox, Centralu’s words with the session’s own beside them, and the task is reported', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.answer('Exported 12 files')
-    await w.until(() => reportsIn(threadOf(s.id)!.id).length === 2)
-    const [words, report] = reportsIn(threadOf(s.id)!.id)
-    expect(words).toMatchObject({ sender: mail.sessionAddress(s.id), body: 'Exported 12 files', facts: { relayed: true } })
-    expect(report).toMatchObject({ sender: 'centralu', facts: { outcome: 'finished' } })
+    await w.until(() => reportsOf(s.id).length === 1)
+    const [report] = reportsOf(s.id)
+    expect(report).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: taskOf(s.id)!.id, facts: { outcome: 'finished', answer: 'Exported 12 files' } })
     expect(report!.body).toContain('finished its turn')
     expect(report!.body).not.toContain('Exported')
-    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ recipient: PERSON, readAt: null })
-    expect(threadOf(s.id)?.state).toBe('review')
+    expect(read.row(report!.id, PERSON)).toMatchObject({ readAt: null })
+    expect(settledOf(s.id)).toBe('reported')
   })
 
   it('the turns after it are the person’s own: typing into the session reports nothing', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.answer('Exported 12 files')
-    await w.until(() => threadOf(s.id)?.state === 'review')
+    await w.until(() => settledOf(s.id) === 'reported')
     await w.mgr.send(s.id, 'and the second one')
     handleOf(s.id)!.answer('Done too')
     await new Promise((r) => setTimeout(r, 30))
-    expect(reportsIn(threadOf(s.id)!.id)).toHaveLength(2)
-    expect(threadOf(s.id)?.state).toBe('review')
+    expect(reportsOf(s.id)).toHaveLength(1)
+    expect(read.tasks(PERSON, s.id)).toHaveLength(1)
   })
 
   it('a failed turn is reported as it ended, by the kind of its error', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.event({ type: 'error', sessionId: s.id, error: { code: 'internal', message: 'rate limit reached, retry later', retryable: false } })
-    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
-    const report = reportsIn(threadOf(s.id)!.id).find((m) => m.sender === 'centralu')!
-    expect(report.facts).toMatchObject({ outcome: 'failed', error: 'usage_limit' })
-    expect(report.body).not.toContain('rate limit reached')
-    expect(threadOf(s.id)?.state).toBe('review')
+    await w.until(() => reportsOf(s.id).length > 0)
+    const [report] = reportsOf(s.id)
+    expect(report!.facts).toMatchObject({ outcome: 'failed', error: 'usage_limit' })
+    expect(report!.body).not.toContain('rate limit reached')
+    expect(settledOf(s.id)).toBe('reported')
   })
 
-  it('a turn that left its own background work running is a pause: the thread stays running, and the report says how many tasks', async () => {
+  it('a turn that left its own background work running is a pause: the task stays open, and the report says how many tasks', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
     handleOf(s.id)!.answer('Started the server')
-    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
-    const report = reportsIn(threadOf(s.id)!.id).find((m) => m.sender === 'centralu')!
-    expect(report.facts).toMatchObject({ outcome: 'paused', paused: 1 })
-    expect(report.body).not.toContain('pnpm dev')
-    expect(threadOf(s.id)?.state).toBe('running')
-    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(true)
+    await w.until(() => reportsOf(s.id).length > 0)
+    const [report] = reportsOf(s.id)
+    expect(report!.facts).toMatchObject({ outcome: 'paused', paused: 1 })
+    expect(report!.body).not.toContain('pnpm dev')
+    expect(settledOf(s.id)).toBeNull()
+    expect(owes(s.id)).toBe(true)
   })
 
-  it('work it handed on in the turn keeps the thread running: the turn’s end is a pause, not the work’s end', async () => {
+  it('work it handed on in the turn keeps the task open: the turn’s end is a pause, not the work’s end', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     const started = await w.mgr.startAgent(s.id, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
-    expect(w.store.mail.latestBetween(mail.sessionAddress(s.id), mail.sessionAddress(child))?.parentId).toBe(threadOf(s.id)!.id)
+    // The task it handed on is caused by the person's task, the work of the turn it was given in (§9.4)
+    expect(read.tasks(addressOf(s.id), child)[0]?.causeId).toBe(taskOf(s.id)!.id)
     handleOf(s.id)!.answer('Handed it on')
-    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
-    expect(reportsIn(threadOf(s.id)!.id).find((m) => m.sender === 'centralu')?.facts).toMatchObject({ outcome: 'paused' })
-    expect(threadOf(s.id)?.state).toBe('running')
-    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(true)
+    await w.until(() => reportsOf(s.id).length > 0)
+    expect(reportsOf(s.id)[0]?.facts).toMatchObject({ outcome: 'waiting', waitingOn: 1 })
+    expect(settledOf(s.id)).toBeNull()
+    expect(owes(s.id)).toBe(true)
   })
 
   it('a session that also owes a report to another session reports to that one, not to the person', async () => {
@@ -128,21 +123,21 @@ describe('a script starts a session with a first message', () => {
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
-    mail.recordDelegation(PERSON, { assignee: mail.sessionAddress(child), task: 'Run the export', origin: 'create_session', projectId: w.caller.id, depth: 0 })
+    personTask(child)
     handleOf(child)!.answer('done')
-    await new Promise((r) => setTimeout(r, 30))
-    expect(reportsIn(threadOf(child)!.id)).toEqual([])
-    expect(threadOf(child)?.state).toBe('running')
+    await w.until(() => read.reportsOn(read.tasks(addressOf(parent), child)[0]!.id).length > 0)
+    expect(reportsOf(child)).toEqual([])
+    expect(settledOf(child)).toBeNull()
   })
 
-  it('a turn the person starts while the thread is still running is theirs, not the work’s: nothing is reported', async () => {
+  it('a turn the person starts while the task is still open is theirs, not the work’s: nothing is reported', async () => {
     const s = await start({}, 'limited')
-    mail.recordDelegation(PERSON, { assignee: mail.sessionAddress(s.id), task: 'Run the export', origin: 'create_session', projectId: w.caller.id, depth: 0 })
+    personTask(s.id)
     await w.mgr.send(s.id, 'what is the state?')
     handleOf(s.id)!.answer('Still going')
     await new Promise((r) => setTimeout(r, 30))
-    expect(reportsIn(threadOf(s.id)!.id)).toEqual([])
-    expect(threadOf(s.id)?.state).toBe('running')
+    expect(reportsOf(s.id)).toEqual([])
+    expect(settledOf(s.id)).toBeNull()
   })
 
   it('a message sent into the first turn joins it: the turn is still the work’s, and reported', async () => {
@@ -150,8 +145,8 @@ describe('a script starts a session with a first message', () => {
     // The first turn is still going when the person writes into it: it joins that turn
     await w.mgr.send(s.id, 'also use the new folder')
     handleOf(s.id)!.answer('Exported 12 files')
-    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
-    expect(threadOf(s.id)?.state).toBe('review')
+    await w.until(() => reportsOf(s.id).length > 0)
+    expect(settledOf(s.id)).toBe('reported')
   })
 })
 
@@ -185,11 +180,9 @@ describe('the first message is the script’s, not the person’s (3.8b)', () =>
     expect(w.mgr.sessionInfo(t.id)?.name).toBe('Help me with this')
   })
 
-  it('is the script’s on the thread too: the assign carries the label as a fact, and the owner is still the person', async () => {
+  it('is the script’s on the task too: its origin is the script, and its sender is still the person', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited', 'ci runner')
-    const thread = threadOf(s.id)!
-    expect(thread.owner).toBe(PERSON)
-    expect(w.store.mail.messagesAfter(thread.id, 0)[0]).toMatchObject({ kind: 'assign', sender: PERSON, facts: { fromScript: { credential: 'ci runner' } } })
+    expect(taskOf(s.id)).toMatchObject({ kind: 'task', sender: PERSON, origin: 'script' })
   })
 
   it('a program that said nothing is an unnamed script, and a label that could pose as something else is made plain', async () => {
@@ -233,13 +226,13 @@ describe('a script that sends later is the script too (3.8b)', () => {
     expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).not.toHaveProperty('intent')
   })
 
-  it('a script’s send is work, not the person’s own turn: the turn it starts is reported to the thread the person owes', async () => {
+  it('a script’s send is work, not the person’s own turn: the turn it starts is reported on the task the person gave', async () => {
     const s = await start({}, 'limited')
-    mail.recordDelegation(PERSON, { assignee: mail.sessionAddress(s.id), task: 'Run the export', origin: 'create_session', projectId: w.caller.id, depth: 0 })
+    personTask(s.id)
     await send(s.id, {}, 'limited')
     handleOf(s.id)!.answer('Both parts done')
-    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
-    expect(threadOf(s.id)?.state).toBe('review')
+    await w.until(() => reportsOf(s.id).length > 0)
+    expect(settledOf(s.id)).toBe('reported')
   })
 
   it('cannot take over a report another session is owed: the choice is the person’s (#1377)', async () => {
@@ -254,33 +247,33 @@ describe('a script that sends later is the script too (3.8b)', () => {
 })
 
 describe('what is not a script’s work', () => {
-  it('a window’s own session (the host’s token) with a first message is the person typing: no thread, no report', async () => {
+  it('a window’s own session (the host’s token) with a first message is the person typing: no task, no report', async () => {
     const s = await start({ initialPrompt: 'Help me with this' }, 'full')
-    expect(threadOf(s.id)).toBeUndefined()
+    expect(taskOf(s.id)).toBeUndefined()
     handleOf(s.id)!.answer('Sure')
     await new Promise((r) => setTimeout(r, 30))
-    expect(w.store.mail.threadsOfParty(PERSON, 'owner')).toEqual([])
+    expect(personTasks()).toEqual([])
     // And one with no rights stated at all (the host's own callers)
     const t = await start({ initialPrompt: 'Help me with this too' })
-    expect(threadOf(t.id)).toBeUndefined()
+    expect(taskOf(t.id)).toBeUndefined()
   })
 
   it('a script’s session with no first message has no work to report: nothing is written down', async () => {
     const s = await start({}, 'limited')
-    expect(threadOf(s.id)).toBeUndefined()
+    expect(taskOf(s.id)).toBeUndefined()
     await w.mgr.send(s.id, 'now a message')
     handleOf(s.id)!.answer('ok')
     await new Promise((r) => setTimeout(r, 30))
-    expect(w.store.mail.threadsOfParty(PERSON, 'owner')).toEqual([])
+    expect(personTasks()).toEqual([])
   })
 
-  it('a session another session started is that session’s work: it has no thread of the person’s', async () => {
+  it('a session another session started is that session’s work: it has no task of the person’s', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     handleOf(child)!.answer('done')
     await new Promise((r) => setTimeout(r, 30))
-    expect(threadOf(child)).toBeUndefined()
+    expect(taskOf(child)).toBeUndefined()
   })
 })

@@ -31,8 +31,6 @@ export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): s
       return 'Running'
     case 'review':
       return 'In review'
-    case 'blocked':
-      return 'Blocked'
     default:
       return t.state
   }
@@ -65,14 +63,6 @@ export function heldResume(row: Pick<MailHeldRow, 'reason' | 'threadId' | 'recip
   if (kind === 'resume-thread') return { threadId: row.threadId }
   if (kind === 'resume-session') return row.recipient.sessionId ? { sessionId: row.recipient.sessionId } : null
   return null
-}
-
-/**
- * Whether the host would take work given to this session (§9.3, §9.1): a session of this computer that is an ordinary one in a project
- * (it has the mail tool), not the orchestrator, a coordinator, a builder or an app's agent, and not one of another machine
- */
-export function canGiveWorkTo(s: { kind: string; projectId?: string | null; appId?: string | null; machine?: string | null }): boolean {
-  return s.kind === 'worker' && !!s.projectId && !s.appId && !s.machine
 }
 
 /** "2 sessions have mail from while Centralu was off" */

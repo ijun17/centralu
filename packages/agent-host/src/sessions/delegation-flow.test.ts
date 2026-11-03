@@ -195,6 +195,7 @@ describe("a child's turn and the call waiting on it", () => {
       toolProfileOf: () => 'scoped',
       pauseReport: (id, tasks) => children.pauseReport(id, tasks),
       reportBackIfAwaited: async (sessionId, ending) => void reported.push({ sessionId, type: ending.type }),
+      refusesDelegation: () => null,
     }
     Object.defineProperties(given, Object.getOwnPropertyDescriptors(extra))
     return new DelegationFlow(hostWith(given))

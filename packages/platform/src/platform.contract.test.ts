@@ -18,7 +18,7 @@ import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
 import { AgentVersionService } from '../../agent-host/src/agent-versions.js'
 import { MailPerson } from '../../agent-host/src/mail/person.js'
-import { MailService } from '../../agent-host/src/mail/service.js'
+import { hostMail, mailSessionsOf } from '../../agent-host/src/mail/host-mail.js'
 import { ThemeFiles } from '../../agent-host/src/themes.js'
 import { ViewHost } from '../../agent-host/src/views/view-host.js'
 import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
@@ -196,13 +196,9 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
     sessions: mgr,
     publish: (status) => server.broadcast({ type: 'agent_versions', status }),
   })
-  // The person's side of the mailbox over this store (#1347); nothing in it delivers, so the delivery's part is empty
-  const mail = new MailPerson(
-    new MailService(store.mail, { hostId: () => 'hub-contract' }),
-    store.mail,
-    { resumeSession: () => {}, resumeThread: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 },
-    { session: () => undefined },
-  )
+  // The person's side of the mailbox over this store (#1347), wired as main.ts wires it; its delivery is not started, so nothing is delivered
+  const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => false), { hostId: 'hub-contract' })
+  const mail = new MailPerson(hostMailbox.service, store.mailbox, hostMailbox.delivery, { session: () => undefined, legacyChain: () => [], projectLabel: (id) => id, untrusted: () => false, turnOn: () => undefined, closed: () => {} })
   const server = new HostServer({
     port: 0,
     token: 'contract',

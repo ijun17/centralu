@@ -7,32 +7,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { InputObserver } from '../adapters/contract.js'
-import { MailDelivery } from '../mail/delivery.js'
-import { MailService } from '../mail/service.js'
-import { MailTool } from '../mail/tool.js'
-import { MailTurns } from '../mail/turns.js'
-import { openBy } from '../mail/mail.test-helpers.js'
+import { PERSON } from '../mail/address.js'
+import type { HostMail } from '../mail/host-mail.js'
 import { MAIL_ACCEPT_MS } from './session-events.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let w: ReturnType<typeof managerWorld>
-let mail: MailService
-let delivery: MailDelivery
-let turns: MailTurns
+let m: HostMail
+let read: ReturnType<typeof mailReader>
 let clock = { t: 1_800_000_000_000 }
 
 beforeEach(() => {
   w = managerWorld()
   clock = { t: 1_800_000_000_000 }
-  mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => clock.t })
   // The timers are not used: a test looks at a mailbox when it says so
-  turns = new MailTurns(w.store.mail, { now: () => clock.t })
-  delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {}, turns })
-  w.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => delivery.poke(id), sessionEvent: (e, ended) => turns.observe(e, ended), tool: (id, args) => new MailTool(mail, w.store.mail).run(id, args) })
-  delivery.start()
+  m = wireHostMail(w.mgr, w.store, { now: () => clock.t })
+  read = mailReader(w.store)
+  m.delivery.start()
 })
-afterEach(() => delivery.stop())
+afterEach(() => m.delivery.stop())
 
+/** A message from `from` to the session, waiting for the mailbox to deliver it */
+const send = (from: string, sessionId: string, text: string, needsReply = false) => m.service.send(from, { to: [addressOf(sessionId)], text, needsReply }).message
+/** Work the person gives the session through the mailbox, not yet delivered */
+const personTask = (sessionId: string, text: string) => m.service.task(PERSON, addressOf(sessionId), { text, origin: 'person', delivered: false })
 const create = async () => {
   const project = (await w.rpc('projects.add', { path: tmpdir() })) as { id: string }
   return (await w.rpc('agents.createSession', { projectId: project.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
@@ -49,7 +49,7 @@ const settle = async () => {
 /** Moves the clock past the 2 s debounce and looks at the mailbox, as its timer would */
 const due = async (sessionId: string) => {
   clock.t += 3_000
-  await delivery.process(mail.sessionAddress(sessionId))
+  await m.delivery.process(addressOf(sessionId))
   await settle()
 }
 const stored = (sessionId: string) => w.store.messages.loadMessages(sessionId, 200)
@@ -59,23 +59,23 @@ describe('a session at rest is woken by mail', () => {
   it('with the frame as the CLI’s input stamped as the channel of Centralu, a line in the conversation, and no message of the person’s', async () => {
     const giver = await create()
     const worker = await create()
-    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #12', body: 'please land it', assignee: mail.sessionAddress(worker.id) })
+    const sent = send(addressOf(giver.id), worker.id, 'please land it')
     const userRowsBefore = stored(worker.id).filter((m) => m.role === 'user').length
     await due(worker.id)
 
     const h = handleOf(worker.id)
     expect(h.sent).toHaveLength(1)
     expect(h.sent[0]).toContain('[SYSTEM NOTIFICATION - NOT USER INPUT]')
-    expect(h.sent[0]).toContain(`thread="${thread.id}"`)
-    expect(h.sent[0]).toContain('> please land it')
+    expect(h.sent[0]).toContain(`id="${sent.id}"`)
+    // A session's words flow up: the wake names the message, and the receiver reads its words with the mail tool (§8.3)
+    expect(h.sent[0]).not.toContain('please land it')
     expect(h.origins[0]).toEqual({ kind: 'channel', server: 'centralu' })
     // The conversation keeps a compact line from Centralu's record, and no user row: nothing reads as the person
     expect(stored(worker.id).filter((m) => m.role === 'user')).toHaveLength(userRowsBefore)
     expect(mailLines(worker.id)).toHaveLength(1)
-    expect(mailLines(worker.id)[0]!.payload).toMatchObject({ type: 'notice', level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message in 1 thread, from the session that gave you this work' })
+    expect(mailLines(worker.id)[0]!.payload).toMatchObject({ type: 'notice', level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message, from a session of your project' })
     expect(w.events.some((e: NormalizedEvent) => e.type === 'user_message' && e.sessionId === worker.id)).toBe(false)
-    const first = w.store.mail.messagesAfter(thread.id, 0)[0]!
-    expect(w.store.mail.receiptsOf(first.id)[0]!.deliveredAt).not.toBeNull()
+    expect(read.row(sent.id, addressOf(worker.id))!.deliveredAt).not.toBeNull()
   })
 
   // The fake tool gives every session the same conversation id, so a test that wakes a session uses one session and the person to give it work
@@ -86,7 +86,7 @@ describe('a session at rest is woken by mail', () => {
     const worker = await create()
     expect(await w.mgr.sleepSession(worker.id)).toBe(true)
     expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false, auto: false })
-    openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'wake up', assignee: mail.sessionAddress(worker.id) })
+    personTask(worker.id, 'wake up')
     await due(worker.id)
     expect(handleOf(worker.id).sent.some((t) => t.includes('> wake up'))).toBe(true)
   })
@@ -95,7 +95,7 @@ describe('a session at rest is woken by mail', () => {
     const worker = await create()
     handleOf(worker.id).send('working')
     expect(w.mgr.sessionInfo(worker.id)?.state).toBe('working')
-    openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'after this turn', assignee: mail.sessionAddress(worker.id) })
+    personTask(worker.id, 'after this turn')
     await due(worker.id)
     expect(handleOf(worker.id).sent).toEqual(['working'])
 
@@ -108,7 +108,7 @@ describe('a session at rest is woken by mail', () => {
     const worker = await create()
     handleOf(worker.id).emitApproval('req-1')
     expect(w.mgr.sessionInfo(worker.id)?.state).toBe('waiting_approval')
-    openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'after the card', assignee: mail.sessionAddress(worker.id) })
+    personTask(worker.id, 'after the card')
     await due(worker.id)
     expect(handleOf(worker.id).sent).toEqual([])
     // The card is answered by the person's decision, and only then does the session take the mail
@@ -119,44 +119,45 @@ describe('a session at rest is woken by mail', () => {
 })
 
 describe('the mail tool of an ordinary session', () => {
-  it('answers through the real tool bundle the host gives the session, not a fake: its inbox, and a thread it was given', async () => {
+  it('answers through the real tool bundle the host gives the session, not a fake: its inbox, and a task it was given', async () => {
     const worker = await create()
     const empty = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
     expect(empty).toEqual({ text: 'Your mailbox is empty.' })
-    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 'Land #12', body: 'please', assignee: mail.sessionAddress(worker.id) })
+    const task = personTask(worker.id, 'please')
     const listed = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
     expect(listed.isError).toBeUndefined()
-    expect(listed.text).toContain(thread.id)
-    const read = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'read', thread: thread.id })
-    expect(read.text).toContain('> please')
+    expect(listed.text).toContain(task.id)
+    const opened = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'read', thread: task.id })
+    expect(opened.text).toContain('> please')
   })
 })
 
 describe('the mail tool of the orchestrator', () => {
   it('is a command behind centralu_run, answered by the real tool bundle; called bare it is refused naming centralu_run', async () => {
     const orc = await w.mgr.createSession({ projectId: null, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
-    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 'Land #12', body: 'tell me when it lands', assignee: mail.sessionAddress(orc.id) })
+    const task = personTask(orc.id, 'tell me when it lands')
     const run = (args: Record<string, unknown>) => w.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'mail', args })
-    expect((await run({ action: 'inbox' })).text).toContain(thread.id)
-    expect((await run({ action: 'read', thread: thread.id })).text).toContain('> tell me when it lands')
+    expect((await run({ action: 'inbox' })).text).toContain(task.id)
+    expect((await run({ action: 'read', thread: task.id })).text).toContain('> tell me when it lands')
     await expect(w.mgr.runOrchestratorTool(orc.id, 'mail', { action: 'inbox' })).rejects.toThrow('centralu_run(command="mail"')
   })
 })
 
 describe('the turn mail starts (§7.9)', () => {
-  it('is recorded when the session is woken, and ends with the session’s turn: empty when nothing was called, acted when a tool was', async () => {
+  it('is recorded when the session is woken, with its work message, and ends with the session’s turn: empty when nothing was called, acted when a tool was', async () => {
     const worker = await create()
-    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'first', assignee: mail.sessionAddress(worker.id) })
+    const task = personTask(worker.id, 'first')
     await due(worker.id)
-    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(true)
+    expect(m.turns.current(worker.id)).toMatchObject({ by: 'mail', messageId: task.id, starter: task.id })
+    expect(read.row(task.id, addressOf(worker.id))!.turnSeq).toBe(m.turns.current(worker.id)!.turnSeq)
     handleOf(worker.id).finishTurn()
     await settle()
-    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(false)
-    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(1)
-    const outcomes = () => w.store.mail.turnsOf(worker.id).map((t) => t.outcome)
+    expect(m.turns.current(worker.id)).toBeUndefined()
+    expect(turnsOf(w.store, worker.id)).toMatchObject([{ startedBy: 'mail', messageId: task.id, starterId: task.id, endedAt: expect.any(Number) }])
+    const outcomes = () => turnsOf(w.store, worker.id).map((t) => t.outcome)
     expect(outcomes()).toEqual(['empty'])
 
-    mail.post(thread.id, 'person', { kind: 'note', body: 'second' })
+    send(PERSON, worker.id, 'second')
     await due(worker.id)
     handleOf(worker.id).emitToolCall('Bash', 'ls')
     handleOf(worker.id).finishTurn()
@@ -168,14 +169,16 @@ describe('the turn mail starts (§7.9)', () => {
 describe('a session restored from the trash', () => {
   it('takes the mail that waited for it, and the work it held is not given back', async () => {
     const worker = await create()
-    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'while you were away', assignee: mail.sessionAddress(worker.id) })
+    const task = personTask(worker.id, 'the work it held')
+    send(PERSON, worker.id, 'while you were away')
     await w.rpc('agents.deleteSession', { sessionId: worker.id })
-    expect(w.store.mail.thread(thread.id)).toMatchObject({ assignee: null, state: 'open' })
+    expect(read.row(task.id, addressOf(worker.id))).toMatchObject({ settled: 'gone' })
     clock.t += 3_000
     await w.rpc('trash.restore', { sessionId: worker.id })
     await settle()
     expect(handleOf(worker.id).sent.some((t) => t.includes('> while you were away'))).toBe(true)
-    expect(w.store.mail.thread(thread.id)?.assignee).toBeNull()
+    expect(handleOf(worker.id).sent.some((t) => t.includes('the work it held'))).toBe(false)
+    expect(read.row(task.id, addressOf(worker.id))).toMatchObject({ settled: 'gone' })
   })
 })
 
@@ -236,10 +239,10 @@ describe('what a session is to the delivery', () => {
   it('a session in the trash is not woken, and its mail stays', async () => {
     const giver = await create()
     const worker = await create()
-    openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 's', body: 'x', assignee: mail.sessionAddress(worker.id) })
+    const sent = send(addressOf(giver.id), worker.id, 'x')
     await w.rpc('agents.deleteSession', { sessionId: worker.id })
     await due(worker.id)
     expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'gone' })
-    expect(w.store.mail.recipientsWithMail()).toContain(mail.sessionAddress(worker.id))
+    expect(read.row(sent.id, addressOf(worker.id))).toMatchObject({ deliveredAt: null, settled: null })
   })
 })

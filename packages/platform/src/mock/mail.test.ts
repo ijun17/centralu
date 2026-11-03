@@ -47,7 +47,7 @@ describe('the mock mailbox', () => {
     await expect(p.mail.thread('nope')).rejects.toMatchObject({ code: 'refused' })
   })
 
-  it('shows held mail with its reason until the person releases or dismisses it, and a blocker until it is resolved', async () => {
+  it('shows held mail with its reason until the person releases or dismisses it, and has no blocker to resolve or work to give away', async () => {
     const p = createMockPlatform()
     const id = p.seedMail({ subject: 'work', from: mockSessionParty('s0', 'Boss'), body: 'do it', kind: 'assign', held: { reason: 'loop', recipient: worker } })
     const { held, threads } = await p.mail.list()
@@ -55,11 +55,28 @@ describe('the mock mailbox', () => {
     expect(threads[0]!.held).toBe(1)
     expect(await p.mail.held('release', worker.address, [held[0]!.messageId])).toEqual({ changed: 1 })
     expect((await p.mail.list()).held).toEqual([])
+    expect((await p.mail.list()).threads[0]).toMatchObject({ id, blocked: 0 })
+    // Both went with threads (Q-M3a-34): the mock, like the port, has neither
+    expect(['reassign', 'unblock'].filter((m) => m in p.mail)).toEqual([])
+    expect('block' in p.mockMail).toBe(false)
+  })
 
-    p.mockMail.block(id, 'waiting for a design')
-    expect((await p.mail.list()).threads[0]).toMatchObject({ state: 'blocked', blocked: 1 })
-    expect((await p.mail.unblock(id, 1)).state).toBe('open')
-    await expect(p.mail.unblock(id, 1)).rejects.toMatchObject({ code: 'refused' })
+  it('closing a thread a session is working on stops that session and tells it, as the host does; one not working is closed alone', async () => {
+    const p = createMockPlatform()
+    const events: NormalizedEvent[] = []
+    p.agents.subscribe((e) => void events.push(e))
+    const busy = p.seedMail({ subject: 'w', from: mockSessionParty('s0', 'Boss'), body: 'do it', kind: 'assign', state: 'running', assignee: worker, working: true })
+    expect(await p.mail.close(busy, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped', working: false })
+    expect(p.mockMail.calls).toEqual(['stop:s1'])
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: 'state_change', sessionId: 's1', state: 'waiting_input', reason: 'interrupted' },
+        expect.objectContaining({ type: 'notice', sessionId: 's1', from: 'Centralu', text: '✉ Centralu told it a thread of its was closed' }),
+      ]),
+    )
+    const idle = p.seedMail({ subject: 'q', from: worker, body: 'b' })
+    await p.mail.close(idle, 'finished')
+    expect(p.mockMail.calls).toEqual(['stop:s1'])
   })
 
   it('a pause lifted sends what it held: a thread’s turns, or a session’s budget', async () => {

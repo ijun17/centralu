@@ -14,7 +14,6 @@ export function mockSessionParty(sessionId: string, name: string, state = 'idle'
 type Thread = {
   row: MailThreadRow
   messages: MailMessage[]
-  blockers: MailThreadView['blockers']
   /** The seq the person has read up to */
   read: number
 }
@@ -45,7 +44,7 @@ export class MailMock {
     kind?: string
     state?: string
     assignee?: MailParty | null
-    /** A turn of the thread is going in its assignee: Drop and Mark done ask first (3.10) */
+    /** A turn of the thread is going in its assignee: Drop and Mark done ask first, and closing stops that turn and tells the session (3.10) */
     working?: boolean
     held?: { reason: string; recipient: MailParty }
   }): string {
@@ -69,22 +68,13 @@ export class MailMock {
       updatedAt: now,
       last: { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: now },
     }
-    this.threads.set(id, { row, messages: [message], blockers: [], read: 0 })
+    this.threads.set(id, { row, messages: [message], read: 0 })
     if (spec.held) {
       this.heldRows.push({ messageId: message.id, threadId: id, subject: spec.subject, sender: spec.from, recipient: spec.held.recipient, kind: message.kind, reason: spec.held.reason, preview: spec.body.slice(0, 140), since: now })
       row.held = 1
     }
     this.emit({ type: 'mail_changed', threadId: id, toPerson: true })
     return id
-  }
-
-  /** Adds a blocker a test wants the screen to show */
-  block(threadId: string, text: string): void {
-    const t = this.must(threadId)
-    t.blockers.push({ n: t.blockers.length + 1, kind: 'text', ref: null, text, resolved: false })
-    t.row.blocked = t.blockers.filter((b) => !b.resolved).length
-    t.row.state = 'blocked'
-    this.emit({ type: 'mail_changed', threadId, toPerson: false })
   }
 
   private must(threadId: string): Thread {
@@ -100,7 +90,7 @@ export class MailMock {
         { party: t.row.owner, role: 'owner' },
         ...(t.row.assignee ? [{ party: t.row.assignee, role: 'assignee' }] : []),
       ],
-      blockers: t.blockers.map((b) => ({ ...b })),
+      blockers: [],
       messages: messages.map((m) => ({ ...m })),
       more: false,
       older,
@@ -151,27 +141,16 @@ export class MailMock {
     },
     close: async (threadId, outcome) => {
       const t = this.must(threadId)
+      // As the host does (3.10): the session whose turn is on the thread is stopped, and told in Centralu's words without a wake
+      const helper = t.row.working ? t.row.assignee?.sessionId : null
+      if (helper) {
+        this.calls.push(`stop:${helper}`)
+        this.emit({ type: 'state_change', sessionId: helper, state: 'waiting_input', reason: 'interrupted' })
+        this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it a thread of its was closed' })
+      }
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
-      this.touch(t)
-      return { ...t.row }
-    },
-    reassign: async (threadId, sessionId, text) => {
-      const t = this.must(threadId)
-      t.row.assignee = mockSessionParty(sessionId, sessionId)
-      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: 'assign', urgent: false, body: text, facts: {}, createdAt: this.clock.now() }
-      t.messages.push(message)
-      t.read = message.seq
-      this.touch(t)
-      return this.view(t, [message])
-    },
-    unblock: async (threadId, n) => {
-      const t = this.must(threadId)
-      const b = t.blockers.find((x) => x.n === n && !x.resolved)
-      if (!b) throw mockError(`thread ${threadId} has no standing blocker ${n}`, 'refused')
-      b.resolved = true
-      t.row.blocked = t.blockers.filter((x) => !x.resolved).length
-      if (t.row.blocked === 0) t.row.state = 'open'
+      t.row.working = false
       this.touch(t)
       return { ...t.row }
     },

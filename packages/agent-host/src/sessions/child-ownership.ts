@@ -217,7 +217,7 @@ export type OwnerMove = {
   queued: boolean
 }
 
-type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mail'>
+type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox'>
 
 /** The end of a turn of work the person owns, as the mailbox takes it (§8.1): Centralu's words, the session's own beside them, and where the thread goes */
 export type PersonReportDraft = { outcome: string; body: string; answer?: string; error?: string; paused?: number; then: 'review' | 'running' }
@@ -372,6 +372,28 @@ export class ChildOwnership {
     this.personWork = hooks
   }
 
+  /**
+   * Whether the old report paths still owe `ownerId` a report of `childId` (docs/plans/mailbox.md §9.5, D18): they are the truth of an owed report
+   * until M8, and the mail task rows follow them. A delegation not settled, a report mark, a queued request, a report paused over the child's own
+   * work, a linked machine's report; for the person, their task with the child
+   */
+  oldOwes(ownerId: string, childId: string): boolean {
+    if (ownerId === 'person') return this.personOwes(childId)
+    if ([...this.runs.values()].some((d) => d.callerId === ownerId && d.sessionId === childId && !d.settled)) return true
+    if (this.reports.get(childId) === ownerId) return true
+    if ((this.queues.get(childId) ?? []).some((q) => q.callerSessionId === ownerId)) return true
+    return this.linked.get(childId)?.orchestratorId === ownerId
+  }
+
+  /**
+   * At startup, before the mailbox's hook is attached: how many tasks the child handed on in the work it does for the owner are still owed (§9.4),
+   * from the store. Owed here is what a report mark the store holds still owes
+   */
+  private handedOnOwed(childId: string, ownerId: string, marks: readonly { sessionId: string; callerSessionId: string }[]): number {
+    const idOf = (address: string) => address.slice(address.lastIndexOf('/') + 1)
+    return this.store.mailbox.handedOnBySessions(ownerId, childId).filter((r) => marks.some((m) => m.sessionId === idOf(r.recipient) && m.callerSessionId === idOf(r.sender))).length
+  }
+
   /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
   startedForPerson(sessionId: string, text: string, fromScript?: { credential: string }): void {
     try {
@@ -454,20 +476,15 @@ export class ChildOwnership {
    * The owner of a turn the mailbox started in a session that already owes another owner a report (#1474): that turn is the work of the thread it
    * carries, so its end is reported to this owner, and the other mark and its pause are left as they are. Taken (once) as the turn ends
    */
-  private readonly mailTurns = new Map<string, { ownerId: string; closed: boolean }>()
+  private readonly mailTurns = new Map<string, { ownerId: string }>()
   markMailTurn(sessionId: string, ownerId: string): void {
-    this.mailTurns.set(sessionId, { ownerId, closed: false })
+    this.mailTurns.set(sessionId, { ownerId })
   }
   /** The input was not taken: no turn started for `ownerId` */
   clearMailTurn(sessionId: string, ownerId: string): void {
     if (this.mailTurns.get(sessionId)?.ownerId === ownerId) this.mailTurns.delete(sessionId)
   }
-  /** The thread was closed while its turn went: the stopped turn is reported to nobody, and it is not the other owner's either */
-  closeMailTurn(sessionId: string, ownerId: string): void {
-    const turn = this.mailTurns.get(sessionId)
-    if (turn?.ownerId === ownerId) turn.closed = true
-  }
-  takeMailTurn(sessionId: string): { ownerId: string; closed: boolean } | undefined {
+  takeMailTurn(sessionId: string): { ownerId: string } | undefined {
     const turn = this.mailTurns.get(sessionId)
     this.mailTurns.delete(sessionId)
     return turn
@@ -503,7 +520,8 @@ export class ChildOwnership {
      * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs
      * on in the kept process, and the turn its ending starts ends under this host.
      */
-    for (const mark of this.store.children.listReportMarks()) {
+    const marks = this.store.children.listReportMarks()
+    for (const mark of marks) {
       const child = sessions.get(mark.sessionId)
       const kept = keptSessions?.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
       const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
@@ -516,7 +534,7 @@ export class ChildOwnership {
        * the turn their end starts ends under this host. It needs no process of its own (asleep, or the host was quit): the helper's report
        * wakes it. The mailbox's hook is not attached yet, so the store is asked
        */
-      const waiting = child && sessions.has(mark.callerSessionId) && !inTurn(child.state) ? this.store.mail.waitingOnSessions(mark.callerSessionId, mark.sessionId) : 0
+      const waiting = child && sessions.has(mark.callerSessionId) && !inTurn(child.state) ? this.handedOnOwed(mark.sessionId, mark.callerSessionId, marks) : 0
       if (waiting > 0) {
         // What a process that is gone held (its background work) went with it
         if (!kept) this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))

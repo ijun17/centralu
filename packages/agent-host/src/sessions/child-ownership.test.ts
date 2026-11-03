@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { Store, type QueuedRequest } from '../dev-services/store.js'
-import { MailService } from '../mail/service.js'
+import type { MailSessions } from '../mail/delivery.js'
+import { hostMail, type HostMailSessions } from '../mail/host-mail.js'
 import { ChildOwnership, pausedReportKey, reportTurnKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
 
 /*
@@ -386,62 +387,91 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
     expect(store.settings.appSetting(pausedReportKey('gone-process'))).toBeNull()
   })
 
-  describe('a session at rest that waits for threads it handed on (§6)', () => {
+  describe('a session at rest that waits for tasks it handed on (§6, §9.4)', () => {
     const HOST = 'hub-aaaaaaaa'
-    /** The caller gave 'kept-idle' work; in it, 'kept-idle' handed a part on to 'helper' */
-    const handedOn = () => {
-      const mail = new MailService(store.mail, { hostId: () => HOST })
-      const addr = (id: string) => mail.sessionAddress(id)
-      const work = mail.recordDelegation(addr('caller'), { assignee: addr('kept-idle'), task: 'Land it', origin: 'start_agent' }).thread
-      const part = mail.recordDelegation(addr('kept-idle'), { assignee: addr('helper'), task: 'The tests', origin: 'start_agent', parentId: work.id }).thread
-      store.children.setReportMark('kept-idle', 'caller')
-      return { mail, addr, work, part }
+    /** What the host's mail reads of its sessions: nothing of it is asked here but the turn a task is written in */
+    const mailSessions: HostMailSessions = {
+      sessionInfo: () => undefined,
+      listSessions: () => [],
+      canReadMail: () => true,
+      orchestratorId: () => null,
+      orchestratorAsks: () => null,
+      mailCommand: () => false,
+      keptInTurn: () => false,
+      oldOwes: () => true,
+      mailSessions: () => ({ receiver: () => ({ atRest: false }), deliver: async () => {}, note: () => {} }) as unknown as MailSessions,
     }
-
-    it('keeps its mark with the swap: the threads are in the store, and the turn their end starts ends under this host', () => {
-      handedOn()
-      own.restoreReports(sessions, kept)
-      expect(own.awaitingReport.get('kept-idle')).toBe('caller')
-      expect(store.children.listReportMarks()).toEqual([{ sessionId: 'kept-idle', callerSessionId: 'caller' }])
-    })
+    /**
+     * The caller gave 'kept-idle' a task; in the turn of that task, 'kept-idle' handed a part on to `helper` (a task whose cause is the caller's
+     * task), and the old path owes 'kept-idle' the helper's report (its report mark)
+     */
+    const handedOn = (helper = 'helper', text = 'Land it') => {
+      const m = hostMail(store, mailSessions, { hostId: HOST })
+      const addr = (id: string) => m.service.sessionAddress(id)
+      const work = m.service.task(addr('caller'), addr('kept-idle'), { text, origin: 'start_agent', delivered: true })
+      m.turns.beginOther('kept-idle', 'caller', work.id, 'caller')
+      const part = m.service.task(addr('kept-idle'), addr(helper), { text: `${text}: the tests`, origin: 'start_agent', delivered: true })
+      expect(part.causeId).toBe(work.id)
+      store.children.setReportMark('kept-idle', 'caller')
+      helperMarks.add(helper)
+      return { m, addr, work, part }
+    }
+    /** The helpers whose report marks the store holds before each start; a start drops the marks of sessions it does not have */
+    const helperMarks = new Set<string>()
+    beforeEach(() => helperMarks.clear())
 
     /** Whether a fresh host, started now with these sessions kept, still owes the report */
     let lastHost = own
     const owed = (keptNow: ReadonlySet<string> = kept, sessionsNow: ReadonlyMap<string, SessionInfo> = sessions) => {
       store.children.setReportMark('kept-idle', 'caller')
+      for (const helper of helperMarks) store.children.setReportMark(helper, 'kept-idle')
       lastHost = new ChildOwnership(store)
       lastHost.restoreReports(sessionsNow, keptNow)
       return lastHost.awaitingReport.get('kept-idle') === 'caller'
     }
 
-    it('drops it when nothing is going: the helper’s thread is over, or nobody is on it', () => {
-      const { mail, addr, part } = handedOn()
-      // Going, it is kept
+    it('keeps its mark with the swap: the tasks are in the store, and the turn their end starts ends under this host', () => {
+      handedOn()
+      for (const helper of helperMarks) store.children.setReportMark(helper, 'kept-idle')
+      own.restoreReports(sessions, kept)
+      expect(own.awaitingReport.get('kept-idle')).toBe('caller')
+      expect(store.children.listReportMarks()).toEqual([{ sessionId: 'kept-idle', callerSessionId: 'caller' }])
+    })
+
+    it('drops it when nothing is owed: the helper reported, is gone, or the old path no longer owes its report', () => {
+      const { m, part } = handedOn()
+      // Owed, it is kept
       expect(owed()).toBe(true)
-      mail.update(part.id, addr('kept-idle'), { state: 'done', outcome: 'finished' })
+      m.service.report(part.id, { outcome: 'finished', body: 'tests written' })
       expect(owed()).toBe(false)
       const other = handedOn()
       expect(owed()).toBe(true)
-      other.mail.sessionGone('helper')
+      other.m.service.partyGone(other.addr('helper'))
+      expect(owed()).toBe(false)
+      handedOn('helper3')
+      expect(owed()).toBe(true)
+      // The helper's report mark went (its turn ended with no host to report it): the old path owes nothing, so the task is not waited on
+      helperMarks.clear()
       expect(owed()).toBe(false)
     })
 
     it('drops it when the work itself is over, whatever its helper does', () => {
-      const { mail, addr, work } = handedOn()
+      const { m, work } = handedOn()
       expect(owed()).toBe(true)
-      mail.update(work.id, addr('caller'), { state: 'done', outcome: 'dropped' })
+      m.service.report(work.id, { outcome: 'stopped', reason: 'taken_over', body: 'dropped' })
       expect(owed()).toBe(false)
     })
 
     it('keeps it for a session with no process too (asleep, or the host was quit): the work is the helpers’, and their report wakes it', () => {
-      const { mail, addr, part } = handedOn()
+      const { m, part } = handedOn()
       store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
       expect(owed(new Set())).toBe(true)
       // What its process held went with it
       expect(store.settings.appSetting(pausedReportKey('kept-idle'))).toBeNull()
       expect(lastHost.pausedReports.has('kept-idle')).toBe(false)
-      // With nothing going, a session whose process was not kept loses its mark as it did
-      mail.update(part.id, addr('kept-idle'), { state: 'done', outcome: 'finished' })
+      // With nothing owed, a session whose process was not kept loses its mark as it did
+      m.service.report(part.id, { outcome: 'finished', body: 'tests written' })
+      helperMarks.clear()
       expect(owed(new Set())).toBe(false)
       expect(store.children.listReportMarks()).toEqual([])
     })
@@ -466,13 +496,13 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
       expect(owed(new Set(), working)).toBe(false)
     })
 
-    it('reads the latest thread of the pair: an old one that is done does not hide the new one that is going', () => {
-      const { mail, addr, work } = handedOn()
-      mail.update(work.id, addr('caller'), { state: 'done', outcome: 'finished' })
+    it('reads the newest task of the pair: an old one that is reported does not hide the new one that is owed', () => {
+      const { m, work } = handedOn()
+      m.service.report(work.id, { outcome: 'finished', body: 'landed' })
+      // Its helper's task is still unsettled, but it was handed on in work that is over
       expect(owed()).toBe(false)
-      const next = mail.recordDelegation(addr('caller'), { assignee: addr('kept-idle'), task: 'More work', origin: 'start_agent' }).thread
-      expect(next.id).not.toBe(work.id)
-      mail.recordDelegation(addr('kept-idle'), { assignee: addr('helper2'), task: 'Its part', origin: 'start_agent', parentId: next.id })
+      const next = handedOn('helper2', 'More work')
+      expect(next.work.id).not.toBe(work.id)
       expect(owed()).toBe(true)
     })
   })

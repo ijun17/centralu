@@ -12,8 +12,6 @@ export const mailResults = {
   'mail.thread': MailThreadView,
   'mail.reply': MailThreadView,
   'mail.close': MailThreadRow,
-  'mail.reassign': MailThreadView,
-  'mail.unblock': MailThreadRow,
   'mail.held': z.object({ changed: z.number() }),
   'mail.resume': z.object({ ok: z.literal(true) }),
   'mail.wake': z.object({ ok: z.literal(true) }),

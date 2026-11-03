@@ -48,6 +48,10 @@ export const MailFacts = z.looseObject({
   asker: z.string().optional(),
   handedOver: z.boolean().optional(),
   legacyKind: z.string().optional(),
+  /** The recipients an older build's person released a moved message to: never held again for them (§6.3) */
+  releasedTo: z.array(z.string()).optional(),
+  /** On a chain's root: how the person last closed the chain (Mark done `finished`, Drop `dropped`), which the window shows while it stays done */
+  closed: z.object({ outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), at: z.number() }).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
@@ -98,8 +102,8 @@ export type RecipientRow = {
 export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }
 export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
   Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
-/** Which of the original's rows a handoff moves: all, or those of mail from the recipients of its tasks that move (§7.7) */
-export type HandOverScope = 'all' | { recipients: readonly string[] }
+/** Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) */
+export type HandOverScope = 'all' | { senders: readonly string[] }
 
 /** The stored message, and whether it was there already under the sender's `dedupeKey` */
 export type StoredMail = MailRow & { duplicate: boolean }
@@ -328,6 +332,22 @@ export class MailboxRecords {
   }
 
   /**
+   * The last `limit` messages of a root in the order they were stored, each with its number in `mail_numbers` (given here to those that have none
+   * yet, in the order stored): a number that is the message's own for good and never given to another, what the person's window pages by (§12)
+   */
+  numbered(rootId: string, limit: number): { m: MailRow; n: number }[] {
+    return this.transaction(() => {
+      this.db.prepare(`INSERT OR IGNORE INTO mail_numbers (message_id) SELECT id FROM mail WHERE root_id = ? ORDER BY rowid`).run(rootId)
+      return this.db
+        .prepare<[string, number], MailSql & { n: number }>(
+          `SELECT * FROM (SELECT k.n AS n, m.* FROM mail m JOIN mail_numbers k ON k.message_id = m.id WHERE m.root_id = ? ORDER BY k.n DESC LIMIT ?) ORDER BY n`,
+        )
+        .all(rootId, limit)
+        .map((r) => ({ m: this.toMail(r), n: r.n }))
+    })
+  }
+
+  /**
    * Messages to or from `address`, newest first, `limit` of them, before the message `before` when given (none when it
    * is not stored). The two sides are a `UNION` of two index reads (`mail_sender`, `mail_recipients_by`), not a scan
    */
@@ -338,6 +358,28 @@ export class MailboxRecords {
   /** Centralu's reports on a task (replying to it), oldest first */
   reportsOn(taskId: string): MailRow[] {
     return this.messages(`m.reply_to = ? AND m.kind = 'report' AND m.sender = 'centralu' ORDER BY m.created_at, m.id`, taskId)
+  }
+
+  /** The newest message moved from the v61 thread `threadId` (§6.3) that `recipient` was sent: what the old tool's `thread` names (§11.3) */
+  newestLegacyTo(threadId: string, recipient: string): MailRow | undefined {
+    return this.messages(
+      `m.legacy_thread = ? AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
+      threadId,
+      recipient,
+    )[0]
+  }
+
+  /** The chains moved from the v61 thread `threadId` (§6.3), the newest first: what an old thread's id names in the person's window */
+  movedFrom(threadId: string): string[] {
+    return this.db
+      .prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE legacy_thread = ? GROUP BY root_id ORDER BY MAX(created_at) DESC`)
+      .all(threadId)
+      .map((r) => r.root_id)
+  }
+
+  /** Whether a message of `sender` moved from a v61 thread (§6.3) has a row for `recipient`: the old build let it write there */
+  movedTo(sender: string, recipient: string): boolean {
+    return this.messages(`m.sender = ? AND m.legacy_thread IS NOT NULL AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) LIMIT 1`, sender, recipient).length > 0
   }
 
   /** The newest task from `sender` whose row to `recipient` is not settled */
@@ -417,6 +459,11 @@ export class MailboxRecords {
     this.update('held = ?', [why], recipient, ids)
   }
 
+  /** No longer held; an unread row waits to be delivered again, whatever was delivered of it while it was held (the person trusted its project, §7.4) */
+  letGo(recipient: string, ids: readonly string[]): void {
+    this.update('held = NULL, delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END, attempt_at = NULL, attempts = 0', [], recipient, ids)
+  }
+
   /** Read, keeping an earlier read time */
   markRead(recipient: string, ids: readonly string[], at: number): number {
     return this.update('read_at = COALESCE(read_at, ?)', [at], recipient, ids)
@@ -435,6 +482,19 @@ export class MailboxRecords {
       ids,
       `held IN ${RECIPIENT_HOLDS}`,
     )
+  }
+
+  /**
+   * The person's Mark done on a chain (§12): each of `ids` with a row to `recipient` is settled `done`, watched or not, unless it was withdrawn or its
+   * sender is gone. A row settled `legacy` or `answered` says done from now: what the person marks is theirs to mark
+   */
+  closeFor(recipient: string, ids: readonly string[], at: number): number {
+    return this.update(`settled = 'done', settled_at = ?`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
+  }
+
+  /** How the person closed the chain rooted at `rootId` (`facts.closed`): the last close stands */
+  markClosed(rootId: string, outcome: 'finished' | 'failed' | 'stopped' | 'dropped', at: number): void {
+    this.db.prepare(`UPDATE mail SET facts = json_set(CASE WHEN json_valid(facts) THEN facts ELSE '{}' END, '$.closed', json(?)) WHERE id = ?`).run(JSON.stringify({ outcome, at }), rootId)
   }
 
   /** The person's Dismiss of `uncertain` or `failed` mail: never delivered, held against no one */
@@ -523,12 +583,16 @@ export class MailboxRecords {
 
   // ── Settling and waiting ──
 
-  /** Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). Returns how many */
+  /**
+   * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). Returns how many
+   */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
         `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
-          WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient) AND settled IS NULL
+          WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
+            AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,
       )
       .run({ messageId, recipient, how, at, answerId: answerId ?? null }).changes
@@ -536,12 +600,54 @@ export class MailboxRecords {
 
   /** The recipient's answer is held for the person: the row keeps it and stays open (D8) */
   answerHeld(messageId: string, recipient: string, answerId: string): void {
-    this.db.prepare(`UPDATE mail_recipients SET answer_id = ? WHERE message_id = ? AND recipient = ? AND settled IS NULL`).run(answerId, messageId, recipient)
+    this.db.prepare(`UPDATE mail_recipients SET answer_id = ? WHERE message_id = ? AND recipient = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId, messageId, recipient)
   }
 
   /** A held answer was dismissed: the rows it was to settle are open again. Returns how many */
   answerDropped(answerId: string): number {
-    return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND settled IS NULL`).run(answerId).changes
+    return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId).changes
+  }
+
+  /** Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5) */
+  unsettledTasks(): { messageId: string; sender: string; recipient: string }[] {
+    return this.db
+      .prepare<[], { message_id: string; sender: string; recipient: string }>(
+        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE m.kind = 'task' AND r.settled IS NULL ORDER BY m.created_at, m.id`,
+      )
+      .all()
+      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient }))
+  }
+
+  /**
+   * The task rows whose cause is `causeId`, not settled and not held: the work handed on in that task (§9.4), each with its sender and recipient
+   */
+  handedOn(causeId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
+    return this.db
+      .prepare<[string], { message_id: string; sender: string; recipient: string; delivered_at: number | null }>(
+        `SELECT r.message_id, m.sender, r.recipient, r.delivered_at FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE m.cause_id = ? AND m.kind = 'task' AND r.settled IS NULL AND (r.held IS NULL OR r.held = 'released') ORDER BY m.created_at, m.id`,
+      )
+      .all(causeId)
+      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient, delivered: r.delivered_at !== null }))
+  }
+
+  /**
+   * The work handed on in the newest unsettled task from session `ownerId` to session `childId` (`handedOn`), from the two sessions' ids alone: for
+   * the host's start, which knows no address yet (an address ends in `/<session id>`)
+   */
+  handedOnBySessions(ownerId: string, childId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
+    const task = this.messages(
+      `m.sender LIKE ? AND m.kind = 'task' AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient LIKE ? AND r.settled IS NULL)
+       ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
+      `session:%/${ownerId}`,
+      `session:%/${childId}`,
+    )[0]
+    return task ? this.handedOn(task.id) : []
+  }
+
+  /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
+  unansweredTo(recipient: string): RecipientRow[] {
+    return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
   }
 
   /** The watched rows to `recipient` not settled */
@@ -616,12 +722,17 @@ export class MailboxRecords {
     )
   }
 
-  /** Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5) */
+  /**
+   * Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5). Only turns a session's
+   * message started: one the person started, by their words or their message, counts toward no guard (D13, Q-M3a-12)
+   */
   pairTurnsSince(a: string, b: string, since: number): number {
     return this.count(
       `SELECT COUNT(DISTINCT r.recipient || ':' || r.turn_seq) AS n FROM mail_recipients r JOIN mail m ON m.id = r.message_id
         WHERE ((r.recipient = @a AND m.sender = @b) OR (r.recipient = @b AND m.sender = @a)) AND r.turn_seq IS NOT NULL
-          AND r.delivered_at >= @since`,
+          AND r.delivered_at >= @since
+          AND EXISTS (SELECT 1 FROM mail_turns t JOIN mail s ON s.id = t.starter_id
+                       WHERE r.recipient LIKE 'session:%/' || t.session_id AND t.turn_seq = r.turn_seq AND t.started_by = 'mail' AND s.sender LIKE 'session:%')`,
       { a, b, since },
     )
   }
@@ -707,6 +818,7 @@ export class MailboxRecords {
         )
         .run({ from, to, ids: idList(ids) })
       this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
+      for (const id of ids) this.carryRelease(id, from, to)
       return ids
     })
   }
@@ -720,38 +832,58 @@ export class MailboxRecords {
           WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
           ORDER BY m.created_at, m.id`,
       )
-      .all({ from, to, senders: idList(scope === 'all' ? [] : scope.recipients) })
+      .all({ from, to, senders: idList(scope === 'all' ? [] : scope.senders) })
       .map((r) => r.id)
   }
 
   /**
-   * The orchestrator's role moved (§7.7): rows sent to the role (`via = 'orchestrator'`) that are watched and not settled,
-   * or not delivered, go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the message ids moved
+   * The orchestrator's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
+   * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
+   * message ids moved
    */
-  moveRole(from: string, to: string): string[] {
+  moveRole(to: string): string[] {
     return this.transaction(() => {
-      const ids = this.rows(
-        `r.recipient = ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING})) ORDER BY m.created_at, m.id`,
-        from,
-      ).map((r) => r.messageId)
-      this.db
-        .prepare(
-          `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
-             held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
-           WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`,
-        )
-        .run(to, from, idList(ids))
-      this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`).run(from, idList(ids))
-      return ids
+      const rows = this.rows(
+        `r.recipient <> ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING}) OR (r.settled = 'legacy' AND r.read_at IS NULL))
+          ORDER BY m.created_at, m.id`,
+        to,
+      )
+      const move = this.db.prepare(
+        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
+           held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
+         WHERE message_id = ? AND recipient = ?`,
+      )
+      const drop = this.db.prepare(`DELETE FROM mail_recipients WHERE message_id = ? AND recipient = ?`)
+      for (const r of rows) {
+        move.run(to, r.messageId, r.recipient)
+        drop.run(r.messageId, r.recipient)
+        this.carryRelease(r.messageId, r.recipient, to)
+      }
+      return rows.map((r) => r.messageId)
     })
   }
 
-  /** The trash was emptied of `address`: its rows go, and each message left with no row. Returns the rows deleted */
+  /**
+   * A row moved from `from` to `to` keeps an older build's person's release (`facts.releasedTo`, §6.3): released is never held again, whoever
+   * holds the row now
+   */
+  private carryRelease(messageId: string, from: string, to: string): void {
+    this.db
+      .prepare(
+        `UPDATE mail SET facts = json_set(facts, '$.releasedTo', (SELECT json_group_array(CASE WHEN value = @from THEN @to ELSE value END) FROM json_each(mail.facts, '$.releasedTo')))
+          WHERE id = @messageId AND json_valid(facts) AND json_type(facts, '$.releasedTo') = 'array'
+            AND EXISTS (SELECT 1 FROM json_each(mail.facts, '$.releasedTo') WHERE value = @from)`,
+      )
+      .run({ messageId, from, to })
+  }
+
+  /** The trash was emptied of `address`: its rows go, and each message left with no row but the person's own. Returns the rows deleted */
   purgeParty(address: string): number {
     return this.transaction(() => {
       const ids = this.db.prepare<[string], { id: string }>(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ?`).all(address).map((r) => r.id)
       const n = this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ?`).run(address).changes
-      this.dropOrphans(ids)
+      // The person's own words stay in their window, sent to nobody kept (§12)
+      this.dropOrphans(ids, { keepPerson: true })
       return n
     })
   }
@@ -786,6 +918,80 @@ export class MailboxRecords {
       messages += n
       if (n === 0) return { messages }
     }
+  }
+
+  // ── Turns (`mail_turns`, read and written by `MailTurns`, M3a) ──
+
+  /**
+   * A turn begins: its work message and the message that started it (§8.2 step 6), and `thread_id` NULL. An older build
+   * serving the same store writes `thread_id` and leaves these two NULL; each reads only its own columns (§6.2)
+   */
+  startTurn(t: Omit<TurnRecord, 'endedAt' | 'outcome'>): void {
+    this.db
+      .prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, message_id, starter_id, started_by, started_at) VALUES (?, ?, NULL, ?, ?, ?, ?)`)
+      .run(t.sessionId, t.turnSeq, t.messageId, t.starterId, t.startedBy, t.startedAt)
+  }
+
+  nextTurnSeq(sessionId: string): number {
+    return this.count(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`, sessionId)
+  }
+
+  /** Turns no host recorded an end of: what a host that starts finds the last one left (`MailTurns.closeStale`) */
+  openTurns(): TurnRecord[] {
+    return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurnRecord)
+  }
+
+  endTurn(sessionId: string, turnSeq: number, at: number, outcome: string): void {
+    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(at, outcome, sessionId, turnSeq)
+  }
+
+  /** The running turn's work message is known only now (a delegation is written after its turn began): it is that work's, and the task started it */
+  setTurnMessage(sessionId: string, turnSeq: number, messageId: string): void {
+    this.db
+      .prepare(`UPDATE mail_turns SET message_id = ?, starter_id = COALESCE(starter_id, ?) WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL AND message_id IS NULL`)
+      .run(messageId, messageId, sessionId, turnSeq)
+  }
+
+  /**
+   * Turns since `since` that mail from a session or a Centralu follow-up started (the host-wide cap, §7.5): `started_by = 'mail'`
+   * and a starter that is a session's message, or Centralu's reminder or notice of unanswered mail. The person's words and a
+   * report do not count, nor a turn whose delivery was not taken (`canceled`). One session's when `session` is given
+   */
+  mailStartedSince(since: number, session?: string): number {
+    return this.count(`SELECT COUNT(*) AS n FROM (${MAIL_STARTED}) WHERE (@session IS NULL OR session_id = @session)`, { since, session: session ?? null })
+  }
+
+  /** When the oldest of `session`'s counted turns since `since` began (`mailStartedSince`): when the cap lets its next one go. Null when none */
+  oldestMailStartedSince(since: number, session: string): number | null {
+    return this.db.prepare<{ since: number; session: string }, { at: number | null }>(`SELECT MIN(started_at) AS at FROM (${MAIL_STARTED}) WHERE session_id = @session`).get({ since, session })?.at ?? null
+  }
+
+  /** When the person last started a turn of the session (their word, §7.5's pair guard), or null */
+  lastPersonTurn(sessionId: string): number | null {
+    return this.db.prepare<[string], { at: number | null }>(`SELECT MAX(started_at) AS at FROM mail_turns WHERE session_id = ? AND started_by = 'person'`).get(sessionId)?.at ?? null
+  }
+
+  /** When the person last wrote to `recipient`, or null */
+  lastFromPerson(recipient: string): number | null {
+    return (
+      this.db
+        .prepare<[string], { at: number | null }>(`SELECT MAX(m.created_at) AS at FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.sender = 'person' AND r.recipient = ?`)
+        .get(recipient)?.at ?? null
+    )
+  }
+
+  /**
+   * The parties of watched rows not settled, as recipients or senders: whom the delivery's sweep checks are still here (`partyGone`, §7.7). A row sent
+   * to the role waits for the next orchestrator (`moveRole`), not for the session that held it
+   */
+  openParties(): string[] {
+    return this.db
+      .prepare<[], { a: string }>(
+        `SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND COALESCE(r.via, '') <> 'orchestrator' AND ${WATCHED}
+         UNION SELECT m.sender FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE r.settled IS NULL AND ${WATCHED}`,
+      )
+      .all()
+      .map((r) => r.a)
   }
 
   // ── Rows ──
@@ -865,10 +1071,27 @@ export class MailboxRecords {
   }
 
   /** Deletes those of `ids` no row names any more */
-  private dropOrphans(ids: readonly string[]): void {
-    this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)`).run(idList(ids))
+  private dropOrphans(ids: readonly string[], opts: { keepPerson?: boolean } = {}): void {
+    this.db
+      .prepare(
+        `DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = mail.id)
+           AND (? = 0 OR sender <> 'person')`,
+      )
+      .run(idList(ids), opts.keepPerson ? 1 : 0)
   }
 }
+
+/** A turn as this build records it (§6.1): its work message and its starter; `thread_id` is the older build's */
+export type TurnRecord = { sessionId: string; turnSeq: number; messageId: string | null; starterId: string | null; startedBy: string; startedAt: number; endedAt: number | null; outcome: string | null }
+type TurnSql = { session_id: string; turn_seq: number; message_id: string | null; starter_id: string | null; started_by: string; started_at: number; ended_at: number | null; outcome: string | null }
+function toTurnRecord(r: TurnSql): TurnRecord {
+  return { sessionId: r.session_id, turnSeq: r.turn_seq, messageId: r.message_id, starterId: r.starter_id, startedBy: r.started_by, startedAt: r.started_at, endedAt: r.ended_at, outcome: r.outcome }
+}
+/** The turns `mailStartedSince` counts, as a subquery over `@since` */
+const MAIL_STARTED = `SELECT t.session_id, t.started_at FROM mail_turns t JOIN mail s ON s.id = t.starter_id
+   WHERE t.started_by = 'mail' AND t.started_at >= @since AND COALESCE(t.outcome, '') <> 'canceled'
+     AND (s.sender LIKE 'session:%' OR (s.sender = 'centralu' AND s.kind = 'notice' AND json_valid(s.facts)
+          AND (json_type(s.facts, '$.reminder') IS NOT NULL OR json_type(s.facts, '$.unanswered') IS NOT NULL)))`
 
 function toRecipient(r: RecipientSql): RecipientRow {
   return {

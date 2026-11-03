@@ -727,6 +727,23 @@ describe('rollback_machine', () => {
     expect(card(orc.id)).toBeUndefined()
     expect(ops.changes()).toEqual([])
   })
+
+  it('refuses before any card a step back across the mail switch (docs/plans/mailbox.md D28, S17); one within one side of it runs', async () => {
+    const at = (current: string, previous: string) => ({ managed: true, current: { version: current, node: '22.12.0' }, previous: { version: previous, node: '22.12.0' } })
+    ops.patch({ install: at('0.1.0-beta.46', '0.1.0-beta.45') })
+    const orc = await mgr.orchestrator()
+    const across = await run(orc.id, 'rollback_machine', { machine: 'laptop' })
+    expect(across.isError).toBe(true)
+    expect(across.text).toContain(
+      '"Laptop" cannot go back to Centralu "0.1.0-beta.45": since "0.1.0-beta.46" its mail is kept in a form "0.1.0-beta.45" cannot read, so mail waiting there would never arrive. Update it instead.',
+    )
+    expect(card(orc.id)).toBeUndefined()
+    expect(ops.changes()).toEqual([])
+    ops.patch({ install: at('0.1.0-beta.47', '0.1.0-beta.46') })
+    const within = await answered(orc.id, 'rollback_machine', { machine: 'laptop' }, 'allow')
+    expect(within.r.isError).toBeFalsy()
+    expect(ops.changes()).toEqual([['rollback', 'laptop']])
+  })
 })
 
 describe('uninstall_machine', () => {

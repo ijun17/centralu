@@ -1,177 +1,250 @@
 /**
- * Work a session gave another is written down in the mailbox as a thread (docs/plans/mailbox.md §8.1), beside the old path that
- * delivered it: the caller owns it, the child is the assignee, the task is the first `assign`, and nothing wakes anyone.
+ * What the old delegation paths call (docs/plans/mailbox.md §9): a delegation writes a task, a turn that mail did not start is recorded with the task
+ * it is the work of, a turn's end is Centralu's report on that task with the `ReportedAs` of §9.3, a call that returned the answer is the report, and
+ * the person's work (a script's or the RPC's first message) is the person's task.
  */
 import { describe, expect, it } from 'vitest'
-import { Store } from '../dev-services/store.js'
-import { sessionAddress } from './address.js'
-import { delegationRecorder } from './delegation.js'
+import { PERSON } from './address.js'
+import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder, type ReportDraft } from './delegation.js'
+import { A, B, ORC, W, world } from './messages.test-helpers.js'
+import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
-import { refusalReason } from './rules.js'
-import { MailService } from './service.js'
-import { mailRelations } from './relations.js'
+import { parseAddress } from './address.js'
+import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
-const HOST = 'hub-aaaaaaaa'
-const NOW = 1_800_000_000_000
-const CALLER = sessionAddress(HOST, 'caller')
-const CHILD = sessionAddress(HOST, 'child')
-
-function setup() {
-  const store = new Store()
-  const clock = { t: NOW }
-  // The relations of §9.1 refuse a session writing to a stranger: a recorded delegation is the host's act, after the tool's own checks
-  const policy = mailRelations({
-    // The caller started child and child3, so a task made with mail may go to them; the delegation is the host’s act and needs no such relation
-    session: (id) => ({ kind: 'worker' as const, askedBy: id === 'child' || id === 'child3' ? 'caller' : null }),
-    mailTool: () => true,
-    inThread: () => false,
+/** The message world with real turns behind the service's `turn` option */
+function turnWorld() {
+  const w = world()
+  // Filled once the turns exist: the service reads a session's turn through it
+  const box: { turns?: MailTurns } = {}
+  const mail = new MessageService(w.store.mailbox, w.reach, {
+    hostId: 'hub-aaaaaaaa',
+    now: () => w.clock.t,
+    turn: (address) => {
+      const party = parseAddress(address)
+      return (party?.kind === 'session' && box.turns?.current(party.sessionId)) || null
+    },
   })
-  const mail = new MailService(store.mail, { hostId: () => HOST, now: () => clock.t, policy })
-  return { store, mail, clock }
+  box.turns = new MailTurns(w.store.mailbox, { now: () => w.clock.t })
+  const t = box.turns
+  const end = (sessionId: string) => t.observe({ type: 'turn_complete', sessionId } as never, true)
+  return { ...w, mail, turns: t, end }
 }
-const task = (over: Partial<Parameters<MailService['recordDelegation']>[1]> = {}) => ({ assignee: CHILD, task: 'Land #12\nand check the docs', origin: 'start_agent' as const, ...over })
+const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review', delivery: 'wake', ...over })
 
-describe('a delegation written down', () => {
-  it('is a running thread the caller owns and the child is assigned, whose first message is the task as the caller wrote it', () => {
-    const { mail } = setup()
-    const { thread, message, continued } = mail.recordDelegation(CALLER, task({ projectId: 'p1' }))
-    expect(continued).toBe(false)
-    expect(thread).toMatchObject({ owner: CALLER, assignee: CHILD, state: 'running', origin: 'start_agent', projectId: 'p1', subject: 'Land #12' })
-    expect(message).toMatchObject({ sender: CALLER, kind: 'assign', body: 'Land #12\nand check the docs' })
+describe('a delegation written down (§9.1)', () => {
+  it('is a task from the caller to the child, delivered and read (the old path gave it the words), and the turn it started is that task’s', () => {
+    const w = turnWorld()
+    w.turns.beginOther('w', 'caller', null, 'a')
+    delegationRecorder(w.mail, w.turns)('a', 'w', 'start_agent', 'Write the export\nand test it')
+    const task = w.store.mailbox.newestTask(A, W)!
+    expect(task).toMatchObject({ kind: 'task', sender: A, body: 'Write the export\nand test it', origin: 'start_agent', depth: 0 })
+    expect(w.rowOf(task.id, W)).toMatchObject({ deliveredAt: w.clock.t, readAt: w.clock.t, settled: null })
+    expect(w.turns.current('w')).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
+    expect(turnsOf(w.store, 'w')[0]).toMatchObject({ messageId: task.id, starterId: task.id })
   })
 
-  it('is delivered and read for the child already, so nothing wakes it: the old path gave it the task', () => {
-    const { store, mail } = setup()
-    const { message } = mail.recordDelegation(CALLER, task())
-    expect(store.mail.receiptsOf(message.id)).toEqual([expect.objectContaining({ recipient: CHILD, deliveredAt: NOW, readAt: NOW })])
-    expect(mail.drain(CHILD, {}).messageIds).toEqual([])
-    expect(store.mail.hasDue(CHILD, NOW + 60_000)).toBe(false)
-  })
-
-  it('does not go through the relations or the rate: the delegation’s own checks came first', () => {
-    const { mail } = setup()
-    // A session that did not start the child, to a child in another project: the policy alone would refuse it
-    const stranger = sessionAddress(HOST, 'stranger')
-    expect(() => mail.open(stranger, { kind: 'assign', subject: 's', body: 'b', assignee: CHILD })).toThrow()
-    expect(() => mail.recordDelegation(stranger, task())).not.toThrow()
-    for (let i = 0; i < 40; i++) mail.recordDelegation(sessionAddress(HOST, `c${i}`), task({ task: `task ${i}` }))
-  })
-
-  it('a later instruction to the same child is a note in the thread they have, and the child has it in hand again', () => {
-    const { store, mail, clock } = setup()
-    const first = mail.recordDelegation(CALLER, task())
-    store.mail.updateThread(first.thread.id, { state: 'review' }, NOW, false)
-    clock.t += 5_000
-    const again = mail.recordDelegation(CALLER, task({ task: 'also run the linter', origin: 'agent_session' }))
-    expect(again.continued).toBe(true)
-    expect(again.thread.id).toBe(first.thread.id)
-    expect(again.message).toMatchObject({ kind: 'note', body: 'also run the linter', sender: CALLER })
-    expect(again.thread.state).toBe('running')
-    const events = store.mail.messagesAfter(first.thread.id, 0).filter((m) => m.kind === 'event')
-    expect(events.map((e) => e.facts)).toEqual([expect.objectContaining({ change: 'state', from: 'review', to: 'running' })])
-    expect(store.mail.receiptsOf(again.message.id)[0]).toMatchObject({ recipient: CHILD, deliveredAt: NOW + 5_000, readAt: NOW + 5_000 })
-  })
-
-  it('a thread that is done is not added to: the new instruction opens a thread that follows it', () => {
-    const { mail, clock } = setup()
-    const first = mail.recordDelegation(CALLER, task())
-    mail.update(first.thread.id, CALLER, { state: 'done', outcome: 'finished' })
-    clock.t += 1_000
-    const second = mail.recordDelegation(CALLER, task({ task: 'one more thing' }))
-    expect(second.continued).toBe(false)
-    expect(second.thread.id).not.toBe(first.thread.id)
-    expect(second.thread.follows).toEqual([first.thread.id])
-    expect(second.thread.state).toBe('running')
-  })
-
-  it('a different child is a different thread', () => {
-    const { mail } = setup()
-    const a = mail.recordDelegation(CALLER, task())
-    const b = mail.recordDelegation(CALLER, task({ assignee: sessionAddress(HOST, 'other') }))
-    expect(b.thread.id).not.toBe(a.thread.id)
-  })
-
-  it('a task past the longest a session posts is cut with Centralu’s note, and the whole of it is the child’s conversation', () => {
-    const { mail } = setup()
-    const { message } = mail.recordDelegation(CALLER, task({ task: 'x'.repeat(20_000) }))
-    expect(message.body.length).toBeLessThanOrEqual(16_000)
-    expect(message.body).toContain('[Centralu: cut here. The full task is in the session’s conversation (read_session).]'.replace('’', "'"))
-    expect(message.body.startsWith('xxxx')).toBe(true)
-  })
-
-  it('takes its subject from the first line of the task, cut at 200 characters as a subject is', () => {
-    const { mail } = setup()
-    expect(mail.recordDelegation(CALLER, task({ task: `${'w'.repeat(300)}\nmore` })).thread.subject).toBe(`${'w'.repeat(200)}…`)
-    expect(mail.recordDelegation(sessionAddress(HOST, 'c2'), task({ task: '\n\nsecond line only' })).thread.subject).toBe('second line only')
-  })
-
-  it('refuses a task with nothing in it, two parties that are one, an address that is not a session, and an origin that is not one', () => {
-    const { mail } = setup()
-    const reason = (fn: () => unknown) => {
-      try {
-        fn()
-      } catch (e) {
-        return refusalReason(e)
-      }
-      return 'NOT REFUSED'
-    }
-    expect(reason(() => mail.recordDelegation(CALLER, task({ task: '  ' })))).toBe('empty')
-    expect(reason(() => mail.recordDelegation(CALLER, task({ assignee: CALLER })))).toBe('bad_value')
-    expect(reason(() => mail.recordDelegation(CALLER, task({ assignee: 'person' })))).toBe('bad_address')
-    expect(reason(() => mail.recordDelegation(CALLER, task({ origin: 'nonsense' as never })))).toBe('bad_value')
+  it('each delegation is its own task; one handed on in the middle of work is caused by that work', () => {
+    const w = turnWorld()
+    const record = delegationRecorder(w.mail, w.turns)
+    record('a', 'w', 'start_agent', 'first')
+    record('a', 'w', 'agent_session', 'second')
+    expect(w.store.mailbox.watchedFrom(A).map((r) => w.message(r.messageId).body)).toEqual(['first', 'second'])
+    // w works on a's task and hands some of it on to b
+    w.turns.beginOther('w', 'caller', w.store.mailbox.newestTask(A, W)!.id, 'a')
+    record('w', 'b', 'send_to_session', 'part of it')
+    expect(w.store.mailbox.newestTask(W, B)).toMatchObject({ causeId: w.store.mailbox.newestTask(A, W)!.id })
   })
 })
 
-describe('a delegation handed on in the middle of work', () => {
-  it('is a child of the thread of the turn the caller is in, and works at the depth the host knows', () => {
-    const { store, mail } = setup()
-    const turns = new MailTurns(store.mail)
-    const record = delegationRecorder(mail, (id) => ({ projectId: null, depth: id === 'grand' ? 2 : 0 }), turns)
-    // 'caller' is doing the work 'boss' gave it, in a turn of that thread
-    const work = mail.recordDelegation(sessionAddress(HOST, 'boss'), { assignee: CALLER, task: 'Land #12', origin: 'start_agent' }).thread
-    turns.beginOther('caller', 'caller', work.id)
-    record('caller', 'grand', 'start_agent', 'Write the tests')
-    expect(store.mail.latestBetween(CALLER, sessionAddress(HOST, 'grand'))).toMatchObject({ parentId: work.id, depth: 2 })
-    // A turn that belongs to no thread (the person's own) hands nothing on from anything
-    turns.beginOther('caller', 'person', null)
-    record('caller', 'other', 'start_agent', 'Another')
-    expect(store.mail.latestBetween(CALLER, sessionAddress(HOST, 'other'))).toMatchObject({ parentId: null, depth: 0 })
+describe('a turn the mailbox did not start', () => {
+  it('a caller’s message starts a turn of that caller’s task; the person’s own turn is nobody’s work; the person adding to the task is theirs, of the task', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
+    record('w', { by: 'work', added: false, cli: false, source: 'caller', ownerId: 'a' })
+    expect(w.turns.current('w')).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
+    w.end('w')
+    record('w', { by: 'person', added: false, cli: false, source: 'caller' })
+    expect(w.turns.current('w')).toMatchObject({ by: 'person', messageId: null, starter: null })
+    w.end('w')
+    record('w', { by: 'work', added: true, cli: false, source: 'caller', ownerId: 'a' })
+    // The person's word: the turn is the task's, but what it sends has no cause (D9)
+    expect(w.turns.current('w')).toMatchObject({ by: 'person', messageId: task.id, starter: null })
+  })
+
+  it('the CLI running on after the work’s background tasks is a turn of that task; a report or an app’s message is a turn of its own kind', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
+    record('w', { by: 'work', added: false, cli: true, source: 'caller', ownerId: 'a' })
+    expect(w.turns.current('w')).toMatchObject({ by: 'cli', messageId: task.id, starter: null })
+    w.end('w')
+    record('w', { by: 'work', added: false, cli: false, source: 'report' })
+    expect(w.turns.current('w')).toMatchObject({ by: 'report', messageId: null })
+  })
+
+  it('the person’s work: the turn its first message starts is the person’s task', () => {
+    const w = turnWorld()
+    personWorkRecorder(w.mail)('w', 'Sort the photos')
+    const task = w.store.mailbox.newestTask(PERSON, W)!
+    turnRecorder(w.mail, w.store.mailbox, w.turns)('w', { by: 'work', added: false, cli: false, source: 'caller' })
+    expect(w.turns.current('w')).toMatchObject({ messageId: task.id })
   })
 })
 
-describe('a delegation next to the tasks made with the mail tool', () => {
-  it('does not take a task one gave through mail, which has its own assign still to arrive, for the delegation’s thread', () => {
-    const { mail } = setup()
-    const mine = mail.open(CALLER, { kind: 'assign', subject: 'Task X', body: 'x', assignee: CHILD })
-    const delegated = mail.recordDelegation(CALLER, task({ task: 'Task Y' }))
-    expect(delegated.continued).toBe(false)
-    expect(delegated.thread.id).not.toBe(mine.thread.id)
-    expect(mine.thread.state).toBe('open')
+describe('a turn’s end (§9.3): each case answers the ReportedAs the table gives', () => {
+  const setup = () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    w.turns.beginOther('w', 'caller', task.id, 'a')
+    const report = reportRecorder(w.mail, w.store.mailbox, w.turns)
+    return { w, task, report }
+  }
+
+  it('no task: none, and the old path tells', () => {
+    const w = turnWorld()
+    expect(reportRecorder(w.mail, w.store.mailbox, w.turns)('a', 'w', draft())).toBe('none')
   })
 
-  it('archiving a party moves the work as §3.3 has it, the same as for a task made with mail: the person owns a gone owner’s, a gone assignee leaves it open', () => {
-    const { store, mail } = setup()
-    const owned = mail.recordDelegation(CALLER, task()).thread
-    const had = mail.recordDelegation(sessionAddress(HOST, 'owner2'), task({ assignee: sessionAddress(HOST, 'child2') })).thread
-    mail.partyGone(CALLER)
-    mail.partyGone(sessionAddress(HOST, 'child2'))
-    // Never closed by it: the child goes on, and its later reports reach the person, who may drop the work
-    expect(store.mail.thread(owned.id)).toMatchObject({ owner: 'person', assignee: CHILD, state: 'running' })
-    expect(store.mail.participants(owned.id).find((p) => p.address === 'person')).toMatchObject({ role: 'owner' })
-    expect(store.mail.thread(had.id)).toMatchObject({ owner: sessionAddress(HOST, 'owner2'), assignee: null, state: 'open' })
-    const events = store.mail.messagesAfter(owned.id, 0).filter((m) => m.kind === 'event').map((m) => m.facts)
-    expect(events).toEqual([expect.objectContaining({ change: 'owner_gone', party: CALLER })])
-    expect(store.mail.inboxOf('person').map((r) => r.thread.id)).toContain(owned.id)
+  it('the child is being archived: closed, and the task is left to partyGone', () => {
+    const { w, task, report } = setup()
+    expect(report('a', 'w', draft({ archiving: true }))).toBe('closed')
+    expect(w.rowOf(task.id, W).settled).toBeNull()
+    expect(w.store.mailbox.reportsOn(task.id)).toEqual([])
+  })
+
+  it('the task is settled already (withdrawn): closed, nothing written', () => {
+    const { w, task, report } = setup()
+    w.mail.done(A, task.id)
+    expect(report('a', 'w', draft())).toBe('closed')
+    expect(w.store.mailbox.reportsOn(task.id)).toEqual([])
+  })
+
+  it('finished to an owner that reads mail: mailed; the report replies to the task, carries the answer, and settles it reported', () => {
+    const { w, task, report } = setup()
+    expect(report('a', 'w', draft({ answer: 'all done', error: undefined }))).toBe('mailed')
+    const [r] = w.store.mailbox.reportsOn(task.id)
+    expect(r).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: task.id, facts: { outcome: 'finished', answer: 'all done', about: { session: W } } })
+    expect(w.rowOf(task.id, W).settled).toBe('reported')
+  })
+
+  it('a failure, a usage limit or a stop keeps the old word as the reason; the person taking it over is stopped, taken_over', () => {
+    const one = setup()
+    one.report('a', 'w', draft({ outcome: 'limit_reached' }))
+    expect(one.w.store.mailbox.reportsOn(one.task.id)[0]!.facts).toMatchObject({ outcome: 'failed', reason: 'limit_reached' })
+    const two = setup()
+    two.report('a', 'w', draft({ outcome: 'took_over', then: 'dropped' }))
+    expect(two.w.store.mailbox.reportsOn(two.task.id)[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'taken_over' })
+    expect(two.w.rowOf(two.task.id, W).settled).toBe('reported')
+  })
+
+  it('to an owner that cannot read mail: an object, and its settle marks the report delivered and read so nothing wakes the owner', () => {
+    const { w, task, report } = setup()
+    const as = report('a', 'w', draft({ delivery: 'old' }))
+    if (typeof as !== 'object') throw new Error(`not an object: ${String(as)}`)
+    expect(as.keep).toBe(true)
+    const [r] = w.store.mailbox.reportsOn(task.id)
+    expect(w.rowOf(r!.id, A).deliveredAt).toBeNull()
+    as.settle()
+    expect(w.rowOf(r!.id, A)).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
+  })
+
+  it('the first pause wakes and leaves the task open; a later pause is quiet; the same pause again is closed', () => {
+    const { w, task, report } = setup()
+    expect(report('a', 'w', draft({ outcome: 'paused', paused: 2, then: 'running' }))).toBe('mailed')
+    expect(report('a', 'w', draft({ outcome: 'paused', paused: 2, then: 'running' }))).toBe('closed')
+    expect(report('a', 'w', draft({ outcome: 'paused', paused: 1, then: 'running', delivery: 'old' }))).toBe('closed')
+    expect(report('a', 'w', draft({ outcome: 'paused', paused: 3, then: 'running', delivery: 'old', ownerInTurn: true }))).toMatchObject({ keep: true })
+    const reports = w.store.mailbox.reportsOn(task.id)
+    expect(reports.map((r) => [r.facts.outcome, r.facts.paused, r.facts.quiet ?? false])).toEqual([['paused', 2, false], ['paused', 1, true], ['paused', 3, true]])
+    expect(w.rowOf(task.id, W).settled).toBeNull()
+  })
+
+  it('work handed on still owed is a pause too, waiting with its count', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    w.turns.beginOther('w', 'caller', task.id, 'a')
+    reportRecorder(w.mail, w.store.mailbox, w.turns, () => 2)('a', 'w', draft({ outcome: 'paused', then: 'running' }))
+    expect(w.store.mailbox.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'waiting', waitingOn: 2 })
+  })
+
+  it('an update cut the turn and it goes on (#1618): none, the old path says so, and the task stays open', () => {
+    const { w, task, report } = setup()
+    expect(report('a', 'w', draft({ outcome: 'resumed', then: 'running' }))).toBe('none')
+    expect(w.rowOf(task.id, W).settled).toBeNull()
+  })
+
+  it('one report settles every open task of that owner to that child delivered before the turn began; one queued during it stays open', () => {
+    const w = turnWorld()
+    const t1 = w.mail.task(A, W, { text: 'one', origin: 'start_agent', delivered: true })
+    w.clock.t += 10
+    const t2 = w.mail.task(A, W, { text: 'two', origin: 'agent_session', delivered: true })
+    w.clock.t += 10
+    w.turns.beginOther('w', 'caller', t2.id, 'a')
+    w.clock.t += 10
+    const t3 = w.mail.task(A, W, { text: 'three', origin: 'agent_session', delivered: true })
+    reportRecorder(w.mail, w.store.mailbox, w.turns)('a', 'w', draft())
+    expect([t1, t2, t3].map((t) => w.rowOf(t.id, W).settled)).toEqual(['reported', 'reported', null])
+    expect(w.store.mailbox.reportsOn(t2.id)[0]!.facts.covers).toEqual([t1.id])
+  })
+
+  it('the orchestrator’s request turn: S12 replies to the request, carries none of its other words, and settles that turn’s requests', () => {
+    const w = turnWorld()
+    w.clock.t += 10
+    const request = w.mail.send(A, { to: [ORC], text: 'please check CI', needsReply: true })
+    const seq = w.turns.begin('orc', { workMessage: request.message.id, starter: request.message.id, asker: A })
+    w.store.mailbox.markDelivered(ORC, [request.message.id], w.clock.t, seq)
+    w.end('orc')
+    expect(reportRecorder(w.mail, w.store.mailbox, w.turns)('a', 'orc', draft({ answer: 'what I told the person' }))).toBe('mailed')
+    const [r] = w.store.mailbox.reportsOn(request.message.id)
+    expect(r!.body).toContain('The orchestrator ended its turn on your request.')
+    expect(r!.facts.answer).toBeUndefined()
+    expect(w.rowOf(request.message.id, ORC).settled).toBe('reported')
   })
 })
 
-describe('the recorder the host hands the manager', () => {
-  it('writes the thread from ids, with the child’s project', () => {
-    const { store, mail } = setup()
-    delegationRecorder(mail, (id) => (id === 'child' ? { projectId: 'p9' } : undefined))('caller', 'child', 'ask_project', 'Ask the other project')
-    const [row] = store.mail.threadsOfParty(CALLER, 'owner')
-    expect(row).toMatchObject({ assignee: CHILD, origin: 'ask_project', projectId: 'p9', subject: 'Ask the other project', state: 'running' })
-    delegationRecorder(mail, () => ({ projectId: '' }))('caller', 'child2', 'start_agent', 'An agent outside any project')
-    expect(store.mail.latestBetween(CALLER, sessionAddress(HOST, 'child2'))?.projectId).toBeNull()
+describe('a call that returned the answer (§9.6)', () => {
+  it('is the report: written as told, delivered and read, and the task is settled, so nothing wakes the caller', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'all done' })
+    const [r] = w.store.mailbox.reportsOn(task.id)
+    expect(r!.facts).toMatchObject({ outcome: 'finished', answer: 'all done' })
+    expect(w.rowOf(r!.id, A)).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
+    expect(w.rowOf(task.id, W).settled).toBe('reported')
+  })
+
+  it('a failure says its kind; an answer over 600 characters is cut; a read of where it stands only marks the reports read', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    const paused = w.mail.report(task.id, { outcome: 'paused', paused: 1, body: 'paused' })
+    answerRecorder(w.mail, w.store.mailbox)('a', 'w')
+    expect('message' in paused && w.rowOf(paused.message.id, A).readAt).not.toBeNull()
+    expect(w.rowOf(task.id, W).settled).toBeNull()
+    answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: false, error: 'network' })
+    expect(w.store.mailbox.reportsOn(task.id).at(-1)!.facts).toMatchObject({ outcome: 'failed', error: 'network' })
+    const t2 = w.mail.task(A, W, { text: 'again', origin: 'agent_session', delivered: true })
+    answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'x'.repeat(700) })
+    expect(w.store.mailbox.reportsOn(t2.id)[0]!.facts.answer).toHaveLength(601)
+  })
+})
+
+describe('the person’s work (§9.6)', () => {
+  it('is a task from the person, delivered; the person is owed its turn’s report until it is reported, and a pause leaves it owed', () => {
+    const w = turnWorld()
+    personWorkRecorder(w.mail)('w', 'Sort the photos', { credential: 'cred-1' })
+    const task = w.store.mailbox.newestTask(PERSON, W)!
+    expect(task).toMatchObject({ kind: 'task', origin: 'script' })
+    const owes = personOwes(w.mail, w.store.mailbox)
+    const report = personReportRecorder(w.mail, w.store.mailbox)
+    expect(owes('w')).toBe(true)
+    expect(report('w', { outcome: 'paused', body: 'paused', paused: 1, then: 'running' })).toBe(true)
+    expect(owes('w')).toBe(true)
+    expect(report('w', { outcome: 'finished', body: 'done', answer: 'sorted', then: 'review' })).toBe(true)
+    expect(owes('w')).toBe(false)
+    expect(w.store.mailbox.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['paused', 'finished'])
+    // Nothing more to report
+    expect(report('w', { outcome: 'finished', body: 'again', then: 'review' })).toBe(false)
   })
 })
