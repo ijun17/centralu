@@ -198,7 +198,12 @@ describe('a parent that waits for what it handed on, across a swap', () => {
 })
 
 describe('a rollback to an earlier build, then forward', () => {
-  it('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause', async () => {
+  /*
+   * `unread`: the parent also left the helper a note it was given and never read (#1458). Under threads such a note kept the helper's thread
+   * `running` after the forward step, and the parent waited on it for good. The waiting count reads the old report paths and the task rows not
+   * delivered yet (`MessageService.waitingOn`), never whether a delivered message was read, so the note changes nothing
+   */
+  it.each([false, true])('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause (unread note: %s)', async (unread) => {
     const a = host()
     a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
@@ -216,6 +221,11 @@ describe('a rollback to an earlier build, then forward', () => {
     // unsettled: it does not know the message tables
     a.claude.handles.get(helper)!.answer('the tests are written')
     await until(() => read().taskRow(part.id, helper)?.settled === 'reported')
+    if (unread) {
+      const note = a.m.service.send(addressOf(child), { to: [addressOf(helper)], text: 'one more thing about the tests' })
+      store.mailbox.markDelivered(addressOf(helper), [note.message.id], Date.now(), null)
+      expect(store.mailbox.recipient(note.message.id, addressOf(helper))).toMatchObject({ deliveredAt: expect.any(Number), readAt: null, settled: null })
+    }
     await a.mgr.detachAll()
     store.children.clearReportMark(helper)
     ;(store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
