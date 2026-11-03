@@ -77,9 +77,8 @@ export class AcpConnection {
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
     logToolStderr(proc, label, stderrLine)
-    const { onStderrLine } = handlers
-    if (onStderrLine) {
-      const errors = lineSplitter(onStderrLine)
+    if (handlers.onStderrLine) {
+      const errors = lineSplitter((line) => handlers.onStderrLine?.(line))
       proc.stderr?.on('data', (chunk: Buffer | string) => errors.push(chunk))
     }
     proc.on('exit', (code) => this.finish(code, null))
