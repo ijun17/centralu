@@ -435,6 +435,8 @@ describe('a handoff carries the attached apps (#1638)', () => {
     claude.failNext = true
     await expect(handOff(s, 'claude')).rejects.toThrow('the tool did not start')
     expect(claude.failedId).not.toBe('')
+    // The copy was made and counted when the tool started, then the start failed
+    expect(claude.startServers.get(claude.failedId)).toEqual(['app-board', 'app-ledger'])
     expect(store.settings.appSetting(`session_apps:${claude.failedId}`)).toBeNull()
     // The original's own are as they were
     expect(store.settings.appSetting(`session_apps:${s.id}`)).not.toBeNull()
