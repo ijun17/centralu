@@ -30,10 +30,15 @@ What reads `by`:
    Codex `send` (its `clientUserMessageId`, as `sendTracked` already did).
 2. **Which entries are held.** `turn_inputs:<session>` holds `spent`: the rows at or before it are done with. It is
    written with the first message (the row before it), so nothing given is ever outside it. The held entries are every
-   user row after it that carries an `inputId`, however many rows the turn wrote. The key also keeps the running
-   turn's state: `named` (its opening was named), `takenOver`, and the held ids that are `joined`, `after` or
-   `carried`. All of it is kept in memory and read back once per host, so a host that takes a kept session over
-   mid-turn decides as the one before would have.
+   user row after it that carries an `inputId`, however many rows the turn wrote. A user row with no `inputId`
+   after them (an older build after a rollback, or a turn run outside Centralu) means something else ran the
+   session: the entries before it are done with. The key also keeps the running turn's state: `named` (its opening
+   was named), `takenOver`, and `marks`, each held id that is `joined`, `after` or `carried`. All of it is kept in
+   memory and read back once per host, so a host that takes a kept session over mid-turn decides as the one before
+   would have; a message the new host is given first, whose row it read back, is marked as given then.
+   With no `turn_inputs` at all (an upgrade swap from a build before this one), the host reads once what that build
+   kept: the running turn's `pending` list in `report_turn` (given into the turn) and the hub's messages in
+   `input_origins`. Both are removed in a later release.
 3. **At the turn's start** (rest to `working`): the turn is the oldest held entry's sender's (not one `carried`),
    else the CLI's own (`cli`). Written to `report_turn` and the mailbox's row as before. Every held entry is a
    candidate for the opening now; `joined` marks one given while the turn runs.
@@ -86,7 +91,8 @@ From the review on #1639, and which way each errs:
 | An older CLI's own turn after a note was taken in mid-turn goes to that note's sender | Gone: an end that cannot name spends every entry. The cost: a note an older CLI really runs as a turn of its own after is read as the CLI's own turn, the work's, so a person's answer there is reported to the caller |
 | The person then a caller at rest, folded into one turn | The work's with `wrote`, from every entry up to the one named |
 | A takeover before the tool names the inputs is overwritten | Not overwritten: a taken-over turn stays the person's |
-| Entries a build before this one leaves during a swap | It writes no `inputId`, so its rows are no entries. Its turns do not spend this build's entries: the next turn here decides by them until the tool names its input (Claude 2.1.289+, Codex, ACP), and an older CLI's end spends them |
+| Entries a build before this one leaves during a swap | Its rows carry no `inputId`. At an upgrade the host reads its `pending` and `input_origins` once; a message it held at rest that is neither a pending one nor a hub's (a person's at rest) is not known, and the next turn is the CLI's own until the tool names its input. Read once: a second swap in the same turn keeps only the entries this build's rows hold |
+| A rollback to an older build and forward again | A user row the older build wrote ends what was held before it. If the older build ran held messages and wrote no user row, they read back as held: the next turn is decided by them until the tool names its input (Claude 2.1.289+, Codex, ACP); an older CLI's end spends them |
 | A message that started no turn (`/goal` refused, a limit at rest) | Stays held: the next turn is decided by it at its start, and corrected when the tool names that turn's input. An older CLI keeps it for one turn |
 | A turn whose opening is named only at its end (a card was up at the first stream message, or the tool answered without a stream) | The end corrects `report_turn`, the report and the mailbox's row (`restate`, before the row is closed), so the pair guard and `lastPersonTurn` count the corrected starter from then on. What read the start's guess while the turn ran stays as it was: the cause of mail the turn sent, a `continuesPause` or `personInTurn` refusal, and a pair-guard check made then. Accepted: on Claude 2.1.289+, Codex and ACP the opening is named before any tool call, so only a turn that opens under a card or has no stream is affected, and it errs as before this design (by the oldest held message) |
 | A message Codex steered into a turn, when the next turn opens for something else | Counted as taken in by the turn it was steered into (`wrote`), and done with at the next opening. If Codex instead ran it as a turn of its own and the opening was not named, it is read as taken in |

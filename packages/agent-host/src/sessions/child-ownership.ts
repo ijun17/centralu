@@ -121,14 +121,14 @@ type Entry = { id?: string; seq?: number; by: 'person' | 'work'; added?: true; s
 /**
  * Where each session's messages given its tool stand (#1639), in `turn_inputs:<session>`: `spent`, the rows at or before it are done
  * with, and the held ones are the user rows after it that carry an `inputId`; and of the running turn, whether its opening was named, whether
- * the person took it over, and which held ids are `joined`, `after` or `carried`. Read back once per host, so a host that takes a kept session over
+ * the person took it over, and each held id that is `joined`, `after` or `carried` (`marks`). Read back once per host, so a host that takes a kept session over
  * mid-turn decides as the one before would have
  */
 export const turnInputsKey = (sessionId: string) => `turn_inputs:${sessionId}`
 function readInputs(raw: string | null) {
   const p = raw === null ? {} : asObj(tryParseJson(raw))
-  const ids = (v: unknown) => new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
-  return { spent: typeof p.spent === 'number' ? p.spent : null, named: p.named === true, takenOver: p.takenOver === true, joined: ids(p.joined), after: ids(p.after), carried: ids(p.carried) }
+  const marks: Record<string, unknown> = asObj(p.marks)
+  return { spent: typeof p.spent === 'number' ? p.spent : null, named: p.named === true, takenOver: p.takenOver === true, marks }
 }
 /** The entry a user row is, when it went in under an input id (#1639): the person's when no one else is named on it */
 function entryOf(row: StoredMessage): (Entry & { id: string }) | undefined {
@@ -651,29 +651,59 @@ export class ChildOwnership {
     const joined = inTurnNow && joinsRunningTurn
     if (joined && !this.starters.has(sessionId)) this.starters.set(sessionId, { by: 'work' })
     const held = this.held(sessionId)
-    if (inputId !== undefined && held.some((e) => e.id === inputId)) return
-    held.push({ ...(inputId !== undefined ? { id: inputId } : {}), ...(seq !== undefined ? { seq } : {}), by, ...(added ? { added: true as const } : {}), source, joined, ...(inTurnNow && !joined ? { after: true as const } : {}) })
+    const mark = { joined, ...(inTurnNow && !joined ? { after: true as const } : {}) }
+    // A host that just took the session over read this message back from the row already stored: the same entry, marked as given now
+    const kept = inputId !== undefined ? held.find((e) => e.id === inputId) : undefined
+    if (kept) Object.assign(kept, mark)
+    else held.push({ ...(inputId !== undefined ? { id: inputId } : {}), ...(seq !== undefined ? { seq } : {}), by, ...(added ? { added: true as const } : {}), source, ...mark })
     this.save(sessionId)
     if (joined) this.persistTurn(sessionId)
   }
   /**
    * The session's held messages (#1639), read back the first time this host asks: every user row after `spent` with an input id, and the
-   * running turn's state as the host before left it
+   * running turn's state as the host before left it. A user row with no input id was written by something else that ran the session (a
+   * build before #1639 after a rollback, a turn run outside Centralu): what was given before it is done with. With no `turn_inputs` at all, a
+   * build before #1639 left the session (`legacyHeld`)
    */
   private held(sessionId: string): Entry[] {
     let held = this.entries.get(sessionId)
     if (!held) {
-      const kept = readInputs(this.store.settings.appSetting(turnInputsKey(sessionId)))
-      held = kept.spent === null ? [] : this.store.messages.loadUserRowsFrom(sessionId, kept.spent).flatMap((row) => {
+      const raw = this.store.settings.appSetting(turnInputsKey(sessionId))
+      const kept = readInputs(raw)
+      let spent = kept.spent
+      held = spent === null && raw === null ? this.legacyHeld(sessionId) : []
+      for (const row of spent === null ? [] : this.store.messages.loadUserRowsFrom(sessionId, spent)) {
         const e = entryOf(row)
-        return e ? [{ ...e, joined: kept.joined.has(e.id), ...(kept.after.has(e.id) ? { after: true as const } : {}), ...(kept.carried.has(e.id) ? { carried: true as const } : {}) }] : []
-      })
-      if (kept.spent !== null) this.spentAt.set(sessionId, kept.spent)
+        const mark = e && kept.marks[e.id]
+        if (e) held.push({ ...e, joined: mark === 'joined', ...(mark === 'after' || mark === 'carried' ? { [mark]: true as const } : {}) })
+        else [held, spent] = [[], row.seq]
+      }
+      if (spent !== null) this.spentAt.set(sessionId, spent)
       if (kept.named) this.named.add(sessionId)
       if (kept.takenOver) this.takenOver.add(sessionId)
       this.entries.set(sessionId, held)
     }
     return held
+  }
+  /**
+   * What a build before #1639 left of the messages its session's tool holds (an upgrade swap; read once, removed with `input_origins`): the
+   * running turn's `pending` in `report_turn` (given into it), and the hub's messages in `input_origins`. Its rows carry no input id
+   */
+  private legacyHeld(sessionId: string): Entry[] {
+    const listed = tryParseJson(this.store.settings.appSetting(inputOriginsKey(sessionId)) ?? '[]')
+    const hub = (Array.isArray(listed) ? listed : []).flatMap((e) => {
+      const origin = Array.isArray(e) && typeof e[0] === 'string' ? TurnOrigin.safeParse(e[1]) : undefined
+      return origin?.success ? [{ id: e[0] as string, seq: origin.data.seq, origin: origin.data }] : []
+    })
+    const turn = asObj(tryParseJson(this.store.settings.appSetting(reportTurnKey(sessionId)) ?? '{}'))
+    // The turn running was decided by the build before, at its start
+    if (turn.by === 'person' || turn.by === 'work') this.named.add(sessionId)
+    const given: Entry[] = (Array.isArray(turn.pending) ? turn.pending.map(asObj) : []).flatMap((p) => p.by !== 'person' && p.by !== 'work' ? [] : [{
+      ...(typeof p.id === 'string' ? { id: p.id, ...hub.find((h) => h.id === p.id) } : {}), by: p.by, ...(p.added === true ? { added: true as const } : {}),
+      source: p.source === 'app' || p.source === 'report' ? p.source : 'caller', joined: true,
+    }])
+    const atRest: Entry[] = hub.filter((h) => !given.some((g) => g.id === h.id)).map((h) => ({ ...h, by: 'work', source: 'caller', joined: false }))
+    return [...atRest, ...given]
   }
   /** The first `count` held messages are done with (#1639): the record moves past the last of their rows (`save` writes it). Returns them */
   private spend(sessionId: string, count: number): Entry[] {
@@ -689,11 +719,13 @@ export class ChildOwnership {
   private save(sessionId: string): void {
     const held = this.held(sessionId)
     const spent = this.spentAt.get(sessionId) ?? Math.min(...held.map((e) => e.seq ?? Infinity)) - 1
-    const ids = (which: (e: Entry) => boolean) => held.filter(which).flatMap((e) => e.id ?? [])
-    const [joined, after, carried] = [ids((e) => e.joined), ids((e) => !!e.after), ids((e) => !!e.carried)]
+    const marks = Object.fromEntries(held.flatMap((e) => {
+      const mark = e.carried ? 'carried' : e.after ? 'after' : e.joined ? 'joined' : undefined
+      return mark && e.id !== undefined ? [[e.id, mark]] : []
+    }))
     this.store.settings.setAppSetting(turnInputsKey(sessionId), JSON.stringify({
       ...(Number.isFinite(spent) ? { spent } : {}), ...(this.named.has(sessionId) ? { named: true } : {}), ...(this.takenOver.has(sessionId) ? { takenOver: true } : {}),
-      ...(joined.length ? { joined } : {}), ...(after.length ? { after } : {}), ...(carried.length ? { carried } : {}),
+      ...(Object.keys(marks).length ? { marks } : {}),
     }))
     const hub = held.flatMap((e) => (e.origin && e.id !== undefined ? [[e.id, e.origin] as const] : []))
     if (hub.length || this.store.settings.appSetting(inputOriginsKey(sessionId)) !== null) this.store.settings.setAppSetting(inputOriginsKey(sessionId), JSON.stringify(hub.slice(-MAX_INPUT_ORIGINS)))

@@ -1015,16 +1015,16 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     seedSession()
     const row = (seq: number, payload: Record<string, unknown>) => ({ sessionId: 's', seq, role: 'user' as const, kind: 'text' as const, payload: { text: 't', ...payload }, ts: 1 })
     store.messages.appendMessages([
-      row(1, { inputId: 'person-1' }),
-      row(2, { inputId: 'caller-1', from: { sessionId: 'c', name: 'C' } }),
-      row(3, { inputId: 'person-2', intent: 'task' }),
-      // A row a build before this one wrote, with no input id: no message to go by
-      row(4, {}),
+      // A row with no input id (a first prompt, or one an older build wrote): no message to go by
+      row(1, {}),
+      row(2, { inputId: 'person-1' }),
+      row(3, { inputId: 'caller-1', from: { sessionId: 'c', name: 'C' } }),
+      row(4, { inputId: 'person-2', intent: 'task' }),
     ])
-    own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+    own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 2)
     own.turnStarted('s')
     own.turnNamed('s', ['person-1'])
-    expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toEqual({ spent: 1, named: true })
+    expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toEqual({ spent: 2, named: true })
     const next = new ChildOwnership(store)
     next.turnStarted('s')
     expect(next.starterOf('s')).toEqual({ by: 'work' })
@@ -1071,6 +1071,55 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
       expect(next.continuesPause('s', 'caller')).toBe(false)
+    })
+
+    // Recheck of #1929, N1: the new host's first call is the person's message, whose row is already stored
+    it('a message given first thing on the new host is marked as given into the turn, and kept so across another swap', () => {
+      store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
+      own.markReport('s', 'caller')
+      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      // A card is up at the opening: it is not named
+      own.turnStarted('s')
+      const next = new ChildOwnership(store)
+      next.adoptReport('s', 'caller', null)
+      next.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
+      expect(next.personInTurn('s')).toBe(true)
+      const third = new ChildOwnership(store)
+      third.adoptReport('s', 'caller', null)
+      expect(third.personInTurn('s')).toBe(true)
+      // Codex names nothing at the end: the person's message went into the work's turn
+      expect(third.turnEnded('s', undefined)).toEqual({ by: 'work', wrote: true })
+    })
+
+    // N2: an upgrade swap from a build before #1639, which kept no `turn_inputs` and wrote no input id on its rows
+    it('reads once what a build before #1639 left: the running turn’s pending messages', () => {
+      store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'work', pending: [{ id: 'person-1', by: 'person' }] }))
+      const next = new ChildOwnership(store)
+      next.adoptReport('s', 'caller', null)
+      expect(next.personInTurn('s')).toBe(true)
+      expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
+    })
+
+    it('reads once what a build before #1639 left: the hub’s messages its tool holds', () => {
+      const hubNote = { seq: 3, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
+      store.settings.setAppSetting('input_origins:s', JSON.stringify([['hub-1', hubNote]]))
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      expect(next.starterOf('s')).toEqual({ by: 'work' })
+      expect(next.turnNamed('s', ['hub-1'])).toEqual(hubNote)
+    })
+
+    // N5: a rollback to a build before #1639 and forward again
+    it('does not read back as held what was given before a row an older build wrote: that build ran it', () => {
+      store.messages.appendMessages([user(1, 'person-1'), { ...user(2, 'x'), payload: { text: 'from the older build' } }, user(3, 'caller-2', 'c')])
+      store.settings.setAppSetting('turn_inputs:s', JSON.stringify({ spent: 0 }))
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      // Not the person's message the older build already ran: the caller's given after it
+      expect(next.starterOf('s')).toEqual({ by: 'work' })
+      next.turnNamed('s', ['person-1'])
+      expect(next.starterOf('s')).toEqual({ by: 'work' })
+      expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ spent: 2 })
     })
 
     it('reads back however many rows a long turn wrote after the last message spent', () => {
