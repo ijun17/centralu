@@ -15,33 +15,35 @@ import { z } from 'zod'
  * Fail closed: a path that is not absolute, or that cannot be told, is out of reach; so is a session that cannot be found.
  */
 
-/** What a read looks at */
-export type ReadScope =
+/** What a read looks at, also as the store keeps it (`AskedGate`) */
+export const READ_SCOPE = z.union([
   /**
    * Files or folders by path; `''` stands for the orchestrator's own working folder (a path left out), which is nobody's request. `real` is each
    * path as the file system had it when it was read (`pinned`): a link swapped afterwards does not change what was read
    */
-  | { paths: readonly string[]; real?: readonly string[] }
-  /** One session's conversation, or null when the call does not say which */
-  | { session: string | null }
-  /** A project's own state (its branch, an app's runs and errors), or null when the call names none */
-  | { project: string | null }
-  /** A mail thread, or null when the call names none */
-  | { thread: string | null }
-  /** Conversations across projects, whichever they are (`recall`, the list of sessions, the archive) */
-  | { everywhere: true }
-
-/** A `ReadScope` read back from the store (`AskedGate`) */
-export const READ_SCOPE: z.ZodType<ReadScope> = z.union([
   z.object({ paths: z.array(z.string()), real: z.array(z.string()).optional() }),
+  /** One session's conversation, or null when the call does not say which */
   z.object({ session: z.string().nullable() }),
+  /** A project's own state (its branch, an app's runs and errors), or null when the call names none */
   z.object({ project: z.string().nullable() }),
+  /** A mail message (and the messages before it), or null when the call names none */
   z.object({ thread: z.string().nullable() }),
+  /** One mail message alone, as a read naming none shows the unread (`AskedGate`) */
+  z.object({ message: z.string() }),
+  /** Conversations across projects, whichever they are (`recall`, the list of sessions, the archive) */
   z.object({ everywhere: z.literal(true) }),
 ])
+export type ReadScope = z.infer<typeof READ_SCOPE>
 
 /** What the asking session reaches itself: its folders, its project (id and name) and the thread of its request */
-export type Reach = { folders: readonly string[]; project: string | null; projectName?: string | null; thread: string }
+export type Reach = {
+  folders: readonly string[]
+  project: string | null
+  projectName?: string | null
+  thread: string
+  /** Whether the asking session sent or received a mail message; none known is none (fail closed) */
+  partyTo?: (messageId: string) => boolean
+}
 
 /**
  * Tools that return nothing anybody read: the CLI's writes and plans, and the Centralu tools that only list their own commands or move the
@@ -166,6 +168,7 @@ export function outOfReach(name: string, scope: ReadScope, reach: Reach, project
     const project = projectOf(scope.session)
     return project !== undefined && project !== null && project === reach.project ? null : named(scope.session)
   }
+  if ('message' in scope) return reach.partyTo?.(scope.message) === true ? null : named(scope.message)
   if ('thread' in scope) return scope.thread !== null && scope.thread === reach.thread ? null : scope.thread === null ? name : named(scope.thread)
   if ('project' in scope) {
     const asked = scope.project?.trim().toLowerCase()

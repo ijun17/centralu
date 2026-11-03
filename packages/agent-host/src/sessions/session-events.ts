@@ -61,6 +61,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailPoke: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
+    /** A turn ended: what the orchestrator's conversation read is vouched for up to its last message (`AskedGate.vouch`) */
+    vouchReads: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
@@ -368,6 +370,7 @@ export class SessionEvents {
     // A turn ended, a card was answered or a state was stated: the mail it was holding may go (#1347)
     // Counted before anything is poked: a delivery it lets go must see the turn that just ended
     if (e.sessionId) this.host.mailEvent(e, endedTurn)
+    if (endedTurn && e.sessionId) this.host.vouchReads(e.sessionId)
     if (e.sessionId) this.host.compactEvent(e, endedTurn)
     // A request of the turn moves the context figure before the turn's end brings the tool's reading (#1492)
     const meta = e.sessionId ? this.host.meta.get(e.sessionId) : undefined

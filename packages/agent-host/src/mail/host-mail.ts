@@ -155,11 +155,16 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
 
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, mailTurns, id),
+    mailShown: (id) => service.unreadShown(addressOf(id)),
+    partyTo: (sessionId, messageId) => {
+      const m = store.mailbox.message(messageId)
+      return m !== undefined && (m.sender === addressOf(sessionId) || store.mailbox.recipient(messageId, addressOf(sessionId)) !== undefined)
+    },
     answerWaits: (asker) => {
       // The card is raised whether or not the session can be told
       try {
         const told = service.notice(addressOf(asker.sessionId), {
-          body: `The orchestrator's answer to your ${asker.messageId} waits for the person: it may carry what the orchestrator read outside your reach, so the person is asked first. It reaches you if they allow it; if not, it is not sent, and the orchestrator is told.`,
+          body: `The orchestrator's answer to your ${asker.messageId} waits for the person's approval. It reaches you if they allow it; if not, it is not sent, and the orchestrator is told.`,
           facts: { quiet: true },
           dedupeKey: `answer_waits:${asker.messageId}:${asker.turn}`,
         })

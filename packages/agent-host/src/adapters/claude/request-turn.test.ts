@@ -97,13 +97,14 @@ describe('a hook in front of every tool call of a session’s request', () => {
     await handle.dispose()
   })
 
-  it('but it tells the host what the person’s own turn reads, since a later request’s reply could carry it; a host that cannot note it never holds the tool', async () => {
+  it('but it tells the host what the person’s own turn reads, since a later request’s reply could carry it; a read the host cannot note is not made', async () => {
     const w = world('auto')
     const handle = await w.start('h3b')
     expect(await w.hook('Read', { file_path: '/elsewhere/a.txt' })).toEqual({})
     expect(w.turn.seen).toEqual([{ tool: 'Read', input: { file_path: '/elsewhere/a.txt' } }])
     w.turn.seenFails = true
-    expect(await w.hook('Read', { file_path: '/elsewhere/b.txt' })).toEqual({})
+    // Made unnoted, it could reach a later request's reply with no card, also after a restart (#1926)
+    expect((await w.hook('Read', { file_path: '/elsewhere/b.txt' })).hookSpecificOutput).toMatchObject({ permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('could not note this read') })
     await handle.dispose()
   })
 

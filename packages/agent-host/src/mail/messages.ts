@@ -404,16 +404,7 @@ export class MessageService {
       const now = this.now()
       const asker = this.opts.turn?.(reader)?.asker ?? null
       if (opts.id === undefined && opts.before === undefined) {
-        const items: ReadItem[] = []
-        let chars = 0
-        for (const { message } of this.records.unreadFor(reader)) {
-          const item = this.item(message, reader, asker)
-          // Work not delivered yet reaches the session by delivery, which a read here would take it out of (#1683)
-          if (item.withheld || (item.row?.deliveredAt === null && (message.kind === 'task' || this.isRequest(message, reader)))) continue
-          if (items.length >= READ_ITEMS || (items.length > 0 && chars + message.body.length > READ_CHARS)) break
-          items.push(item)
-          chars += message.body.length
-        }
+        const items = this.unreadItems(reader, asker)
         const marked = this.records.markRead(reader, items.map((i) => i.message.id), now)
         return { items, older: null, marked }
       }
@@ -428,6 +419,26 @@ export class MessageService {
       const marked = read && !read.phantom && !read.withheld && read.row ? this.records.markRead(reader, [base.id], now) : 0
       return { items, older: !missing && chain.length === READ_CHAIN && oldest.replyTo !== null ? oldest.id : null, marked }
     })
+  }
+
+  /** The ids of what `read` naming no message would show `reader` now, read only (`AskedGate` judges such a read by them) */
+  unreadShown(reader: string): string[] {
+    return this.run(() => this.unreadItems(reader, this.opts.turn?.(reader)?.asker ?? null).map((i) => i.message.id))
+  }
+
+  /** What `read` naming no message shows: the unread, up to its bounds */
+  private unreadItems(reader: string, asker: string | null): ReadItem[] {
+    const items: ReadItem[] = []
+    let chars = 0
+    for (const { message } of this.records.unreadFor(reader)) {
+      const item = this.item(message, reader, asker)
+      // Work not delivered yet reaches the session by delivery, which a read here would take it out of (#1683)
+      if (item.withheld || (item.row?.deliveredAt === null && (message.kind === 'task' || this.isRequest(message, reader)))) continue
+      if (items.length >= READ_ITEMS || (items.length > 0 && chars + message.body.length > READ_CHARS)) break
+      items.push(item)
+      chars += message.body.length
+    }
+    return items
   }
 
   /** What the reader's `inbox` lists (S6): what waits for its answer, what is unread, what it asked and is not answered, and its mail held for the person */

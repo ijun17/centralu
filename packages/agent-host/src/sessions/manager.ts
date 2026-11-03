@@ -135,6 +135,10 @@ export type MailHooks = {
   askedBy?(orchestratorId: string): Asker | null
   /** The orchestrator's answer to `asker`'s request waits for the person's card (§9.7, #1926): the session is told */
   answerWaits?(asker: Asker): void
+  /** The messages a `mail read` naming none would show the session now (`AskedGate`) */
+  mailShown?(sessionId: string): string[]
+  /** Whether a session sent or received a mail message (`AskedGate`) */
+  partyTo?(sessionId: string, messageId: string): boolean
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
@@ -473,6 +477,9 @@ export class SessionManager {
         return m ? (m.projectId ?? null) : undefined
       },
       kept: store.settings,
+      lastSeq: (id) => store.messages.nextSeq(id) - 1,
+      mailShown: (id) => this.mailHooks?.mailShown?.(id) ?? null,
+      partyTo: (sessionId, messageId) => this.mailHooks?.partyTo?.(sessionId, messageId) === true,
       answerWaits: (asker) => this.mailHooks?.answerWaits?.(asker),
     })
     this.linkedReports = new LinkedReports(this.parts())
@@ -539,6 +546,8 @@ export class SessionManager {
     const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
     this.updateLists = lists
     for (const s of store.sessions.listSessions()) {
+      // Before anything of its is written: what the orchestrator's conversation read holds only if no other build served it since (#1926)
+      if (s.kind === 'orchestrator') this.askedGate.takeOver(s.id)
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
@@ -1970,7 +1979,7 @@ export class SessionManager {
       roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
       newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
-      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.noteRead(id, tool, input) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
@@ -2092,6 +2101,7 @@ export class SessionManager {
           console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
         }
       },
+      vouchReads: (id) => self.askedGate.vouch(id),
       mailEvent: (e, ended) => {
         try {
           self.mailHooks?.sessionEvent?.(e, ended)
@@ -2572,6 +2582,12 @@ export class SessionManager {
     } finally {
       this.sweepingHandles = false
     }
+    this.vouchReads()
+  }
+
+  /** The host goes, having written all it will of its sessions: the next host keeps what the orchestrator's conversation read (#1926) */
+  private vouchReads(): void {
+    for (const m of this.meta.values()) if (m.kind === 'orchestrator') this.askedGate.vouch(m.id)
   }
 
   private async disposeEverything(): Promise<void> {
@@ -2638,6 +2654,7 @@ export class SessionManager {
     for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
     for (const id of [...this.record.streams.keys()]) this.record.closeStream(id)
     this.handles.clear()
+    this.vouchReads()
   }
 
   /**

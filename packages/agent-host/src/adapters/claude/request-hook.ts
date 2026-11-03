@@ -36,7 +36,9 @@ export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | '
         try {
           request.seen(name, isRecord(input.tool_input) ? input.tool_input : {})
         } catch (err) {
+          // Made unnoted, it could reach a later request's reply with no card, also after a restart
           console.error(`[claude] a read could not be noted: ${err instanceof Error ? err.message : String(err)}`)
+          return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Nothing was done: the host could not note this read.' } }
         }
         return {}
       }

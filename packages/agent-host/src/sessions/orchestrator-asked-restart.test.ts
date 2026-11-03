@@ -96,26 +96,37 @@ function card(h: Host, orc: string) {
 }
 const settled = <T>(p: Promise<T>) => Promise.race([p, new Promise<'pending'>((r) => setTimeout(() => r('pending'), 150))])
 
+/** The orchestrator reads its mail as the wake tells it to, naming no message: in a request's turn that shows the request */
+const readMail = async (h: Host, orc: string) => expect((await h.mgr.runOrchestratorTool(orc, 'centralu_run', { command: 'mail', args: { action: 'read' } })).isError).toBeFalsy()
+
 /**
- * The first host: the orchestrator answers a request after reading `what` (a session of the asker's own project, or one of another), and its turn
- * ends. Then the host goes (`how`), and the next one starts on the same store with the orchestrator's conversation, resumed or taken over
+ * The first host: the orchestrator reads its mail and answers a request after reading `what` (a session of the asker's own project, or one of
+ * another), and its turn ends. Then the host goes (`how`), and the next one starts on the same store with the orchestrator's conversation, resumed
+ * or taken over, and the orchestrator reads its mail again for the next request. `between`: what happens to the store while no host of this build has it
  */
-async function readThenRestart(what: 'own project' | 'other project', how: 'quit' | 'swap') {
+async function readThenRestart(what: 'own project' | 'other project', how: 'quit' | 'swap', between?: (store: Store, orc: string) => void) {
   const a = await startHost()
   const orc = (await a.mgr.createSession({ projectId: null, cwd: data, tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })).id
   const acme = await project(a, 'Acme')
   const asker = await sessionIn(a, acme)
   const read = what === 'own project' ? await sessionIn(a, acme) : await sessionIn(a, await project(a, 'Elsewhere'))
   await ask(a, orc, asker, 'what is the other session doing?')
+  await readMail(a, orc)
   expect(await settled(a.mgr.runOrchestratorTool(orc, 'read_session', { sessionId: read.id }))).not.toBe('pending')
   a.adapter.handleOf(orc)!.finishTurn()
   await settle()
   await stopHost(a, how)
+  if (between) {
+    const store = new Store(`${data}/store.db`)
+    between(store, orc)
+    store.close()
+  }
 
   const b = await startHost(how === 'swap' ? new Set([orc]) : new Set())
   if (how === 'swap') await b.mgr.adoptKept([{ sessionId: orc, tool: 'claude', process: new FakeProcess() }])
   else await b.mgr.resumeSession(orc)
   const request = await ask(b, orc, asker, 'and what did it find?')
+  await readMail(b, orc)
   const reply = b.mgr.runOrchestratorTool(orc, 'centralu_run', { command: 'mail', args: { action: 'reply', thread: request, text: 'it found the bug in login' } })
   return { b, orc, asker, request, reply }
 }
@@ -140,4 +151,15 @@ describe('a reply to a session after the host restarted (#1926)', () => {
       expect((await reply).isError).toBe(true)
     })
   }
+
+  it('a build that keeps no record served the conversation in between (a rollback, then forward again): the reply is put to the person', async () => {
+    // What that build's turn read is not in the record; its messages are in the transcript, which every build writes
+    const { b, orc, reply } = await readThenRestart('own project', 'quit', (store, id) =>
+      store.messages.appendMessages([{ sessionId: id, seq: store.messages.nextSeq(id), role: 'assistant', kind: 'text', payload: { text: 'read elsewhere' }, ts: Date.now() }]),
+    )
+    await eventually(() => !!card(b, orc))
+    expect(card(b, orc)!.text).toContain('not seen from its beginning')
+    b.mgr.respondApproval(orc, card(b, orc)!.requestId, 'deny')
+    expect((await reply).isError).toBe(true)
+  })
 })

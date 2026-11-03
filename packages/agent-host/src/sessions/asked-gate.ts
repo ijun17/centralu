@@ -1,10 +1,10 @@
 import { z } from 'zod'
 import type { RequestTurnAnswer } from '../adapters/contract.js'
 import { readJson } from '../dev-services/store/json.js'
-import type { ListSettingAccess } from '../dev-services/store/settings.js'
+import type { ListSettingAccess, SettingsRecords } from '../dev-services/store/settings.js'
 import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion, outlivesTheTurn, stepOf, type AskedStep } from './asked-acts.js'
-import { outOfReach, pinned, READ_SCOPE, readScope, type Reach } from './asked-reach.js'
+import { outOfReach, pinned, READ_SCOPE, readScope, type Reach, type ReadScope } from './asked-reach.js'
 
 /**
  * The orchestrator's privileged steps, asked about when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
@@ -31,7 +31,13 @@ export type AskedGateHost = {
   /** The project of a session: null for none, undefined when there is no such session */
   projectOf(sessionId: string): string | null | undefined
   /** The host's settings, where what each orchestrator's conversation read is kept, so the next host has it (`readsKey`) */
-  kept: ListSettingAccess
+  kept: ListSettingAccess & Pick<SettingsRecords, 'updateAppSetting'>
+  /** The seq of the orchestrator's last stored message, which every build writes (`throughKey`) */
+  lastSeq(orchestratorId: string): number
+  /** The messages a `mail read` naming none would show the orchestrator now, or null when that cannot be told */
+  mailShown(orchestratorId: string): readonly string[] | null
+  /** Whether a session sent or received a mail message */
+  partyTo(sessionId: string, messageId: string): boolean
   /** The answer to the session's request waits for the person's card: the session is told, so it does not wait on the thread unaware */
   answerWaits(asker: Asker): void
 }
@@ -46,6 +52,14 @@ type Reads = z.infer<typeof READS>
  * does not read it
  */
 export const readsKey = (orchestratorId: string): string => `asked_reads:${orchestratorId}`
+/** What `readsKey` holds when it is not known: written in place of a record, so an update cannot start one */
+const NOT_KNOWN = 'null'
+
+/**
+ * The orchestrator's last message seq that a build keeping the record saw (`vouch`). A build before #1926 serves turns without it, so a record
+ * whose mark is behind the transcript when a host takes over was left short of what those turns read, and is dropped (`takeOver`)
+ */
+export const throughKey = (orchestratorId: string): string => `asked_reads_through:${orchestratorId}`
 
 /**
  * `T` is what the step gives back: a tool's result for the orchestrator's own tools, an app tool's for an attached app's. `refused` makes the
@@ -62,8 +76,8 @@ export type WhenAsked = <T>(
 ) => Promise<T>
 
 export class AskedGate {
-  /** The orchestrators whose record this process cannot trust: it did not read, or a read could not be written to it. Cleared by a new conversation */
-  private readonly unknown = new Set<string>()
+  /** The records named on stderr as not reading, once each */
+  private readonly saidUnreadable = new Set<string>()
 
   constructor(private readonly host: AskedGateHost) {}
 
@@ -72,12 +86,10 @@ export class AskedGate {
    * read across turns, requests, the person's own turns, compaction (a summary can carry the data), a host restart and a keeper swap (#1926), so it is
    * kept in the store until a new conversation begins and is judged against the reach of whoever asks when words are written (`readIn`)
    */
-  private readsOf(orchestratorId: string): Reads | null {
-    if (this.unknown.has(orchestratorId)) return null
-    const raw = this.host.kept.appSetting(readsKey(orchestratorId))
+  private readsOf(orchestratorId: string, raw = this.host.kept.appSetting(readsKey(orchestratorId))): Reads | null {
     const reads = readJson(raw, READS.nullable(), null)
-    if (raw !== null && reads === null) {
-      this.unknown.add(orchestratorId)
+    if (raw !== null && raw !== NOT_KNOWN && reads === null && !this.saidUnreadable.has(orchestratorId)) {
+      this.saidUnreadable.add(orchestratorId)
       console.error(`[agent-host] app_settings.${readsKey(orchestratorId)} does not read as what the conversation read; it counts as having read everything`)
     }
     return reads
@@ -89,46 +101,65 @@ export class AskedGate {
    * conversation adopted from a build that kept what it read in memory only is not known to have read nothing
    */
   beginConversation(orchestratorId: string, fresh = true): void {
-    if (fresh) this.host.kept.setAppSetting(readsKey(orchestratorId), '[]')
-    else this.host.kept.deleteAppSetting(readsKey(orchestratorId))
-    this.unknown.delete(orchestratorId)
+    if (fresh) {
+      this.host.kept.setAppSetting(readsKey(orchestratorId), '[]')
+      this.host.kept.setAppSetting(throughKey(orchestratorId), String(this.host.lastSeq(orchestratorId)))
+    } else this.drop(orchestratorId)
   }
 
-  /** The orchestrator read something in a turn that was not a request (the person's own): kept, since a later request's reply could carry it */
-  seen(orchestratorId: string, name: string, args: Record<string, unknown>): void {
-    this.noteRead(orchestratorId, name, args)
+  /** The record holds what the conversation read up to its last message: this host saw them all. At a turn's end and when the host goes */
+  vouch(orchestratorId: string): void {
+    if (this.readsOf(orchestratorId) !== null) this.host.kept.setAppSetting(throughKey(orchestratorId), String(this.host.lastSeq(orchestratorId)))
   }
 
   /**
-   * Remembers a read. Reading stays free; what the conversation read matters when words go to a session (`askedAct`), because they could carry it
+   * A host takes the orchestrator over, before it writes anything of it: a record that the last recording build did not vouch for up to the last
+   * message misses the turns some other build served (or a crash cut), so it is dropped, and the conversation counts as having read everything
    */
-  private noteRead(orchestratorId: string, name: string, args: Record<string, unknown>): void {
+  takeOver(orchestratorId: string): void {
+    const through = this.host.kept.appSetting(throughKey(orchestratorId))
+    if (through === null || Number(through) !== this.host.lastSeq(orchestratorId)) this.drop(orchestratorId)
+  }
+
+  private drop(orchestratorId: string): void {
+    this.host.kept.deleteAppSetting(readsKey(orchestratorId))
+    this.host.kept.deleteAppSetting(throughKey(orchestratorId))
+  }
+
+  /**
+   * Remembers a read, before it is made: a caller whose read cannot be noted (this throws) does not make it. Reading stays free; what the conversation
+   * read matters when words go to a session (`askedAct`), because they could carry it. Also what the orchestrator read in the person's own turn: a
+   * later request's reply could carry it
+   */
+  noteRead(orchestratorId: string, name: string, args: Record<string, unknown>): void {
     // The person's answer to a question the orchestrator asks it is read in a request's turn only: there the asker could have got the person to type
     // it and receive it with no card; in the person's own turn it is the person's own word to the orchestrator
     if (name === 'AskUserQuestion' && this.host.askedBy(orchestratorId) === null) return
-    const read = readScope(name, args)
-    if (read === null) return
-    const list = this.readsOf(orchestratorId)
-    // Not known: it counts as having read everything already
-    if (list === null) return
-    // Where a path really is, now: a link swapped later does not change what was read
-    const scope = pinned(read)
-    if (list.some((r) => r.name === name && JSON.stringify(r.scope) === JSON.stringify(scope))) return
-    // (bounded: past a few hundred distinct reads it is simply "everything")
-    const next: Reads = list.length >= 300 ? [{ name: 'reads', scope: { everywhere: true } }] : [...list, { name, scope }]
-    try {
-      this.host.kept.setAppSetting(readsKey(orchestratorId), JSON.stringify(next))
-    } catch (e) {
-      // The read is not in the record: from now on it counts as having read everything, here and, with the record gone, for the next host. Thrown on,
-      // so a read the gate runs itself is not run; the CLI's hook in the person's turn lets its read go on, which the mark covers
-      this.unknown.add(orchestratorId)
-      try {
-        this.host.kept.deleteAppSetting(readsKey(orchestratorId))
-      } catch {
-        // The store cannot be written at all: this process still counts it as everything
+    const scopes = this.scopesOf(orchestratorId, name, args)
+    if (scopes.length === 0) return
+    // One transaction: the old and the new host of a swap cannot drop each other's reads
+    this.host.kept.updateAppSetting(readsKey(orchestratorId), (raw) => {
+      let list = this.readsOf(orchestratorId, raw)
+      // Not known: it counts as having read everything already
+      if (list === null) return raw ?? NOT_KNOWN
+      for (const scope of scopes) {
+        if (list.some((r) => r.name === name && JSON.stringify(r.scope) === JSON.stringify(scope))) continue
+        // (bounded: past a few hundred distinct reads it is simply "everything")
+        list = list.length >= 300 ? [{ name: 'reads', scope: { everywhere: true } }] : [...list, { name, scope }]
       }
-      throw e
-    }
+      return JSON.stringify(list)
+    })
+  }
+
+  /**
+   * What a call reads, each scope pinned where a path really is now (a link swapped later does not change what was read). A `mail read` naming no
+   * message shows the unread messages, which are known before it runs: the read follows at once, with nothing in between that could add one
+   */
+  private scopesOf(orchestratorId: string, name: string, args: Record<string, unknown>): ReadScope[] {
+    const read = readScope(name, args)
+    if (read === null) return []
+    const shown = 'thread' in read && read.thread === null && name === 'mail' && args.action === 'read' ? this.host.mailShown(orchestratorId) : null
+    return shown ? shown.map((message) => ({ message })) : [pinned(read)]
   }
 
   /** The first read of this conversation that the asker could not make itself, in words, or null */
@@ -136,7 +167,7 @@ export class AskedGate {
     const reads = this.readsOf(orchestratorId)
     if (reads === null) return 'an earlier conversation of the orchestrator, not seen from its beginning'
     try {
-      const reach = { ...this.host.reach(asker.sessionId), thread: asker.messageId }
+      const reach = { ...this.host.reach(asker.sessionId), thread: asker.messageId, partyTo: (id: string) => this.host.partyTo(asker.sessionId, id) }
       for (const { name, scope } of reads) {
         const what = outOfReach(name, scope, reach, (id) => this.host.projectOf(id))
         if (what !== null) return what
@@ -206,7 +237,7 @@ export class AskedGate {
     if ('tooLong' in step) {
       return refused('Nothing was done: this step is too long to show the person in a card whole, and a card that hid part of it would not be a fair question. Ask for it in smaller parts, or leave it for the person.')
     }
-    if ('afterRead' in step) this.host.answerWaits(asker)
+    if ('answers' in step) this.host.answerWaits(asker)
     const answer = await this.host.ask(orchestratorId, askedQuestion(asker, step.act), signal)
     // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
     const now = this.host.askedBy(orchestratorId)

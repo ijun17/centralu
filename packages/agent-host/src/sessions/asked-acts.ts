@@ -114,7 +114,7 @@ function argsLine(args: Record<string, unknown>, cut: boolean): string {
 }
 
 /** What the person is asked to allow: the step as one line, or that it does not fit a card */
-export type AskedStep = { act: string; afterRead?: true } | { tooLong: true }
+export type AskedStep = { act: string; afterRead?: true; answers?: true } | { tooLong: true }
 
 /**
  * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post
@@ -134,7 +134,7 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     const toPerson = action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person'
     if (reached !== null && !toPerson && (action === 'reply' || action === 'update' || action === 'close' || action === 'send')) {
       const act = `${inThread ? 'answer it' : 'write to a session'}, though the orchestrator has read what this session could not read itself (${reached}): run mail ${argsLine(args, false)}`
-      return act.length > CLI_ACT_MAX ? { tooLong: true } : { act, afterRead: true }
+      return act.length > CLI_ACT_MAX ? { tooLong: true } : { act, afterRead: true, ...(inThread ? { answers: true as const } : {}) }
     }
     // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
     if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && inThread) return null

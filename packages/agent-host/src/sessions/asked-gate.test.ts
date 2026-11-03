@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Asker } from '../mail/asked-by.js'
-import { AskedGate, readsKey, type AskedGateHost } from './asked-gate.js'
+import { AskedGate, readsKey, throughKey, type AskedGateHost } from './asked-gate.js'
 import { HostCards } from './host-cards.js'
 
 const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }
@@ -25,6 +25,10 @@ function world(
     begun?: boolean
     /** The host's settings, as a previous host left them (a restart) */
     settings?: Map<string, string>
+    /** The seq of the orchestrator's last stored message */
+    lastSeq?: () => number
+    /** What a `mail read` naming no message would show */
+    mailShown?: readonly string[]
   } = {},
 ) {
   const asked: string[] = []
@@ -48,7 +52,11 @@ function world(
       appSetting: (key) => settings.get(key) ?? null,
       setAppSetting: (key, value) => void settings.set(key, value),
       deleteAppSetting: (key) => void settings.delete(key),
+      updateAppSetting: (key, next) => void settings.set(key, next(settings.get(key) ?? null)),
     },
+    lastSeq: over.lastSeq ?? (() => 7),
+    mailShown: () => over.mailShown ?? null,
+    partyTo: (sessionId, messageId) => sessionId === 'asker' && messageId.startsWith('mine'),
     answerWaits: (asker) => void waits.push(asker),
   }
   const gate = new AskedGate(host)
@@ -303,7 +311,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     let asker: Asker | null = null
     const w = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
     // The person's turn: the hook tells the gate, nothing is asked
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
     asker = ASKER
     const { r } = await send(w, reply())
     expect(r.calls).toHaveLength(1)
@@ -321,7 +329,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
   it('what it read is judged against whoever asks now: a file of the other asker’s folder is out of reach for this one', async () => {
     let asker: Asker = ASKER
     const w = world({ asker: () => asker, answer: 'allow', reachOf: (id) => ({ folders: [id === 'asker' ? HOME : OTHER_HOME], project: id === 'asker' ? 'p1' : 'p2' }) })
-    w.gate.seen('orc', 'Read', { file_path: resolve('/work/zed/notes.txt') })
+    w.gate.noteRead('orc', 'Read', { file_path: resolve('/work/zed/notes.txt') })
     // Its own folder's file: free
     asker = { ...ASKER, sessionId: 'zed', messageId: 't2' }
     expect((await send(w, reply('fine', 't2'))).r.calls).toHaveLength(1)
@@ -338,7 +346,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     expect(w.asked).toHaveLength(1)
     expect(w.asked[0]).toContain('not seen from its beginning')
     w.gate.beginConversation('orc')
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
     await send(w, reply())
     expect(w.asked).toHaveLength(2)
     w.gate.beginConversation('orc')
@@ -352,12 +360,12 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
 
   it('what it read is kept across a host restart: the next host judges the reply by it, not by the restart (#1926)', async () => {
     const before = world({ asker: () => null, folders: [HOME] })
-    before.gate.seen('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
+    before.gate.noteRead('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
     const inReach = world({ settings: new Map(before.settings), folders: [HOME] })
     expect((await send(inReach, reply())).r.calls).toHaveLength(1)
     expect(inReach.asked).toEqual([])
 
-    before.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    before.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
     const outside = world({ settings: new Map(before.settings), folders: [HOME] })
     await send(outside, reply())
     expect(outside.asked).toHaveLength(1)
@@ -368,44 +376,78 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     for (const kept of [undefined, 'not json', '[{"name":"Read"}]', '[{"name":"Read","scope":{"paths":"/private"}}]', '{}']) {
       const w = world({ settings: new Map(kept === undefined ? [] : [[readsKey('orc'), kept]]), folders: [HOME] })
       // What it reads now is not what it read before: still not known
-      w.gate.seen('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
+      w.gate.noteRead('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
       await send(w, reply())
       expect(w.asked).toHaveLength(1)
       expect(w.asked[0]).toContain('not seen from its beginning')
     }
   })
 
-  it('a read that cannot be written to the record counts as having read everything, also for the next host', async () => {
-    const w = world({ asker: () => null, folders: [HOME] })
-    const set = w.settings.set.bind(w.settings)
+  it('a read that cannot be noted is not made: noting it throws, and the gate does not run its own read', async () => {
+    const w = world({ folders: [HOME] })
     w.settings.set = () => {
-      throw new Error('disk full')
+      throw new Error('database is locked')
     }
-    expect(() => w.gate.seen('orc', 'Read', { file_path: OUTSIDE })).toThrow('disk full')
-    w.settings.set = set
-    const after = world({ settings: w.settings, folders: [HOME] })
-    await send(after, reply())
-    expect(after.asked).toHaveLength(1)
-    const here = world({ asker: () => ASKER, folders: [HOME] })
-    here.settings.set = () => {
-      throw new Error('disk full')
-    }
-    here.settings.delete = () => {
-      throw new Error('disk full')
-    }
-    // (the gate's own read: not run)
+    expect(() => w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })).toThrow('database is locked')
     const r = ran()
-    await expect(here.gate.when('orc', { name: 'Read', args: { file_path: OUTSIDE } }, undefined, r.run, refused)).rejects.toThrow('disk full')
+    await expect(w.gate.when('orc', { name: 'read_session', args: { sessionId: 'elsewhere' } }, undefined, r.run, refused)).rejects.toThrow('database is locked')
     expect(r.calls).toEqual([])
-    await send(here, reply())
-    expect(here.asked).toHaveLength(1)
   })
 
-  it('a reply held for the person tells the session that asked; a card for any other step does not', async () => {
+  it('a record holds across a host taking over only if a recording build vouched for it up to the last message', async () => {
+    let seq = 7
+    const before = world({ asker: () => null, folders: [HOME], lastSeq: () => seq })
+    before.gate.noteRead('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
+    seq = 9
+    before.gate.vouch('orc')
+    expect(before.settings.get(throughKey('orc'))).toBe('9')
+    // The next host: nothing served the conversation in between
+    const kept = world({ settings: new Map(before.settings), folders: [HOME], lastSeq: () => seq })
+    kept.gate.takeOver('orc')
+    await send(kept, reply())
+    expect(kept.asked).toEqual([])
+    // A build that keeps no record served turns in between (a rollback), or a crash came before the vouch: the transcript is past the mark
+    seq = 12
+    const behind = world({ settings: new Map(before.settings), folders: [HOME], lastSeq: () => seq })
+    behind.gate.takeOver('orc')
+    await send(behind, reply())
+    expect(behind.asked).toHaveLength(1)
+    expect(behind.asked[0]).toContain('not seen from its beginning')
+    // One with no mark at all
+    const unmarked = new Map(before.settings)
+    unmarked.delete(throughKey('orc'))
+    const none = world({ settings: unmarked, folders: [HOME], lastSeq: () => 9 })
+    none.gate.takeOver('orc')
+    await send(none, reply())
+    expect(none.asked).toHaveLength(1)
+  })
+
+  it('a mail read naming no message is judged by the messages it shows: in reach only those the asker sent or received', async () => {
+    const own = world({ folders: [HOME], mailShown: ['mine-1', 'mine-2'] })
+    await own.gate.when('orc', { name: 'mail', args: { action: 'read' } }, undefined, ran().run, refused)
+    await send(own, reply())
+    expect(own.asked).toEqual([])
+    const more = world({ folders: [HOME], mailShown: ['mine-1', 'm9'] })
+    await more.gate.when('orc', { name: 'mail', args: { action: 'read' } }, undefined, ran().run, refused)
+    await send(more, reply())
+    expect(more.asked).toHaveLength(1)
+    expect(more.asked[0]).toContain('mail of "m9"')
+    // Where what it shows cannot be told, it counts as reading everything
+    const unknown = world({ folders: [HOME] })
+    await unknown.gate.when('orc', { name: 'mail', args: { action: 'read' } }, undefined, ran().run, refused)
+    await send(unknown, reply())
+    expect(unknown.asked).toHaveLength(1)
+  })
+
+  it('a reply held for the person tells the session that asked; words held on their way to anyone else do not', async () => {
     const w = world({ folders: [HOME], answer: 'deny' })
     await send(w, { action: 'send', to: 'someone', text: 'hi' })
     expect(w.waits).toEqual([])
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
+    await send(w, { action: 'send', to: 'someone', text: 'the file says: hunter2' })
+    await send(w, reply('the file says: hunter2', 'another-thread'))
+    expect(w.asked).toHaveLength(3)
+    expect(w.waits).toEqual([])
     await send(w, reply())
     expect(w.waits).toEqual([ASKER])
   })
@@ -425,7 +467,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
   it('after a recorded read any mail to a session asks with its whole text: a new thread to the asker, a padded thread id, update and close in another thread', async () => {
     const long = 'y'.repeat(900) + ' hunter2'
     const w = world({ folders: [HOME], answer: 'deny' })
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
     for (const args of [
       { action: 'send', to: 'session:asker', text: long },
       { action: 'reply', thread: ' t1', text: long },
@@ -462,10 +504,10 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
   it('other steps that pass words on show them whole after a recorded read, not cut', async () => {
     const w = world({ folders: [HOME], answer: 'allow' })
     // (a read inside the asker's reach, so far: the first card cuts)
-    w.gate.seen('orc', 'Read', { file_path: resolve(HOME, 'notes.txt') })
+    w.gate.noteRead('orc', 'Read', { file_path: resolve(HOME, 'notes.txt') })
     await w.gate.when('orc', { name: 'send_to_session', args: { sessionId: 's', text: 'z'.repeat(1_000) } }, undefined, ran().run, refused)
     expect(w.asked[0]).toContain('(1000 characters)')
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    w.gate.noteRead('orc', 'Read', { file_path: OUTSIDE })
     await w.gate.when('orc', { name: 'send_to_session', args: { sessionId: 's', text: 'z'.repeat(1_000) } }, undefined, ran().run, refused)
     expect(w.asked[1]).toContain('z'.repeat(1_000))
     expect(w.asked[1]).not.toContain('characters)')
@@ -484,7 +526,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       let asker: Asker | null = null
       const w = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
       // The person's turn: only the hook's `seen`, nothing is asked
-      w.gate.seen('orc', name, args)
+      w.gate.noteRead('orc', name, args)
       expect(w.asked).toEqual([])
       asker = ASKER
       await send(w, reply())
@@ -503,8 +545,8 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     expect(w.asked).toHaveLength(1)
 
     const own = world({ folders: [HOME], answer: 'allow' })
-    own.gate.seen('orc', 'mcp__centralu__centralu_run', { command: 'rename_session' })
-    own.gate.seen('orc', 'mcp__centralu__mail', { action: 'inbox' })
+    own.gate.noteRead('orc', 'mcp__centralu__centralu_run', { command: 'rename_session' })
+    own.gate.noteRead('orc', 'mcp__centralu__mail', { action: 'inbox' })
     await send(own, reply())
     expect(own.asked).toEqual([])
   })
@@ -539,7 +581,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     ]
     for (const [name, args] of reads) {
       const w = world({ folders: [HOME], projects: { mine: 'p1' } })
-      w.gate.seen('orc', name, args)
+      w.gate.noteRead('orc', name, args)
       await send(w, reply())
       expect(w.asked, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
     }
@@ -561,7 +603,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     ]
     for (const [name, args] of nothing) {
       const w = world({ folders: [HOME], projects: { mine: 'p1' } })
-      w.gate.seen('orc', name, args)
+      w.gate.noteRead('orc', name, args)
       await send(w, reply())
       expect(w.asked, `${name} ${JSON.stringify(args)}`).toEqual([])
     }
@@ -569,16 +611,16 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
 
   it('the person’s answer to a question is read in a request’s turn, where the asker could have got the person to type it; in the person’s own turn it is not', async () => {
     const request = world({ folders: [HOME] })
-    request.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    request.gate.noteRead('orc', 'AskUserQuestion', { questions: [] })
     await send(request, reply())
     expect(request.asked).toHaveLength(1)
     const own = world({ asker: () => null, folders: [HOME] })
-    own.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    own.gate.noteRead('orc', 'AskUserQuestion', { questions: [] })
     expect(own.asked).toEqual([])
     // (the same conversation, later asked by a session)
     let asker: Asker | null = null
     const later = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
-    later.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    later.gate.noteRead('orc', 'AskUserQuestion', { questions: [] })
     asker = ASKER
     await send(later, reply())
     expect(later.asked).toEqual([])
@@ -602,7 +644,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       }
       const w = world({ folders: [project], answer: 'allow' })
       // Read through the link while it points outside, then the link is made to point inside
-      w.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
+      w.gate.noteRead('orc', 'Read', { file_path: join(link, 'secret.txt') })
       rmSync(link, { recursive: true, force: true })
       symlinkSync(join(project, 'inner'), link, 'junction')
       await send(w, reply())
@@ -610,7 +652,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       expect(w.asked[0]).toContain('Read of')
       // And the other way round: read while inside, swapped to outside afterwards, is still a read inside
       const inside = world({ folders: [project], answer: 'allow' })
-      inside.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
+      inside.gate.noteRead('orc', 'Read', { file_path: join(link, 'secret.txt') })
       rmSync(link, { recursive: true, force: true })
       symlinkSync(elsewhere, link, 'junction')
       await send(inside, reply())
