@@ -183,6 +183,22 @@ describe("a handoff moves the original's mail to the session that took over (#15
     }, 5 * DEBOUNCE_MS)
   })
 
+  it("case 6, the original stays: a finished child's unread report, which Centralu sent, moves with the child and does not wake the original", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'write notes')
+    const task = read.tasks(at(parent), child)[0]!
+    h.claude.handles.get(child)!.answer('notes done')
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    const report = read.reportsOn(task.id)[0]!
+    expect(read.row(report.id, at(parent))).toMatchObject({ readAt: null })
+
+    const heir = await handOff(h, project, parent, false)
+    expect(read.row(report.id, at(heir))).toMatchObject({ readAt: null, deliveredAt: null })
+    expect(read.row(report.id, at(parent))).toBeUndefined()
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`mail message "${report.body.split('\n')[0]!.slice(0, 40)}`)
+  })
+
   it('case 5 (guard), a settled child given more work by the successor reports to the successor', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

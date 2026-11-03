@@ -42,7 +42,18 @@ class Handle implements SessionHandle {
 class CapturingAdapter extends BaseAdapter {
   override descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
   emits: EventSink[] = []
+  /** The server set each session was launched with, read inside the start as the real adapters read it (Claude's servers, a Codex thread's `mcp_servers`) */
+  startServers = new Map<string, string[] | undefined>()
+  /** The next start throws, after the manager has built the session's apps */
+  failNext = false
+  failedId = ''
   protected override handle(opts: CreateSessionOpts, emit: EventSink) {
+    this.startServers.set(opts.sessionId, servers(opts))
+    if (this.failNext) {
+      this.failNext = false
+      this.failedId = opts.sessionId
+      throw new Error('the tool did not start')
+    }
     this.emits.push(emit)
     return new Handle(opts.sessionId, this.tool === 'codex')
   }
@@ -353,6 +364,8 @@ describe('a handoff carries the attached apps (#1638)', () => {
 
     const opened = adapter.last()
     expect(opened.sessionId).toBe(heir.id)
+    // What the tool read while it started, not what a count says afterwards: the session is not known to the host yet then
+    expect(adapter.startServers.get(heir.id)).toEqual(['app-board', 'app-ledger'])
     expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
     expect((await opened.apps!.call('app-ledger', 'peek', {})).isError).toBe(false)
     // A copy: the original keeps its own, and detaching there leaves the successor's alone
@@ -360,19 +373,71 @@ describe('a handoff carries the attached apps (#1638)', () => {
     expect((await tool(s.id, 'detach_app', { app: 'beta/board' })).isError).toBeFalsy()
     expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
     const note = readFileSync(handoffNotePath(alpha, s.id), 'utf8')
-    expect(note).toContain('The previous session had these apps attached. They are attached to you too')
-    expect(note).toContain('- app "beta/board" — attached to you too — handle: app-board.')
+    expect(note).toContain('The previous session had these apps attached.')
+    expect(note).toContain('- app "beta/board" — attached to you too — handle: app-board. Its tools are yours under that server name.')
     expect(note).toContain('- app "beta/ledger" — attached to you too — handle: app-ledger.')
+    expect(note).not.toContain('not attached to you')
   })
 
-  it('keeps the apps with the original when it goes, and the successor holds them under its own trust', async () => {
+  it('when the original is removed, the successor holds the apps under its own trust', async () => {
     const s = await withTwoApps('claude')
     const heir = await handOff(s, 'claude', true)
-    expect(servers(claude.last())).toEqual(['app-board', 'app-ledger'])
+    await mgr.trashSession(s.id)
+    expect(claude.startServers.get(heir.id)).toEqual(['app-board', 'app-ledger'])
     // Revoking the pair's consent takes them from the successor as from any session that attached them
     await rpc('projectConsents.revoke', { fromProjectId: alpha, toProjectId: beta, kind: 'apps' })
     await waitFor(() => servers(claude.last())!.length === 0)
     expect(mgr.listSessions().some((x) => x.id === heir.id)).toBe(true)
+  })
+
+  /** An app the person allowed once, for this session's attachment (#382), on a session that is `normal` */
+  async function withOnceApp() {
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    const s = await create(alpha, 'claude')
+    const pending = tool(s.id, 'attach_app', { app: 'beta/board' })
+    await waitFor(() => !!card(s.id))
+    mgr.respondApproval(s.id, card(s.id)!.requestId, 'allow')
+    expect((await pending).text).toContain('Attached: beta/board')
+    return s
+  }
+
+  it('does not copy an "Allow once" answer to the successor of an original that stays: the note says to attach it again, and the person is asked there', async () => {
+    const s = await withOnceApp()
+    const heir = await handOff(s, 'claude')
+
+    expect(claude.startServers.get(heir.id)).toEqual([])
+    expect(store.settings.appSetting(`session_apps:${heir.id}`)).toBeNull()
+    const note = readFileSync(handoffNotePath(alpha, s.id), 'utf8')
+    expect(note).toContain('- app "beta/board" — not attached to you — handle: beta/board. It does not carry over')
+    expect(note).toContain('attach it again with attach_app, where the person is asked')
+    expect(note).not.toContain('attached to you too')
+    // Attaching it there asks the person
+    const again = tool(heir.id, 'attach_app', { app: 'beta/board' })
+    await waitFor(() => !!card(heir.id))
+    mgr.respondApproval(heir.id, card(heir.id)!.requestId, 'deny')
+    expect((await again).isError).toBe(true)
+    // The original keeps its own
+    expect(servers(claude.seen.find((o) => o.sessionId === s.id)!)).toEqual(['app-board'])
+  })
+
+  it('copies an "Allow once" answer when the original goes: it is a move', async () => {
+    const s = await withOnceApp()
+    const heir = await handOff(s, 'claude', true)
+    await mgr.trashSession(s.id)
+
+    expect(claude.startServers.get(heir.id)).toEqual(['app-board'])
+    expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)
+    expect(readFileSync(handoffNotePath(alpha, s.id), 'utf8')).toContain('- app "beta/board" — attached to you too — handle: app-board.')
+  })
+
+  it('a start that fails after the copy leaves no row of the successor', async () => {
+    const s = await withTwoApps('claude')
+    claude.failNext = true
+    await expect(handOff(s, 'claude')).rejects.toThrow('the tool did not start')
+    expect(claude.failedId).not.toBe('')
+    expect(store.settings.appSetting(`session_apps:${claude.failedId}`)).toBeNull()
+    // The original's own are as they were
+    expect(store.settings.appSetting(`session_apps:${s.id}`)).not.toBeNull()
   })
 })
 

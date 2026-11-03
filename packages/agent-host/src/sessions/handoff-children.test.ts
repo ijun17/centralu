@@ -593,6 +593,24 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(await next.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
   })
 
+  it('after a host restart the kept original is still told that a handoff gave the child away (#1475)', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent, false)
+    const own = await startChild(h, heir, 'its own work')
+    await h.mgr.detachAll()
+
+    // The record of what moved is memory only; the successor's marker and the child's owner are stored
+    const next = host()
+    expect(await next.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining(`to the session that took over from this one, "You are taking over. Read the note." [${heir}]`),
+    })
+    // A child the successor started itself was not given away
+    expect(await next.mgr.agentSession(parent, { sessionId: own, action: 'status' })).toMatchObject({ ok: false, error: expect.not.stringContaining('A handoff gave') })
+  })
+
   it('leaves a settled child with the original when the store fails mid-move', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
