@@ -184,10 +184,12 @@ describe('what the merge queue decides for one poll', () => {
     expect(classifyRun(failedRun, [job('e2e (webkit 1/5)', 'failure', { ...secondTry, notes: [...firstTry, "The action 'Install WebKit system libraries, second try' has timed out after 3 minutes."] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step: 'Install WebKit system libraries, second try' })
     // The job's own limit is the job's whoever the earlier steps were
     expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled', { ...testsFailed, steps: testsFailed.steps.map((x) => (x.name.startsWith('pnpm') ? { ...x, conclusion: 'cancelled' } : x)), notes: [...firstTry, 'The job has exceeded the maximum execution time of 25 minutes.'] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: false })
-    // The step that keeps the results (an artifact upload, named by hand or not, a post step) failing alone is the service's, a test that failed before it is not
+    // A step that only keeps the results (an upload named for it, a post step) failing alone is the service's, not a test's: 2026-11-03, `Upload the test times` after every test passed
     const stored = (name: string) => ({ steps: [{ name: 'pnpm test', conclusion: 'success' }, { name, conclusion: 'failure' }] })
-    for (const name of ['Upload the test times', 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'])
-      expect(classifyRun(failedRun, [job('macos tests', 'failure', stored(name))])).toMatchObject({ real: false, cause: 'setup', step: name })
+    for (const name of ['Upload the test times', 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'])
+      expect(classifyRun(failedRun, [job('macos tests', 'failure', stored(name))])).toMatchObject({ real: false, cause: 'storage', step: name })
+    // An upload that is a check on the commit (`if-no-files-found: error`, to fail a build that bundled nothing) is not named so, and stays the commit's
+    expect(classifyRun(failedRun, [job('windows-x64', 'failure', stored('Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'))])).toMatchObject({ real: true, cause: 'test' })
     expect(classifyRun(failedRun, [job('macos tests', 'failure', { steps: [{ name: 'pnpm test', conclusion: 'failure' }, { name: 'Upload the test times', conclusion: 'failure' }] })])).toMatchObject({ real: true, cause: 'test', step: 'pnpm test' })
     // A test's own timeout is a test failure
     expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
@@ -4286,9 +4288,9 @@ describe("the main guard does not revert a commit for the runner's own failure (
 
   // 2026-11-03: every test step of `macos tests` passed; only the artifact upload that keeps the test times failed ("Failed to
   // FinalizeArtifact ... ENOTFOUND"). It was read as a test failure: the only commit since the last green one was blamed and a revert opened.
-  // The job is rerun first, as for any failure; the commit was hunted when the upload failed again.
+  // The job is rerun first, as for any failure; the commit was hunted when the upload failed again (here one that changed the lockfile, which a failed setup step would hunt).
   it('reports a job whose only failed step is the upload that keeps the test times, failing again after the rerun, and reverts nothing', async () => {
-    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const repo = mainRepo([{ subject: 'chore(deps): bump a package (#81)', files: ['pnpm-lock.yaml'] }])
     const sha = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
     const ok = (name: string) => ({ name, conclusion: 'success' })
