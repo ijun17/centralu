@@ -1360,6 +1360,13 @@ original's things is in this table; the bullets below say how.
   them says where it went (`handedOver`) rather than "not a session this session started". The answer for a session is
   also found from the store, so it survives a host restart: a child that is older than the successor, owned by it, when
   the successor's handoff marker names the original (the direct predecessor: an earlier session in the lineage never owned it).
+- **A child that does the work the original owes its own giver stays** (#1932, `kept` only). When the original was asked for a task, handed
+  the work on to a child and answered `waiting`, that child's report is what finishes the task, and the task (with the report owed
+  for it) is the original's. Moved, the report would go to the successor, which does not know the task, and the giver would never be told the end.
+  So such a child (`MailboxRecords.carriesUpstream`: a task from the original to it, still open, whose cause is a task the original was given,
+  still open) keeps answering to the original: its report wakes the original, whose turn finishes the task as before. It is not counted in the
+  notice; the note lists it as "stays with the previous session", and the successor does not follow it. An original that goes (`goes`) gives its
+  tasks away with the rest. A request the original queued for such a child still moves with the other queued requests.
 - **Who may hand over** is not checked here: `moveChildren` trusts its caller. Two callers reach it through
   `createSession`: the person's handoff (the window's RPC) and the orchestrator's `handoff_session`, after
   `HandoffFlow` has checked its authority over the original (§1.2.6). Any other agent-facing path must check its

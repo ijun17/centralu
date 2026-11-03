@@ -177,7 +177,7 @@ export class HandoffChildren {
     }
     const childIds = [...this.host.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
-    const linked = removed ? new Set(childIds) : new Set<string>([
+    const every = removed ? new Set(childIds) : new Set<string>([
       ...queuedBy,
       ...delegated.map((d) => d.sessionId),
       ...[...this.host.children.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
@@ -185,13 +185,28 @@ export class HandoffChildren {
       ...childIds,
     ])
     /*
+     * A child doing the work the original owes its own giver stays with an original that stays (#1932): its report is what finishes that task, and
+     * the task, with the report owed for it, is the original's. Moved, the report would go to the successor and the giver would never be told the end.
+     * It answers to the original as before; the note says so. An original that goes (`goes`) gives its tasks away with it
+     */
+    const staying = scope === 'kept' ? [...every].filter((id) => this.host.store.mailbox.carriesUpstream(from, id)) : []
+    const linked = new Set([...every].filter((id) => !staying.includes(id)))
+    /*
      * A child the original is waiting on in a call right now: that wait took its report mark down (`awaitAgent`) and is
      * about to be ended, so the report is owed to the new session instead
      */
     const armReports = delegated
-      .filter((d) => d.agent && !d.settled && (d.waiters ?? 0) > 0 && this.host.children.awaitingReport.get(d.sessionId) !== from)
+      .filter((d) => d.agent && !d.settled && (d.waiters ?? 0) > 0 && this.host.children.awaitingReport.get(d.sessionId) !== from && !staying.includes(d.sessionId))
       .map((d) => d.sessionId)
     const moved: MovedChild[] = []
+    // They are the note's lines only: nothing about them moves, so they are no part of the notice or the counts
+    const stays = staying.flatMap((id): MovedChild[] =>
+      this.host.meta.has(id)
+        ? [{
+            handle: id, name: this.host.nameOf(id), state: 'stays with the previous session',
+            can: 'It does work the previous session was given by someone else, and its report finishes that task, so it keeps answering to the previous session. You do not follow it; do not stop it.',
+          }]
+        : [])
     const sessions: string[] = []
     const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
     for (const id of linked) {
@@ -234,7 +249,7 @@ export class HandoffChildren {
      * until it goes, when all of it moves (scope `removed`)
      */
     const mailWhich = scope === 'kept' ? (sessions.length ? { senders: sessions } : null) : 'all'
-    if (!moved.length && mailWhich === null) return []
+    if (!moved.length && mailWhich === null) return stays
     let threads: HandedOverMessage[] = []
     try {
       this.host.store.children.moveChildren(
@@ -257,7 +272,7 @@ export class HandoffChildren {
     // The unread report of a finished child, which is listed as a count, is no line of its own either
     const foldedSessions = new Set(moved.filter((c) => c.folded).map((c) => c.handle))
     moved.push(...threads.map((t) => movedMessage(t, t.kind === 'report' && t.about !== undefined && foldedSessions.has(t.about))))
-    if (!moved.length) return []
+    if (!moved.length) return stays
     /*
      * The unread mail that moved waits for the successor. One being created takes it at the end of its first turn, after the note;
      * a successor that is told now (an original removed later) is poked once the move has committed
@@ -304,7 +319,7 @@ export class HandoffChildren {
       })
     }
     console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail message(s)`)
-    return moved
+    return [...moved, ...stays]
   }
 
   /**

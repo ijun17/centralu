@@ -648,6 +648,22 @@ export class MailboxRecords {
     return task ? this.handedOn(task.id) : []
   }
 
+  /**
+   * Whether session `ownerId` gave session `childId` a task, still open, while it worked on a task it was given that is still open (`cause_id`, §9.4): the
+   * child does the work `ownerId` owes its own giver, and its report is what finishes that task (#1932). From the two sessions' ids alone
+   */
+  carriesUpstream(ownerId: string, childId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+            WHERE m.kind = 'task' AND m.sender LIKE ? AND r.recipient LIKE ? AND r.settled IS NULL AND m.cause_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM mail_recipients up WHERE up.message_id = m.cause_id AND up.recipient LIKE ? AND up.settled IS NULL) LIMIT 1`,
+        )
+        .get(`session:%/${ownerId}`, `session:%/${childId}`, `session:%/${ownerId}`) !== undefined
+    )
+  }
+
   /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
   unansweredTo(recipient: string): RecipientRow[] {
     return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)

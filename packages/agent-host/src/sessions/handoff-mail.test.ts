@@ -203,6 +203,37 @@ describe("a handoff moves the original's mail to the session that took over (#15
     expect(note).not.toContain(report.id)
   })
 
+  it("case 7 (#1932), the original stays: a child doing the work it owes its own giver stays with it, so the giver is told the end", async () => {
+    const h = host()
+    h.mgr.setUiPreferences({ agentDepth: 3 })
+    const { project, parent: upstream } = await parentOf(h)
+    // upstream asks the original; the original hands the work on to a child and answers that it waits
+    const original = await startChild(h, upstream, 'land #12')
+    const child = await startChild(h, original, 'write the tests')
+    const task = read.tasks(at(upstream), original)[0]!
+    h.claude.handles.get(original)!.answer('handed the tests on; waiting')
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    expect(read.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'waiting' })
+
+    const heir = await handOff(h, project, original, false)
+    // The child answers to the original still; the note and the original's conversation say so
+    expect(h.mgr.listSessions().find((x) => x.id === child)!.askedBy).toBe(original)
+    const note = readFileSync(handoffNotePath(project, original), 'utf8')
+    expect(note).toContain(`"write the tests" — stays with the previous session — handle: ${child}.`)
+
+    h.claude.handles.get(child)!.answer('tests written')
+    // The child's report is the original's to read: its delivery wakes the original, whose turn is the task's work
+    const report = read.reportsOn(read.tasks(at(original), child)[0]!.id)[0]!
+    await eventually(async () => {
+      await h.m.delivery.process(at(original))
+      return h.claude.handles.get(original)!.sent.some((t) => t.includes(report.id) || t.includes('tests written'))
+    }, 5 * DEBOUNCE_MS)
+    expect(pendingFor(heir, report.id)).toBe(false)
+    h.claude.handles.get(original)!.answer('landed')
+    await eventually(() => read.reportsOn(task.id).length === 2)
+    expect(read.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['waiting', 'finished'])
+  })
+
   it('case 5 (guard), a settled child given more work by the successor reports to the successor', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
