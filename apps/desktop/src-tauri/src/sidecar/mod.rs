@@ -310,7 +310,7 @@ impl Supervisor {
 
     /// Whether "Apply now" can relaunch this window into the update just installed (#352). With the
     /// keeper, which holds the host and every agent through it. Where this window starts the host
-    /// itself (macOS), the relaunch stops the host for an update first and the next one continues what
+    /// itself (`os::RELAUNCH_WITHOUT_KEEPER`), the relaunch stops the host for an update first and the next one continues what
     /// it ended (#1895). Elsewhere a relaunch would only be the quit the update is meant to avoid.
     pub fn relaunch_info(&self) -> RelaunchInfo {
         match self.choice() {
@@ -319,8 +319,8 @@ impl Supervisor {
                 reason: Some("not attached to the background keeper".into()),
                 ..Default::default()
             }),
-            #[cfg(target_os = "macos")]
-            Choice::Direct => relaunch::direct_info(),
+            #[cfg(unix)]
+            Choice::Direct if centralu_keeper_core::os::RELAUNCH_WITHOUT_KEEPER => relaunch::direct_info(),
             // Where nothing relaunches into the new build (a quit and open is the update): no reason, as before the port was offered here
             _ => RelaunchInfo::default(),
         }
