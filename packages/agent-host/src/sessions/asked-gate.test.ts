@@ -180,6 +180,8 @@ describe('a step that can be undone runs, cited or not, and every step that chan
     for (const step of handsOn) expect(await out.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
     expect(out.asked).toHaveLength(handsOn.length)
     const within = world({ inReach: true, answer: 'deny' })
+    // Within the reach the same steps run without the card
+    for (const step of handsOn) expect(await within.gate.when('orc', step, undefined, ran().run, refused), step.name).toEqual({ text: 'did it' })
     const never = [
       { name: 'start_agent', args: { task: 'go' } },
       { name: 'ask_project', args: { project: 'Other', task: 'go' } },

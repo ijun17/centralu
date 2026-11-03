@@ -468,7 +468,7 @@ export class SessionManager {
       inReach: (asker, call) => {
         const me = this.meta.get(asker.sessionId)
         if (!me || me.projectId === null) return false
-        const mine = (s: SessionInfo | undefined) => s !== undefined && s.kind === 'worker' && s.projectId === me.projectId
+        const mine = (s: SessionInfo | undefined): s is SessionInfo => s !== undefined && s.kind === 'worker' && s.projectId === me.projectId
         const to = (v: unknown): SessionInfo | undefined => {
           if (typeof v !== 'string') return undefined
           const party = parseAddress(v.trim())
@@ -477,7 +477,8 @@ export class SessionManager {
         if (call.name === 'create_session') {
           const project = this.store.projects.listProjects().find((p) => p.id === me.projectId)
           const named = typeof call.args.project === 'string' ? call.args.project.trim() : ''
-          const seat = this.orchestratorId() === null ? undefined : this.meta.get(this.orchestratorId()!)
+          const seatId = this.orchestratorId()
+          const seat = seatId === null ? undefined : this.meta.get(seatId)
           // Where its own start_agent would have started one with no card (`AgentConsents`), and no looser than itself
           return (
             project !== undefined &&
@@ -488,7 +489,7 @@ export class SessionManager {
         }
         if (call.name === 'send_to_session' || call.name === 'agent_session') {
           const s = to(call.args.sessionId)
-          return mine(s) && presetWithin(s!.permissionPreset, me.permissionPreset)
+          return mine(s) && presetWithin(s.permissionPreset, me.permissionPreset)
         }
         // Mail the asking session could have sent itself: to a session of its own project, which acts on it under its own preset
         if (call.name === 'mail') return mine(to(call.args.to))

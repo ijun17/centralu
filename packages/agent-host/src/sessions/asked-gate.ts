@@ -73,7 +73,8 @@ export class AskedGate {
         message: `Nothing was done: ${tool} would go on after this turn, where the person's card for the session's request no longer applies, so a request's turn does not start it. Do the work in this turn, or tell the session to ask the person.`,
       }
     }
-    const step = askedAct(tool, input, asker.messageId)!
+    const step = askedAct(tool, input, asker.messageId)
+    if (step === null) return { allowed: true, asked: false }
     return this.put<RequestTurnAnswer>(orchestratorId, asker, step, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
 

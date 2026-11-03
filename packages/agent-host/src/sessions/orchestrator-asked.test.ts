@@ -153,7 +153,8 @@ describe('a session’s request wakes the orchestrator with host fields, and its
   })
 })
 
-describe('in the turn a request starts, a step that cannot be undone asks the person, naming the session', () => {
+// Since #1739 only a step that cannot be undone, and work handed beyond the asking session's reach, ask here; the name stays, which keeps its tests'
+describe('in the turn a request starts, every step that changes something asks the person, naming the session', () => {
   async function asked(trusted = true) {
     const acme = await project('Acme', trusted)
     const asker = await sessionIn(acme)
@@ -252,6 +253,11 @@ describe('in the turn a request starts, a step that cannot be undone asks the pe
     await eventually(() => !!card())
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await made).isError).toBe(true)
+    // To a session as strict as the asking one, which it could have given that work itself: no request card
+    const peer = (await w.rpc('agents.createSession', { projectId: acme.id, cwd: acme.path, tool: 'claude', permissionPreset: 'safe' })) as SessionInfo
+    expect(await settled(tool('send_to_session', { sessionId: peer.id, text: 'look at the login page' }))).not.toMatchObject({ isError: true })
+    expect(card()).toBeUndefined()
+    expect(recordsIn(w.mgr.sessionInfo(strict.id)!)).toEqual([expect.stringContaining('run send_to_session')])
   })
 
   it('reading and answering the request need no card, and nor does mail to anyone else, which is recorded', async () => {
