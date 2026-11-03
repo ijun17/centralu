@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
