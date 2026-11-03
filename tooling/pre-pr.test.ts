@@ -171,10 +171,11 @@ describe('what pre-pr reads', () => {
     }
   }, 90_000 * SLOW)
 
-  it('reads how long some files of a report took from the first starting to the last ending', () => {
+  it('reads how long the slowest of some files of a report took on its own, not the span the shared pass took around them', () => {
     const root = join(tmpdir(), 'r')
-    const report = { testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000, endTime: 5000 }, { name: join(root, 'b.test.ts'), startTime: 2000, endTime: 9000 }, { name: join(root, 'c.test.ts'), startTime: 0, endTime: 50_000 }] }
-    expect(filesRunMs(report, root, ['a.test.ts', 'b.test.ts'])).toBe(8000)
+    // a ran at the start and b at the end of a long pass: the span is 44 s, a pass of the two together takes the slower's 7 s
+    const report = { testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000, endTime: 5000 }, { name: join(root, 'b.test.ts'), startTime: 38_000, endTime: 45_000 }, { name: join(root, 'c.test.ts'), startTime: 0, endTime: 50_000 }] }
+    expect(filesRunMs(report, root, ['a.test.ts', 'b.test.ts'])).toBe(7000)
     expect(filesRunMs(report, root, ['a.test.ts'])).toBe(4000)
     expect(filesRunMs(report, root, ['other.test.ts'])).toBe(0)
     expect(filesRunMs(null, root, ['a.test.ts'])).toBe(0)
@@ -455,7 +456,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     const clock = { now: 0 }
     const limited = (timedOut: boolean) => ({ ...fake.runners, vitest: () => ((clock.now = 300_000), { report: null, timedOut }) })
     const outOfTime = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(true) })
-    expect(outOfTime.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: vitest was stopped after \d+ s, the most it was given, before it had finished/)])
+    expect(outOfTime.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: vitest was stopped after 300 s, the most it was given, before it had finished/)])
     clock.now = 0
     const crashed = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(false) })
     expect(crashed.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/not run: vitest gave no report \(it did not start, or crashed\)/)])

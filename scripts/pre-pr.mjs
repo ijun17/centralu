@@ -126,10 +126,13 @@ export function vitestTests(report, root) {
 export const noReport = (timedOut, limitMs) =>
   timedOut ? `vitest was stopped after ${Math.round(limitMs / 1000)} s, the most it was given, before it had finished` : 'vitest gave no report (it did not start, or crashed)'
 
-/** How long a report's `files` took to run, from the first of them starting to the last ending; 0 when it holds none of them. */
+/**
+ * How long the slowest of a report's `files` took on its own; 0 when it holds none of them. The guards run in one vitest pass,
+ * files side by side, so that is the least one pass takes. The span from the first starting to the last ending would count
+ * everything that ran between them in the shared pass.
+ */
 export function filesRunMs(report, root, files) {
-  const own = (report?.testResults ?? []).filter((f) => files.includes(relFile(root, f.name)))
-  return own.length ? Math.max(...own.map((f) => f.endTime)) - Math.min(...own.map((f) => f.startTime)) : 0
+  return Math.max(0, ...(report?.testResults ?? []).filter((f) => files.includes(relFile(root, f.name))).map((f) => f.endTime - f.startTime))
 }
 
 /** The tests that pass with the source changes reverted and were not in the base's version of their file. */
@@ -881,11 +884,12 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         unlinkLinks(top)
         runners.prepare(top, root)
       }
-      // Answers the tests and the pass (see realRunners.vitest); the tests are null when vitest gave no report
+      // Answers the tests and the pass (see realRunners.vitest) and the limit it was given; the tests are null when vitest gave no report
       const run = (files, options = {}) => {
         check()
-        const pass = runners.vitest(top, files, { timeoutMs: left(), ...options })
-        return { ...pass, tests: pass.report ? vitestTests(pass.report, top) : null }
+        const limitMs = left()
+        const pass = runners.vitest(top, files, { timeoutMs: limitMs, ...options })
+        return { ...pass, limitMs, tests: pass.report ? vitestTests(pass.report, top) : null }
       }
       const first = run(tests.map((t) => t.path))
       const reverted = first.tests
@@ -903,8 +907,8 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       let named = { tests: [] }
       if (reverted && existed.length) named = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed, { namesOnly: true })
       const before = named?.tests ?? null
-      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, noReport(first.timedOut, left()))
-      else if (named && !before) notRun('revert', `The base's version of ${existed.join(', ')}`, `${noReport(named.timedOut, left())}, so no test was judged`)
+      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, noReport(first.timedOut, first.limitMs))
+      else if (named && !before) notRun('revert', `The base's version of ${existed.join(', ')}`, `${noReport(named.timedOut, named.limitMs)}, so no test was judged`)
       // Without the base's answer every passing test would look new: say nothing of them
       const loose = reverted && before ? passingNewTests({ reverted, base: before }) : []
       for (const t of loose) {
