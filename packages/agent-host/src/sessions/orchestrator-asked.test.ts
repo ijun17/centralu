@@ -136,7 +136,7 @@ describe('a session’s request wakes the orchestrator with host fields, and its
   })
 })
 
-describe('in the turn of a request on the person’s word, every step it does not cover asks the person, naming the session', () => {
+describe('in the turn a request starts, every step that changes something asks the person, naming the session', () => {
   async function asked(trusted = true) {
     const acme = await project('Acme', trusted)
     const asker = await sessionIn(acme)

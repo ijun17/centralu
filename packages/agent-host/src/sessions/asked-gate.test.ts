@@ -42,8 +42,8 @@ const ran = () => {
   return { calls, run: async (): Promise<Out> => (calls.push(1), { text: 'did it' }) }
 }
 
-describe('the gate around the orchestrator’s steps in a request on the person’s word', () => {
-  it('a step its word does not cover outright asks first, and runs once the person allows it', async () => {
+describe('the gate around the orchestrator’s steps (§9.7)', () => {
+  it('a step that changes something asks first, and runs once the person allows it', async () => {
     const w = world()
     const r = ran()
     expect(await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
@@ -154,6 +154,7 @@ describe('the steps the person’s word covers (#1739)', () => {
   it('a step that did nothing leaves no record', async () => {
     const w = world()
     await w.gate.when('orc', { name: 'add_project', args: { path: '/nope' } }, undefined, async () => ({ text: 'No folder there.', isError: true }), refused)
+    expect(w.asked).toEqual([])
     expect(w.records).toEqual([])
   })
 
@@ -177,6 +178,9 @@ describe('the steps the person’s word covers (#1739)', () => {
     for (const tool of ['Bash', 'Write']) expect(await w.gate.askCli('orc', tool, { command: 'rm -rf x', file_path: '/x', content: 'y' })).toMatchObject({ allowed: false })
     expect(w.asked).toHaveLength(steps.length + 2)
     expect(w.records).toEqual([])
+    // ...while in the same turn the word's own steps still ask nothing
+    await w.gate.when('orc', { name: 'add_project', args: { path: '/work/app' } }, undefined, ran().run, refused)
+    expect(w.asked).toHaveLength(steps.length + 2)
   })
 
   it('reading, answering in the thread and mail to the person are free, as in the person’s own turn', async () => {
@@ -228,7 +232,7 @@ describe('a request with no word of the person’s: nothing leaves its turn', ()
   })
 })
 
-describe('a read the CLI itself asks about, in a request', () => {
+describe('a read the CLI itself asks about, in a request (§9.7)', () => {
   it('is the gate’s card, naming the session, Allow or Deny; outside a request the CLI keeps its own', async () => {
     const w = world({ answer: 'deny' })
     expect(await w.gate.askCliRead('orc', 'Read', { file_path: resolve('/private/a.txt') })).toMatchObject({ allowed: false })
