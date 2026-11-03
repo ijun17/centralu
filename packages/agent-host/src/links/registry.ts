@@ -24,7 +24,12 @@ export type RegistryOptions = {
 type RegistryKey = { keyid: string; key: string; expires: string | null }
 
 const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
-const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
+/**
+ * A version or a Node version as the hub writes it into a command or a pointer line there: one word, no shell or path
+ * characters. The launcher (`POINTER_WORD`, serve-install.mjs) and the script the hub sends (`WORD`, remote-install.mjs)
+ * hold the same; install.test.ts checks they agree
+ */
+export const VERSION_WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 
 /**
  * The registry has no such package, or no such version of it (it answers 404 for both). Its own
@@ -57,7 +62,7 @@ async function getJson(url: string, f: typeof globalThis.fetch, id?: string): Pr
  * The tarball must come from the registry itself, and the integrity must be a sha512.
  */
 export async function verifiedPackage(name: string, version: string, opts: RegistryOptions = {}): Promise<VerifiedPackage> {
-  if (!PACKAGE_NAME.test(name) || !VERSION.test(version)) throw new Error(`Not a package to install: ${name}@${version}`)
+  if (!PACKAGE_NAME.test(name) || !VERSION_WORD.test(version)) throw new Error(`Not a package to install: ${name}@${version}`)
   const registry = (opts.registry ?? NPM_REGISTRY).replace(/\/+$/, '')
   const f = opts.fetch ?? globalThis.fetch
   const now = opts.now?.() ?? Date.now()

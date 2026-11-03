@@ -105,7 +105,7 @@ export function remoteLayout(dataDir) {
 }
 
 /** A word a pointer file may hold: a folder name, nothing a path could escape with */
-const POINTER_WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
+export const POINTER_WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 
 /** `current` / `previous`: one line, "<centralu version> <node version>". null for anything else */
 export function parsePointer(text) {

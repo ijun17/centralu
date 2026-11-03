@@ -17,9 +17,9 @@ import { spawn } from 'node:child_process'
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { answerLine, replaceFile, runCaptured, sleep, tail, waitUntil } from './serve-util.mjs'
+import { answerLine, replaceFile, runCaptured, say, sleep, tail, waitUntil } from './serve-util.mjs'
 import { isWriter, processStartTime, serveDataDir } from './serve-files.mjs'
-import { managedLauncherScript, parsePointer, remoteLayout } from './serve-install.mjs'
+import { POINTER_WORD, managedLauncherScript, parsePointer, remoteLayout } from './serve-install.mjs'
 import { detachHow } from './serve-windows.mjs'
 
 export const SWITCH_FILE = 'switch.json'
@@ -44,32 +44,33 @@ const UNREADABLE_ALIVE_MS = 10 * 60_000
 /** The steps between a stop and the start that follows it: no other host may start then */
 const QUIET_STEPS = new Set(['stop', 'backup', 'switch', 'restore_store', 'roll_back'])
 
-const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 const LOCAL_BUILD = /\.local\.\d+$/
-const pointer = (v) => (v && WORD.test(String(v.version)) && WORD.test(String(v.node)) ? { version: v.version, node: v.node } : null)
+const pointer = (v) => (v && POINTER_WORD.test(String(v.version)) && POINTER_WORD.test(String(v.node)) ? { version: v.version, node: v.node } : null)
 const line = (p) => `${p.version} ${p.node}\n`
 
-/** The switch the hub asked for, from `--switch`'s argument; null when it is not one */
+/**
+ * The switch the hub asked for, from `--switch`'s argument (base64url of the hub's JSON, update.ts `switchCommand`),
+ * which `--switch-run` is handed unchanged; null when it is not one
+ */
 export function decodeSwitch(raw) {
   try {
-    const v = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
-    const p = v?.params ?? v
+    const p = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
     const to = pointer(p?.to)
     if (!to || typeof p.id !== 'string' || !/^[0-9A-Za-z-]{8,64}$/.test(p.id)) return null
     const by = typeof p.by === 'string' ? p.by.replace(/[^\w .()@-]/g, '').slice(0, 80) : 'another computer'
     const was = { current: pointer(p.was?.current), previous: pointer(p.was?.previous) }
-    const env = {}
-    for (const k of ['CC_DATA_DIR']) if (typeof v?.env?.[k] === 'string' && v.env[k]) env[k] = v.env[k]
-    return { params: { id: p.id, by, to, keep: pointer(p.keep), was, saveStore: p.saveStore === true }, env }
+    return { id: p.id, by, to, keep: pointer(p.keep), was, saveStore: p.saveStore === true }
   } catch {
     return null
   }
 }
 
-/** `--switch-run`'s argument: the switch, and the data folder a process WMI creates would not inherit */
-export function encodeSwitch(params, env = {}) {
-  return Buffer.from(JSON.stringify({ params, env: env.CC_DATA_DIR ? { CC_DATA_DIR: env.CC_DATA_DIR } : {} }), 'utf8').toString('base64url')
-}
+/** `--switch-run`'s second argument: the data folder, which a process WMI creates does not inherit (base64url) */
+const dataDirArg = (env) => (env.CC_DATA_DIR ? [Buffer.from(env.CC_DATA_DIR, 'utf8').toString('base64url')] : [])
+const withDataDir = (env, arg) => (arg ? { ...env, CC_DATA_DIR: Buffer.from(arg, 'base64url').toString('utf8') } : env)
+
+/** A time as `--detach`, `serve` and the hub's refusal say it: HH:MM, local */
+export const clockOf = (at) => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
 
 function readJson(file) {
   try {
@@ -144,10 +145,17 @@ function youngerThan(file, ms) {
   }
 }
 
+/** One managed version's Node and `centralu.mjs`, as the managed launcher finds them */
+function versionPaths(l, v, platform) {
+  return {
+    node: platform === 'win32' ? join(l.node, `v${v.node}`, 'node.exe') : join(l.node, `v${v.node}`, 'bin', 'node'),
+    cli: join(l.versions, v.version, 'node_modules', 'centralu', 'bin', 'centralu.mjs'),
+  }
+}
+
 /** One version's `centralu serve <args>`, on its own Node, as the managed launcher runs it */
 function serveOf(l, v, args, env, platform) {
-  const node = platform === 'win32' ? join(l.node, `v${v.node}`, 'node.exe') : join(l.node, `v${v.node}`, 'bin', 'node')
-  const cli = join(l.versions, v.version, 'node_modules', 'centralu', 'bin', 'centralu.mjs')
+  const { node, cli } = versionPaths(l, v, platform)
   return runCaptured(node, [cli, 'serve', ...args], { ...env, CENTRALU_MANAGED: '1' })
 }
 
@@ -280,9 +288,11 @@ export function storeRestore(dataDir, owner) {
 function switchWork(dataDir, state, { env, platform }) {
   const l = remoteLayout(dataDir)
   const file = join(l.root, SWITCH_FILE)
+  /** Answers the switch as written, which `runSwitcher` and `reconcile` answer in turn (a status read prints it) */
   const write = (patch) => {
     Object.assign(state, patch, { at: Date.now() })
     replaceFile(file, `${JSON.stringify(state)}\n`)
+    return state
   }
   const step = (s) => write({ step: s })
   const from = state.was.current
@@ -296,33 +306,51 @@ function switchWork(dataDir, state, { env, platform }) {
     return { ok: stop.ok === true, wasRunning: stop.wasRunning === true, message: typeof stop.message === 'string' ? stop.message : null }
   }
 
-  /** Whether a host answers as `version` (null: any) within `ms`, by the connection line of the version `asker` */
-  const answers = async (asker, version, ms = CHECK_MS) => {
+  /**
+   * What answers within `ms`, by the connection line of the version `asker`: `{ ok: true }` once a host answers as
+   * `version` (null: any), `{ ok: false, other }` at once when one answers as another version, `{ ok: false }` when none
+   * did. Asked at least once
+   */
+  const hear = async (asker, version, ms = CHECK_MS) => {
     const until = Date.now() + ms
     for (;;) {
       const r = await serveOf(l, asker, ['--connection'], env, platform)
       const said = lastLine(r.stdout, (o) => (typeof o.port === 'number' ? o : undefined))
-      if (said?.hostRunning === true && (version === null || said.version === version)) return true
-      if (Date.now() >= until) return false
+      if (said?.hostRunning === true && (version === null || said.version === version)) return { ok: true }
+      if (said?.hostRunning === true && typeof said.version === 'string') return { ok: false, other: said.version }
+      if (Date.now() >= until) return { ok: false }
       await sleep(1_000)
     }
   }
 
-  /** `v` started and answering as itself; otherwise why not. A start refused for WMI is left to the hub's link (`unchecked`) */
+  /**
+   * `v` started and answering as itself; otherwise why not. A start refused for WMI is left to the hub's link
+   * (`unchecked`). A host of another version found there instead was started meanwhile by something that does not ask
+   * the switch (a version from before it, through the sign-in task, the person or another hub): it is stopped and `v`
+   * started again, twice at most (#1907)
+   */
   const startAndCheck = async (v, [startStep, checkStep] = ['start', 'check']) => {
-    step(startStep)
-    const r = await serveOf(l, v, ['--detach'], env, platform)
-    const detach = lastLine(r.stdout, (o) => o.detach)
-    if (detach?.ok === false && detach.reason === 'wmi_blocked') return { why: null, unchecked: detach.message ?? 'WMI is blocked' }
-    if (detach?.ok === false) return { why: detach.message ?? 'it did not start' }
-    if (!detach) return { why: r.stderr.trim().split(/\r?\n/).at(-1) || `serve --detach gave no answer (exit ${r.code})` }
-    if (checkStep) step(checkStep)
-    return (await answers(v, v.version)) ? { why: null } : { why: NO_ANSWER }
+    for (let stopped = 0; ; stopped++) {
+      step(startStep)
+      const r = await serveOf(l, v, ['--detach'], env, platform)
+      const detach = lastLine(r.stdout, (o) => o.detach)
+      if (detach?.ok === false && detach.reason === 'wmi_blocked') return { why: null, unchecked: detach.message ?? 'WMI is blocked' }
+      const failed = detach?.ok === false ? (detach.message ?? 'it did not start') : !detach ? r.stderr.trim().split(/\r?\n/).at(-1) || `serve --detach gave no answer (exit ${r.code})` : null
+      if (checkStep) step(checkStep)
+      // A start that failed may have met a host starting meanwhile: a few seconds tell
+      const heard = await hear(v, v.version, failed ? 5_000 : CHECK_MS)
+      if (heard.ok) return { why: null }
+      if (!heard.other) return { why: failed ?? NO_ANSWER }
+      if (stopped === 2) return { why: `Centralu ${heard.other} answered there instead; something started it again during the switch` }
+      write({ startedMeanwhile: heard.other })
+      await stopWith(from && heard.other === from.version ? from : v)
+    }
   }
 
   /** The old version back after `why`: the new host stopped, the pointers as they were, the old host started and heard */
   const putBack = async (why, extra = {}) => {
-    step('roll_back')
+    // `why` is kept from here, so a reader that finishes this put-back can still say it
+    write({ step: 'roll_back', why })
     const log = hostLogTail(dataDir)
     const stop = await stopWith(readPointerFile(l.current) ?? to)
     const stopFailed = stop.ok ? null : stop.message
@@ -335,7 +363,7 @@ function switchWork(dataDir, state, { env, platform }) {
           if (back.why) throw new Error(back.why === NO_ANSWER ? `${NO_ANSWER} either` : back.why)
         } else {
           await startNpm(dataDir, env, platform)
-          if (!(await answers(to, null))) throw new Error(`${NO_ANSWER} either`)
+          if (!(await hear(to, null)).ok) throw new Error(`${NO_ANSWER} either`)
         }
       }
     } catch (err) {
@@ -344,7 +372,7 @@ function switchWork(dataDir, state, { env, platform }) {
     return write({ outcome: 'put_back', why, log, ...extra })
   }
 
-  return { step, write, stopWith, startAndCheck, putBack, from, to }
+  return { step, write, stopWith, hear, startAndCheck, putBack, from, to }
 }
 
 /** The Centralu an npm install keeps its launcher for (`<data>/bin/centralu`), started again after a failed first switch */
@@ -407,24 +435,32 @@ export async function runSwitcher({ dataDir, params, env, platform = process.pla
       }
     }
     if (started.why) return await w.putBack(started.why)
-    w.step('prune')
-    let pruned = { removed: [], left: [] }
-    try {
-      pruned = prune(dataDir)
-    } catch {
-      // the next switch prunes again
-    }
-    return w.write({ outcome: 'done', ...pruned, ...(restored ? { restored } : {}), ...(started.unchecked ? { unchecked: started.unchecked } : {}) })
+    return finishDone(dataDir, w, { ...(restored ? { restored } : {}), ...(started.unchecked ? { unchecked: started.unchecked } : {}) })
   } finally {
     release()
   }
 }
 
+/** The new version answered: what no pointer, nor the switch's runner, names is removed, and the switch is `done` */
+function finishDone(dataDir, w, extra = {}) {
+  w.step('prune')
+  let pruned = { removed: [], left: [] }
+  try {
+    pruned = prune(dataDir)
+  } catch {
+    // the next switch prunes again
+  }
+  return w.write({ outcome: 'done', ...pruned, ...extra })
+}
+
 /**
  * A switch with no outcome whose switcher is not alive, finished by whoever read it, by the last step written: before
  * the switch nothing changed (`failed`); from the switch until the check passed the old version is put back
- * (`put_back`); after it (`prune`), `done`. `start`: a host is started too (the old one, or the one that runs when
- * nothing was switched); a caller that starts one itself next passes false. Answers the switch as it is now
+ * (`put_back`); after it (`prune`), `done`. A version the pointers name that answers as itself is taken as it is, never
+ * stopped (#1907): the new one from the switch to the check (`done`), the old one in the put-back (`put_back`), within
+ * the time the switcher would have given it, or at once when that is past. `start`: a host is started too (the old one,
+ * or the one that runs when nothing was switched); a caller that starts one itself next passes false. Answers the
+ * switch as it is now
  */
 export async function reconcile(dataDir, { env, platform = process.platform, start }) {
   const s = readSwitch(dataDir)
@@ -437,7 +473,16 @@ export async function reconcile(dataDir, { env, platform = process.platform, sta
     const again = readSwitch(dataDir)
     if (!again || again.outcome) return again
     const w = switchWork(dataDir, again, { env, platform })
-    if (again.step === 'prune') return w.write({ outcome: 'done', interrupted: true, removed: [], left: [] })
+    if (again.step === 'prune') return finishDone(dataDir, w, { interrupted: true })
+    const now = readPointerFile(l.current)
+    const forward = ['switch', 'start', 'check'].includes(again.step) && now?.version === again.to.version
+    const back = ['roll_back', 'restart'].includes(again.step) && now && now.version === again.was.current?.version
+    if (forward || back) {
+      const left = (typeof again.at === 'number' ? again.at : 0) + (again.step === 'start' || again.step === 'restart' ? 2 : 1) * CHECK_MS - Date.now()
+      if ((await w.hear(now, now.version, Math.max(0, left))).ok) {
+        return forward ? finishDone(dataDir, w, { interrupted: true }) : w.write({ outcome: 'put_back', why: again.why ?? 'interrupted', interrupted: true })
+      }
+    }
     if (again.step === 'stop' || again.step === 'backup') {
       w.write({ outcome: 'failed', stage: 'interrupted', why: 'interrupted before the switch', interrupted: true })
       const now = readPointerFile(l.current)
@@ -445,7 +490,7 @@ export async function reconcile(dataDir, { env, platform = process.platform, sta
       return again
     }
     if (!start) again.wasRunning = false
-    return await w.putBack('interrupted', { interrupted: true })
+    return await w.putBack(again.why ?? 'interrupted', { interrupted: true })
   } finally {
     release()
   }
@@ -469,14 +514,28 @@ export async function beforeHostStart({ dataDir, env, version, platform = proces
 
 /** What `--detach` and `serve` say while a switch is under way there */
 export function switchingMessage(gate) {
-  return `an update from ${gate.by} started at ${new Date(gate.startedAt).toISOString()} is switching versions here; no host starts until it ends`
+  return `an update from ${gate.by} started at ${clockOf(gate.startedAt)} is switching versions here; no host starts until it ends`
+}
+
+/**
+ * `serve`, `--detach` and `--window` ask this before anything else (centralu.mjs), so a switcher that died is finished
+ * whatever this version would refuse next: a host already answering, a missing host entry, a Node below the floor (#1907).
+ * Null: go on. Otherwise the exit code, having said why or run the version `current` names now
+ */
+export async function gateHostStart({ env, home, version, detach, platform = process.platform, write = (s) => process.stdout.write(s) }) {
+  const dataDir = serveDataDir(env, home)
+  const gate = await beforeHostStart({ dataDir, env, version, platform })
+  if (gate.go) return null
+  if (gate.rerun) return rerunAs(dataDir, gate.rerun, process.argv.slice(2), env, platform)
+  const message = switchingMessage(gate)
+  if (detach) return answerLine(write, 'detach', { ok: false, how: detachHow(platform, env), reason: 'switching', by: gate.by, startedAt: gate.startedAt, message })
+  say(message)
+  return 1
 }
 
 /** Runs `centralu serve <args>` of the version `current` names, in this terminal; answers its exit code */
 export function rerunAs(dataDir, v, args, env, platform = process.platform) {
-  const l = remoteLayout(dataDir)
-  const node = platform === 'win32' ? join(l.node, `v${v.node}`, 'node.exe') : join(l.node, `v${v.node}`, 'bin', 'node')
-  const cli = join(l.versions, v.version, 'node_modules', 'centralu', 'bin', 'centralu.mjs')
+  const { node, cli } = versionPaths(remoteLayout(dataDir), v, platform)
   return new Promise((resolve) => {
     const child = spawn(node, [cli, ...args], { env: { ...env, CENTRALU_MANAGED: '1' }, stdio: 'inherit', windowsHide: true })
     child.once('error', () => resolve(1))
@@ -484,29 +543,33 @@ export function rerunAs(dataDir, v, args, env, platform = process.platform) {
   })
 }
 
+/** The variable the hub's handover names the running version in (`<version> <node>`), written to `switch.runner` */
+export const RUNNER_ENV = 'CENTRALU_SWITCH_RUNNER'
+
 /**
  * `centralu serve --switch <arg>`, the handover: starts the switcher outside this ssh session (`detachHow`, as
  * `--detach` starts a host), waits until it wrote its pid, prints `{ v: 1, switch: { ok: true, id, pid } }` and exits.
  * When nothing can be started outside the session (WMI blocked, a `wsl.exe` that never ran), or the one started never
  * wrote its pid, the switch runs here in the session: a link drop then ends it, and the next reader finishes it
- * (`reconcile`). `{ ok: false, reason: 'busy', by, startedAt }` while another switch runs there
+ * (`reconcile`). `{ ok: false, reason: 'busy', by, startedAt }` while another switch runs there, having changed
+ * nothing: `switch.runner` is written only once this one may run
  */
 export async function runSwitch({ env, home, raw, cliPath, execPath = process.execPath, platform = process.platform, start, write = (s) => process.stdout.write(s) }) {
-  const decoded = decodeSwitch(raw)
-  if (!decoded) return answerLine(write, 'switch', { ok: false, reason: 'params', message: 'this is not a switch serve --switch can read' })
-  const runEnv = { ...env, ...decoded.env }
-  const dataDir = serveDataDir(runEnv, home)
-  const { params } = decoded
+  const params = decodeSwitch(raw)
+  if (!params) return answerLine(write, 'switch', { ok: false, reason: 'params', message: 'this is not a switch serve --switch can read' })
+  const dataDir = serveDataDir(env, home)
   const l = remoteLayout(dataDir)
   mkdirSync(l.root, { recursive: true })
-  await reconcile(dataDir, { env: runEnv, platform, start: false })
+  await reconcile(dataDir, { env, platform, start: false })
   const busy = () => {
     const s = readSwitch(dataDir)
-    return answerLine(write, 'switch', { ok: false, reason: 'busy', by: s?.by ?? null, startedAt: s?.startedAt ?? null, message: `another switch runs there${s ? `, from ${s.by} since ${new Date(s.startedAt).toISOString()}` : ''}` })
+    return answerLine(write, 'switch', { ok: false, reason: 'busy', by: s?.by ?? null, startedAt: s?.startedAt ?? null, message: `another switch runs there${s ? `, from ${s.by} since ${clockOf(s.startedAt)}` : ''}` })
   }
   if (lockIsLive(readJson(join(l.root, SWITCH_LOCK)))) return busy()
+  const runner = parsePointer(env[RUNNER_ENV])
+  if (runner) replaceFile(join(l.root, SWITCH_RUNNER), line(runner))
   const startOutside = start ?? (await import('./serve-detach.mjs')).startDetached
-  const created = await startOutside({ how: detachHow(platform, runEnv), execPath, args: [cliPath, 'serve', '--switch-run', encodeSwitch(params, runEnv)], env: { ...runEnv, CENTRALU_MANAGED: '1' }, cwd: dataDir })
+  const created = await startOutside({ how: detachHow(platform, env), execPath, args: [cliPath, 'serve', '--switch-run', raw, ...dataDirArg(env)], env: { ...env, CENTRALU_MANAGED: '1' }, cwd: dataDir })
   if (created.ok && (await waitUntil(() => readSwitch(dataDir)?.id === params.id, HANDOVER_MS))) {
     return answerLine(write, 'switch', { ok: true, id: params.id, pid: readSwitch(dataDir).pid })
   }
@@ -516,7 +579,7 @@ export async function runSwitch({ env, home, raw, cliPath, execPath = process.ex
   const done = await runSwitcher({
     dataDir,
     params,
-    env: runEnv,
+    env,
     platform,
     onLocked: () => {
       said = true
@@ -529,12 +592,12 @@ export async function runSwitch({ env, home, raw, cliPath, execPath = process.ex
   return s?.id === params.id ? answerLine(write, 'switch', { ok: true, id: params.id, pid: s.pid }) : done === null ? busy() : 1
 }
 
-/** `centralu serve --switch-run <arg>`: the detached switcher `runSwitch` started */
-export async function runSwitchRun({ env, home, raw, platform = process.platform }) {
-  const decoded = decodeSwitch(raw)
-  if (!decoded) return 2
-  const runEnv = { ...env, ...decoded.env }
-  const done = await runSwitcher({ dataDir: serveDataDir(runEnv, home), params: decoded.params, env: runEnv, platform })
+/** `centralu serve --switch-run <arg> [<data folder>]`: the detached switcher `runSwitch` started */
+export async function runSwitchRun({ env, home, raw, dataDir: dataArg = null, platform = process.platform }) {
+  const params = decodeSwitch(raw)
+  if (!params) return 2
+  const runEnv = withDataDir(env, dataArg)
+  const done = await runSwitcher({ dataDir: serveDataDir(runEnv, home), params, env: runEnv, platform })
   return done ? 0 : 1
 }
 

@@ -409,11 +409,53 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(events().at(-1)).toBe('start 9.9.1')
     }, 180_000 * SLOW)
 
+    /*
+     * #1907: killed once it wrote `check`, the new host already answering. A later start or status read (hours later)
+     * found a switch with no outcome and put the old version back, stopping a host that worked
+     */
+    it.each(['a start there', 'a status read'])('a switcher killed at the check while the new version answers is finished forward by %s: it keeps serving', async (by) => {
+      await installedAndRunning()
+      void update('9.9.2', { FAKE_HOLD: 'connection 9.9.2' }, { exec: goneAfterHandover() }).done.catch(() => undefined)
+      await killSwitcher('check')
+      tell({})
+      if (by === 'a start there') await startThere()
+      else expect(await readSwitchStatus(control().c)).toMatchObject({ outcome: 'done', interrupted: true })
+      expect(switchNow()).toMatchObject({ outcome: 'done', interrupted: true })
+      expect(running()).toBe('9.9.2')
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
+      expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.2 ${WIN_NODE_V}\n`)
+    }, 180_000 * SLOW)
+
+    /*
+     * #1907: a version from before the switch asks no switch before it starts. Started between the stop and the new
+     * start (the sign-in task, the person, a hub on it), it held the folder; the new version did not answer and the old
+     * one was put back
+     */
+    it('stops a host of the old version that was started during the switch by one that does not ask, and the update goes through', async () => {
+      await installedAndRunning()
+      const { done } = update('9.9.2', { FAKE_HOLD: 'stopped', FAKE_NO_GATE: '9.9.1' })
+      await eventually(() => existsSync(data('holding')), 60_000)
+      expect(switchNow().step).toBe('stop')
+      await startThere()
+      expect(running()).toBe('9.9.1')
+      writeFileSync(data('release'), 'go')
+      expect(await done).toMatchObject({ current: { version: '9.9.2' } })
+      expect(running()).toBe('9.9.2')
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.1', 'stop 9.9.1 (for update)', 'start 9.9.2'])
+      expect(switchNow()).toMatchObject({ outcome: 'done', startedMeanwhile: '9.9.1' })
+    }, 240_000 * SLOW)
+
     it('refuses a second update, and starts no host, while a live switcher is between its stop and its start', async () => {
       await installedAndRunning()
       const first = update('9.9.2', { FAKE_HOLD: 'stop' })
       await eventually(() => existsSync(data('holding')), 60_000)
-      await expect(update('9.9.3', { FAKE_HOLD: 'stop' }).done).rejects.toThrow(/^An update of box started from \S+ at \d\d:\d\d is still running; try again when it ends$/)
+      const runner = readFileSync(remote('switch.runner'), 'utf8')
+      const second = update('9.9.3', { FAKE_HOLD: 'stop' })
+      await expect(second.done).rejects.toThrow(/^An update of box started from \S+ at \d\d:\d\d is still running; try again when it ends$/)
+      // #1907: refused before it held its link or said `stop`, and the machine's record of who reads the switch is as it was
+      expect(second.seen).not.toContain('hold')
+      expect(second.seen).not.toContain('stop')
+      expect(readFileSync(remote('switch.runner'), 'utf8')).toBe(runner)
       await expect(tunnel().startHost()).rejects.toBeInstanceOf(SwitchUnderWay)
       writeFileSync(data('release'), 'go')
       expect(await first.done).toMatchObject({ current: { version: '9.9.2' } })

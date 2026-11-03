@@ -571,20 +571,26 @@ running host's own hello on the folder's credential. Nothing is imported across 
 
 1. **Place** (unchanged, §10.2): the new version beside `current`, over the link. The installer no longer prunes, even
    when it activates a first install: pruning is the switch's.
-2. **Wait for turns** (unchanged, #1399/#1618): the hub's `beforeStop` still runs before anything is handed over, since
-   only the hub can show the person the wait.
+2. **Check, then wait for turns**: the hub first reads the switch there (`--switch-status`). One under way refuses the
+   update at once with the busy text, before the hub waits for turns, holds its link or shows a step (#1907). Then the
+   hub's `beforeStop` runs (unchanged, #1399/#1618), since only the hub can show the person the wait.
 3. **Hand over**: one ssh command runs `serve --switch` with `{ id, by, to, keep, was, saveStore }`, base64url on the line,
    through the first of the versions it names whose package has `serve-switch.mjs`: for an update `to`, then `from` (a
-   dev build that goes back to a release from before this); for a rollback `current`, then `previous`. That version is
-   written to `<data>/remote/switch.runner` first. Its `serve` detaches the switcher the way `--detach` starts a host
-   (`detachHow`, `startDetached`), carrying `CC_DATA_DIR`, which a process WMI creates does not inherit. It waits until
-   the switcher wrote `switch.json` with its pid (at most 10 s), prints `{ v: 1, switch: { ok: true, id, pid } }` and
-   exits. The switcher, not the handover, takes the lock and writes the file, so a handover that dies early leaves
-   nothing behind; one that dies after it leaves a switcher that runs on.
+   dev build that goes back to a release from before this); for a rollback `current`, then `previous`. The command names
+   that version in `CENTRALU_SWITCH_RUNNER`, and `--switch` writes it to `<data>/remote/switch.runner` once no live switch
+   refuses it, so a refused handover changes nothing there. Its `serve` detaches the switcher the way `--detach` starts a
+   host (`detachHow`, `startDetached`) as `--switch-run <the hub's argument, unchanged> [<data folder>]`: the data folder,
+   base64url, is the one thing a process WMI creates does not inherit. It waits until the switcher wrote `switch.json`
+   with its pid (at most 10 s), prints `{ v: 1, switch: { ok: true, id, pid } }` and exits. The switcher, not the
+   handover, takes the lock and writes the file, so a handover that dies early leaves nothing behind; one that dies after
+   it leaves a switcher that runs on.
 4. **The switcher** runs §10.5 steps 2 to 6 and writes each step to `switch.json` before taking it: `stop` (`--stop` of
    `from`, or of `to` over an npm install), `backup` (the store copy of a dev build, §10.11), `switch` (both pointers, and
    the managed launcher if there is none yet), `start` (`--detach` of `to`), `check` (`to`'s `--connection` says a host
-   answers as `to`, within 30 s). Leaving a dev build for a release that does not start on its store, it takes
+   answers as `to`, within 30 s). A host that answers as another version there was started meanwhile by something that
+   does not ask the switch: a version from before this (through the sign-in task, the person, or a hub still on it) while
+   `current` still named it. It is stopped and `to` started again, twice at most (`startedMeanwhile` in the file), then
+   the update fails naming that version (#1907). Leaving a dev build for a release that does not start on its store, it takes
    `restore_store` (the copy taken for the release, and one more start). On success it takes `prune`: every version but
    `current`, `previous` and the runner (which reads the outcome), every Node none of them uses, and the store copies of
    versions that are gone. On failure it takes `roll_back`: the end of `host.log`, `--stop` of the new version (which ends
@@ -596,12 +602,16 @@ running host's own hello on the folder's credential. Nothing is imported across 
    fails (the link down) is tried again, the wait doubling to 30 s, and does not fail the update. It ends on `outcome`, or
    after 15 minutes with "could not be followed to its end; how it ended is shown once the machine is reached again". It
    then reads once more with `--seen <id>`, which marks the outcome reported. At a link start where the hub manages an
-   install it reads the switch too (always when no host runs, once per hub process when one does): a switch under way is
-   waited for, and an outcome not yet `seen` is said once on the row (`switchNote`), then marked.
+   install it reads the switch too: always when no host runs, and when one does while the last switch may have ended
+   unread by this hub (the first open, a switch last seen under way, or an operation of this hub's that failed, such as
+   one it could not follow). A switch under way is waited for, and an outcome not yet `seen` is said once on the row
+   (`switchNote`), then marked. A switch of another hub's that this hub showed `updating` for and that went through is no
+   news, so it says nothing then; a failed one it says.
 
 **`switch.json`** (`v: 1`, written by rename): `{ id, by, from, to, keep, was: { current, previous }, saveStore, step,
 startedAt, at, pid, started, wasRunning?, outcome?: 'done' | 'put_back' | 'failed', stage?, why?, putBackWhy?, stopFailed?,
-log?, restored?, interrupted?, removed?, left?, seen? }`. The sentences are the hub's, from these fields.
+log?, restored?, interrupted?, startedMeanwhile?, removed?, left?, seen? }`. `why` is written when the put-back begins, so
+a reader that finishes it can still say it. The sentences are the hub's, from these fields.
 
 **Is the switcher alive?** Every reader asks this before it believes a `switch.json` with no `outcome`: `--switch-status`,
 `serve` and `--detach` before they start a host, and `--switch` before it hands over. The switcher is alive when the pid in
@@ -619,14 +629,16 @@ time and `at`. A second `--switch` while a live switcher holds it is refused (`r
 when). A lock whose switcher is not alive is stale and is taken over, moved aside first so that of two takers only one
 removes it. `operate`'s one-at-a-time on the hub stays, and the lock covers two hubs.
 
-**No host starts beside a switch.** `serve` and `serve --detach` refuse to start a host while a live switcher is between a
-stop and the start that follows it (steps `stop`, `backup`, `switch`, `restore_store`, `roll_back`); the boot entry runs
-`serve`, so it refuses too. `--detach` answers `{ ok: false, reason: 'switching', by, startedAt }`. The switcher's own
+**No host starts beside a switch.** `serve`, `serve --detach` and `--window` ask the switch first, before anything else
+they check (a host already answering, the host entry, the Node floor), and refuse to start a host while a live switcher
+is between a stop and the start that follows it (steps `stop`, `backup`, `switch`, `restore_store`, `roll_back`); the boot
+entry runs `serve`, so it refuses too. `--detach` answers `{ ok: false, reason: 'switching', by, startedAt }`. The switcher's own
 starts come in its `start` and `restart` steps, where nothing is refused, so no variable has to reach a host started
 through the Windows sign-in task. The hub treats `switching` as "an update is under way there": the row says `updating`
 and the link asks again on its first backoff step instead of reporting a failed start. The link also reads the switch
-before it starts a host where it manages an install, which a version from before this cannot refuse on its own. This
-replaces the hold `pnpm remote-dev` wrote (`swap-hold.ts`, removed): a dev build is a switch like any other.
+before it starts a host where it manages an install, which a version from before this cannot refuse on its own. A
+version from before this started by anything else (the sign-in task, the person, a second hub still on it) is not
+refused; the switcher stops it when it finds it answering at its check (step 4). This replaces the hold `pnpm remote-dev` wrote (`swap-hold.ts`, removed): a dev build is a switch like any other.
 
 **The switcher's own crash** (OOM, a logout that ends the user's processes without linger, a killed process). Its
 lock and `switch.json` stay with no outcome. The next reader that finds the switcher dead takes the lock and finishes the
@@ -634,9 +646,16 @@ switch before anything else, by the last step written:
 
 - `stop` or `backup`: nothing changed. Outcome `failed`, stage `interrupted`. `--switch-status` then starts the version
   `current` names; `serve` and `--detach` start it themselves.
-- `switch` to `restart`: the new host is stopped, the pointers in `was` go back, the store copy goes back for a dev build,
-  and the old version is started and waited for. Outcome `put_back`, `interrupted`. When the reader is a `serve` or
-  `--detach` of the new version, it then runs the same command of the version `current` names now, which serves.
+- `switch`, `start` or `check`, with `current` naming the new version and a host answering as it: the switch went
+  through, it was only not marked. Outcome `done`, `interrupted`, pruned as after a check; nothing is stopped (#1907). A
+  reader asks within what the switcher had left of its bound (30 s from `check`, 60 s from `start`), and once when that
+  is past, so a reader hours later never stops a host that has served all along.
+- `roll_back` or `restart`, with `current` back on the old version and a host answering as it: outcome `put_back`,
+  `interrupted`, with the `why` the put-back began with.
+- Otherwise from `switch` to `restart`: the new host is stopped, the pointers in `was` go back, the store copy goes back
+  for a dev build, and the old version is started and waited for. Outcome `put_back`, `interrupted`. When the reader is a
+  `serve` or `--detach` of the new version, it then runs the same command of the version `current` names now, which
+  serves.
 - `prune` (the check passed): outcome `done`.
 
 Each step is safe to do twice: pointers by rename, a stop of a host already stopped, a prune of what is gone.
@@ -644,7 +663,16 @@ Each step is safe to do twice: pointers by rename, a stop of a host already stop
 **What brings a host back** after a switcher died between the stop and the start: the next `serve` there. That is the hub's
 `--detach` once its link reconnects (the link's backoff, from 2 s up to 5 minutes), the hub's next `--switch-status`, or
 the boot entry's start at the next boot or sign-in. A machine whose switcher dies while no hub is linked and that does not
-reboot has no host until one of those happens. Today the same holds after any hub-stopped host, and the boot entry's
+reboot has no host until one of those happens. The `serve` of whichever version `current` names finishes the switch
+before it refuses for a reason of its own, so a new version that is broken (no host entry, a Node below its floor)
+still hands over to the old one (#1907). Two cases need a hub's `--switch-status` (which runs the runner, not
+`current`):
+
+- `current` names a version from before this switch, which does not ask (the switcher died at `stop` or `backup`, or in
+  the put-back after the pointers went back). That version served before the update, so the boot entry starts it and a
+  host runs; the switch stays without an outcome until a hub reads it, which then finishes it without a second start.
+- `current` names a version whose launcher cannot run at all (its Node binary or its files missing). Nothing on the
+  machine can run that version's `serve`, and the managed launcher, which never changes, knows nothing of a switch. Today the same holds after any hub-stopped host, and the boot entry's
 `Restart=on-failure` does not cover a clean stop. Making the switcher a supervised unit (a transient systemd unit, a
 scheduled task) would close that, at the cost of a second start path per system; not proposed now.
 
@@ -687,15 +715,23 @@ with main's steps (no host after the stop):
 - the hub sends nothing after the handover: the machine ends on the new version, and a later hub reads the outcome once;
 - the switcher is killed while it holds its stop, and while it holds the new version's start, with no hub asking: the
   next `--detach` finishes it, with nothing switched or with the old version put back and serving;
-- a second update, and a `--detach`, while a live switcher is in its stop, are refused (`busy`, `SwitchUnderWay`);
+- the switcher is killed at its check while the new version answers: the next `--detach`, or a status read, finishes it
+  as `done`, and the new host keeps serving (#1907);
+- a version that asks no switch (`FAKE_NO_GATE`, as a release from before it) is started between the stop and the new
+  start: the switcher stops it and the update goes through (#1907). Run too with the published 0.1.0-beta.45 as the old
+  version and its real launcher starting the host mid-switch;
+- a second update, and a `--detach`, while a live switcher is in its stop, are refused (`busy`, `SwitchUnderWay`); the
+  refused update holds no link, shows no step, and leaves `switch.runner` as it was;
 - nothing starts outside the session: the switch runs in it, is killed in its start, and the reconnect brings a host back;
 - neither version has `serve --switch`: refused, nothing touched;
 - the hung new version (#1906), the put-back that gets no hello, the new version that does not start, prune of a folder a
   program holds, the data folder a link names, rollback, and the dev build cases, all through the switcher.
 
 Launcher-level tests (tooling/launcher-switch.test.ts) cover the arguments, the switch's encoding, the Windows liveness
-rule, the steps a start is refused in, a dead switcher finished before and after the switch, a busy second switch, and
-what a prune keeps. The hub's link (links.test.ts) waits for a switch under way and says once how one ended.
+rule, the steps a start is refused in, a dead switcher finished before and after the switch, a busy second switch that
+writes nothing, and what a prune keeps, and a dead switcher finished by a launcher that then exits on a missing host
+entry. The hub's link (links.test.ts) waits for a switch under way, says nothing of one it watched go through, and says
+once how an update it could not follow ended, on the next reach.
 
 **Visible wording** (the owner approved the first four, 2026-11-03; the rest are new and proposed):
 
@@ -709,6 +745,10 @@ what a prune keeps. The hub's link (links.test.ts) waits for a switch under way 
 | `The update of <machine> to Centralu <to> was interrupted before the switch; nothing was switched` | The update's error or row note |
 | `<hub> is switching the Centralu version on <machine>; press Connect to try again` | Machine row, Auto reconnect off |
 | `an update from <hub> started at <time> is switching versions here; no host starts until it ends` | `serve` / `--detach` on the machine (stderr) |
+| `Centralu <version> did not start on <target> (Centralu <other> answered there instead; something started it again during the switch); it runs Centralu <from> again` | The update's error, when an old host came back twice (#1907) |
+
+`<time>` is HH:MM in local time in every one, the machine's own texts included (#1907). `<machine>` is the machine's name
+on its row; `<target>` is the ssh target, which the older texts of §10.5 use.
 
 ### 10.6 Probe 4: where the hub's ssh lives across a hub swap
 

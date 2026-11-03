@@ -122,8 +122,11 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * CLI. A switcher started through WMI gets the account's environment, not the test's, so every `FAKE_*` is read from
  * `<data>/fake-env.json` too. `FAKE_SILENT=<version>`: `--connection` says no host runs while that version would.
  * `FAKE_HOLD=stop` or `FAKE_HOLD=start <version>` holds that command (`<data>/holding` says so) until `<data>/release`
- * appears: `go` lets it on, `quit` ends it having done nothing, as a switcher killed there leaves it. `FAKE_WMI_BLOCKED`:
- * the handover can start nothing outside the session (WMI blocked), so the switch runs in it.
+ * appears: `go` lets it on, `quit` ends it having done nothing, as a switcher killed there leaves it. `stopped` holds a
+ * stop once it stopped the host, and `connection <version>` that version's `--connection` while a host runs. Each
+ * holds once. `FAKE_WMI_BLOCKED`: the handover can start nothing outside the session (WMI blocked), so the switch runs
+ * in it. `FAKE_NO_GATE=<version>` plays a version from before the switch: its `--detach` asks no switch. A `--detach`
+ * while a host runs answers that one, as the real launcher does.
  */
 export const fakeServe = (version: string, o: { fromPackage?: boolean; installInfo?: string; realServe?: string } = {}) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -144,7 +147,9 @@ const F = (k) => process.env[k] ?? fileEnv[k]
 const home = process.env.HOME || process.env.USERPROFILE
 let gate = null
 const hold = async (what) => {
-  if (F('FAKE_HOLD') !== what) return
+  const once = d + '/held-' + what.replace(/[^\\w]/g, '_')
+  if (F('FAKE_HOLD') !== what || existsSync(once)) return
+  writeFileSync(once, '')
   writeFileSync(d + '/holding', what)
   while (!existsSync(d + '/release')) await new Promise((r) => setTimeout(r, 50))
   const said = readFileSync(d + '/release', 'utf8')
@@ -167,7 +172,7 @@ if (real && a.startsWith('serve --switch')) {
   // FAKE_WMI_BLOCKED: nothing can be started outside the session, so the switch runs in it
   const start = F('FAKE_WMI_BLOCKED') ? async () => ({ ok: false, blocked: true, message: 'WMI is blocked here' }) : undefined
   if (mode === '--switch') process.exitCode = await real.runSwitch({ env: process.env, home, raw: arg, cliPath: fileURLToPath(import.meta.url), start })
-  else if (mode === '--switch-run') process.exitCode = await real.runSwitchRun({ env: process.env, home, raw: arg })
+  else if (mode === '--switch-run') process.exitCode = await real.runSwitchRun({ env: process.env, home, raw: arg, dataDir: seen ?? null })
   else process.exitCode = await real.runSwitchStatus({ env: process.env, home, seen: seen ?? null })
 } else if (a === 'serve --stop') {
   await hold('stop')
@@ -176,9 +181,13 @@ if (real && a.startsWith('serve --switch')) {
   rmSync(d + '/running', { force: true })
   if (real && lockPid()) await real.runStop({ env: process.env, home, entry: d + '/no-host.mjs' })
   else console.log(JSON.stringify({ v: 1, stop: F('FAKE_STOP_FAILS') === '1' || (F('FAKE_STOP_FAILS') === '-' && !was) ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
-} else if ((a === 'serve --detach' || a.startsWith('serve --detach --from ')) && real && (gate = await real.beforeHostStart({ dataDir: d, env: process.env, version: V })) && !gate.go) {
+  await hold('stopped')
+} else if ((a === 'serve --detach' || a.startsWith('serve --detach --from ')) && real && F('FAKE_NO_GATE') !== V && (gate = await real.beforeHostStart({ dataDir: d, env: process.env, version: V })) && !gate.go) {
   if (gate.rerun) process.exitCode = await real.rerunAs(d, gate.rerun, process.argv.slice(2), process.env)
   else console.log(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'switching', by: gate.by, startedAt: gate.startedAt, message: 'switching' } }))
+} else if ((a === 'serve --detach' || a.startsWith('serve --detach --from ')) && existsSync(d + '/running')) {
+  const now = readFileSync(d + '/running', 'utf8')
+  console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: now, protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid', already: true } }))
 } else if (a === 'serve --detach' || a.startsWith('serve --detach --from ')) {
   await hold('start ' + V)
   log('start ' + V)
@@ -210,6 +219,7 @@ if (real && a.startsWith('serve --switch')) {
     console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: V, protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
   }
 } else if (a === 'serve --connection') {
+  if (existsSync(d + '/running')) await hold('connection ' + V)
   const said = existsSync(d + '/running') ? readFileSync(d + '/running', 'utf8') : null
   const running = said !== null && said !== F('FAKE_SILENT') ? said : null
   ${o.installInfo ? 'const install = installInfo(d, process.env)' : 'const install = undefined'}

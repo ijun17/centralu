@@ -19,7 +19,7 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, dataDirError, shimNames, StartedNotServing, SwitchUnderWay, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
 import { readSwitchStatus, switchResult, type SwitchState } from './update.js'
@@ -236,8 +236,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected switchFailure: string | null = null
   /** The link waits for a switch there and said so once (plan §10.5a) */
   private switchSaid = false
-  /** The machine's last switch was read once since this hub started: a running host is not asked again at every open */
-  private switchRead = false
+  /**
+   * The machine's last switch may have ended without this hub reading how (plan §10.5a), so the next open asks even when
+   * a host runs there: at the first open, while a switch there was last seen under way, and after an operation of this
+   * hub's that failed (an update it could not follow to its end, #1907). Otherwise a running host is not asked at every open
+   */
+  protected switchUnread = true
+  /** Another hub's switch this hub showed `updating` for: how it ended is no news when it went through */
+  private switchWatched: string | null = null
   /** How the machine's last switch ended, said once on its row when this hub did not follow it (plan §10.5a) */
   protected switchNote: string | null = null
   /** Whether the remote host said in its last hello that it runs with administrator rights (#702); null: it did not say */
@@ -959,11 +965,15 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     /*
      * The machine switches versions itself (plan §10.5a): a switch under way is waited for, and one that ended while no hub
      * followed it is said once. Asked where the hub manages an install (no other machine pays for the extra ssh), when no
-     * host runs, and once per hub when one does
+     * host runs, and when one does only while it may have ended unread (`switchUnread`)
      */
     const managed = !!endpoint.line.install?.current && !this.held && this.operation === null
-    const sw = managed && (!endpoint.line.hostRunning || !this.switchRead) ? await this.switchThere() : null
-    if (managed) this.switchRead = true
+    const asked = managed && (!endpoint.line.hostRunning || this.switchUnread)
+    const read = asked ? await this.switchThere() : null
+    // Unread still while it is under way; a read that failed leaves it so
+    if (asked && read !== undefined) this.switchUnread = !!read && !read.outcome
+    if (read && !read.outcome && read.by !== thisHubName()) this.switchWatched = read.id
+    const sw = read ?? null
     if (this.stopped) return
     if (sw?.outcome && !sw.seen) this.noteSwitch(sw)
     // Found running: a Start has nothing left to start, and nothing is held back
@@ -985,7 +995,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       return this.retryLater()
     }
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
-      if (this.held) return
       if (this.held) return
       // A switch there between its stop and its start: a host started now would be the old version; the switch starts one
       if (sw && !sw.outcome) return this.waitForSwitch(sw.by)
@@ -1096,14 +1105,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     )
   }
 
-  /** The machine's last switch (plan §10.5a), asked over its shell; null where there is no shell, none ran, or no answer */
-  private async switchThere(): Promise<SwitchState | null> {
+  /** The machine's last switch (plan §10.5a), asked over its shell; null where there is no shell or none ran, undefined with no answer */
+  private async switchThere(): Promise<SwitchState | null | undefined> {
     const exec = this.tunnel.exec?.bind(this.tunnel)
     if (!exec) return null
     try {
-      return (await readSwitchStatus({ exec, spec: this.record.remote })) ?? null
+      return await readSwitchStatus({ exec, spec: this.record.remote })
     } catch {
-      return null
+      return undefined
     }
   }
 
@@ -1117,10 +1126,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.retryLater(this.deps.retryMs?.[0] ?? 2_000)
   }
 
-  /** A switch that ended while this hub did not follow it, said once on the row and marked reported there */
+  /**
+   * A switch that ended while this hub did not follow it, said once on the row and marked reported there. One that went
+   * through while this hub showed it `updating` (another hub's) is no news: the row said so all along
+   */
   private noteSwitch(s: SwitchState): void {
-    if (s.outcome === 'done') this.switchNote = `${this.name} was updated to Centralu ${s.to.version} while this computer was away`
-    else {
+    if (s.outcome === 'done') {
+      if (s.id !== this.switchWatched) this.switchNote = `${this.name} was updated to Centralu ${s.to.version} while this computer was away`
+    } else {
       try {
         switchResult(s, this.record.sshTarget, null, this.name)
       } catch (err) {

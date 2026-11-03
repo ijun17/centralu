@@ -78,9 +78,15 @@ export const FROM_RE = /^[A-Za-z0-9._-]{1,64}$/
  */
 export function parseServeArgs(argv) {
   // The hub's switch of the install it manages (docs/plans/remote-hub.md §10.5a): whole commands of their own, not in the help
-  if (argv[0] === '--switch' || argv[0] === '--switch-run') {
-    if (argv.length !== 2 || !/^[A-Za-z0-9_-]{1,4096}$/.test(argv[1])) return { error: `${argv[0]} takes one argument, the switch the hub wrote` }
-    return { mode: argv[0].slice(2), port: null, switchArg: argv[1] }
+  const b64 = (a) => typeof a === 'string' && /^[A-Za-z0-9_-]{1,4096}$/.test(a)
+  if (argv[0] === '--switch') {
+    if (argv.length !== 2 || !b64(argv[1])) return { error: '--switch takes one argument, the switch the hub wrote' }
+    return { mode: 'switch', port: null, switchArg: argv[1] }
+  }
+  // What `--switch` starts: the hub's argument as it came, and the data folder (base64url) when it is not the default
+  if (argv[0] === '--switch-run') {
+    if (argv.length < 2 || argv.length > 3 || !argv.slice(1).every(b64)) return { error: '--switch-run takes the switch the hub wrote, and the data folder' }
+    return { mode: 'switch-run', port: null, switchArg: argv[1], dataDir: argv[2] ?? null }
   }
   if (argv[0] === '--switch-status') {
     if (argv.length === 1) return { mode: 'switch-status', port: null, seen: null }

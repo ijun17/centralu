@@ -676,7 +676,8 @@ describe('a hub linked to another host (#82)', () => {
       Object.assign(sw, { step: 'prune', outcome: 'done' })
       await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.starts()).toBe(1)
-      expect(l.links.list()[0]!.switchNote).toBe(`Remote box was updated to Centralu ${RELEASE} while this computer was away`)
+      // #1907: this computer was not away; its row said `updating` all along, so the update that went through is no news
+      expect(l.links.list()[0]!.switchNote).toBeNull()
       // Reported there, so a hub that links later does not say it again
       await eventually(() => sw.seen === true)
     })
@@ -1275,12 +1276,14 @@ describe('machines.update never installs an older release than the remote runs (
  * and answers `serve --switch-status` with how it ended. What the switcher did is pushed to `runs` (`pointers`, `prune`,
  * and `tail` before a put-back), the stop and the start push their own. Null for any other command
  */
-function fakeSwitcher(h: { runs: string[]; stop: () => Promise<void>; start: () => Promise<unknown>; answers: (version: string) => boolean; log?: string }) {
+function fakeSwitcher(h: { runs: string[]; stop: () => Promise<void>; start: () => Promise<unknown>; answers: (version: string) => boolean; log?: string; blind?: () => boolean }) {
   let state: Record<string, unknown> | null = null
   const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
   return async (cmd: string): Promise<{ code: number; stderr: string; stdout: string } | null> => {
     const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
     const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+    // `blind`: the status cannot be read from here (the link down for every command but the handover)
+    if (script.includes('serve --switch-status') && h.blind?.()) return { code: 255, stderr: 'ssh: connect to host box port 22: Connection timed out', stdout: '' }
     if (script.includes('serve --switch-status')) {
       const seen = / --seen (\S+)/.exec(script)?.[1]
       if (seen && state?.id === seen) state = { ...state, seen: true }
@@ -1322,7 +1325,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
   }
 
-  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean; unmanaged?: boolean; oldVersion?: string }) {
+  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean; unmanaged?: boolean; oldVersion?: string; blind?: () => boolean; followMs?: number }) {
     /** The version the remote runs before the update, and goes back to on a rollback */
     const OLD_VERSION = o.oldVersion ?? '0.0.1'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
@@ -1349,6 +1352,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       start: () => startHost(),
       answers: (version) => starts === version,
       log: 'host: the store was written by a newer Centralu',
+      ...(o.blind ? { blind: o.blind } : {}),
     })
     const exec = async (cmd: string) => {
       const switched = await switcher(cmd)
@@ -1385,7 +1389,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       { exec, startHost },
     )
     const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
-    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, switchPollMs: 20, activityPollMs: 50 })
+    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, switchPollMs: 20, activityPollMs: 50, ...(o.followMs ? { switchFollowMs: o.followMs } : {}) })
     const u = await ui(hub.port)
     // An older remote on one protocol connects (#689); the update is offered, not required
     await eventually(() => status(hub!) === 'connected')
@@ -1404,6 +1408,27 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     const r = await u.call('machines.rollback', { machineId: 'm1' })
     expect(r).toMatchObject({ current: { version: before } })
     await eventually(() => hub.links.list()[0]!.versions?.remote.version === before && status(hub) === 'connected')
+  })
+
+  /*
+   * #1907: the update said how it ended would show once the machine was reached again, but the hub read a machine's
+   * switch only once while a host ran there, so the outcome showed only after this hub restarted
+   */
+  it('says how an update it could not follow ended, once, on the next reach of the machine', async () => {
+    let blind = true
+    const { hub, u } = await setup({ startsVersion: RELEASE, busy: false, blind: () => blind, followMs: 300 })
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(
+      'The update of Remote box could not be followed to its end from this computer; how it ended is shown once Remote box is reached again',
+    )
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.switchNote).toBeNull()
+    blind = false
+    hub.links.reconnect('m1')
+    await eventually(() => hub.links.list()[0]!.switchNote === `Remote box was updated to Centralu ${RELEASE} while this computer was away`)
+    // Once: the next reach does not say it again
+    hub.links.reconnect('m1')
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.switchNote).toBe(`Remote box was updated to Centralu ${RELEASE} while this computer was away`)
   })
 
   it('refuses a rollback back across the mail switch with S17, and runs nothing there (docs/plans/mailbox.md D28)', async () => {

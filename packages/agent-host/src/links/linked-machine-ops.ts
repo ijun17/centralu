@@ -586,6 +586,8 @@ export class LinkedMachine extends LinkedMachineConnection {
       result = await fn(this.control(tunnelExec, installer.script(), step), installer)
     } catch (err) {
       this.deps.log?.(`[links] ${this.name}: ${kind} failed: ${(err as Error).message}`)
+      // A switch it handed over may still end there, unfollowed: the next open reads how (#1907)
+      this.switchUnread = true
       throw linkError((err as Error).message)
     } finally {
       const wasHeld = this.held
@@ -619,6 +621,7 @@ export class LinkedMachine extends LinkedMachineConnection {
       hold,
       step,
       ...(this.deps.switchPollMs === undefined ? {} : { pollMs: this.deps.switchPollMs }),
+      ...(this.deps.switchFollowMs === undefined ? {} : { followMs: this.deps.switchFollowMs }),
     }
   }
 

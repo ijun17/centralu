@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
+import { VERSION_WORD } from './registry.js'
 import { lastLine, thisHubName, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
 
@@ -19,9 +20,6 @@ import { tryParseJson } from '../json-value.js'
  *
  * What runs things there and what watches the link is the caller's (`HostControl`, given by `LinkedMachine`).
  */
-
-/** How long the new version has to answer after it was started (plan §10.5 step 4); the switcher's own bound */
-export const CHECK_MS = 30_000
 
 export type UpdateStep =
   | 'preflight'
@@ -135,20 +133,20 @@ export type SwitchState = {
 
 /** What the handover command prints when neither version has `serve --switch` */
 export const NO_SWITCH = 'CENTRALU-NO-SWITCH'
-const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 
 /**
  * The handover (plan §10.5a step 3): the first of `runners` whose package has `serve --switch` runs it, on its own Node,
- * after its version is written to `switch.runner`, which `switchStatusCommand` reads it through. `NO_SWITCH` when none has
+ * naming itself in `CENTRALU_SWITCH_RUNNER`; it writes that to `switch.runner`, which `switchStatusCommand` reads it
+ * through, once it takes the switch. `NO_SWITCH` when none has
  */
 export function switchCommand(spec: RemoteSpec, runners: InstalledVersion[], params: SwitchParams): RemoteCommand {
   const raw = Buffer.from(JSON.stringify(params), 'utf8').toString('base64url')
-  const tries = runners.filter((v) => WORD.test(v.version) && WORD.test(v.node))
+  const tries = runners.filter((v) => VERSION_WORD.test(v.version) && VERSION_WORD.test(v.node))
   const sh = `${DATA_SH}
 ${tries
   .map(
     (v) =>
-      `if [ -f "$r/versions/${v.version}/node_modules/centralu/bin/serve-switch.mjs" ]; then printf '%s\\n' '${v.version} ${v.node}' > "$r/switch.runner.tmp" && mv -f "$r/switch.runner.tmp" "$r/switch.runner"; CENTRALU_MANAGED=1; export CENTRALU_MANAGED; exec "$r/node/v${v.node}/bin/node" "$r/versions/${v.version}/node_modules/centralu/bin/centralu.mjs" serve --switch ${raw}; fi`,
+      `if [ -f "$r/versions/${v.version}/node_modules/centralu/bin/serve-switch.mjs" ]; then CENTRALU_MANAGED=1 CENTRALU_SWITCH_RUNNER='${v.version} ${v.node}'; export CENTRALU_MANAGED CENTRALU_SWITCH_RUNNER; exec "$r/node/v${v.node}/bin/node" "$r/versions/${v.version}/node_modules/centralu/bin/centralu.mjs" serve --switch ${raw}; fi`,
   )
   .join('\n')}
 echo ${NO_SWITCH}
@@ -158,7 +156,7 @@ ${tries
   .map(
     (v) =>
       `$c = Join-Path $r 'versions\\${v.version}\\node_modules\\centralu\\bin'
-if (Test-Path (Join-Path $c 'serve-switch.mjs')) { [IO.File]::WriteAllText((Join-Path $r 'switch.runner'), "${v.version} ${v.node}\`n"); $env:CENTRALU_MANAGED = '1'; & (Join-Path $r 'node\\v${v.node}\\node.exe') (Join-Path $c 'centralu.mjs') serve --switch '${raw}'; return }`,
+if (Test-Path (Join-Path $c 'serve-switch.mjs')) { $env:CENTRALU_MANAGED = '1'; $env:CENTRALU_SWITCH_RUNNER = '${v.version} ${v.node}'; & (Join-Path $r 'node\\v${v.node}\\node.exe') (Join-Path $c 'centralu.mjs') serve --switch '${raw}'; return }`,
   )
   .join('\n')}
 '${NO_SWITCH}'
@@ -220,7 +218,10 @@ async function follow(c: HostControl, id: string): Promise<SwitchState> {
       if (s.step !== shown) c.step(rowStep((shown = s.step)))
       if (s.outcome) return s
     } else wait = Math.min(wait * 2, 30_000)
-    if (Date.now() > until) throw new Error(`The update of ${c.target} could not be followed to its end from this computer; how it ended is shown once ${c.target} is reached again`)
+    if (Date.now() > until) {
+      const machine = c.machine ?? c.target
+      throw new Error(`The update of ${machine} could not be followed to its end from this computer; how it ended is shown once ${machine} is reached again`)
+    }
     await new Promise((r) => setTimeout(r, wait))
   }
 }
@@ -249,7 +250,7 @@ export function switchResult(s: SwitchState, target: string, stoppedTurns: strin
     case 'backup':
       throw new Error(`The store on ${target} could not be copied before the dev build first opened it (${s.why ?? 'no reason given'}); the release was started again and nothing was switched`)
     case 'interrupted':
-      throw new Error(`The update of ${target} to Centralu ${s.to.version} was interrupted before the switch; nothing was switched`)
+      throw new Error(`The update of ${machine} to Centralu ${s.to.version} was interrupted before the switch; nothing was switched`)
     default: {
       const stop = s.stopFailed ? ` (after Centralu on ${target} could not be stopped: ${s.stopFailed})` : ''
       throw new Error(`Centralu ${s.to.version} did not start on ${target} (${s.why}), and putting back ${back} failed too: ${s.putBackWhy}${stop}.${log}`)
@@ -257,7 +258,7 @@ export function switchResult(s: SwitchState, target: string, stoppedTurns: strin
   }
 }
 
-/** The time a switch started, as the person reads it */
+/** The time a switch started, as the person reads it: HH:MM, as the machine says it too (serve-switch.mjs `clockOf`) */
 const clock = (at: number | null | undefined) => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
 
 /**
@@ -266,18 +267,22 @@ const clock = (at: number | null | undefined) => (typeof at === 'number' ? new D
  * update, the rollback and a dev build (dev-build.ts)
  */
 export async function handOver(c: HostControl, runners: InstalledVersion[], p: Omit<SwitchParams, 'id' | 'by'>): Promise<InstallResult> {
+  const machine = c.machine ?? c.target
+  const busy = (by: unknown, at: unknown) =>
+    new Error(`An update of ${machine} started from ${typeof by === 'string' ? by : 'another computer'} at ${clock(typeof at === 'number' ? at : null)} is still running; try again when it ends`)
+  // A switch under way there refuses this one before anything here waits, holds or stops (#1907); one whose switcher died is finished by this read
+  const there = await readSwitchStatus(c).catch(() => undefined)
+  if (there && !there.outcome) throw busy(there.by, there.startedAt)
   // What is working there is waited for before anything is held or stopped (#1399); the new version is already beside it
   const stoppedTurns = (await c.beforeStop?.()) ?? null
   await c.hold()
   c.step('stop')
   const params: SwitchParams = { id: randomUUID(), by: c.by ?? thisHubName(), ...p }
   const r = await c.exec(switchCommand(c.spec, runners, params))
-  const machine = c.machine ?? c.target
   if (r.stdout.includes(NO_SWITCH)) throw new Error(`Update ${machine} first: both versions there predate updates the machine runs itself`)
   const answer = lineOf(r.stdout, 'switch') as { ok?: unknown; reason?: unknown; by?: unknown; startedAt?: unknown; message?: unknown } | undefined
-  if (answer?.ok === false && answer.reason === 'busy') {
-    throw new Error(`An update of ${machine} started from ${typeof answer.by === 'string' ? answer.by : 'another computer'} at ${clock(answer.startedAt as number)} is still running; try again when it ends`)
-  }
+  // Begun since the read above
+  if (answer?.ok === false && answer.reason === 'busy') throw busy(answer.by, answer.startedAt)
   if (answer?.ok === false) throw new Error(`${c.target} did not take the update: ${typeof answer.message === 'string' ? answer.message : 'no reason given'}`)
   // No answer at all: the command may have died with the link after the switcher started; the switch says
   if (answer === undefined) {

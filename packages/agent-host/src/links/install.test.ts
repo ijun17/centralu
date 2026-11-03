@@ -9,9 +9,12 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
+import { VERSION_WORD } from './registry.js'
 import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.mjs'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { POINTER_WORD } from '../../../../packaging/npm/centralu/bin/serve-install.mjs'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -23,6 +26,18 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 
 const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
 const NODE_V = '24.21.0'
+
+/*
+ * A version word is written into commands and pointer lines by three programs that cannot import each other: the hub,
+ * the launcher there, and the script the hub sends (which runs alone). One rule, held in each
+ */
+describe('the word a version is written as', () => {
+  it('is the same rule in the hub, the launcher and the script the hub sends', () => {
+    const sent = /^const WORD = (\/.+\/)$/m.exec(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs'), 'utf8'))?.[1]
+    expect(sent).toBe(String(VERSION_WORD))
+    expect(String(POINTER_WORD)).toBe(String(VERSION_WORD))
+  })
+})
 const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
 
 const linux: PreflightFacts = { os: 'Linux', arch: 'x86_64', glibc: '2.39', musl: false, freeKb: 50_000_000, tar: true, gzip: true, fetch: 'curl', sha: 'sha256sum' }

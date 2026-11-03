@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
-import { NotPublished, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
+import { NotPublished, VERSION_WORD, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
 import { floorOf } from './node-floor.js'
 import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
@@ -135,7 +135,6 @@ export function preflight(f: PreflightFacts, runtime: RemoteRuntime): { ok: true
   return { ok: true, platform }
 }
 
-const PLAIN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 const SAFE_URL = /^https?:\/\/[0-9A-Za-z.:-]+(\/[0-9A-Za-z._~%/-]*)?$/
 
 /**
@@ -147,7 +146,7 @@ const SAFE_URL = /^https?:\/\/[0-9A-Za-z.:-]+(\/[0-9A-Za-z._~%/-]*)?$/
  * Windows 11 with a folder named in Thai and an emoji).
  */
 export function nodeCommand(spec: RemoteSpec, n: { version: string; url: string; sha256: string }): RemoteCommand {
-  if (!PLAIN.test(n.version) || !SAFE_URL.test(n.url) || !/^[0-9a-f]{64}$/.test(n.sha256)) throw new Error('Not a Node archive to install')
+  if (!VERSION_WORD.test(n.version) || !SAFE_URL.test(n.url) || !/^[0-9a-f]{64}$/.test(n.sha256)) throw new Error('Not a Node archive to install')
   const sh = `${DATA_SH}; V="${n.version}"; n="$r/node/v$V"
 say() { echo "${STEP} $*"; }
 if [ -x "$n/bin/node" ] && "$n/bin/node" --version >/dev/null 2>&1; then say node ok; exit 0; fi
@@ -230,7 +229,7 @@ export type { InstalledVersion }
  * base64 word.
  */
 export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | DevParams): RemoteCommand {
-  if (!PLAIN.test(params.version) || !PLAIN.test(params.node)) throw new Error('Not a version to install')
+  if (!VERSION_WORD.test(params.version) || !VERSION_WORD.test(params.node)) throw new Error('Not a version to install')
   const gz = gzipSync(Buffer.from(script, 'utf8'), { level: 9 }).toString('base64')
   const arg = Buffer.from(JSON.stringify(params), 'utf8').toString('base64')
   const sh = `${DATA_SH}; f="$r/.install-$$.mjs"
