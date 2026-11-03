@@ -766,12 +766,12 @@ export class MessageService {
    * Turns the last host left that nothing continues, closed `lost` at this start (#1916): a crash or a plain restart cut them, or a kept process's
    * turn ended while no host was there to record it. The questions delivered in them that were not answered were read, so no delivery gives them
    * again: each is released `lost`, and each sender is told once for all of them (D25), so it can ask again. A task is not: the old report path
-   * tells its owner of the stop (#698)
+   * tells its owner of the stop (#698). `close` closes them and returns them, in the same write as the release: if the release fails, the turns
+   * stay open and the next start finds them again
    */
-  turnsLost(turns: readonly { address: string; turnSeq: number }[]): void {
-    if (turns.length === 0) return
+  turnsLost(close: () => readonly { address: string; turnSeq: number }[]): void {
     this.releaseAndTell((now, senders) => {
-      for (const { address, turnSeq } of turns) {
+      for (const { address, turnSeq } of close()) {
         for (const row of this.records.unansweredTo(address)) {
           if (row.turnSeq !== turnSeq || row.settled !== null) continue
           const m = this.records.message(row.messageId)

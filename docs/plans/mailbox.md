@@ -317,8 +317,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   when the receiver is, so the sender does not redo work still under way. A release and its notices are one write that
   tells each sender once (`releaseAndTell`): the turns one start closes `lost` are released together, so a sender that
   asked two of them hears once.
-  - A row whose sender is the person is released and tells nobody, as a session's going away has it: the person sees the
-    receiver's own stopped or gone line. Released, it no longer counts as waiting, for retention or for a cover.
+  - A row whose sender is the person is released and tells nobody, as a session's going away has it. The person sees
+    it in the receiver's session: for a session that went away, its gone line; for a turn a crash or restart cut, the
+    "Centralu quit or restarted while this turn was running" line (#698); for a kept turn that ended while no host
+    ran, what that turn said. Released, it no longer counts as waiting, for retention or for a cover.
+  - The close of those turns and their release are one write (`turnsLost` takes the close): if the release fails, the
+    turns stay open and the next start closes and releases them, and the start that failed still delivers.
   - A `task` row is never released: it covers only while it is unsettled (and, until M8, still owed by the old paths),
     because a task that runs long is working, not unanswered.
 - **D26. Mail moved from threads is never reminded or awaited** (settled `legacy`). An update must not wake a crowd

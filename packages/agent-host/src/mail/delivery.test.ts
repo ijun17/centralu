@@ -325,6 +325,38 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     expect(told[0]?.message.body).not.toContain('For the others')
     expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])
   })
+
+  // #1916: the close and the release are one write. A release that fails keeps nothing: the turn stays open, and the next start releases and tells
+  it('a release that fails at a start leaves the turn open, and the next start releases its question and tells the sender', async () => {
+    const w = deliveryWorld()
+    const asked = w.send(A, { to: [B], text: 'what does the build need?' }).message
+    w.store.mailbox.markDelivered(B, [asked.id], NOW, 1)
+    w.store.mailbox.markRead(B, [asked.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 1, messageId: null, starterId: asked.id, startedBy: 'mail', startedAt: NOW })
+    const fail = vi.spyOn(w.records, 'markReleased').mockImplementationOnce(() => {
+      throw new Error('disk full')
+    })
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    w.delivery.start()
+    expect(said).toHaveBeenCalledWith(expect.stringContaining('closing the turns the last host left failed'))
+    expect(turnRows(w.store, 'b')[0]).toMatchObject({ endedAt: null })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedAt: null })
+    // This start still delivers
+    w.send(C, { to: [B], text: 'and this?' })
+    await w.advance(2_000)
+    expect(w.to('b')).toHaveLength(1)
+
+    w.delivery.stop()
+    fail.mockRestore()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    expect(turnRows(w.store, 'b')[0]).toMatchObject({ outcome: 'lost' })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedWhy: 'lost', toldAt: w.clock.t })
+    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
+    expect(told).toHaveLength(1)
+    expect(told[0]?.message.facts.unanswered).toEqual([{ id: asked.id, recipient: B, why: 'lost' }])
+  })
 })
 
 describe('the pair loop guard (§7.5)', () => {
