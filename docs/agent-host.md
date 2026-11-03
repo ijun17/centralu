@@ -1359,7 +1359,7 @@ original's things is in this table; the bullets below say how.
   the new session, set in the same transaction (`armReports`). Its later `agent_session` or `ask_project` about one of
   them says where it went (`handedOver`) rather than "not a session this session started". The answer for a session is
   also found from the store, so it survives a host restart: a child that is older than the successor, owned by it, when
-  the successor's handoff lineage (its markers) reaches the original.
+  the successor's handoff marker names the original (the direct predecessor: an earlier session in the lineage never owned it).
 - **Who may hand over** is not checked here: `moveChildren` trusts its caller. Two callers reach it through
   `createSession`: the person's handoff (the window's RPC) and the orchestrator's `handoff_session`, after
   `HandoffFlow` has checked its authority over the original (§1.2.6). Any other agent-facing path must check its

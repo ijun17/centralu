@@ -15,10 +15,9 @@ import { Adapter, FakeProcess, Handle, processes } from './kept-host.test-helper
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
- * A handoff moves the original session's live children to the session that took over (#693): their reports, the
+ * A handoff moves the original session's children to the session that took over (#693): their reports, the
  * agent_session handle, their delegated turns, the requests the original queued and its start_agent cards still
- * standing. A settled child stays where its history happened while the original stays, and moves too when the
- * original goes (#738). The move is one store transaction, so a crash leaves
+ * standing. A settled child moves too, whether the original stays or goes (#1475, #738). The move is one store transaction, so a crash leaves
  * every link with one owner, and a host that takes over after a swap reads that owner.
  */
 
@@ -145,7 +144,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(false)
   })
 
-  it('moves a settled child with the live ones when the original stays, and lists both in the note (#1475)', async () => {
+  it('moves a settled child with the working ones when the original stays, and lists both in the note (#1475)', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
@@ -230,7 +229,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(store.children.listReportMarks()).toEqual([])
   })
 
-  it('moves a settled child even when nothing else is live (#1475), and says so in the note', async () => {
+  it('moves a settled child even when nothing else is going (#1475), and says so in the note', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
@@ -616,6 +615,25 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     })
     // A child the successor started itself was not given away
     expect(await next.mgr.agentSession(parent, { sessionId: own, action: 'status' })).toMatchObject({ ok: false, error: expect.not.stringContaining('A handoff gave') })
+  })
+
+  it('after a restart an earlier session in the lineage is not told that a handoff gave it a child it never owned (#1475)', async () => {
+    const h = host()
+    const { project, parent: first } = await parentOf(h)
+    // first hands off to second and stays; second starts a child and hands off to third
+    const second = await handOff(h, project, first, false)
+    const child = await settledChild(h, second)
+    const third = await handOff(h, project, second, false)
+    expect(owner(child)).toBe(third)
+    await h.mgr.detachAll()
+
+    const next = host()
+    // second owned it when the handoff moved it, so second is told where it went; first never owned it
+    expect(await next.mgr.agentSession(second, { sessionId: child, action: 'status' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining(`to the session that took over from this one, "You are taking over. Read the note." [${third}]`),
+    })
+    expect(await next.mgr.agentSession(first, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.not.stringContaining('A handoff gave') })
   })
 
   it('leaves a settled child with the original when the store fails mid-move', async () => {
