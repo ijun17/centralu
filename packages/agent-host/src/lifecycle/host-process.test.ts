@@ -294,9 +294,12 @@ describe('the host process, started for real', () => {
     const token = 'token-handed-on-stdin-0123456789'
     const project = join(s.dir, 'project')
     mkdirSync(project)
-    const run = 'node -e "setInterval(() => {}, 1000)"'
+    // A command that stays running. `sleep` is on every login shell's PATH (node is not, on a runner that installs it elsewhere)
+    const run = posix ? 'sleep 600' : 'node -e "setInterval(() => {}, 1000)"'
     const boot = async () => {
-      const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_SERVE: '1' })
+      // The host runs a Run command through `$SHELL -lc`: setup()'s SHELL is a script that only answers the PATH probe and ends,
+      // so a command run through it ends at once and is not one the stop can list. A real shell, as a person's is
+      const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_SERVE: '1', ...(posix ? { SHELL: '/bin/sh' } : {}) })
       host.p.stdin.write(`${JSON.stringify({ token })}
 `)
       return { ...host, port: await host.ready }
@@ -310,6 +313,8 @@ describe('the host process, started for real', () => {
     const { id } = (await rpc(first.port, token, 'projects.add', { path: project })) as { id: string }
     await rpc(first.port, token, 'terminal.create', { projectId: id, cols: 90, rows: 20 })
     await rpc(first.port, token, 'commands.run', { projectId: id, command: run })
+    // It is running when the stop comes: what the stop lists is what is running
+    expect((await state(first.port, id)).runs).toEqual([expect.objectContaining({ command: run, running: true })])
     expect(await rpc(first.port, token, 'host.stop', { forUpdate: true })).toMatchObject({ ok: true })
     expect(await first.exited).toBe(0)
 
