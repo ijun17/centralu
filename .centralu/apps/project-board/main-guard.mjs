@@ -12,7 +12,7 @@
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
 import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
-import { failingStepText, testName } from './ci.mjs'
+import { failingStepText, isTestFailure, testName } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
@@ -165,34 +165,46 @@ export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.e
  * a 1% flake is hunted as seldom as before, and a failure that comes 5% of the time or more is hunted within about a hundred
  * runs, a 20% one within a dozen. Two within 20 hunted a 1% flake every 603 runs (twice as often), four needed 235 runs at 5%.
  * What this costs: a flake of 5 to 10% is now hunted about three times as often as under the first rule, and nothing tells it
- * from a break that fails that often.
+ * from a break that fails that often. So a hunt of this kind starts with the full tier on the red commit itself (`retest`):
+ * a failure that does not come again there is reported as intermittent and blames nothing, where a rerun of the failed
+ * jobs, which this rule skips, would have been that check. Only a failure that comes again is bisected. A hunt uses up the flakes
+ * it counted (`counted`), so the same test failing again is counted afresh, not hunted again at its next failure.
  */
 export const FLAKE_REPEATS = 3
 export const FLAKE_WINDOW = 20
 
-/** Which test failed, for telling a failure from another in the same job: its first failing line without the time it took */
-const failureOf = (line) => testName(String(line ?? '').replace(/^\s*First failure:\s*/, '')).replace(/\s+\d+(?:\.\d+)?\s*m?s\b.*$/, '')
+/**
+ * Which test failed, for telling a failure from another in the same job: its failing line without the time it took. Empty for
+ * a line that names no test (a log with none gives the step's error, "Process completed with exit code 1."): two crashes
+ * or hangs are not the same test, and a failure that names none is never counted.
+ */
+const failureOf = (line) => {
+  const text = String(line ?? '').replace(/^\s*First failure:\s*/, '')
+  return isTestFailure(text) ? testName(text).replace(/\s+\d+(?:\.\d+)?\s*m?s$/, '') : ''
+}
 
 /**
  * The runs among main's newest `FLAKE_WINDOW` where the same failure (the same job, the same test) passed its rerun: the records in
- * `reruns` that `noteFlakes` marked, as run ids. A failure whose line could not be read is never the same as another.
+ * `reruns` that `noteFlakes` marked and no hunt has counted yet, as run ids. A failure that names no test is never the same as another.
  */
 export function earlierFlakes({ reruns, runs, names, line }) {
   const test = failureOf(line)
   if (!test) return []
   const recent = new Set(runs.slice(0, FLAKE_WINDOW).map((r) => String(r.id)))
   return Object.entries(reruns ?? {})
-    .filter(([id, r]) => r.flaked && recent.has(id) && failureOf(r.line) === test && (r.jobs ?? []).some((n) => names.includes(n)))
+    .filter(([id, r]) => r.flaked && !r.counted && recent.has(id) && failureOf(r.line) === test && (r.jobs ?? []).some((n) => names.includes(n)))
     .map(([id]) => id)
 }
 
 /**
- * Where the hunt for a failure that keeps coming starts: the newest run before the earliest of those flakes that passed first time
- * (a run whose rerun passed is green in `mainVerdict`, but a break may have come with the commit it ran). Null when the runs read hold none.
+ * Where the hunt for a failure that keeps coming starts: the newest run that passed without a rerun and is older than the
+ * `FLAKE_WINDOW` newest, or the oldest such run when the list is no longer. A break fails by chance on some of its runs, so a run
+ * that passed clean after the flakes may carry it: every commit the window covers is a candidate. Null when none is read.
  */
-export function cleanGreen({ runs, reruns, flakes }) {
-  const oldest = Math.max(...flakes.map((id) => runs.findIndex((r) => String(r.id) === id)))
-  return runs.slice(oldest + 1).find((r) => r.status === 'completed' && r.conclusion === 'success' && !reruns?.[r.id]?.flaked)?.headSha ?? null
+export function cleanGreen({ runs, reruns }) {
+  const clean = runs.filter((r) => r.status === 'completed' && r.conclusion === 'success' && !reruns?.[r.id]?.flaked)
+  const older = clean.filter((r) => runs.indexOf(r) >= FLAKE_WINDOW)
+  return (older[0] ?? clean[clean.length - 1])?.headSha ?? null
 }
 
 /**
@@ -313,8 +325,14 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const flakes = jobs.kind === 'test' && !rerun ? earlierFlakes({ reruns: g.reruns, runs, names: jobs.names, line }) : []
   const repeats = flakes.length >= FLAKE_REPEATS - 1 ? { times: flakes.length + 1, window: FLAKE_WINDOW } : null
   if (repeats) base.repeats = repeats
-  // A failure that keeps coming is hunted from before the first of its flakes, not from the run that passed its rerun last
-  const greenSha = (repeats && cleanGreen({ runs, reruns: g.reruns, flakes })) || lastGreen
+  if (repeats) {
+    // Those flakes are spent on this hunt: the next failure of the test starts the count over
+    await update((fresh) => {
+      for (const id of flakes) if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].counted = true
+    })
+  }
+  // A failure that keeps coming is hunted from before the window it was counted in, not from the run that passed its rerun last
+  const greenSha = repeats ? cleanGreen({ runs, reruns: g.reruns }) : lastGreen
   const unconfirmed = jobs.kind === 'test' && !repeats && (!rerun || (red.attempt ?? 1) <= rerun.attempt)
   if (jobs.kind === 'infrastructure' || unconfirmed) {
     const what = infraText(jobs.names, jobs.step, jobs.cause)
@@ -349,9 +367,10 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
     // reverted if the hunt finds it. The first time, and a different job's, are still the runner's: rerun, and reported.
     const again = jobs.shutdown === true && rerun.shutdown === true && jobs.names.some((name) => (rerun.jobs ?? []).includes(name))
     // The first attempt failed in a test, and the rerun failed before a test could run: that neither confirms the failure nor clears
-    // it. The test failure that was seen is hunted, not the setup's (the issue and the notice say what failed, not "the same way again")
-    if (rerun.test) Object.assign(base, { kind: 'test', jobs: rerun.jobs, line: rerun.line ?? '', cause: null, step: null })
-    else if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
+    // it, so no commit is blamed for it
+    if (rerun.test)
+      return stop(`a test failed (${rerun.jobs.join(', ')}${rerun.line ? `:${rerun.line}` : ''}), and its rerun failed in ${what} before a test could run, so the failure was neither confirmed nor cleared. Nothing was reverted: rerun the job by hand.`)
+    if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
       // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull
@@ -401,13 +420,15 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const { all, commits } = sortCommits(listed, known)
   // The red commit still carries a known culprit: it may be red only for that one, so its own run proves nothing
   const endCarries = carried(all, known, all.length).length > 0
-  const fresh = { ...base, green: greenSha, all, commits, good: -1, bad: endCarries ? null : commits.length - 1, probe: null }
+  // A failure counted from earlier flakes was not rerun, so the red commit is run once first (`retest`): it is red only if it fails again
+  const retest = Boolean(repeats) && !endCarries
+  const fresh = { ...base, green: greenSha, all, commits, good: -1, bad: endCarries || retest ? null : commits.length - 1, probe: null, ...(retest ? { retest } : {}) }
   // Nothing left but known culprits and their reverts: this red is theirs, already reported
   if (!commits.length) {
     save({ hunt: { ...fresh, outcome: 'explained', endedAt: new Date(now).toISOString() }, hunted: [...hunted, base.red].slice(-50) })
     return { did: 'explained' }
   }
-  if (commits.length === 1 && !endCarries) return finish({ hunt: fresh, culprit: commits[0], how: 'the only commit since the last green one', ...ctx })
+  if (commits.length === 1 && !endCarries && !retest) return finish({ hunt: fresh, culprit: commits[0], how: 'the only commit since the last green one', ...ctx })
   // A suspect by the failed jobs' paths is confirmed with the full tier around it before anything is done about it
   const byPaths = endCarries ? null : attributeByPaths(commits, base.jobs, QUEUE.guard.jobPaths)
   const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${base.jobs.join(', ')}` } : null
@@ -523,6 +544,13 @@ async function stepHunt(ctx) {
       return { did: 'retry', sha: probe.sha }
     }
     const record = await act({ red: hunt, culprit: null, why: `the full tier's run on ${short(probe.sha)} (a bisect step) was cancelled twice.` })
+    if (!record) return { did: 'yielded' }
+    ended(record)
+    return { did: 'unknown' }
+  }
+  // The red commit passed when run again (`retest`): the failure is intermittent, and no commit is blamed
+  if (probe.end && hunt.retest && run.conclusion === 'success') {
+    const record = await act({ red: hunt, culprit: null, why: `the failure came ${hunt.repeats.times} times in main's last ${hunt.repeats.window} runs, but the full tier passed when run again on the red commit ${short(probe.sha)} itself, so it is intermittent. No commit is blamed, and nothing was reverted.` })
     if (!record) return { did: 'yielded' }
     ended(record)
     return { did: 'unknown' }

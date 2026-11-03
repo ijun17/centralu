@@ -757,18 +757,24 @@ looked into).
   first failing line. That comment starts with `<!-- main-guard note -->` (`GUARD_NOTE`), and `readIssueText` leaves such comments out:
   the issue is the list of flakes a person judged, which `ci_status` matches a pull request's failure with, and a pass is not a judgement.
   A rerun GitHub refuses or does not start in 10 minutes is reported, not hunted: a failure that could not be confirmed reverts nothing.
-  A rerun that fails in a step that sets the job up, when the first attempt failed in a test, confirms and clears nothing: the test failure
-  that was seen is reported and hunted, with its own job and line.
+  A rerun that fails in a step that sets the job up, when the first attempt failed in a test, confirms and clears nothing: the failure is
+  reported, with its own job and line, and no commit is looked for.
   - **A failure that keeps passing its rerun is a break** (`FLAKE_REPEATS` 3, `FLAKE_WINDOW` 20): a race that fails half the time passes
     its rerun as often as not, and a failure that a cache another job saved in the first attempt, or the clock, clears on a rerun passes every
-    time. The same job's same test (the first failing line without the time it took) that failed on main and passed its rerun twice within main's
-    newest 20 runs and fails a third time is hunted at once, with no further rerun, and from before the first of those flakes (a run that passed its
-    rerun is green to `mainVerdict`, but its commit may be the break): the issue says it failed three times within twenty runs. Chosen by
+    time. The same job's same test (the failing line without the time it took; a failure whose log names no test, only a step's "Process
+    completed with exit code 1", is never counted) that failed on main and passed its rerun twice within main's newest 20 runs and fails a
+    third time is hunted at once, with no further rerun: the issue says it failed three times within twenty runs. The hunt starts at the newest
+    run older than that window that passed without a rerun (`cleanGreen`), not at a green run after the flakes: a break fails only by chance on
+    some runs, and a run that passed clean after it may carry it. The hunt uses the flakes up (`counted`), so the test failing again is counted from
+    one, not hunted at once a second time. It starts with the full tier on the red commit itself (`retest`), which stands in for the rerun the
+    count skips: when that passes, the failure is reported as intermittent and no commit is blamed; only when it fails again is the range bisected.
+    Chosen by
     simulation of a test failing with probability p on each run, independently: runs until a failure is hunted (a failure is hunted when it
     fails twice, or the third time with two passed reruns lately), p = 1%, 5%, 10%, 20%: 1443, 403, 102 and 26 with the rerun alone;
     1317, 115, 34 and 12 with this. A 1% flake is hunted as seldom as before, a failure of 5% or more within about a hundred runs; two instead of three
     hunted a 1% flake every 603 runs, four needed 235 runs at 5%. The cost: a flake of 5 to 10% is hunted about three times as often as under the
-    rerun alone, and nothing tells it from a break that fails as often.
+    rerun alone, and nothing tells it from a break that fails as often; what the red commit's own run adds is that such a flake blames a commit
+    only when that run fails too (one time in 10 to 20 for 5 to 10%), where it would otherwise blame every time it is hunted.
   - **Why the failed jobs only** and not the whole workflow: a rerun of the 24 jobs of the full tier costs a whole run of the
     shared runners for each red, and does not remove what makes a rerun differ (the clock, a cache saved meanwhile, an artifact kept from the
     first attempt). The count above is the guard against a rerun that passes for such a reason.

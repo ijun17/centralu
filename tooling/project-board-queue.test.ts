@@ -25,7 +25,7 @@ import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, LEASE_MS, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -5926,13 +5926,19 @@ describe('the main guard blames a commit only for a test that fails again on a r
     guardRuntime(repo, {
       // Runs 985 and 975 failed, passed their reruns, and are green now: the last run that never failed is the base
       branchRuns: { main: [mainRun(990, c3, 'failure'), mainRun(985, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
-      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')] },
       logs: { '31': flakyLog },
-      on: { [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(991, c1, 'failure')] } } },
+      on: {
+        // The red commit itself first: it fails again, so the failure is bisected
+        [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(992, c3, 'failure')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(991, c1, 'failure')] } },
+      },
     })
     await call('merge_queue')
     await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the culprit')
     expect(reruns()).toEqual([])
+    // The two flakes are spent on this hunt: the next failure of the test is counted from one
+    expect(Object.values(guardOnDisk().reruns).map((r: any) => r.counted)).toEqual([true, true])
     // The first commit of the three, not the last one alone (the range started at the green run 985 would have blamed #83)
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1, how: expect.stringContaining('bisected') })
     expect(guardOnDisk().hunt.green).toBe(repo.green)
@@ -5957,7 +5963,7 @@ describe('the main guard blames a commit only for a test that fails again on a r
     expect(issues()).toEqual([])
   })
 
-  it('hunts the test failure that was seen when its rerun fails in setup, and does not call it an infrastructure failure', async () => {
+  it('reports a test failure whose rerun failed in setup as neither confirmed nor cleared, and hunts nothing', async () => {
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     const sha = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
@@ -5970,13 +5976,82 @@ describe('the main guard blames a commit only for a test that fails again on a r
       on: { 'rerun-failed:990': { branchRuns: { main: [again(990, sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [installFailure] } } },
     })
     await call('merge_queue')
-    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the issue and the notice')
+    await until(() => issues().length > 0, 'the report')
     expect(reruns()).toEqual([['rerun-failed', '990']])
-    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha })
-    expect(issues()[0]!.body).toContain('Kind of failure: **test failure**')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(guardOnDisk().hunt.culprit).toBeUndefined()
+    expect(issues()[0]!.body).toContain('neither confirmed nor cleared')
     expect(issues()[0]!.body).toContain(line)
-    expect(issues()[0]!.body).not.toContain('failed the same way again')
-    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
+    expect(issues()[0]!.body).toContain('Nothing was reverted')
+  })
+
+  it('runs the red commit itself before blaming a failure that was counted, and blames nothing when it passes', async () => {
+    const repo = mainRepo(['81', '82', '83'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, c3] = repo.shas as [string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c3, { reruns: { '985': marked(c2, line), '975': marked(c1, line) } })
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c3, 'failure'), mainRun(985, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog },
+      on: { [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(991, c3, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the report')
+    // Only the red commit was run: no bisect, no culprit, no revert
+    expect(gh().dispatched).toHaveLength(1)
+    expect(guardOnDisk().hunt.culprit).toBeUndefined()
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()[0]!.body).toContain('it is intermittent')
+    expect(issues()[0]!.body).toContain('No commit is blamed')
+  })
+
+  it('starts the hunt for a counted failure before the window it was counted in, so a break that passed by chance after it is a candidate', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, c3, c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4, { reruns: { '985': marked(c3, line), '980': marked(c2, line) } })
+    guardRuntime(repo, {
+      // #81 broke the test; its own run (975) passed by chance and so did nothing flag it. Runs 985 and 980 passed their reruns
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(985, c3, 'success'), mainRun(980, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')], 993: [failedJob(43, 'verify')] },
+      logs: { '31': flakyLog },
+      on: {
+        [`dispatch:${probe(c4)}`]: { branchRuns: { [probe(c4)]: [probeRun(991, c4, 'failure')] } },
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(992, c2, 'failure')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(993, c1, 'failure')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
+    expect(guardOnDisk().hunt.green).toBe(repo.green)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1 })
+  })
+
+  it('counts a failure only by the test it names, and by the whole of its name', () => {
+    const runs = Array.from({ length: 25 }, (_, i) => ({ id: 1000 - i }))
+    const flake = (text: string, extra = {}) => ({ flaked: true, jobs: ['verify'], line: text, ...extra })
+    const earlier = (reruns: Record<string, unknown>, text: string) => earlierFlakes({ reruns, runs, names: ['verify'], line: ` First failure: ${text}` })
+    const same = 'FAIL unit tooling/a.test.ts > waits 5s for the lock'
+    expect(earlier({ 999: flake(`${same} 120ms`) }, `${same} 133ms`)).toEqual(['999'])
+    // Another test whose name has a duration in it is another test
+    expect(earlier({ 999: flake('FAIL unit tooling/a.test.ts > waits 5s for the other 120ms') }, `${same} 133ms`)).toEqual([])
+    // A step's bare error names no test: two of them are not the same failure
+    const bare = 'Process completed with exit code 1.'
+    expect(earlier({ 999: flake(bare), 998: flake(bare) }, bare)).toEqual([])
+    // A flake a hunt has counted is spent
+    expect(earlier({ 999: flake(same, { counted: true }), 998: flake(same) }, same)).toEqual(['998'])
+  })
+
+  it('starts the hunt at the newest clean green run older than the window, else the oldest one', () => {
+    const run = (id: number, conclusion = 'success') => ({ id, status: 'completed', conclusion, headSha: `sha${id}` })
+    const runs = Array.from({ length: 24 }, (_, i) => run(1000 - i))
+    // Runs 980 and older are outside the 20 newest; 979 passed after a rerun, so it is not clean
+    expect(cleanGreen({ runs, reruns: { 980: { flaked: true } } })).toBe('sha979')
+    expect(cleanGreen({ runs, reruns: {} })).toBe('sha980')
+    // A list no longer than the window: its oldest clean run
+    expect(cleanGreen({ runs: runs.slice(0, 5), reruns: {} })).toBe('sha996')
+    expect(cleanGreen({ runs: [run(1, 'failure')], reruns: {} })).toBeNull()
   })
 
   it('reports a failure it could not confirm, and reverts nothing, when GitHub refuses the rerun', async () => {
