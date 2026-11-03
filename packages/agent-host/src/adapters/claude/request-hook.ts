@@ -25,7 +25,7 @@ const HOOK_TIMEOUT_SECONDS = 3600
  * else here runs in a turn that is not a request.
  *
  * A step let through as asked is recorded once the CLI has run it (`PostToolUse`, which the CLI sends only for a call that did not fail; a failed
- * one gets `PostToolUseFailure`, and a call the CLI's own rule denied gets neither), not when the person allowed it.
+ * one, a command that exits non-zero included, gets `PostToolUseFailure`: measured with the real CLI, 2026-11-03), not when the person allowed it.
  */
 export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | 'apps'>, ownServer: () => boolean): { PreToolUse: HookCallbackMatcher[]; PostToolUse: HookCallbackMatcher[] } | undefined {
   const request = opts.requestTurn

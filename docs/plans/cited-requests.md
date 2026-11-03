@@ -95,7 +95,7 @@ A notice in the asking session, from Centralu, label `request record`:
 > For this session's request, which cites no message of yours, the orchestrator did this: run add_project {"path":"…"}
 
 It is written once the step has run and not failed: a Centralu or app step when its result comes back, a step of the CLI's own when the
-CLI says it ran (`PostToolUse`; a failed one gets `PostToolUseFailure`, and one a rule of the CLI's denied gets neither). A step the person
+CLI says it ran (`PostToolUse`; a failed one, a command that exits non-zero included, gets `PostToolUseFailure` instead: measured with the real CLI). A step the person
 allowed on a card is recorded too. A read, an answer in the thread, and a step that failed or was refused are not. Other places the owner
 may prefer: the orchestrator's own conversation; the person's Inbox; a mark on the cited message (needs a UI change).
 
