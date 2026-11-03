@@ -25,7 +25,7 @@ import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, LEASE_MS, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -1411,7 +1411,10 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path) && st.rerunError) {
   fail(st.rerunError)
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path)) {
-  write([path.endsWith('failed-jobs') ? 'rerun-failed' : 'rerun', path.split('/')[5]])
+  const rerun = [path.endsWith('failed-jobs') ? 'rerun-failed' : 'rerun', path.split('/')[5]]
+  // A rerun the test says nothing of starts another attempt of a run on a branch (main's, a bisect probe's) that ends as the last one did
+  if (!(st.on && st.on[rerun.join(':')])) for (const r of Object.values(st.branchRuns ?? {}).flat()) if (String(r.id) === rerun[1]) r.run_attempt = (r.run_attempt ?? 1) + 1
+  write(rerun)
 } else if (path && /\/actions\/runs\/\d+\/jobs\?/.test(path)) {
   // A run's jobs and steps: as the test gives them, else its checks, a failed one failing in a step (a real failure)
   const id = Number(path.split('/')[5])
@@ -1457,6 +1460,11 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.issues = [...(st.issues ?? []), body]
   write(['issue', body.title])
   out({ number: 500 + st.issues.length, html_url: 'https://github.com/ijun17/centralu/issues/' + (500 + st.issues.length) })
+} else if (path && /\/issues\/\d+\/comments$/.test(path) && args.includes('POST')) {
+  const body = JSON.parse(stdin)
+  st.comments = [...(st.comments ?? []), { issue: Number(path.split('/')[4]), body: body.body }]
+  write(['comment', path.split('/')[4]])
+  out({ id: 700 + st.comments.length, html_url: 'https://github.com/ijun17/centralu/issues/' + path.split('/')[4] + '#issuecomment-1', user: { login: 'tester' }, created_at: '2026-10-23T00:00:00Z', body: body.body })
 } else if (path && args.includes('DELETE')) {
   write(['delete', path.split('/heads/')[1]])
 } else fail('fake gh: unexpected call ' + JSON.stringify(args) + ' (HTTP 400)')
@@ -3940,15 +3948,15 @@ const probeRun = (id: number, sha: string, conclusion: string) => ({ ...ghRun(co
 const failedJob = (id: number, name: string) => ({ id, name, status: 'completed', conclusion: 'failure', steps: [{ name: 'pnpm test', conclusion: 'failure' }] })
 
 /** The queue file as the queue left it: the items given (a merged one that landed a commit, say) */
-function seedQueue(items: Record<string, unknown>[]) {
+function seedQueue(items: Record<string, unknown>[], guard?: Record<string, unknown>) {
   const dir = join(root, 'data', 'app-data', 'p1', 'project-board')
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items, events: [], batches: [], batchSeq: 0, batchOff: null }))
+  writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items, events: [], batches: [], batchSeq: 0, batchOff: null, ...(guard ? { guard } : {}) }))
 }
 
 /** The queue landed `commit` (as #90, for another session): the guard watches main once the queue has landed something */
-const landed = (commit: string) =>
-  seedQueue([{ repo: R, pr: 90, lowers: [], owner: 'other', state: 'merged', commit, title: 'feat(apps): change 90', updatedAt: new Date().toISOString(), reruns: {} }])
+const landed = (commit: string, guard?: Record<string, unknown>) =>
+  seedQueue([{ repo: R, pr: 90, lowers: [], owner: 'other', state: 'merged', commit, title: 'feat(apps): change 90', updatedAt: new Date().toISOString(), reruns: {} }], guard)
 
 function guardRuntime(repo: ReturnType<typeof mainRepo>, state: Gh, env: Record<string, string> = {}) {
   mkdirSync(appTmp(), { recursive: true })
@@ -4597,14 +4605,14 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(mainRedNotices()[0]!.text).toContain('(test failure)')
   })
 
-  it('reverts at once, with no rerun, a failure in a test step, and says it is a test failure', async () => {
+  it('reverts a failure in a test step once its failed jobs fail again on one rerun, and says it is a test failure (#1496)', async () => {
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     const sha = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
     guardRuntime(repo, { branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [failedJob(31, 'verify')] } })
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
-    expect(reruns()).toEqual([])
+    expect(reruns()).toEqual([['rerun-failed', '990']])
     expect(mainRedNotices()[0]!.text).toContain('verify failed at')
     expect(mainRedNotices()[0]!.text).toContain('(test failure)')
   })
@@ -5790,7 +5798,8 @@ describe('the main guard does not blame a commit for a bisect probe the runner b
     await call('merge_queue')
     await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the report', 60_000)
     await polls(11)
-    expect(rerunsOf()).toEqual([['rerun-failed', '991']])
+    // Main's own red run (a test failure) is rerun first, then the probe's
+    expect(rerunsOf()).toEqual([['rerun-failed', '990'], ['rerun-failed', '991']])
     expect(guardOnDisk().hunt.culprit).toBeUndefined()
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(issues()).toHaveLength(1)
@@ -5814,7 +5823,8 @@ describe('the main guard does not blame a commit for a bisect probe the runner b
     })
     await call('merge_queue')
     await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
-    expect(rerunsOf()).toEqual([])
+    // Main's own red run (a test failure) is rerun; the probe is not
+    expect(rerunsOf()).toEqual([['rerun-failed', '990']])
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2 })
   })
 
@@ -5822,8 +5832,242 @@ describe('the main guard does not blame a commit for a bisect probe the runner b
     const { c3 } = setup('success')
     await call('merge_queue')
     await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
-    expect(rerunsOf()).toEqual([['rerun-failed', '991']])
+    expect(rerunsOf()).toEqual([['rerun-failed', '990'], ['rerun-failed', '991']])
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3, how: expect.stringContaining('bisected') })
-    expect(rerunsOf()).toHaveLength(1)
+  })
+})
+
+/*
+ * A red is a run whose failed jobs fail again when only they are rerun (#1496). On 2026-10-23 a flaky test failed once on a
+ * commit that did not touch it, the hunt bisected a pass on the commit before and that one failure, and the queue opened a revert
+ * of reviewed work. Main's red run is rerun once, and a pass makes it green. A failure that keeps passing its rerun is a break
+ * after all (it fails now and then, or the rerun finds what the first attempt left behind), and a probe that fails in a test is red
+ * on that failure: one that had to fail twice would be passed over for a break that fails half of its runs.
+ */
+describe('the main guard blames a commit only for a test that fails again on a rerun (#1496)', { timeout: 120_000 * SLOW }, () => {
+  const again = (id: number, sha: string, conclusion: string, probeBranch?: string) => ({ ...(probeBranch ? probeRun(id, sha, conclusion) : mainRun(id, sha, conclusion)), run_attempt: 2 })
+  const flakyLog = 'FAIL unit tooling/fake-gh.test.ts > the shared fake gh > reads the state whole while the fake is rewriting it\nAssertionError: expected [ \'Unexpected end of JSON input\' ] to deeply equal []'
+  const reruns = () => writes().filter((w) => w[0] === 'rerun-failed')
+  const comments = (): { issue: number; body: string }[] => gh().comments ?? []
+
+  it("leaves main alone when the failed job passes on its rerun, and says on the known failures issue, once, that it was intermittent", async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const sha = repo.shas[1]!
+    seedQueue([{ repo: R, pr: 82, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog },
+      on: { 'rerun-failed:990': { branchRuns: { main: [again(990, sha, 'success'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().green === sha && comments().length > 0, 'main green again, and the note')
+    await polls(11)
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    // No hunt, no probe, no revert, no issue, nothing told to the session that landed it
+    expect(gh().dispatched ?? []).toEqual([])
+    expect(writes().filter((w) => w[0] === 'pr-create' || w[0] === 'issue')).toEqual([])
+    expect(issues()).toEqual([])
+    expect(mainRedNotices()).toEqual([])
+    expect(guardOnDisk().hunt ?? null).toBe(null)
+    expect(comments()).toHaveLength(1)
+    expect(comments()[0]).toMatchObject({ issue: 368, body: expect.stringContaining(`Intermittent failure: verify failed on main at ${sha.slice(0, 7)}`) })
+    expect(comments()[0]!.body).toContain('reads the state whole while the fake is rewriting it')
+    expect(comments()[0]!.body).toContain('nothing was reverted')
+  })
+
+  it('goes on to find the culprit when the failed job fails again, rerunning it once and no more', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const [c1, c2] = repo.shas as [string, string]
+    landed(c2)
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c2, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog },
+      on: { [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(991, c1, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2 })
+    expect(comments()).toEqual([])
+  })
+
+  it('keeps a bisect probe red on its first test failure, without a rerun: a break that fails half the time must not be passed over', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [, c2, , c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')] },
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'failure')] } },
+        [`dispatch:${probe(repo.shas[0]!)}`]: { branchRuns: { [probe(repo.shas[0]!)]: [probeRun(992, repo.shas[0]!, 'success')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
+    // Main's own red run is rerun once and fails again; neither probe is rerun
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2, how: expect.stringContaining('bisected') })
+  })
+
+  // A flake the guard marked: the run's record in `guard.reruns`, as `noteFlakes` leaves it once the rerun passed
+  const marked = (sha: string, line: string) => ({ attempt: 1, at: '2026-10-17T08:00:00Z', what: 'x', shutdown: false, jobs: ['verify'], test: true, sha, url: null, line, flaked: true })
+  const line = flakyLog.split('\n')[0]!
+
+  it('hunts a failure that passed its rerun twice lately, from before the first of them, without another rerun, and says so', async () => {
+    const repo = mainRepo(['81', '82', '83'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, c3] = repo.shas as [string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c3, { reruns: { '985': marked(c2, line), '975': marked(c1, line) } })
+    guardRuntime(repo, {
+      // Runs 985 and 975 failed, passed their reruns, and are green now: the last run that never failed is the base
+      branchRuns: { main: [mainRun(990, c3, 'failure'), mainRun(985, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')] },
+      logs: { '31': flakyLog },
+      on: {
+        // The red commit itself first: it fails again, so the failure is bisected
+        [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(992, c3, 'failure')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(991, c1, 'failure')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the culprit')
+    expect(reruns()).toEqual([])
+    // The two flakes are spent on this hunt: the next failure of the test is counted from one
+    expect(Object.values(guardOnDisk().reruns).map((r: any) => r.counted)).toEqual([true, true])
+    // The first commit of the three, not the last one alone (the range started at the green run 985 would have blamed #83)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1, how: expect.stringContaining('bisected') })
+    expect(guardOnDisk().hunt.green).toBe(repo.green)
+    expect(issues()[0]!.body).toContain('The same test failed 3 times on main within its last 20 runs')
+  })
+
+  it('does not count another test of the same job, nor a failure older than the newest 20 runs', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const [c1, c2] = repo.shas as [string, string]
+    const old = Array.from({ length: 19 }, (_, i) => mainRun(900 + i, repo.green, 'success'))
+    landed(c2, { reruns: { '985': marked(c1, 'FAIL unit tooling/other.test.ts > another test'), '960': marked(c1, line) } })
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c2, 'failure'), mainRun(985, c1, 'success'), ...old.slice(0, 18), mainRun(960, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog },
+      on: { 'rerun-failed:990': { branchRuns: { main: [again(990, c2, 'success'), mainRun(985, c1, 'success'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().green === c2, 'main green again')
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(gh().dispatched ?? []).toEqual([])
+    expect(issues()).toEqual([])
+  })
+
+  it('reports a test failure whose rerun failed in setup as neither confirmed nor cleared, and hunts nothing', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    const installFailure = { id: 41, name: 'verify', status: 'completed', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Install WebKit', conclusion: 'failure' }, { name: 'pnpm test', conclusion: 'skipped' }] }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog, '41': WEBKIT_INSTALL_LOG },
+      // The rerun's attempt fails in a step that sets the job up, before any test ran
+      on: { 'rerun-failed:990': { branchRuns: { main: [again(990, sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [installFailure] } } },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0, 'the report')
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(guardOnDisk().hunt.culprit).toBeUndefined()
+    expect(issues()[0]!.body).toContain('neither confirmed nor cleared')
+    expect(issues()[0]!.body).toContain(line)
+    expect(issues()[0]!.body).toContain('Nothing was reverted')
+  })
+
+  it('runs the red commit itself before blaming a failure that was counted, and blames nothing when it passes', async () => {
+    const repo = mainRepo(['81', '82', '83'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, c3] = repo.shas as [string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c3, { reruns: { '985': marked(c2, line), '975': marked(c1, line) } })
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c3, 'failure'), mainRun(985, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': flakyLog },
+      on: { [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(991, c3, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt && issues().length > 0, 'the report')
+    // Only the red commit was run: no bisect, no culprit, no revert
+    expect(gh().dispatched).toHaveLength(1)
+    expect(guardOnDisk().hunt.culprit).toBeUndefined()
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()[0]!.body).toContain('it is intermittent')
+    expect(issues()[0]!.body).toContain('No commit is blamed')
+  })
+
+  it('starts the hunt for a counted failure before the window it was counted in, so a break that passed by chance after it is a candidate', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [c1, c2, c3, c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4, { reruns: { '985': marked(c3, line), '980': marked(c2, line) } })
+    guardRuntime(repo, {
+      // #81 broke the test; its own run (975) passed by chance and so did nothing flag it. Runs 985 and 980 passed their reruns
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(985, c3, 'success'), mainRun(980, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')], 993: [failedJob(43, 'verify')] },
+      logs: { '31': flakyLog },
+      on: {
+        [`dispatch:${probe(c4)}`]: { branchRuns: { [probe(c4)]: [probeRun(991, c4, 'failure')] } },
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(992, c2, 'failure')] } },
+        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(993, c1, 'failure')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
+    expect(guardOnDisk().hunt.green).toBe(repo.green)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1 })
+  })
+
+  it('counts a failure only by the test it names, and by the whole of its name', () => {
+    const runs = Array.from({ length: 25 }, (_, i) => ({ id: 1000 - i }))
+    const flake = (text: string, extra = {}) => ({ flaked: true, jobs: ['verify'], line: text, ...extra })
+    const earlier = (reruns: Record<string, unknown>, text: string) => earlierFlakes({ reruns, runs, names: ['verify'], line: ` First failure: ${text}` })
+    const same = 'FAIL unit tooling/a.test.ts > waits 5s for the lock'
+    expect(earlier({ 999: flake(`${same} 120ms`) }, `${same} 133ms`)).toEqual(['999'])
+    // Another test whose name has a duration in it is another test
+    expect(earlier({ 999: flake('FAIL unit tooling/a.test.ts > waits 5s for the other 120ms') }, `${same} 133ms`)).toEqual([])
+    // A step's bare error names no test: two of them are not the same failure
+    const bare = 'Process completed with exit code 1.'
+    expect(earlier({ 999: flake(bare), 998: flake(bare) }, bare)).toEqual([])
+    // A flake a hunt has counted is spent
+    expect(earlier({ 999: flake(same, { counted: true }), 998: flake(same) }, same)).toEqual(['998'])
+  })
+
+  it('starts the hunt at the newest clean green run older than the window, else the oldest one', () => {
+    const run = (id: number, conclusion = 'success') => ({ id, status: 'completed', conclusion, headSha: `sha${id}` })
+    const runs = Array.from({ length: 24 }, (_, i) => run(1000 - i))
+    // Runs 980 and older are outside the 20 newest; 979 passed after a rerun, so it is not clean
+    expect(cleanGreen({ runs, reruns: { 980: { flaked: true } } })).toBe('sha979')
+    expect(cleanGreen({ runs, reruns: {} })).toBe('sha980')
+    // A list no longer than the window: its oldest clean run
+    expect(cleanGreen({ runs: runs.slice(0, 5), reruns: {} })).toBe('sha996')
+    expect(cleanGreen({ runs: [run(1, 'failure')], reruns: {} })).toBeNull()
+  })
+
+  it('reports a failure it could not confirm, and reverts nothing, when GitHub refuses the rerun', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      rerunError: 'Unable to retry this workflow run because it was created over a month ago (HTTP 403)',
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0, 'the report')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()[0]!.body).toContain('it is a test failure')
+    expect(issues()[0]!.body).toContain('GitHub refused to rerun the job')
+    expect(issues()[0]!.body).toContain('Nothing was reverted')
   })
 })

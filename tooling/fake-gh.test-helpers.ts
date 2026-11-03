@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { delimiter, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { fakeExe, linkNode, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 
 /**
@@ -8,14 +10,15 @@ import { fakeExe, linkNode, windowsSystemEnv } from '../packages/agent-host/src/
  * the PATH that logs every call and answers from a state file the test writes and reads (#845).
  *
  * Seven test files each built their own: the same opening lines in the script, the same bin and node folders, the same
- * environment, and their own readers of the log and the state. The copies had drifted. The state is rewritten in place
- * (writeFileSync truncates, then writes), so a read can find it half written while a gh call the app made is saving it,
- * or a gh call can find it half written while the test changes it. Only the merge queue test's reader tried again; the
- * other readers and every fake failed on it. Only that test's read of the log skipped a line still being appended.
+ * environment, and their own readers of the log and the state. The copies had drifted. Only the merge queue test's read
+ * of the log skipped a line still being appended.
  *
- * Both sides now read the state the same way: a read that finds it half written (a truncated JSON object never parses)
- * tries again. Writing a new file and renaming it into place would avoid the half-written read, but Windows refuses to
- * replace a file another process has open, and a test polling the state keeps it open most of the time.
+ * The state is written as a whole file renamed into place where that is possible, and read again for up to 5 seconds when
+ * it does not parse (fake-gh-state.cjs), by the fake and by the test alike. It was rewritten in place everywhere (truncate,
+ * then write) and read again up to 50 times 20 ms apart; on a loaded CI runner all 50 tries could land on a torn file, and
+ * the main guard blamed an innocent pull request for the failed test (#1496). Windows refuses to replace a file another
+ * process has open, and a test polling the state keeps it open most of the time, so there the write stays in place and
+ * only the read's wait grew.
  *
  * The test gives the part of the script that answers. Before it runs, the script has:
  * - `fs`, `args` (gh's arguments) and `stdin` (what `--input -` sent, else null)
@@ -23,21 +26,19 @@ import { fakeExe, linkNode, windowsSystemEnv } from '../packages/agent-host/src/
  *
  * Every call is logged before the answer, as `{ args, stdin }`.
  */
+const STATE_MODULE = fileURLToPath(new URL('./fake-gh-state.cjs', import.meta.url))
+const { readState, writeState } = createRequire(import.meta.url)(STATE_MODULE) as {
+  readState: (path: string) => unknown
+  writeState: (path: string, text: string) => void
+}
+
 const PROLOGUE = String.raw`const fs = require('node:fs')
+const { readState, writeState } = require(${JSON.stringify(STATE_MODULE)})
 const args = process.argv.slice(2)
 const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
 fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = (() => {
-  for (let i = 0; ; i++) {
-    try {
-      return fs.existsSync(process.env.FAKE_GH_STATE) ? JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8')) : {}
-    } catch (e) {
-      if (i >= 50) throw e
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
-    }
-  }
-})()
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+const st = fs.existsSync(process.env.FAKE_GH_STATE) ? readState(process.env.FAKE_GH_STATE) : {}
+const save = () => writeState(process.env.FAKE_GH_STATE, JSON.stringify(st))
 `
 
 /**
@@ -95,7 +96,7 @@ export interface FakeGh {
    */
   env(extra?: Record<string, string>, more?: readonly string[]): Record<string, string>
   setState(state: unknown): void
-  /** The state as the fake last saved it (or the test last set it), read again if it is half written */
+  /** The state as the fake last saved it (or the test last set it) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each test types its own state
   state<S = any>(): S
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each test types its own state
@@ -123,17 +124,8 @@ export function fakeGh(root: string, answer: string, { inProcess = false }: { in
   const statePath = join(root, 'gh-state.json')
   const logPath = join(root, 'gh.log')
   writeFileSync(logPath, '')
-  const state = <S>(): S => {
-    for (let i = 0; ; i++) {
-      try {
-        return JSON.parse(readFileSync(statePath, 'utf8')) as S
-      } catch (e) {
-        if (i >= 50 || (e as NodeJS.ErrnoException).code === 'ENOENT') throw e
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
-      }
-    }
-  }
-  const write = (s: unknown) => writeFileSync(statePath, JSON.stringify(s))
+  const state = <S>(): S => readState(statePath) as S
+  const write = (s: unknown) => writeState(statePath, JSON.stringify(s))
   return {
     bin,
     node,
