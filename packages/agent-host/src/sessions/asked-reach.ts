@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { oneLineText, wireJoin, wireSegments } from '@cc/protocol'
+import { z } from 'zod'
 
 /**
  * What a request's turn reads that the asking session could not read itself (docs/plans/mailbox.md §9.7, #1447).
@@ -29,6 +30,15 @@ export type ReadScope =
   | { thread: string | null }
   /** Conversations across projects, whichever they are (`recall`, the list of sessions, the archive) */
   | { everywhere: true }
+
+/** A `ReadScope` read back from the store (`AskedGate`) */
+export const READ_SCOPE: z.ZodType<ReadScope> = z.union([
+  z.object({ paths: z.array(z.string()), real: z.array(z.string()).optional() }),
+  z.object({ session: z.string().nullable() }),
+  z.object({ project: z.string().nullable() }),
+  z.object({ thread: z.string().nullable() }),
+  z.object({ everywhere: z.literal(true) }),
+])
 
 /** What the asking session reaches itself: its folders, its project (id and name) and the thread of its request */
 export type Reach = { folders: readonly string[]; project: string | null; projectName?: string | null; thread: string }

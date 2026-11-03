@@ -133,6 +133,8 @@ export type MailHooks = {
   roleMoved?(toSessionId: string): void
   /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
   askedBy?(orchestratorId: string): Asker | null
+  /** The orchestrator's answer to `asker`'s request waits for the person's card (§9.7, #1926): the session is told */
+  answerWaits?(asker: Asker): void
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
@@ -470,6 +472,8 @@ export class SessionManager {
         const m = this.meta.get(sessionId)
         return m ? (m.projectId ?? null) : undefined
       },
+      kept: store.settings,
+      answerWaits: (asker) => this.mailHooks?.answerWaits?.(asker),
     })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())

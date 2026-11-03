@@ -155,6 +155,19 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
 
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, mailTurns, id),
+    answerWaits: (asker) => {
+      // The card is raised whether or not the session can be told
+      try {
+        const told = service.notice(addressOf(asker.sessionId), {
+          body: `The orchestrator's answer to your ${asker.messageId} waits for the person: it may carry what the orchestrator read outside your reach, so the person is asked first. It reaches you if they allow it; if not, it is not sent, and the orchestrator is told.`,
+          facts: { quiet: true },
+          dedupeKey: `answer_waits:${asker.messageId}:${asker.turn}`,
+        })
+        if (told) delivery.poke(asker.sessionId)
+      } catch (e) {
+        console.error(`[mail] telling ${asker.sessionId.slice(0, 8)} its answer waits for the person failed: ${errorMessage(e)}`)
+      }
+    },
     sessionGone: (id) => service.partyGone(addressOf(id)),
     handOver: (from, to, which) => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }),
     handOverPreview: (from, to) => service.handOverPreview(addressOf(from), addressOf(to)),

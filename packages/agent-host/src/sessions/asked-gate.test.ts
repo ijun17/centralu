@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Asker } from '../mail/asked-by.js'
-import { AskedGate, type AskedGateHost } from './asked-gate.js'
+import { AskedGate, readsKey, type AskedGateHost } from './asked-gate.js'
 import { HostCards } from './host-cards.js'
 
 const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }
@@ -23,10 +23,14 @@ function world(
     projectName?: string
     /** The gate has seen the orchestrator's conversation begin (the usual case) */
     begun?: boolean
+    /** The host's settings, as a previous host left them (a restart) */
+    settings?: Map<string, string>
   } = {},
 ) {
   const asked: string[] = []
   const covered: boolean[] = []
+  const waits: Asker[] = []
+  const settings = over.settings ?? new Map<string, string>()
   const host: AskedGateHost = {
     askedBy: over.asker ?? (() => ASKER),
     ask: async (_id, question) => {
@@ -40,10 +44,16 @@ function world(
     },
     reach: (id) => ({ ...(over.reachOf?.(id) ?? { folders: over.folders ?? [], project: 'p1' }), ...(over.projectName ? { projectName: over.projectName } : {}) }),
     projectOf: (id) => over.projects?.[id],
+    kept: {
+      appSetting: (key) => settings.get(key) ?? null,
+      setAppSetting: (key, value) => void settings.set(key, value),
+      deleteAppSetting: (key) => void settings.delete(key),
+    },
+    answerWaits: (asker) => void waits.push(asker),
   }
   const gate = new AskedGate(host)
-  if (over.begun !== false) gate.beginConversation('orc')
-  return { gate, asked, covered }
+  if (over.begun !== false && over.settings === undefined) gate.beginConversation('orc')
+  return { gate, asked, covered, waits, settings }
 }
 const ran = () => {
   const calls: number[] = []
@@ -338,6 +348,40 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     w.gate.beginConversation('orc', false)
     await send(w, reply())
     expect(w.asked).toHaveLength(3)
+  })
+
+  it('what it read is kept across a host restart: the next host judges the reply by it, not by the restart (#1926)', async () => {
+    const before = world({ asker: () => null, folders: [HOME] })
+    before.gate.seen('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
+    const inReach = world({ settings: new Map(before.settings), folders: [HOME] })
+    expect((await send(inReach, reply())).r.calls).toHaveLength(1)
+    expect(inReach.asked).toEqual([])
+
+    before.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    const outside = world({ settings: new Map(before.settings), folders: [HOME] })
+    await send(outside, reply())
+    expect(outside.asked).toHaveLength(1)
+    expect(outside.asked[0]).toContain(`Read of ${JSON.stringify(OUTSIDE)}`)
+  })
+
+  it('a restart never makes a reply that needs the person pass: no record, or one that does not parse, is not known to have read nothing', async () => {
+    for (const kept of [undefined, 'not json', '[{"name":"Read"}]', '[{"name":"Read","scope":{"paths":"/private"}}]', '{}']) {
+      const w = world({ settings: new Map(kept === undefined ? [] : [[readsKey('orc'), kept]]), folders: [HOME] })
+      // What it reads now is not what it read before: still not known
+      w.gate.seen('orc', 'Read', { file_path: join(HOME, 'notes.txt') })
+      await send(w, reply())
+      expect(w.asked).toHaveLength(1)
+      expect(w.asked[0]).toContain('not seen from its beginning')
+    }
+  })
+
+  it('a reply held for the person tells the session that asked; a card for any other step does not', async () => {
+    const w = world({ folders: [HOME], answer: 'deny' })
+    await send(w, { action: 'send', to: 'someone', text: 'hi' })
+    expect(w.waits).toEqual([])
+    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
+    await send(w, reply())
+    expect(w.waits).toEqual([ASKER])
   })
 
   it('a mail thread other than the request’s counts as read out of reach; its own thread does not', async () => {
