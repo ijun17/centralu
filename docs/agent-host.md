@@ -734,8 +734,12 @@ or send at rest). `answer` takes a question card's answer to the machine (`agent
 card stays the person's on that machine, whatever the caller's preset: a caller's `auto`, which alone lets it answer a
 local child's approval, never answers one on another computer, even when its child runs under `auto` there. `send`
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
-person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
-refused, as neither a queue nor a fork reaches another machine. A note the tool did not read in the turn it went into
+person's message there; nothing is armed again); into a turn the caller did not give it (the person's there, or one the
+tool started after the work was reported finished, which nothing on its start ties to the assignment) it is refused, and a fork
+does not reach another machine. `ifBusy: "queue"` holds the note in the child's record on the hub (`RemoteAgent.queued`, a restart
+or a link's loss loses none) and sends it as new work the caller owns, as a send at rest, once the child is in no turn: after a turn's
+end seen, and when the machine's link is back; a note refused then (the caller's trust or depth read again) is told to the caller. The
+caller's stop drops what is held. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
 names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id
 (`ChildOwnership` `noteInputOrigin`: into a running turn or at rest, in the order given, at most 64 a session, in the app

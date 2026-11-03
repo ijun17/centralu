@@ -668,6 +668,8 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     it('keeps it across a hub restart and a link that dropped while the turn ended, and sends it once the link is back', async () => {
       await reportedThenBusy()
       expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      // The host that held it has tried once and found the child in a turn
+      await flush()
       linkDown()
       hub.boot()
       machine.selfTurnEnds()
