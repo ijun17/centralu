@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
+import { gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -1016,17 +1016,17 @@ export class RemoteAgents {
   /** Holds the caller's note until the child is at rest (#1682); the same words again are the one held, as a local queue has it */
   private hold(rec: RemoteAgent, text: string): ChildRunResult {
     const held = this.of(rec.sessionId)?.queued ?? []
-    const at = held.findIndex((q) => q.text === text)
-    const entry = at >= 0 ? held[at]! : { id: `qr-${randomUUID()}`, text }
-    if (at < 0) this.setQueued(rec.sessionId, [...held, entry])
+    const same = held.find((q) => q.text === text)
+    const entry = same ?? { id: `qr-${randomUUID()}`, text }
+    if (!same) this.setQueued(rec.sessionId, [...held, entry])
     // The turn may have ended while the caller chose
     this.scheduleDrain(rec.sessionId)
-    return { ok: true, tool: rec.tool, state: 'queued', sessionId: rec.sessionId, sessionName: rec.name, queueId: entry.id, position: (at >= 0 ? at : held.length) + 1 }
+    return { ok: true, tool: rec.tool, state: 'queued', sessionId: rec.sessionId, sessionName: rec.name, queueId: entry.id, position: (same ? held.indexOf(same) : held.length) + 1 }
   }
 
   private setQueued(sessionId: string, queued: { id: string; text: string }[]): void {
     const rec = this.of(sessionId)
-    if (!rec || (rec.queued ?? []).length === queued.length && (rec.queued ?? []).every((q, i) => q.id === queued[i]!.id)) return
+    if (!rec || (rec.queued ?? []).map((q) => q.id).join() === queued.map((q) => q.id).join()) return
     const { queued: _queued, ...rest } = rec
     this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...rest, ...(queued.length ? { queued } : {}) } : r)))
   }
@@ -1050,7 +1050,7 @@ export class RemoteAgents {
       if (!this.host.meta.has(rec.callerId)) return this.setQueued(sessionId, [])
       const now = await reader.read(sessionId, 1)
       // Not readable now, or in a turn: the next turn's end, or the link's return, tries again
-      if (!now.ok || inTurn((now.state ?? 'idle') as SessionState) || this.busy.has(sessionId)) return
+      if (!now.ok || isInTurn(now.state) || this.busy.has(sessionId)) return
       this.setQueued(sessionId, (this.of(sessionId)?.queued ?? []).filter((q) => q.id !== next.id))
       const sent = await this.agentSession(rec.callerId, rec, { sessionId, action: 'send', text: next.text, ifBusy: 'queue' })
       if (sent.ok) return
