@@ -396,9 +396,12 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
   with the first line of the failure. This never refuses: the list is printed and goes into **Verified**
   (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
-  merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked;
+  merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked. One
+  that merges is started only with as much time left as your guards took in the revert check's run (a run
+  cut off half way says nothing); the ones left are named with that time and what was left;
 - each new or changed test file, run with every other change of the pull request reverted to its
-  base: a new test that passes there protects nothing, and is reported;
+  base: a new test that passes there protects nothing, and is reported. A test the base's file had
+  skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
 - and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
   and what a merge would conflict on.
 

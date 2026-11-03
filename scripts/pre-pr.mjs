@@ -25,11 +25,15 @@
 //             the first line of the failure, as warnings (they go into Verified). Each day's guards broke a
 //             queued pull request an hour after landing; the author fixes those in the same change, or tells
 //             their authors. Bounded: a time limit (--guards-limit), only the guards the branch changed, and a
-//             pull request that does not merge cleanly (or needs other dependencies) is skipped and said so.
+//             pull request that does not merge cleanly (or needs other dependencies) is skipped and said so. One that
+//             merges is started only with as much time left as the guards took in the revert check's run, since a run cut
+//             off half way says nothing; the ones left are named, with the time a run needs and the time left.
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
-//             request count; one that was already there passing is no news.
+//             request count; one that was already there passing is no news. Which tests the base's
+//             version of a file had is read by a vitest pass that selects none, so it names them all, the skipped and
+//             todo ones too (a test the pull request un-skips was there), without running them a second time.
 //   tier      never a refusal: the pull request's risk tier by the paths it changes over its base, by
 //             main's .centralu/tiers.json (scripts/tier.mjs, #1259); deep when there are no rules or
 //             they cannot be read. The board writes it into Verified and labels the pull request tier:<name>.
@@ -105,15 +109,30 @@ export function depErrorsOf(cruise) {
 /** A file `pnpm lint` reads: what ESLint's configuration covers, by extension. */
 export const isLintable = (path) => /\.[cm]?[jt]sx?$/.test(path)
 
+const relFile = (root, name) => relative(root, name).split('\\').join('/')
+
 /** vitest's JSON reporter: every test as `{ file, name, status }`, the file relative to `root` with `/`. */
 export function vitestTests(report, root) {
   return (report?.testResults ?? []).flatMap((f) =>
     (f.assertionResults ?? []).map((t) => ({
-      file: relative(root, f.name).split('\\').join('/'),
+      file: relFile(root, f.name),
       name: [...(t.ancestorTitles ?? []), t.title].join(' > '),
       status: t.status,
     })),
   )
+}
+
+/** Why a vitest pass left no report: it was stopped at the limit it was given (`timedOut`, from how it ended), or it did not start or crashed. */
+export const noReport = (timedOut, limitMs) =>
+  timedOut ? `vitest was stopped after ${Math.round(limitMs / 1000)} s, the most it was given, before it had finished` : 'vitest gave no report (it did not start, or crashed)'
+
+/**
+ * How long the slowest of a report's `files` took on its own; 0 when it holds none of them. The guards run in one vitest pass,
+ * files side by side, so that is the least one pass takes. The span from the first starting to the last ending would count
+ * everything that ran between them in the shared pass.
+ */
+export function filesRunMs(report, root, files) {
+  return Math.max(0, ...(report?.testResults ?? []).filter((f) => files.includes(relFile(root, f.name))).map((f) => f.endTime - f.startTime || 0))
 }
 
 /** The tests that pass with the source changes reverted and were not in the base's version of their file. */
@@ -308,13 +327,19 @@ export const realRunners = {
   lint(dir, files, { timeoutMs = 0 } = {}) {
     return nodeBin(dir, 'tsx/dist/cli.mjs', ['tooling/lint.ts', ...files], {}, timeoutMs)
   },
-  vitest(dir, files, { timeoutMs = 0 } = {}) {
+  /**
+   * Runs vitest of the worktree with a data folder of its own; answers `{ report, timedOut }`: vitest's JSON report, or null when
+   * it wrote none, and whether it was stopped at `timeoutMs`. Failing tests exit non-zero, which is an answer here, not an error.
+   * With `namesOnly` no test runs: a name filter nothing matches leaves every test of the files in the report as skipped, the
+   * skipped and todo ones too, in seconds where a run takes minutes.
+   */
+  vitest(dir, files, { timeoutMs = 0, namesOnly = false } = {}) {
     const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
     const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
     try {
-      // Failing tests exit non-zero, which is an answer here, not an error
-      nodeBin(dir, 'vitest/vitest.mjs', ['run', '--reporter=json', `--outputFile=${out}`, ...files], { CC_DATA_DIR: data }, timeoutMs)
-      return existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null
+      const args = ['run', '--reporter=json', `--outputFile=${out}`, ...(namesOnly ? ['-t', '(?!)'] : []), ...files]
+      const { timedOut } = nodeBin(dir, 'vitest/vitest.mjs', args, { CC_DATA_DIR: data }, timeoutMs)
+      return { report: existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null, timedOut }
     } finally {
       rmSync(join(out, '..'), { recursive: true, force: true })
       rmSync(data, { recursive: true, force: true })
@@ -471,9 +496,11 @@ export const PHASE_MIN_MS = 60_000
  * Runs `guards` (files of this branch) against each of `prs` (open, not the stack's own) with this branch
  * merged in: a commit of the pull request's head and `head`, made from a merge that did not conflict. Answers
  * `{ failing, skipped, unchecked }`; never throws for one pull request's trouble. `makeWorktree(commit)`
- * answers a worktree, or null when its dependencies would need an install.
+ * answers a worktree, or null when its dependencies would need an install. `needMs` is how long one run of the guards is known to
+ * take: a pull request that merges is not started with less time than that left, since a run cut off half way says nothing and
+ * costs all of it; it is listed as not reached, with why. `perPrMs` is the most one run may take.
  */
-export function runGuards({ root, remote, runId, runners, prs, head, guards, makeWorktree, dropWorktree, limitMs, now, log, check }) {
+export function runGuards({ root, remote, runId, runners, prs, head, guards, makeWorktree, dropWorktree, limitMs, now, log, check, needMs = 0, perPrMs = GUARDS_PER_PR_MS }) {
   const failing = []
   const skipped = []
   const unchecked = []
@@ -488,10 +515,6 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
     }
     for (const pr of prs) {
       check()
-      if (now() >= deadline) {
-        unchecked.push(pr)
-        continue
-      }
       let wt = null
       try {
         const theirs = git(root, ['rev-parse', '--verify', `${space}/${pr.number}^{commit}`]).trim()
@@ -503,6 +526,11 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
           skipped.push({ pr, why: files.length ? `does not merge cleanly with this branch (${files.slice(0, 5).join(', ')})` : 'could not be merged with this branch' })
           continue
         }
+        const timeLeft = deadline - now()
+        if (timeLeft < Math.max(needMs, 1)) {
+          unchecked.push({ pr, why: timeLeft > 0 ? `not started: a run takes about ${Math.round(needMs / 1000)} s and ${Math.round(timeLeft / 1000)} s were left` : 'time limit reached' })
+          continue
+        }
         const commit = git(root, ['commit-tree', tree, '-p', theirs, '-p', head, '-m', `pre-pr guards: #${pr.number} with this branch`], ident).trim()
         wt = makeWorktree(commit)
         if (!wt) {
@@ -512,9 +540,10 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
         const present = guards.filter((g) => existsSync(join(wt, g)))
         if (!present.length) continue
         log(`guards against #${pr.number}`)
-        const report = runners.vitest(wt, present, { timeoutMs: Math.max(1000, Math.min(GUARDS_PER_PR_MS, deadline - now())) })
+        const timeoutMs = Math.max(1000, Math.min(perPrMs, deadline - now()))
+        const { report, timedOut } = runners.vitest(wt, present, { timeoutMs })
         if (!report) {
-          skipped.push({ pr, why: 'vitest gave no report (it ran out of time, or did not start)' })
+          skipped.push({ pr, why: noReport(timedOut, timeoutMs) })
           continue
         }
         const fails = failuresOf(report, wt)
@@ -545,7 +574,7 @@ export function guardWarnings({ failing, skipped, unchecked }, guards) {
     const more = failures.length > 1 ? ` (and ${failures.length - 1} more)` : ''
     return { check: 'guards', message: `#${pr.number} "${pr.title}" (${pr.headRefName}) would fail ${first.file}${first.name ? ` > ${first.name}` : ''} with this branch merged in: ${first.line}${more}. Fix it in this change, or tell its author.` }
   })
-  const left = [...skipped.map(({ pr, why }) => `#${pr.number} (${why})`), ...unchecked.map((pr) => `#${pr.number} (time limit reached)`)]
+  const left = [...skipped, ...unchecked].map(({ pr, why }) => `#${pr.number} (${why})`)
   if (left.length) warnings.push({ check: 'guards', message: `${guards.join(', ')} was not run against: ${left.join('; ')}.` })
   return warnings
 }
@@ -835,6 +864,8 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
     }
 
     // revert: the changed tests, at the head, with everything else the pull request changed put back.
+    // The first pass's report: it also says how long the guards among the tests took, which is the least one run of them needs
+    let firstReport = null
     const tests = changed.filter((c) => c.status !== 'D' && isVitestFile(c.path))
     if (skip('revert')) {
       // nothing: the exemption and its reason are in the answer
@@ -853,27 +884,34 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         unlinkLinks(top)
         runners.prepare(top, root)
       }
-      let failed = 0
-      // Answers the tests, or null when vitest gave no report (out of time included)
-      const run = (files) => {
+      // Answers the tests and the pass (see realRunners.vitest) and the limit it was given; the tests are null when vitest gave no report
+      const run = (files, options = {}) => {
         check()
-        const report = runners.vitest(top, files, { timeoutMs: left() })
-        if (!report) return null
-        // Failures, not "not passed": a skipped or todo test is neither, and a file that did not load fails with no test of its own
-        failed = failuresOf(report, top).length
-        return vitestTests(report, top)
+        // At least a second: an install before this may have used the time up, and a limit of 0 or less means none to the runner
+        const limitMs = Math.max(1000, left())
+        const pass = runners.vitest(top, files, { timeoutMs: limitMs, ...options })
+        return { ...pass, limitMs, tests: pass.report ? vitestTests(pass.report, top) : null }
       }
-      const reverted = run(tests.map((t) => t.path))
-      const failing = failed
-      // The second pass only tells which passing tests the base's version of a file already had: a file that is
-      // new (added) has none to ask, and one with no passing test in the first pass has nothing to compare
+      const first = run(tests.map((t) => t.path))
+      const reverted = first.tests
+      firstReport = first.report
+      // Failures, not "not passed": a skipped or todo test is neither, and a file that did not load fails with no test of its own
+      const failing = first.report ? failuresOf(first.report, top).length : 0
+      // The second pass only tells which passing tests the base's version of a file already had, so it only needs their names:
+      // a pass that selects no test finds them in seconds where running them would take as long again, and names the skipped
+      // ones too, so a test the pull request un-skips was there. A file that is new (added) has none to ask, and one with no
+      // passing test in the first pass has nothing to compare
       const passing = new Set((reverted ?? []).filter((t) => t.status === 'passed').map((t) => t.file))
       const existed = tests.filter((t) => t.status !== 'A' && passing.has(t.path)).map((t) => t.path)
       for (const p of existed) git(top, ['checkout', fork, '--', p])
+      // The base's test names; null when there was no time to ask (said already) or vitest gave no report (said below)
       let before = []
-      if (reverted && existed.length) before = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed)
-      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, 'vitest gave no report (it ran out of time, or did not start)')
-      else if (!before) notRun('revert', `The base's version of ${existed.join(', ')}`, 'no report, so no test was judged')
+      if (reverted && existed.length) {
+        const named = outOfTime('revert', `The base's version of ${existed.join(', ')}`) ? null : run(existed, { namesOnly: true })
+        before = named?.tests ?? null
+        if (named && !before) notRun('revert', `The base's version of ${existed.join(', ')}`, `${noReport(named.timedOut, named.limitMs)}, so no test was judged`)
+      }
+      if (!reverted) notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, noReport(first.timedOut, first.limitMs))
       // Without the base's answer every passing test would look new: say nothing of them
       const loose = reverted && before ? passingNewTests({ reverted, base: before }) : []
       for (const t of loose) {
@@ -895,8 +933,9 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
         }
         if (prs) {
           const guardsMs = Math.min(guardsLimitMs, left())
+          const guardMs = filesRunMs(firstReport, top, guards)
           log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsMs / 1000)} s`)
-          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsMs, now, log, check })
+          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsMs, now, log, check, needMs: guardMs, perPrMs: Math.max(GUARDS_PER_PR_MS, Math.ceil(guardMs * 1.5)) })
           warnings.push(...guardWarnings(res, guards))
           notes.push(`${guards.join(', ')} run against ${prs.length} open pull request(s): ${res.failing.length} would fail, ${res.skipped.length} skipped, ${res.unchecked.length} not reached.`)
         }

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, filesRunMs, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -26,13 +26,14 @@ const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t',
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', env: GIT_ENV }).trim()
 
 type Report = { testResults: { name: string; assertionResults: { ancestorTitles: string[]; title: string; status: string }[] }[] }
+type Pass = { report: Report | null; timedOut: boolean }
 
 /**
  * `linkTo`: each worktree gets a real link (a junction on Windows) at src/node_modules to that folder,
  * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
  */
 function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: boolean; linkTo?: string } = {}) {
-  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], timeouts: [] as (number | undefined)[] }
+  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], names: [] as string[][], timeouts: [] as (number | undefined)[] }
   return {
     calls,
     runners: {
@@ -59,21 +60,26 @@ function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: bo
         calls.lint.push(files)
         return opts.lintFails ? { ok: false, out: 'src/b.mjs\n  1:1  error  Unsafe type assertion  @typescript-eslint/no-unsafe-type-assertion' } : { ok: true, out: '' }
       },
-      vitest: (dir: string, files: string[], o?: { timeoutMs?: number }): Report => {
+      // A line `title :: file :: text` is a test that passes when the file holds the text; a fourth field `skip` makes it a skipped
+      // one. With `namesOnly` none runs: every test is named, as skipped
+      vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean }): Pass => {
         calls.timeouts.push(o?.timeoutMs)
-        calls.vitest.push(files)
+        ;(o?.namesOnly ? calls.names : calls.vitest).push(files)
         return {
-          testResults: files.map((file) => ({
-            name: join(dir, file),
-            assertionResults: readFileSync(join(dir, file), 'utf8')
-              .split('\n')
-              .filter((l) => l.includes(' :: '))
-              .map((l) => {
-                const [title, target, text] = l.split(' :: ').map((s) => s.trim()) as [string, string, string]
-                const ok = existsSync(join(dir, target)) && readFileSync(join(dir, target), 'utf8').includes(text)
-                return { ancestorTitles: [], title, status: ok ? 'passed' : 'failed' }
-              }),
-          })),
+          timedOut: false,
+          report: {
+            testResults: files.map((file) => ({
+              name: join(dir, file),
+              assertionResults: readFileSync(join(dir, file), 'utf8')
+                .split('\n')
+                .filter((l) => l.includes(' :: '))
+                .map((l) => {
+                  const [title, target, text, skip] = l.split(' :: ').map((s) => s.trim()) as [string, string, string, string | undefined]
+                  const ok = existsSync(join(dir, target)) && readFileSync(join(dir, target), 'utf8').includes(text)
+                  return { ancestorTitles: [], title, status: o?.namesOnly || skip ? 'skipped' : ok ? 'passed' : 'failed' }
+                }),
+            })),
+          },
         }
       },
     },
@@ -132,6 +138,49 @@ describe('what pre-pr reads', () => {
     const tests = vitestTests({ testResults: [{ name: join(root, 'a', 'x.test.ts'), assertionResults: [{ ancestorTitles: ['outer'], title: 'one', status: 'passed' }, { ancestorTitles: [], title: 'two', status: 'failed' }, { ancestorTitles: [], title: 'three', status: 'passed' }] }] }, root)
     expect(tests[0]).toEqual({ file: 'a/x.test.ts', name: 'outer > one', status: 'passed' })
     expect(passingNewTests({ reverted: tests, base: [{ file: 'a/x.test.ts', name: 'three', status: 'passed' }] })).toEqual([tests[0]])
+  })
+
+  it('names the tests of a file with the real vitest without running one, the skipped and todo ones too', () => {
+    // A folder of its own that reaches this checkout's dependencies, so no test file lands among the repository's
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-names-'))
+    try {
+      symlinkSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules'), join(dir, 'node_modules'), 'junction')
+      writeFileSync(
+        join(dir, 'names.test.ts'),
+        [
+          "import { describe, expect, it } from 'vitest'",
+          "it('runs', () => { throw new Error('ran') })",
+          "it.skip('is skipped', () => {})",
+          "it.todo('is todo')",
+          "it.runIf(false)('is not run here', () => {})",
+          "describe.skip('a skipped block', () => { it('inside', () => {}) })",
+          "describe('a block', () => { it('inside too', () => expect(1).toBe(1)) })",
+          '',
+        ].join('\n'),
+      )
+      const named = realRunners.vitest(dir, ['names.test.ts'], { timeoutMs: 60_000 * SLOW, namesOnly: true })
+      expect(named.timedOut).toBe(false)
+      const tests = vitestTests(named.report, dir)
+      expect(tests.map((t: { name: string }) => t.name).sort()).toEqual(['a block > inside too', 'a skipped block > inside', 'is not run here', 'is skipped', 'is todo', 'runs'])
+      // None ran: the first would have failed
+      expect(new Set(tests.map((t: { status: string }) => t.status))).toEqual(new Set(['skipped']))
+      expect(vitestTests(null, dir)).toEqual([])
+    } finally {
+      unlinkLinks(dir)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 90_000 * SLOW)
+
+  it('reads how long the slowest of some files of a report took on its own, not the span the shared pass took around them', () => {
+    const root = join(tmpdir(), 'r')
+    // a ran at the start and b at the end of a long pass: the span is 44 s, a pass of the two together takes the slower's 7 s
+    const report = { testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000, endTime: 5000 }, { name: join(root, 'b.test.ts'), startTime: 38_000, endTime: 45_000 }, { name: join(root, 'c.test.ts'), startTime: 0, endTime: 50_000 }] }
+    expect(filesRunMs(report, root, ['a.test.ts', 'b.test.ts'])).toBe(7000)
+    expect(filesRunMs(report, root, ['a.test.ts'])).toBe(4000)
+    expect(filesRunMs(report, root, ['other.test.ts'])).toBe(0)
+    expect(filesRunMs(null, root, ['a.test.ts'])).toBe(0)
+    // A file with no time in the report counts for nothing, not for NaN (which no gate and no limit would take as a number)
+    expect(filesRunMs({ testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000 }, { name: join(root, 'b.test.ts'), startTime: 0, endTime: 3000 }] }, root, ['a.test.ts', 'b.test.ts'])).toBe(3000)
   })
 
   it('mirrors the checkout\'s dependencies into a worktree with the same lockfile, workspace packages pointing at the worktree, and unlinks them without touching the checkout (#1254)', () => {
@@ -347,13 +396,31 @@ describe('pre-pr on a stack of two pull requests', () => {
     commit('solo')
     const solo = run({ head: 'solo' })
     expect(solo.calls.vitest).toEqual([['src/a.test.mjs']])
+    expect(solo.calls.names).toEqual([])
     expect(solo.findings).toEqual([])
     // One that passes asks, and its new test is named
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nstill exports :: src/a.mjs :: export\n')
     commit('solo: a test that guards nothing')
     const loose = run({ head: 'solo' })
-    expect(loose.calls.vitest).toEqual([['src/a.test.mjs'], ['src/a.test.mjs']])
+    expect(loose.calls.vitest).toEqual([['src/a.test.mjs']])
+    expect(loose.calls.names).toEqual([['src/a.test.mjs']])
     expect(loose.findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
+  })
+
+  it('counts a test that the base had skipped as already there, so un-skipping one is no news', () => {
+    git(repo, 'checkout', '-q', '-b', 'unskip', 'main')
+    write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nonce skipped :: src/a.mjs :: export :: skip\n')
+    commit('unskip: a skipped test on main')
+    git(repo, 'checkout', '-q', '-b', 'unskipped')
+    write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nonce skipped :: src/a.mjs :: export\n')
+    commit('unskipped: it runs now')
+    const r = run({ head: 'unskipped', base: 'unskip' })
+    expect(r.calls.names).toEqual([['src/a.test.mjs']])
+    expect(r.findings.filter((f: { check: string }) => f.check === 'revert')).toEqual([])
+    // A name the base's file did not have at all is new
+    write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nonce skipped :: src/a.mjs :: export\nbrand new :: src/a.mjs :: export\n')
+    commit('unskipped: and a new one')
+    expect(run({ head: 'unskipped', base: 'unskip' }).findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "brand new"'])
   })
 
   it('refuses what it could not start for want of time, as it refuses a failure, and runs nothing then', () => {
@@ -377,19 +444,47 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(fake.calls.timeouts).toEqual([300_000, 200_000, 100_000, 100_000])
   })
 
+  it('gives the changed tests at least a second when an install before them used the time up: a limit of 0 or less would mean none', () => {
+    git(repo, 'checkout', '-q', '-b', 'deps', 'top')
+    write('package.json', '{}\n')
+    commit('deps')
+    const clock = { now: 0 }
+    const fake = fakeRunners()
+    const limits: (number | undefined)[] = []
+    const runners = {
+      ...fake.runners,
+      // The revert check's install (the dependencies changed) comes after the lint check, and takes more than the whole time
+      prepare: (dir: string) => {
+        fake.runners.prepare(dir)
+        if (fake.calls.lint.length) clock.now = 400_000
+      },
+      vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean }) => (limits.push(o?.timeoutMs), fake.runners.vitest(dir, files, o)),
+    }
+    prePr({ cwd: repo, head: 'deps', main: 'main', fetch: false, runners, limitMs: 300_000, now: () => clock.now })
+    expect(limits[0]).toBe(1000)
+  })
+
   it('does not judge a test when a vitest pass gave no report or a tool was stopped, and says so', () => {
     const fake = fakeRunners()
     const stopped = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tsc: () => ({ ok: false, out: '', timedOut: true }) } })
     expect(stopped.findings.filter((f: { check: string }) => f.check === 'tsc').map((f: { message: string }) => f.message.split(': not run')[0]).length).toBe(2)
     expect(stopped.findings.filter((f: { message: string }) => /tsc fails/.test(f.message))).toEqual([])
     // The first pass: no report
-    const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: () => null } })
+    const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: () => ({ report: null, timedOut: false }) } })
     expect(first.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(first.findings[0].message).toMatch(/not run: vitest gave no report/)
-    // The second pass: no report, and no test of the first looks new
-    let n = 0
-    const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: (dir: string, files: string[]) => (n++ ? null : fake.runners.vitest(dir, files)) } })
-    expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: no report/.test(f.message)])).toEqual([['revert', true]])
+    // ...and one that was stopped at the limit it was given says that, so the step that ran out is named. It is how the step ended
+    // that tells, not the clock: a crash with the time used up reads as a crash
+    const clock = { now: 0 }
+    const limited = (timedOut: boolean) => ({ ...fake.runners, vitest: () => ((clock.now = 300_000), { report: null, timedOut }) })
+    const outOfTime = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(true) })
+    expect(outOfTime.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: vitest was stopped after 300 s, the most it was given, before it had finished/)])
+    clock.now = 0
+    const crashed = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(false) })
+    expect(crashed.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/not run: vitest gave no report \(it did not start, or crashed\)/)])
+    // The base's names: none, and no test of the first pass looks new
+    const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: (dir: string, files: string[], o?: { namesOnly?: boolean }) => (o?.namesOnly ? { report: null, timedOut: false } : fake.runners.vitest(dir, files, o)) } })
+    expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: vitest gave no report .*so no test was judged/.test(f.message)])).toEqual([['revert', true]])
   })
 
   it('reports each new test that passes with the other changes reverted, and none that fails or was there', () => {
@@ -398,21 +493,23 @@ describe('pre-pr on a stack of two pull requests', () => {
       'src/a.test.mjs: "still exports" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
       'src/b.test.mjs: "has a" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
     ])
-    // The changed file ran at the head's version, then at the base's to learn which tests were there
-    expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs'], ['src/a.test.mjs']])
+    // The changed files ran once, at the head's version; the base's version was only listed, to learn which tests were there
+    expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs']])
+    expect(r.calls.names).toEqual([['src/a.test.mjs']])
     expect(r.ok).toBe(false)
   })
 
   it('counts a failed test and a file that did not load as failing without the change, a skipped test as neither (#1806)', () => {
     const fake = fakeRunners()
     const vitest = (dir: string, files: string[]) => ({
-      testResults: files.map((file) => ({
+      timedOut: false,
+      report: { testResults: files.map((file) => ({
         name: join(dir, file),
         status: file === 'src/a.test.mjs' ? 'failed' : 'passed',
         message: 'beforeAll threw',
         // The reverted tree: a.test.mjs did not load, so its tests are skipped; b.test.mjs has one failure and one skipped test
         assertionResults: file === 'src/a.test.mjs' ? [{ title: 'one', status: 'skipped' }, { title: 'two', status: 'skipped' }] : [{ title: 'x', status: 'failed', failureMessages: ['no'] }, { title: 'y', status: 'skipped' }, { title: 'z', status: 'todo' }],
-      })),
+      })) },
     })
     const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest } })
     expect(r.notes).toContain('2 test(s) of 2 changed file(s) fail without the change; no new test passes without it.')
@@ -775,6 +872,8 @@ describe('pre-pr and the guards a branch adds', () => {
   const GUARD = 'no banned in src :: src :: banned\n'
   const clock = { t: 0 }
   let step = 1000
+  // How long a test file takes where it is not `step`
+  const fileMs: Record<string, number> = {}
   const vitestCalls: string[][] = []
   const runners = (prs: unknown[], extra: Record<string, unknown> = {}) => {
     const fake = fakeRunners()
@@ -785,11 +884,17 @@ describe('pre-pr and the guards a branch adds', () => {
       prepare: (dir: string, _root: string, options?: { linkOnly?: boolean }) => (options?.linkOnly && existsSync(join(dir, 'needs-install')) ? false : undefined),
       vitest: (dir: string, files: string[]) => {
         vitestCalls.push(files)
-        clock.t += step
+        // The files run side by side: the pass ends with the slowest
+        const startTime = clock.t
+        clock.t += Math.max(...files.map((f) => fileMs[f] ?? step))
         return {
+          timedOut: false,
+          report: {
           testResults: files.map((file) => ({
             name: join(dir, file),
             status: 'passed',
+            startTime,
+            endTime: startTime + (fileMs[file] ?? step),
             assertionResults: readFileSync(join(dir, file), 'utf8')
               .split('\n')
               .filter((l) => l.includes(' :: '))
@@ -799,6 +904,7 @@ describe('pre-pr and the guards a branch adds', () => {
                 return { ancestorTitles: [], title, status: hit ? 'failed' : 'passed', failureMessages: hit ? [`AssertionError: ${folder}/${hit} holds "${word}"\n    at somewhere`] : [] }
               }),
           })),
+          },
         }
       },
       ...extra,
@@ -814,6 +920,7 @@ describe('pre-pr and the guards a branch adds', () => {
   beforeEach(() => {
     clock.t = 0
     step = 1000
+    for (const f of Object.keys(fileMs)) delete fileMs[f]
     vitestCalls.length = 0
     repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
     bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
@@ -908,6 +1015,16 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(r.notes).toContain('tooling/guard.test.ts run against 3 open pull request(s): 0 would fail, 0 skipped, 1 not reached.')
   })
 
+  it('tries the merge before the time, so a pull request that does not merge is not blamed on the clock', () => {
+    addGuard()
+    write('src/a.txt', 'mine\n')
+    commit('feat: changes a file')
+    const prs = [openPr(21, { 'src/p21.txt': 'fine\n' }), openPr(22, { 'src/a.txt': 'theirs\n' }), openPr(26, { 'src/p26.txt': 'fine\n' })]
+    // #21 uses the guards' second; #22 would come after it, with no time left, and conflicts: it says so, where #26, that merges, says the time ran out
+    const r = run(runners(prs), { guardsLimitMs: 1000 })
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #22 (does not merge cleanly with this branch (src/a.txt)); #26 (time limit reached).'])
+  })
+
   it('caps the guards by what is left of the whole run, not only by their own limit', () => {
     addGuard()
     step = 31_000
@@ -916,6 +1033,66 @@ describe('pre-pr and the guards a branch adds', () => {
     const r = run(runners(prs), { limitMs: 61_500 })
     expect(vitestCalls).toHaveLength(2)
     expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
+  })
+
+  // #1816: one run of project-board-queue.test.ts takes more than the five minutes a pull request was given, so the guards spent
+  // their ten minutes cutting two runs off half way and learned nothing. The guards took as long in the revert check's run as one
+  // run of them needs at the least: a pull request is started with that much time left or not at all, and given more than five minutes when it took more.
+  const withRevert = (rs: ReturnType<typeof runners>, over: Record<string, unknown> = {}) =>
+    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, ...over })
+
+  it('starts a pull request only with as much time left as one run of the guards took, and says what was left', () => {
+    addGuard()
+    step = 30_000
+    const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
+    // 100 s in all: the revert check's run takes 30 s, and the guards have 70 s left. #21 runs (40 s left), #22 runs (10 s left), and #26 would be cut off
+    const r = withRevert(runners(prs), { limitMs: 100_000 })
+    expect(vitestCalls).toHaveLength(3)
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (not started: a run takes about 30 s and 10 s were left).'])
+  })
+
+  it('sizes the guard runs by the guards, not by the slowest test the pull request changed', () => {
+    addGuard()
+    write('src/slow.test.mjs', 'slow :: src :: nothing-here\n')
+    commit('feat: a slow test')
+    step = 30_000
+    fileMs['src/slow.test.mjs'] = 300_000
+    const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
+    // 370 s in all: the revert check's run takes 300 s, because of the slow test, and the guard file in it 30 s. The 70 s left hold
+    // two runs of the guard (sized by the slow test, none would start; without the gate, all three would)
+    const r = withRevert(runners(prs), { limitMs: 370_000 })
+    expect(vitestCalls.filter((f) => f.length === 1 && f[0] === 'tooling/guard.test.ts')).toHaveLength(2)
+    expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (not started: a run takes about 30 s and 10 s were left).'])
+  })
+
+  it('gives a guard run more than five minutes when the changed tests took longer, and says when it was cut off', () => {
+    addGuard()
+    const prs = [openPr(21, { 'src/p21.txt': 'fine\n' })]
+    const given: (number | undefined)[] = []
+    // The revert check's run takes 400 s; the guards' run is stopped at the limit it is given
+    const cutOff = (clockStep: number) => {
+      let calls = 0
+      return runners(prs, {
+        vitest: (dir: string, files: string[], o?: { timeoutMs?: number }) => {
+          if (calls++ === 0) {
+            clock.t += clockStep
+            return { timedOut: false, report: { testResults: files.map((file) => ({ name: join(dir, file), status: 'passed', startTime: 0, endTime: clockStep, assertionResults: [{ ancestorTitles: [], title: 'no banned in src', status: 'passed' }] })) } }
+          }
+          given.push(o?.timeoutMs)
+          clock.t += o?.timeoutMs ?? 0
+          return { report: null, timedOut: true }
+        },
+      })
+    }
+    const slow = withRevert(cutOff(400_000))
+    expect(given).toEqual([600_000])
+    expect(guardsOf(slow)).toEqual(['tooling/guard.test.ts was not run against: #21 (vitest was stopped after 600 s, the most it was given, before it had finished).'])
+    // Quick tests keep the five minutes a pull request always had
+    clock.t = 0
+    given.length = 0
+    const quick = withRevert(cutOff(1_000))
+    expect(given).toEqual([300_000])
+    expect(guardsOf(quick)[0]).toContain('vitest was stopped after 300 s')
   })
 
   it('asks nothing of GitHub when the branch changes no guard or the check is exempted, and leaves no ref behind', () => {
