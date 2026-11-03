@@ -30,7 +30,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     const [sent] = w.store.mailbox.feedOf(A, { limit: 1 })
     expect(sent).toMatchObject({ kind: 'message', needsReply: true, body: 'Is #12 still open?' })
     expect(r.text).toBe(`Sent ${sent!.id} to beta (${B}). It waits for a reply; the reply will reach you as mail. What comes back arrives in your mailbox, and wakes you if you are at rest.`)
-    w.run('a', { action: 'send', to: 'orchestrator', cite: true, text: 'help please', kind: 'question' })
+    w.run('a', { action: 'send', to: 'orchestrator', text: 'help please', kind: 'question' })
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
   })
 

@@ -72,8 +72,8 @@ export type SendInput = {
   cite?: boolean
 }
 /**
- * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the orchestrator cites, checked. `toPerson`:
- * why a request went to the person instead of the orchestrator (it cites no word of the person's that passed the check)
+ * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the orchestrator cites, checked.
+ * `notCited`: why a citation the request asked for did not pass the check, so the orchestrator reads the request as the session's own words
  */
 export type SendResult = {
   message: MailRow
@@ -82,7 +82,7 @@ export type SendResult = {
   quiet: boolean
   asWork: boolean
   cited?: { seq: number; at: number }
-  toPerson?: string
+  notCited?: string
 }
 
 /** How old the person's message a request cites may be (owner, 2026-11-03) */
@@ -244,14 +244,7 @@ export class MessageService {
     const asWork = target !== undefined && this.answersClarification(sender, target, to)
     const kind: MailKind = asWork ? 'task' : 'message'
 
-    let requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
-    // A request reaches the orchestrator only on the person's word; without it, it is the person's to read (docs/plans/cited-requests.md §2)
-    const word = requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, input.cite === true) : null
-    if (typeof word === 'string') {
-      to = [...new Set(to.map((r, i) => (requests[i] ? PERSON : r)))]
-      requests = to.map(() => false)
-    }
-    const cited = word !== null && typeof word === 'object' ? word : undefined
+    const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
     for (const [i, r] of to.entries()) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
@@ -262,6 +255,9 @@ export class MessageService {
 
     return this.run(() => {
       const now = this.now()
+      // The person's message a request cites, checked here, in the send's transaction: evidence for the orchestrator's judgement (docs/plans/cited-requests.md §3)
+      const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
+      const cited = word !== null && typeof word === 'object' ? word : undefined
       this.guards(sender, cls, to, text, target, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
@@ -290,19 +286,20 @@ export class MessageService {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
         else this.answerHeld(target, stored, held[0]?.why ?? 'policy')
       }
-      return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { toPerson: word } : {}) }
+      return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
     })
   }
 
   /**
    * The person's word a request cites, checked in code (docs/plans/cited-requests.md §3): the newest message the person typed in the sender's own
-   * conversation, at most `CITE_MS` old, not cited before by this sender. Or, when there is none that passes, why not, in words for the sender
+   * conversation, at most `CITE_MS` old and not later than now, not cited before by this sender. Or, when none passes, why not, in words for the sender
    */
-  private personWord(sender: string, sessionId: string, cite: boolean): { seq: number; at: number } | string {
-    if (!cite) return "it cites no message of the person's"
+  private personWord(sender: string, sessionId: string, now: number): { seq: number; at: number } | string {
     const said = this.opts.personSaid?.(sessionId) ?? null
     if (!said) return 'the person has typed nothing in this session that it could cite'
-    const age = this.now() - said.ts
+    const age = now - said.ts
+    // A clock set back makes a message look newer than it is
+    if (age < 0) return "the person's last message here is dated later than now"
     if (age > CITE_MS) return `the person's last message here is ${Math.round(age / 60_000)} minutes old, and a citation may be ${CITE_MS / 60_000} at most`
     if (this.records.hasDedupe(sender, citeKey(said.seq))) return "the person's last message here was cited by an earlier request already"
     return { seq: said.seq, at: said.ts }

@@ -462,19 +462,15 @@ export class SessionManager {
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      // The record of a step done on the person's word, where they wrote it (docs/plans/cited-requests.md §5; its words are the owner's call)
-      onPersonsWord: (asker, act) => {
-        const cited = this.store.messages.loadMessagesFrom(asker.sessionId, asker.cites.seq - 1, 1).find((r) => r.seq === asker.cites.seq)
+      // The record of a step a session's request had done, where the person reads that session (docs/plans/cited-requests.md §5; its words are the owner's call)
+      done: (asker, act) => {
+        const cites = asker.cites
+        const cited = cites ? this.store.messages.loadMessagesFrom(asker.sessionId, cites.seq - 1, 1).find((r) => r.seq === cites.seq) : undefined
         const words = cited && typeof cited.payload === 'object' && cited.payload !== null && 'text' in cited.payload ? String(cited.payload.text) : ''
-        const ago = Math.max(1, Math.round((Date.now() - asker.cites.at) / 60_000))
-        this.events.onEvent({
-          type: 'notice',
-          sessionId: asker.sessionId,
-          level: 'info',
-          from: 'Centralu',
-          label: 'on your word',
-          text: `On your message from ${ago} min ago (${JSON.stringify(oneLineText(words, 60))}), the orchestrator did this for this session's request without asking you again: ${oneLineText(act, 300)}`,
-        })
+        const why = cites
+          ? `On your message from ${Math.max(1, Math.round((Date.now() - cites.at) / 60_000))} min ago (${JSON.stringify(oneLineText(words, 60))}), the orchestrator did this for this session's request`
+          : "For this session's request, which cites no message of yours, the orchestrator did this"
+        this.events.onEvent({ type: 'notice', sessionId: asker.sessionId, level: 'info', from: 'Centralu', label: 'request record', text: `${why}: ${oneLineText(act, 300)}` })
       },
     })
     this.linkedReports = new LinkedReports(this.parts())
@@ -1971,7 +1967,7 @@ export class SessionManager {
       refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal) }),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {

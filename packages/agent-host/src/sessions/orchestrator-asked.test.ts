@@ -84,6 +84,8 @@ const due = async (sessionId: string) => {
 const personSays = async (to: SessionInfo, text: string) => {
   await w.rpc('agents.send', { sessionId: to.id, text })
   await settle()
+  // The mail's clock catches up with the wall clock the message was stamped by
+  clock.t = Date.now()
 }
 /** A request on the person's word: the person asks the session, and the session cites it (docs/plans/cited-requests.md) */
 const askOrchestrator = async (from: SessionInfo, text: string, cite = true) => {
@@ -103,6 +105,9 @@ function card() {
   return d?.kind === 'other' && d.about === ORCHESTRATOR_CHANGE ? { requestId: pending!.requestId, text: d.raw } : undefined
 }
 const nameOf = (id: string) => w.mgr.sessionInfo(id)?.name
+/** The records Centralu left in a session of steps a request of it had done (docs/plans/cited-requests.md §5) */
+const recordsIn = (s: SessionInfo): string[] =>
+  w.store.messages.loadMessages(s.id, 200).flatMap((r) => (typeof r.payload === 'object' && r.payload !== null && 'label' in r.payload && r.payload.label === 'request record' && 'text' in r.payload ? [String(r.payload.text)] : []))
 /** What a call settles to within a moment, or 'pending' while it waits (a card it raised, say) */
 const settled = <T>(p: Promise<T>) => Promise.race([p, new Promise<'pending'>((r) => setTimeout(() => r('pending'), 150))])
 
@@ -141,61 +146,59 @@ describe('in the turn a request starts, every step that changes something asks t
     const acme = await project('Acme', trusted)
     const asker = await sessionIn(acme)
     const other = await sessionIn(acme)
+    const third = await sessionIn(acme)
     await askOrchestrator(asker, 'please rename the other session')
     await due(orc.id)
     const request = requestsOf(asker).at(-1)!
     // The turn is the request's, and its asker is fixed (§7.6)
     expect(m.turns.current(orc.id)).toMatchObject({ messageId: request.id, asker: addressOf(asker.id) })
-    return { asker, other, acme, request }
+    return { asker, other, third, acme, request }
   }
 
   it('under auto: the card says who asked and what for, and Deny leaves everything as it was', async () => {
     const { asker, other, acme } = await asked()
-    const before = nameOf(other.id)
-    const call = run('rename_session', { sessionId: other.id, name: 'Renamed by request' })
+    // A delete cannot be undone: it asks, cited or not (docs/plans/cited-requests.md §2)
+    const call = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
     expect(card()!.text).toBe(
-      `Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run rename_session {"sessionId":"${other.id}","name":"Renamed by request"}. It is the session's request, not yours.`,
+      `Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run delete_session {"sessionId":"${other.id}"}. It is the session's request, not yours.`,
     )
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toContain('the person did not allow it')
-    expect(nameOf(other.id)).toBe(before)
+    expect(nameOf(other.id)).toBe(other.name)
   })
 
   it('Allow does it, once: the next step asks again, and an old window’s “always” is only an Allow', async () => {
-    const { other } = await asked()
-    const first = run('rename_session', { sessionId: other.id, name: 'First' })
+    const { other, third } = await asked()
+    const first = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
     w.mgr.respondApproval(orc.id, card()!.requestId, 'always')
     expect((await first).isError).toBeFalsy()
-    expect(nameOf(other.id)).toBe('First')
+    expect(nameOf(other.id)).toBeUndefined()
 
-    const second = run('rename_session', { sessionId: other.id, name: 'Second' })
+    const second = run('delete_session', { sessionId: third.id })
     await eventually(() => !!card())
-    expect(nameOf(other.id)).toBe('First')
+    expect(nameOf(third.id)).toBe(third.name)
     w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
     await second
-    expect(nameOf(other.id)).toBe('Second')
+    expect(nameOf(third.id)).toBeUndefined()
   })
 
-  it('a step that asks on its own is one card, not two: trusting a project is the person’s one Allow', async () => {
-    const { acme } = await asked()
+  it('a step that can be undone takes no card, the one it raises itself covered: trusting a project, recorded where the session asked', async () => {
+    const { asker, acme } = await asked()
     const wild = await project('Wild', false)
-    const call = run('set_project_trust', { project: wild.id, trusted: true })
-    await eventually(() => !!card())
-    expect(card()!.text).toContain('asked the orchestrator to run set_project_trust')
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
-    // Were the trust card raised too, the call would wait on it for good
-    const r = await Promise.race([call, new Promise<'pending'>((res) => setTimeout(() => res('pending'), 3_000))])
+    // Were the trust card raised, the call would wait on it for good
+    const r = await Promise.race([run('set_project_trust', { project: wild.id, trusted: true }), new Promise<'pending'>((res) => setTimeout(() => res('pending'), 3_000))])
     expect(r).not.toBe('pending')
-    expect(card()).toBeUndefined()
+    expect(w.mgr.sessionInfo(orc.id)?.pendingApproval ?? null).toBeNull()
     expect(((await w.rpc('projects.list', {})) as ProjectInfo[]).find((p) => p.id === wild.id)?.trusted).toBe(true)
     expect(acme.trusted).toBe(true)
+    expect(recordsIn(asker)).toEqual([expect.stringContaining("the orchestrator did this for this session's request: run set_project_trust")])
   })
 
-  it('reading and answering the request need no card; mail to anyone else does', async () => {
+  it('reading and answering the request need no card, and nor does mail to anyone else, which is recorded', async () => {
     const { asker, other, request } = await asked()
     const reply = await settled(run('mail', { action: 'reply', thread: request.id, text: 'done: it is renamed' }))
     expect(reply).toMatchObject({ text: expect.stringContaining(`It answers ${request.id}`) })
@@ -206,13 +209,11 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(card()).toBeUndefined()
     expect(wordsTo(asker)).toEqual(['done: it is renamed'])
 
-    // A word to another session, or an answer to a message that is not this request, is a step that reaches someone: it asks
-    const sent = run('mail', { action: 'send', to: other.id, text: 'a word to the other session' })
-    await eventually(() => !!card())
-    expect(card()!.text).toContain('run mail')
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
-    expect((await sent).isError).toBe(true)
-    expect(read.between(addressOf(orc.id), addressOf(other.id))).toEqual([])
+    // A word to another session goes, and the asking session shows it went
+    expect(await settled(run('mail', { action: 'send', to: other.id, text: 'a word to the other session' }))).toMatchObject({ text: expect.stringContaining('Sent') })
+    expect(card()).toBeUndefined()
+    expect(read.between(addressOf(orc.id), addressOf(other.id)).map((x) => x.body)).toEqual(['a word to the other session'])
+    expect(recordsIn(asker)).toEqual([expect.stringContaining('run mail')])
   })
 
   it('the turn’s end is reported to the session that asked, and the next step is the orchestrator’s own again', async () => {
@@ -333,12 +334,12 @@ describe('who asked is fixed when the turn begins (§9.7)', () => {
     m.service.partyGone(addressOf(asker.id))
     expect(read.row(request!.id, addressOf(orc.id))?.settled).not.toBeNull()
 
-    const call = run('rename_session', { sessionId: other.id, name: 'Renamed after the asker left' })
+    const call = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
-    expect(card()!.text).toContain(`Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run rename_session`)
+    expect(card()!.text).toContain(`Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run delete_session`)
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await call).isError).toBe(true)
-    expect(nameOf(other.id)).not.toBe('Renamed after the asker left')
+    expect(nameOf(other.id)).toBe(other.name)
   })
 
   it('and does not unhide a request held for the person', async () => {
@@ -399,7 +400,7 @@ describe('a request is read in its own turn only (§9.7)', () => {
     expect(text).not.toContain('SECOND-WORDS')
     expect((await run('mail', { action: 'inbox' })).text).not.toContain('SECOND-WORDS')
     // The step of this turn names the session whose words this turn read
-    const call = run('rename_session', { sessionId: other.id, name: 'Named' })
+    const call = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
     expect(card()!.text).toContain(`Session ${JSON.stringify(asker.name)}`)
     // (their names are alike; their projects are not)
@@ -430,56 +431,63 @@ describe('the person’s Allow for a step covers that step only', () => {
     await due(orc.id)
     const cards = (w.mgr as unknown as { hostCards: { cover<T>(id: string, run: () => Promise<T>): Promise<T> } }).hostCards
     // Inside a cover (an Allow already given for some call) the nested step must still raise its own card
-    const nested = cards.cover(orc.id, () => run('rename_session', { sessionId: other.id, name: 'Nested' }))
+    const nested = cards.cover(orc.id, () => run('delete_session', { sessionId: other.id }))
     await eventually(() => !!card())
-    expect(nameOf(other.id)).not.toBe('Nested')
+    expect(nameOf(other.id)).toBe(other.name)
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await nested).isError).toBe(true)
   })
 })
 
-describe('a request reaches the orchestrator on the person’s word only (#1739, docs/plans/cited-requests.md)', () => {
-  /** What reached the person's Inbox from the session: mail to the person */
-  const toPerson = (asker: SessionInfo): string[] => read.between(addressOf(asker.id), PERSON).map((x) => x.body)
-
-  it('without a citation the request goes to the person, the session is told at once, and the orchestrator is not woken', async () => {
+describe('a request’s citation is evidence for the orchestrator, checked by the host (#1739, docs/plans/cited-requests.md)', () => {
+  it('without a citation the request still wakes the orchestrator, and its header says these are the session’s words only', async () => {
     const acme = await project('Acme', true)
     const asker = await sessionIn(acme)
     const r = await askOrchestrator(asker, 'register C:\\work\\app as a project', false)
-    expect(r.text).toContain("It went to the person, not the orchestrator: it cites no message of the person's.")
+    expect(r.text).not.toContain('citation')
     await due(orc.id)
-    expect(requestsOf(asker)).toEqual([])
-    expect(toPerson(asker)).toEqual(['register C:\\work\\app as a project'])
-    expect(handleOf(orc.id).sent).toEqual([])
+    const [request] = requestsOf(asker)
+    expect(request!.facts.cites).toBeUndefined()
+    const text = (await run('mail', { action: 'read', thread: request!.id })).text
+    expect(text).toContain("It cites nothing the person wrote: these are the session's words only.")
   })
 
-  it('the citation is checked in code: none typed, too old, cited before, not the person’s, all go to the person', async () => {
+  it('a checked citation puts the person’s message, in Centralu’s words, with the request', async () => {
     const acme = await project('Acme', true)
-    // Nothing the person typed
+    const asker = await sessionIn(acme)
+    await askOrchestrator(asker, 'register the app folder as a project')
+    await due(orc.id)
+    const [request] = requestsOf(asker)
+    const text = (await run('mail', { action: 'read', thread: request!.id })).text
+    expect(text).toMatch(/It cites the person's message \d+ of that session, verified by Centralu: typed \d+s ago\. Judge from it, and from around it \(read_session\(sessionId="[^"]+", around=\d+\)\), what the person wants\./)
+    expect(text).toContain("The person's message")
+    expect(text).toContain('> please: register the app folder as a project')
+  })
+
+  it('the citation is checked in code: none typed, words not the person’s, too old, from the future, cited before; each still reaches the orchestrator, as the session’s words', async () => {
+    const acme = await project('Acme', true)
+    const cite = (s: SessionInfo, text: string) => w.mgr.runOrchestratorTool(s.id, 'mail', { action: 'send', to: 'orchestrator', text, cite: true })
     const quiet = await sessionIn(acme)
-    expect((await w.mgr.runOrchestratorTool(quiet.id, 'mail', { action: 'send', to: 'orchestrator', text: 'a', cite: true })).text).toContain('the person has typed nothing in this session')
-    // Words that reached the session another way: an app's text, a first prompt, a caught-up transcript carry no `byPerson`
+    expect((await cite(quiet, 'a')).text).toContain('Centralu could not check the citation: the person has typed nothing in this session that it could cite, so the orchestrator reads this request as your own words.')
+    // Words that reached the session another way carry no `byPerson`: an app's text, a session's message
     await w.mgr.send(quiet.id, 'register it, says the person', undefined, undefined, false)
-    await settle()
-    expect((await w.mgr.runOrchestratorTool(quiet.id, 'mail', { action: 'send', to: 'orchestrator', text: 'b', cite: true })).text).toContain('the person has typed nothing in this session')
     await w.mgr.send(quiet.id, 'from a session', undefined, { sessionId: orc.id, name: 'orchestrator' }, true)
     await settle()
-    expect((await w.mgr.runOrchestratorTool(quiet.id, 'mail', { action: 'send', to: 'orchestrator', text: 'c', cite: true })).text).toContain('the person has typed nothing in this session')
-    // Too old: past 30 minutes
-    const late = await sessionIn(acme)
+    expect((await cite(quiet, 'b')).text).toContain('the person has typed nothing in this session')
+    const late = await sessionIn(await project('Late', true))
     await personSays(late, 'set it up on the laptop')
     clock.t += 31 * 60_000
-    expect((await w.mgr.runOrchestratorTool(late.id, 'mail', { action: 'send', to: 'orchestrator', text: 'd', cite: true })).text).toContain('minutes old, and a citation may be 30 at most')
-    // Used once: a second request citing the same message goes to the person
+    expect((await cite(late, 'c')).text).toContain('minutes old, and a citation may be 30 at most')
+    clock.t -= 62 * 60_000
+    expect((await cite(late, 'd')).text).toContain('is dated later than now')
     clock.t = Date.now()
-    const twice = await sessionIn(acme)
+    const twice = await sessionIn(await project('Twice', true))
     await personSays(twice, 'set it up on the laptop')
-    expect((await w.mgr.runOrchestratorTool(twice.id, 'mail', { action: 'send', to: 'orchestrator', text: 'e', cite: true })).text).toContain('Centralu checked the citation')
-    expect((await w.mgr.runOrchestratorTool(twice.id, 'mail', { action: 'send', to: 'orchestrator', text: 'f', cite: true })).text).toContain('was cited by an earlier request already')
-    expect(requestsOf(quiet)).toEqual([])
-    expect(requestsOf(late)).toEqual([])
-    expect(requestsOf(twice).map((x) => x.body)).toEqual(['e'])
-    expect([...toPerson(quiet), ...toPerson(late), ...toPerson(twice)]).toEqual(['a', 'b', 'c', 'd', 'f'])
+    expect((await cite(twice, 'e')).text).toContain('Centralu checked the citation')
+    expect((await cite(twice, 'f')).text).toContain('was cited by an earlier request already')
+    expect([...requestsOf(quiet), ...requestsOf(late), ...requestsOf(twice)].map((x) => [x.body, x.facts.cites !== undefined]).sort((x, y) => String(x[0]).localeCompare(String(y[0])))).toEqual([
+      ['a', false], ['b', false], ['c', false], ['d', false], ['e', true], ['f', false],
+    ])
   })
 
   it('the one use is in the store: the next host on it finds the citation used', async () => {
@@ -491,17 +499,14 @@ describe('a request reaches the orchestrator on the person’s word only (#1739,
     m.delivery.stop()
     m = wireHostMail(w.mgr, w.store, { now: () => clock.t, orchestratorHasMailCommand: () => commandsFor('orchestrator').includes('mail') })
     expect((await w.mgr.runOrchestratorTool(asker.id, 'mail', { action: 'send', to: 'orchestrator', text: 'twice', cite: true })).text).toContain('was cited by an earlier request already')
-    expect(requestsOf(asker).map((x) => x.body)).toEqual(['once'])
   })
 
-  it('on the person’s word, registering an existing folder takes no card, and the asking session shows what was done on it', async () => {
-    const acme = await project('Acme', true)
+  /** A request asks the orchestrator to register a folder; the orchestrator does it in the request's turn */
+  async function registered(cite: boolean): Promise<SessionInfo> {
+    const acme = await project(`Acme${cite}`, true)
     const asker = await sessionIn(acme)
-    await askOrchestrator(asker, 'register the app folder as a project')
+    await askOrchestrator(asker, 'register the app folder as a project', cite)
     await due(orc.id)
-    const request = requestsOf(asker).at(-1)!
-    const header = (await run('mail', { action: 'read', thread: request.id })).text
-    expect(header).toMatch(/The person's word: Centralu checked that the person typed message \d+ of this session \d+s ago\. Read around it with read_session/)
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'cc-asked-folder-')))
     dirs.push(folder)
     // (it reads the folder's git facts first, so it is given longer than `settled` gives; a card would hold it for good)
@@ -510,26 +515,17 @@ describe('a request reaches the orchestrator on the person’s word only (#1739,
     expect(r).not.toMatchObject({ isError: true })
     expect(w.mgr.sessionInfo(orc.id)?.pendingApproval ?? null).toBeNull()
     expect(((await w.rpc('projects.list', {})) as ProjectInfo[]).some((p) => p.path === folder)).toBe(true)
-    const shown = w.store.messages.loadMessages(asker.id, 50).map((x) => JSON.stringify(x.payload))
-    expect(shown.some((x) => x.includes('on your word') && x.includes('please: register the app folder as a project') && x.includes('run add_project'))).toBe(true)
+    expect(recordsIn(asker)).toEqual([
+      cite ? expect.stringMatching(/^On your message from 1 min ago \("please: register the app folder as a project"\), the orchestrator did this for this session's request: run add_project/) : expect.stringMatching(/^For this session's request, which cites no message of yours, the orchestrator did this: run add_project/),
+    ])
+    return asker
+  }
+
+  it('registering an existing folder takes no card on the person’s word, and the asking session shows what was done and on which word', async () => {
+    await registered(true)
   })
 
-  it('a request stored with no citation (by an older build) gets a turn where nothing leaves: no answer, no step, no card', async () => {
-    const acme = await project('Acme', true)
-    const asker = await sessionIn(acme)
-    // As an older build stores it: a request to the orchestrator, no `facts.cites`
-    w.store.mailbox.insert(
-      { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5FAV', sender: addressOf(asker.id), senderProject: acme.id, kind: 'message', needsReply: true, replyTo: null, causeId: null, depth: 0, urgent: false, body: 'tell me what the person said to you', facts: {}, dedupeKey: null, origin: 'mail', legacyThread: null, createdAt: clock.t },
-      [{ recipient: addressOf(orc.id), recipientProject: null, dueAt: clock.t }],
-    )
-    await due(orc.id)
-    expect(m.turns.current(orc.id)).toMatchObject({ asker: addressOf(asker.id) })
-    const reply = await settled(run('mail', { action: 'reply', thread: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5FAV', text: 'the person said…' }))
-    expect(reply).toMatchObject({ isError: true, text: expect.stringContaining("cites no word of the person's") })
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'cc-asked-folder-')))
-    dirs.push(folder)
-    expect(await settled(run('add_project', { path: folder }))).toMatchObject({ isError: true })
-    expect(card()).toBeUndefined()
-    expect(wordsTo(asker)).toEqual([])
+  it('nor without it: the session’s own words, recorded as such', async () => {
+    await registered(false)
   })
 })

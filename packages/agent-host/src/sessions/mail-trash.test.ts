@@ -61,9 +61,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
     const asker = await create()
     const orc = await world.mgr.orchestrator()
     world.adapter.capabilities.gatesSteps = true
-    // On the person's word, as a request reaches the orchestrator (docs/plans/cited-requests.md)
-    await world.rpc('agents.send', { sessionId: asker.id, text: 'ask the orchestrator to look at CI' })
-    expect(m.tool.run(asker.id, { action: 'send', to: 'orchestrator', cite: true, text: 'Can you look at CI?' }).text).toContain('Centralu checked the citation')
+    expect(m.tool.run(asker.id, { action: 'send', to: 'orchestrator', text: 'Can you look at CI?' }).text).toContain('Sent')
     const request = read.between(addressOf(asker.id), addressOf(orc.id))[0]!
     await world.rpc('agents.deleteSession', { sessionId: orc.id })
     expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ settled: null })

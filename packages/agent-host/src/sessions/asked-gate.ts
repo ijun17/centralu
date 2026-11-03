@@ -1,19 +1,20 @@
 import type { RequestTurnAnswer } from '../adapters/contract.js'
 import type { Asker } from '../mail/asked-by.js'
-import { askedAct, askedQuestion, onPersonsWord, outlivesTheTurn, postsInThread, stepOf, type AskedStep } from './asked-acts.js'
+import { askedAct, askedQuestion, cannotBeUndone, outlivesTheTurn, type AskedStep } from './asked-acts.js'
 
 /**
  * The orchestrator's steps in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md §2).
  *
  * Every tool and command of the orchestrator runs through `when`, and every step of its CLI through `askCli`. In any turn that is not a request
- * they run at once, as before. In a request's turn:
+ * they run at once, as before. In a request's turn the orchestrator judges, from the request and the person's message it may cite (checked by the
+ * host at send), what to do, and these hold whatever it judges:
  *
- * - **On the person's word** (the request cites their message, checked at send): reading and answering in the thread are free; the reversible
- *   steps the word covers (`onPersonsWord`) run with no card, with the cards they raise themselves covered by that word, and leave a record in the
- *   asking session; every other step that changes something raises the person's card first, naming who asked, under every preset (`alwaysAsk`).
- * - **Without it** (a request an older build stored, one moved from a v61 thread, a reminder's turn): nothing leaves the turn. Every step that
- *   changes something is refused, and so is every word to the session, in its thread too; reading, marking it handled and mail to the person
- *   are free.
+ * - **A step that cannot be undone** (`cannotBeUndone`: a delete, an uninstall, an OS entry, a command, a file written, an app's step) raises the
+ *   person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny does not.
+ * - **A step that would outlive the turn** (a subagent, a scheduled prompt, a background command) is refused without a question.
+ * - **Every other step that changes something** runs, with the cards it raises itself covered for that call, as the person's Allow covers them.
+ * - **Every step that changed something leaves a record** in the asking session (`done`), so the person can see afterwards what a session's request
+ *   had done and on which message of theirs, if any.
  *
  * One card for one step. The person's Allow is for exactly this call, so the cards the step would raise itself meanwhile (a trust card, a delete
  * card, a start_agent consent) are not raised a second time: they have an "always" this turn must not offer, and the answer to them is the one
@@ -25,13 +26,13 @@ export type AskedGateHost = {
   askedBy(orchestratorId: string): Asker | null
   /** The person's card with the question, Allow or Deny only; not covered by a step's own Allow */
   ask(orchestratorId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
-  /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given, or by the person's word */
+  /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given, or by the request's turn */
   cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
-  /** A step was done on the person's word: its record, in the asking session (docs/plans/cited-requests.md §5) */
-  onPersonsWord(asker: Asker & { cites: NonNullable<Asker['cites']> }, act: string): void
+  /** A step that changed something was done for a session's request: its record, in the asking session (docs/plans/cited-requests.md §5) */
+  done(asker: Asker, act: string): void
 }
 
-/** `AskedGate.when` as the places that call it hold it: a session's step is run when it is not a request's turn, the person's word covers it, or the person allows it */
+/** `AskedGate.when` as the places that call it hold it: a session's step is run when it is not a request's turn, it can be undone, or the person allows it */
 export type WhenAsked = <T>(
   sessionId: string,
   /** `readOnly`: the app says the tool only reads, so it is never asked about */
@@ -42,9 +43,6 @@ export type WhenAsked = <T>(
   refused: (text: string) => T,
 ) => Promise<T>
 
-const UNCITED =
-  "Nothing was done: this request cites no word of the person's, so in its turn nothing reaches the session that asked and nothing is changed for it. If it needs the person, tell them with mail send to person."
-
 export class AskedGate {
   constructor(private readonly host: AskedGateHost) {}
 
@@ -54,13 +52,12 @@ export class AskedGate {
   }
 
   /**
-   * The orchestrator's CLI is about to run a step of its own (a command, a file written, a page fetched): the person is asked, unless it is a read
-   * (`asked: false`); a step that would outlive the turn, and any step in a turn with no word of the person's, is refused without a question
+   * The orchestrator's CLI is about to run a step of its own (a command, a file written, a page fetched): a read is left to the CLI's own flow
+   * (`asked: false`), a step that would outlive the turn is refused without a question, and every other one is put to the person
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker || askedAct(tool, input, asker.messageId) === null) return { allowed: true, asked: false }
-    if (asker.cites === null) return { allowed: false, message: UNCITED }
     if (outlivesTheTurn(tool, input)) {
       return {
         allowed: false,
@@ -68,16 +65,6 @@ export class AskedGate {
       }
     }
     return this.when<RequestTurnAnswer>(orchestratorId, { name: tool, args: input }, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
-  }
-
-  /**
-   * The CLI itself is about to ask the person about a read of its own (a file outside its working folder, in a preset that asks): in a request's turn
-   * the question is this gate's, naming the session and offering Allow or Deny only, not the CLI's plain card with its "always"
-   */
-  async askCliRead(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
-    const asker = this.host.askedBy(orchestratorId)
-    if (!asker) return { allowed: true, asked: false }
-    return this.put<RequestTurnAnswer>(orchestratorId, asker, stepOf(tool, input), signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
 
   async when<T>(
@@ -90,17 +77,16 @@ export class AskedGate {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker || call.readOnly === true) return run()
     const step = askedAct(call.name, call.args, asker.messageId)
-    if (asker.cites === null) return step === null && !postsInThread(call.name, call.args) ? run() : refused(UNCITED)
     if (step === null) return run()
-    if (onPersonsWord(call.name)) {
-      const cites = asker.cites
-      const done = await this.host.cover(orchestratorId, run, signal)
+    const recorded = async (): Promise<T> => {
+      const done = await run()
       // A step that did nothing (refused, failed) leaves no record of having been done
-      const failed = typeof done === 'object' && done !== null && 'isError' in done && done.isError === true
-      if (!failed) this.host.onPersonsWord({ ...asker, cites }, 'act' in step ? step.act : `run ${call.name}`)
+      const failed = typeof done === 'object' && done !== null && (('isError' in done && done.isError === true) || ('allowed' in done && done.allowed === false))
+      if (!failed) this.host.done(asker, 'act' in step ? step.act : `run ${call.name}`)
       return done
     }
-    return this.put(orchestratorId, asker, step, signal, run, refused)
+    if (cannotBeUndone(call.name, call.args)) return this.put(orchestratorId, asker, step, signal, recorded, refused)
+    return this.host.cover(orchestratorId, recorded, signal)
   }
 
   /** Puts a step to the person and runs it on Allow; Deny, no answer and a turn that has ended run nothing */

@@ -1,15 +1,11 @@
 import { oneLineText } from '@cc/protocol'
 
 /**
- * Which acts of the orchestrator ask the person when a session asked for them (#1447, #1739, docs/plans/cited-requests.md).
+ * What the orchestrator's acts are in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md): reads and answers in the
+ * request's thread (`askedAct` null), steps that change something, and among those the ones that cannot be undone (`cannotBeUndone`), which ask
+ * the person first, whatever the orchestrator's own preset.
  *
- * A turn whose message a session sent is that session's request, and a session's words are not the person's. A request reaches the orchestrator
- * on the person's word (it cites their message), and in its turn every step the orchestrator could not take from that word alone raises the
- * person's card, whatever the orchestrator's own preset: anything that changes sessions, projects, settings, machines, installations or apps,
- * starts agents, deletes, runs a command or writes a file, except the reversible steps the word covers (`onPersonsWord`). Reading, and answering
- * in the thread that asked, need no card.
- *
- * **Fail closed.** The reading acts are listed; every other tool or command asks, so a command added later asks until someone says it only reads.
+ * **Fail closed.** The reading acts are listed; every other tool or command counts as a change, which is recorded, so a command added later is recorded until someone says it only reads.
  */
 
 /** Tools and commands that only read, or only change this orchestrator's own turn: no card (§9.7) */
@@ -118,17 +114,33 @@ function argsLine(args: Record<string, unknown>, cut: boolean): string {
 export type AskedStep = { act: string } | { tooLong: true }
 
 /**
- * The steps a request on the person's word takes with no card (docs/plans/cited-requests.md §2, owner 2026-11-03): reversible ones only, registering
- * an existing folder as a project and starting a session, here or on a linked machine. Every other step still asks, so a step added later asks until
- * it is listed here
+ * The steps a session's request never takes without the person's card, cited or not (owner, 2026-11-03): what cannot be undone. A delete, an
+ * uninstall, an OS entry, an install, a version put back over the current one, work stopped, an update applied
  */
-const ON_PERSONS_WORD: ReadonlySet<string> = new Set(['add_project', 'create_session'])
+const CANNOT_BE_UNDONE: ReadonlySet<string> = new Set([
+  'delete_session',
+  'delete_archived',
+  'delete_all_archived',
+  'archive_subagent_steps',
+  'install_machine',
+  'remove_machine',
+  'uninstall_machine',
+  'rollback_machine',
+  'set_machine_autostart',
+  'remove_app',
+  'restore_app_version',
+  'apply_agent_versions',
+  'clear_background_tasks',
+])
 
-/** Whether a step runs with no card in a turn whose request cites the person's word */
-export const onPersonsWord = (name: string): boolean => ON_PERSONS_WORD.has(name)
-
-/** Whether a call posts words in a thread (an answer, an update): what a turn with no word of the person's may not send the asker */
-export const postsInThread = (name: string, args: Record<string, unknown>): boolean => name === 'mail' && (args.action === 'reply' || args.action === 'update' || args.action === 'close')
+/**
+ * Whether a step of a request's turn asks the person first (`AskedGate`): one that cannot be undone, an update installed or applied, and every step
+ * of the CLI's own that is not a read, of another MCP server's or of an app's, which nobody here can tell can be undone (a command, a file written
+ * or edited, an app's `queue_merge`)
+ */
+export function cannotBeUndone(name: string, args: Record<string, unknown>): boolean {
+  return CANNOT_BE_UNDONE.has(name) || (name === 'update_centralu' && args.action !== 'check') || isCliTool(name) || name.includes('.')
+}
 
 /**
  * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post

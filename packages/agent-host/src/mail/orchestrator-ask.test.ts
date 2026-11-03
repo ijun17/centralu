@@ -62,9 +62,9 @@ describe('the limits of asking (D13)', () => {
       w.mail.send(i % 2 === 0 ? A : at('w'), { to: [ORC], text: `ask ${i}` })
     }
     w.clock.t += 10
-    expect(w.tool.run('a', { action: 'send', to: 'orchestrator', cite: true, text: 'one more' }).text).toMatch(/^Refused \(ask_rate\)/)
+    expect(w.tool.run('a', { action: 'send', to: 'orchestrator', text: 'one more' }).text).toMatch(/^Refused \(ask_rate\)/)
     // Another project is another group
-    expect(w.tool.run('c', { action: 'send', to: 'orchestrator', cite: true, text: 'mine' }).isError).toBeUndefined()
+    expect(w.tool.run('c', { action: 'send', to: 'orchestrator', text: 'mine' }).isError).toBeUndefined()
   })
 })
 
@@ -84,7 +84,7 @@ describe('an untrusted project’s request (§7.4: the one hold replaces the ask
 describe('the role moves (§7.7, D15, #1683)', () => {
   it('an unanswered request reaches the new orchestrator, even one the old one read, and a later request too', async () => {
     const w = started()
-    const q = w.tool.run('a', { action: 'send', to: 'orchestrator', cite: true, text: 'are you there?' })
+    const q = w.tool.run('a', { action: 'send', to: 'orchestrator', text: 'are you there?' })
     expect(q.isError).toBeUndefined()
     const request = w.store.mailbox.feedOf(A, { limit: 1 })[0]!
     await w.advance(2_000)

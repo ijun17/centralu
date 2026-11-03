@@ -1,12 +1,11 @@
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Asker } from '../mail/asked-by.js'
 import { AskedGate, type AskedGateHost } from './asked-gate.js'
 import { HostCards } from './host-cards.js'
 
-/** A request on the person's word: it cites their message 7 of the asking session, checked at send */
+/** A request that cites the person's message 7 of the asking session, checked at send */
 const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 7, at: 1_000 } }
-/** The same request with no word of the person's: one an older build stored, a moved one, a reminder's turn */
+/** The same request citing nothing the person wrote */
 const UNCITED: Asker = { ...ASKER, cites: null }
 
 type Out = { text: string; isError?: boolean }
@@ -21,7 +20,7 @@ function world(
 ) {
   const asked: string[] = []
   const covered: boolean[] = []
-  const records: { asker: string; seq: number; act: string }[] = []
+  const records: { asker: string; seq: number | null; act: string }[] = []
   const host: AskedGateHost = {
     askedBy: over.asker ?? (() => ASKER),
     ask: async (_id, question) => {
@@ -33,7 +32,7 @@ function world(
       covered.push(true)
       return run()
     },
-    onPersonsWord: (asker, act) => void records.push({ asker: asker.sessionId, seq: asker.cites.seq, act }),
+    done: (asker, act) => void records.push({ asker: asker.sessionId, seq: asker.cites?.seq ?? null, act }),
   }
   return { gate: new AskedGate(host), asked, covered, records }
 }
@@ -46,9 +45,9 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('a step that changes something asks first, and runs once the person allows it', async () => {
     const w = world()
     const r = ran()
-    expect(await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
+    expect(await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
     expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run rename_session')
+    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run delete_session')
     expect(r.calls).toHaveLength(1)
     expect(w.covered).toEqual([true])
   })
@@ -133,125 +132,62 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   })
 })
 
-describe('the steps the person’s word covers (#1739)', () => {
-  it('registering a folder and starting a session run with no card, their own cards covered, and each leaves a record', async () => {
-    const w = world()
-    const r = ran()
-    const add = { name: 'add_project', args: { path: '/work/app', machine: 'laptop' } }
-    const start = { name: 'create_session', args: { projectId: 'p1', machine: 'laptop', message: 'set it up' } }
-    expect(await w.gate.when('orc', add, undefined, r.run, refused)).toEqual({ text: 'did it' })
-    expect(await w.gate.when('orc', start, undefined, r.run, refused)).toEqual({ text: 'did it' })
-    expect(w.asked).toEqual([])
-    expect(r.calls).toHaveLength(2)
-    // Covered, so the folder card add_project raises itself is answered by the person's word
-    expect(w.covered).toEqual([true, true])
-    expect(w.records).toEqual([
-      { asker: 'asker', seq: 7, act: 'run add_project {"path":"/work/app","machine":"laptop"}' },
-      { asker: 'asker', seq: 7, act: 'run create_session {"projectId":"p1","machine":"laptop","message":"set it up"}' },
-    ])
+describe('a step that can be undone runs, cited or not, and every step that changed something is recorded (#1739)', () => {
+  const undoable = [
+    { name: 'add_project', args: { path: '/work/app', machine: 'laptop' } },
+    { name: 'create_session', args: { project: 'Acme', firstMessage: 'set it up' } },
+    { name: 'rename_session', args: { sessionId: 's', name: 'n' } },
+    { name: 'set_project_trust', args: { project: 'p1', trusted: true } },
+    { name: 'send_to_session', args: { sessionId: 's', message: 'hi' } },
+    { name: 'start_agent', args: { task: 'go' } },
+    { name: 'mail', args: { action: 'send', to: 'session:h/s2', text: 'hi' } },
+  ]
+
+  it('registering, starting, renaming, trusting, sending and starting an agent take no card, the cards they raise themselves covered, cited or not', async () => {
+    for (const asker of [ASKER, UNCITED]) {
+      const w = world({ asker: () => asker })
+      const r = ran()
+      for (const step of undoable) expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toEqual({ text: 'did it' })
+      expect(w.asked).toEqual([])
+      expect(r.calls).toHaveLength(undoable.length)
+      expect(w.covered).toHaveLength(undoable.length)
+      expect(w.records.map((x) => x.seq)).toEqual(undoable.map(() => asker.cites?.seq ?? null))
+    }
   })
 
-  it('a step that did nothing leaves no record', async () => {
-    const w = world()
-    await w.gate.when('orc', { name: 'add_project', args: { path: '/nope' } }, undefined, async () => ({ text: 'No folder there.', isError: true }), refused)
-    expect(w.asked).toEqual([])
-    expect(w.records).toEqual([])
-  })
-
-  it('anything irreversible or not listed still asks, whatever the word says: a delete, a clone, a trust, an OS entry, an agent, words to another session', async () => {
-    const w = world({ answer: 'deny' })
-    const steps = [
-      { name: 'delete_archived', args: { sessionId: 's' } },
-      { name: 'create_project', args: { name: 'x', clone: 'https://example.com/x.git' } },
-      { name: 'set_project_trust', args: { project: 'p1', trusted: true } },
+  it('what cannot be undone asks, cited or not: a delete, an uninstall, an OS entry, an update applied, a command, a file written, an app’s step', async () => {
+    const floor = [
+      { name: 'delete_session', args: { sessionId: 's' } },
+      { name: 'delete_all_archived', args: {} },
+      { name: 'uninstall_machine', args: { machineId: 'm' } },
       { name: 'set_machine_autostart', args: { machineId: 'm', enabled: true } },
-      { name: 'start_agent', args: { task: 'go' } },
-      { name: 'send_to_session', args: { sessionId: 's', message: 'hi' } },
+      { name: 'update_centralu', args: { action: 'apply' } },
+      { name: 'server.queue_merge', args: { pr: 1 } },
     ]
-    for (const step of steps) {
-      const r = ran()
-      const out = await w.gate.when('orc', step, undefined, r.run, refused)
-      expect(out.isError, step.name).toBe(true)
-      expect(r.calls, step.name).toEqual([])
+    for (const asker of [ASKER, UNCITED]) {
+      const w = world({ asker: () => asker, answer: 'deny' })
+      for (const step of floor) {
+        const r = ran()
+        expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toMatchObject({ isError: true })
+        expect(r.calls, step.name).toEqual([])
+      }
+      for (const tool of ['Bash', 'PowerShell', 'Write', 'Edit', 'mcp__other__drop']) expect(await w.gate.askCli('orc', tool, { command: 'rm -rf x', file_path: '/x' }), tool).toMatchObject({ allowed: false })
+      expect(w.asked).toHaveLength(floor.length + 5)
+      expect(w.records).toEqual([])
     }
-    expect(w.asked).toHaveLength(steps.length)
-    for (const tool of ['Bash', 'Write']) expect(await w.gate.askCli('orc', tool, { command: 'rm -rf x', file_path: '/x', content: 'y' })).toMatchObject({ allowed: false })
-    expect(w.asked).toHaveLength(steps.length + 2)
-    expect(w.records).toEqual([])
-    // ...while in the same turn the word's own steps still ask nothing
-    await w.gate.when('orc', { name: 'add_project', args: { path: '/work/app' } }, undefined, ran().run, refused)
-    expect(w.asked).toHaveLength(steps.length + 2)
   })
 
-  it('reading, answering in the thread and mail to the person are free, as in the person’s own turn', async () => {
-    const w = world()
-    const r = ran()
-    for (const call of [
-      { name: 'read_session', args: { sessionId: 'asker', around: 7 } },
-      { name: 'list_machines', args: {} },
-      { name: 'mail', args: { action: 'reply', thread: 't1', text: 'Done: registered and started.' } },
-      { name: 'mail', args: { action: 'send', to: 'person', text: 'fyi' } },
-    ]) await w.gate.when('orc', call, undefined, r.run, refused)
-    expect(r.calls).toHaveLength(4)
-    expect(w.asked).toEqual([])
-  })
-})
-
-describe('a request with no word of the person’s: nothing leaves its turn', () => {
-  it('every step that changes something is refused with no card, the covered ones included', async () => {
+  it('a read, an answer in the thread, a failed step and a refused one leave no record; a step the person allowed does', async () => {
     const w = world({ asker: () => UNCITED })
-    for (const step of [{ name: 'add_project', args: { path: '/work/app' } }, { name: 'create_session', args: {} }, { name: 'delete_session', args: {} }, { name: 'server.tool', args: {} }]) {
-      const r = ran()
-      const out = await w.gate.when('orc', step, undefined, r.run, refused)
-      expect(out, step.name).toMatchObject({ isError: true, text: expect.stringContaining("cites no word of the person's") })
-      expect(r.calls).toEqual([])
-    }
-    expect(await w.gate.askCli('orc', 'Bash', { command: 'ls' })).toMatchObject({ allowed: false, message: expect.stringContaining('cites no word') })
-    expect(await w.gate.askCli('orc', 'WebFetch', { url: 'https://example.com/?q=secret' })).toMatchObject({ allowed: false })
-    expect(w.asked).toEqual([])
-    expect(w.records).toEqual([])
-  })
-
-  it('no word reaches the session, in its own thread either; reading, marking it handled and mail to the person are free', async () => {
-    const w = world({ asker: () => UNCITED })
-    for (const action of ['reply', 'update', 'close']) {
-      const r = ran()
-      expect(await w.gate.when('orc', { name: 'mail', args: { action, thread: 't1', text: 'the person told me…' } }, undefined, r.run, refused), action).toMatchObject({ isError: true })
-      expect(r.calls).toEqual([])
-    }
     const r = ran()
-    for (const call of [
-      { name: 'read_session', args: { sessionId: 'other' } },
-      { name: 'mail', args: { action: 'read', thread: 't1' } },
-      { name: 'mail', args: { action: 'handled', thread: 't1' } },
-      { name: 'mail', args: { action: 'send', to: 'person', text: 'a session asks for this' } },
-    ]) await w.gate.when('orc', call, undefined, r.run, refused)
-    expect(r.calls).toHaveLength(4)
-    expect(await w.gate.askCli('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: false })
-    expect(w.asked).toEqual([])
+    await w.gate.when('orc', { name: 'read_session', args: { sessionId: 's' } }, undefined, r.run, refused)
+    await w.gate.when('orc', { name: 'mail', args: { action: 'reply', thread: 't1', text: 'done' } }, undefined, r.run, refused)
+    await w.gate.when('orc', { name: 'add_project', args: { path: '/nope' } }, undefined, async () => ({ text: 'No folder there.', isError: true }), refused)
+    expect(w.records).toEqual([])
+    await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, r.run, refused)
+    expect(w.records).toEqual([{ asker: 'asker', seq: null, act: 'run delete_session {"sessionId":"s"}' }])
   })
 })
-
-describe('a read the CLI itself asks about, in a request (§9.7)', () => {
-  it('is the gate’s card, naming the session, Allow or Deny; outside a request the CLI keeps its own', async () => {
-    const w = world({ answer: 'deny' })
-    expect(await w.gate.askCliRead('orc', 'Read', { file_path: resolve('/private/a.txt') })).toMatchObject({ allowed: false })
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run Read')
-    const allowing = world({ answer: 'allow' })
-    expect(await allowing.gate.askCliRead('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: true })
-    const none = world({ asker: () => null })
-    expect(await none.gate.askCliRead('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: false })
-    expect(none.asked).toEqual([])
-  })
-
-  it('an Allow that comes in a later turn of the same thread runs nothing: it was for the turn it was asked in', async () => {
-    let turn = 1
-    const w = world({ asker: () => ({ ...ASKER, turn }), answer: 'allow', afterAsk: () => void (turn = 2) })
-    expect(await w.gate.askCliRead('orc', 'Read', { file_path: resolve('/private/a.txt') })).toMatchObject({ allowed: false, message: expect.stringContaining('has ended') })
-  })
-})
-
-
 
 describe('the Allow covers one call, not the session', () => {
   it('is kept by the call’s own async work and ends with the call and with its signal', async () => {

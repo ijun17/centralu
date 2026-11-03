@@ -1058,7 +1058,7 @@ message.
 | One open request to the orchestrator per group (`checkAsk`, `service.ts:1819`) | **drop** | — | #1683: a report is not a second request, and the gate stranded it |
 | 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
 | Request turns: every non-read step raises the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message | Mail grants nothing |
-| The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **keep, re-keyed** | "a mail thread other than its own request" becomes "a message the asker was not party to" | Unchanged in spirit (#1516) |
+| The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **dropped** (#1739) | the orchestrator judges a request, with the person's message it cites as evidence; a step that cannot be undone asks, and every change is recorded ([cited-requests.md](cited-requests.md)) | Replaced, not re-keyed |
 | Mail never answers a card, never passes for the person, grants nothing (old §9.2) | **keep** | unchanged: the frame, quoted bodies, the held `card` state | Not about threads |
 | The `auto` receiver's hold (`holdsInbound`, `policy.ts:22`) | **drop** | — | Owner, 2026-11-02 (D10) |
 | The untrusted asker's request hold (`delivery.ts:518-520`) | **folded** into §7.4 | | One rule for text leaving an untrusted project |
@@ -1073,11 +1073,13 @@ message.
   §9.7). A worker answering the orchestrator's question, asking about the orchestrator's task, or reporting it is not
   asking for anything. A reply to an orchestrator message that did not need a reply is a request: the orchestrator did
   not ask for it, so the person's cards apply.
-- **On the person's word only** (#1739, [cited-requests.md](cited-requests.md), replacing the read gate of #1516 and
-  #1926's reply cards). `send` checks a request's `cite` against the person's newest message in the sender's own
-  conversation (typed in the composer, at most 30 minutes old, cited once: `dedupe_key` `cite:<seq>`) and stores
-  `facts.cites`. A request without one that passes goes to the person instead, and the sender's result says why. A
-  request stored uncited anyway (an older build, a moved one, a reminder's turn) gets a turn where nothing leaves.
+- **The person's message a request cites** (#1739, [cited-requests.md](cited-requests.md), replacing the read gate of
+  #1516 and #1926's reply cards). `send` checks a request's `cite` against the person's newest message in the sender's
+  own conversation (typed in the composer, at most 30 minutes old and not later than now, cited once: `dedupe_key`
+  `cite:<seq>`) and stores `facts.cites`; `mail read` puts that message with the request, as evidence for the
+  orchestrator's judgement. A request that cites nothing, or fails the check, is delivered all the same, as the
+  session's own words. In the turn, a step that cannot be undone asks the person, and every change is recorded in the
+  asking session.
 - **One asker per wake.** `drain` for the orchestrator keeps the requests of one session (the person's words and
   urgent mail first, then needsReply requests, then the oldest). Requests from other sessions wait for the next turn.
   Mail that is not a request rides along.
