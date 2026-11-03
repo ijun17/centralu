@@ -374,8 +374,9 @@ export interface SessionHandle {
    * The inputs the turn that is starting runs for (#1604), read while the `state_change` that opens it is handled: the
    * tool names the input it began that turn from, which for a message that did not run in the turn it was sent into (a
    * note a turn did not read, one sent just after a turn ended, one queued behind a compact) is that message's `id`. The
-   * `state_change` may be a second `working` for the turn, said when the tool names the input. `null`: it does not say.
-   * Absent: the tool never names an input a turn began from
+   * `state_change` may be a second `working` for the turn, said when the tool names the input. Three answers (#1639): the ids;
+   * `[]`, an opening that names no input (a turn the tool runs on its own), only from a tool that names its inputs; `null`, not an
+   * opening, or a tool that does not say. Absent: the tool never names an input a turn began from
    */
   turnStartInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */

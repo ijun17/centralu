@@ -84,6 +84,29 @@ describe('a turn the mailbox did not start', () => {
     expect(w.turns.current('w')).toMatchObject({ by: 'report', messageId: null })
   })
 
+  /*
+   * #1639: a turn is decided at its start by the oldest message given before it, and decided again when the tool names the input it opened from.
+   * The same turn's row is corrected in place: no second turn is begun, and the first is not closed lost
+   */
+  it('a turn decided again by the input the tool names is the same turn, its row corrected in place', () => {
+    const w = turnWorld()
+    const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
+    record('w', { by: 'person', added: false, cli: false, source: 'caller', ownerId: 'a' })
+    const seq = w.turns.current('w')!.turnSeq
+    record('w', { by: 'work', added: false, cli: false, source: 'caller', ownerId: 'a', again: true })
+    expect(w.turns.current('w')).toMatchObject({ turnSeq: seq, by: 'caller', messageId: task.id, starter: task.id })
+    expect(turnsOf(w.store, 'w')).toEqual([expect.objectContaining({ turnSeq: seq, startedBy: 'caller', messageId: task.id, starterId: task.id, outcome: null })])
+    // And back to the CLI's own: what it sends has no cause
+    record('w', { by: 'work', added: false, cli: true, source: 'caller', again: true })
+    expect(turnsOf(w.store, 'w')).toEqual([expect.objectContaining({ turnSeq: seq, startedBy: 'cli', starterId: null, outcome: null })])
+    // A turn the mailbox's delivery started is the mailbox's: not decided again
+    w.end('w')
+    const mailSeq = w.turns.begin('w', { workMessage: null, starter: null })
+    record('w', { by: 'person', added: false, cli: false, source: 'caller', again: true })
+    expect(w.turns.current('w')).toMatchObject({ turnSeq: mailSeq, by: 'mail' })
+  })
+
   it('the person’s work: the turn its first message starts is the person’s task', () => {
     const w = turnWorld()
     personWorkRecorder(w.mail)('w', 'Sort the photos')

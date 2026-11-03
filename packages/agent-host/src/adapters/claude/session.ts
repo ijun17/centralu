@@ -94,6 +94,8 @@ export class ClaudeSession implements SessionHandle {
   private spoke: boolean
   /** The CLI ran a turn on its own (it took a quiet input into one): the result that ends it ends a turn, though it names only quiet inputs */
   private cliTurnRan = false
+  /** The running turn's opening input was named to the host (`turnStartInputs`, #1639): once per turn */
+  private turnNamed = false
   /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
   private readonly stream: ClaudeStreamNormalizer
@@ -359,14 +361,22 @@ export class ClaudeSession implements SessionHandle {
   /** One message of the stream, in the order the CLI sent it */
   private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
     const m = msg as StreamMsg
-    if (!this.ledger.turnRunning && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
-      this.ledger.turnStarted(CLAUDE_TURN)
-      this.cliTurnRan = true
+    if ((!this.ledger.turnRunning || !this.turnNamed) && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
+      const opening = !this.ledger.turnRunning
+      if (opening) {
+        this.ledger.turnStarted(CLAUDE_TURN)
+        this.cliTurnRan = true
+      }
+      this.turnNamed = true
       if (!this.cards.pending.size && !this.cards.questions.size) {
-        // The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604)
-        // A turn the CLI runs on its own (after a background task ends) names no input (#1830)
-        this.startInputs = m.user_message_uuid ? [m.user_message_uuid] : null
-        this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+        /*
+         * The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604, #1639). A CLI that
+         * tracks its inputs names none for a turn it runs on its own (after a background task ends, #1830): `[]`. An older one names
+         * nothing to go by: null. A turn a send at rest began was said working at once, before the CLI named its input, so it is said
+         * again now (as Codex does). With a card up it is not (the card's state stays): the turn's end names the inputs it took
+         */
+        this.startInputs = m.user_message_uuid ? [m.user_message_uuid] : this.sendTracked ? [] : null
+        if (opening || this.startInputs !== null) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
         this.startInputs = null
       }
     }
@@ -382,6 +392,7 @@ export class ClaudeSession implements SessionHandle {
       // Not when the CLI ran a turn for it: that turn put the session to work, and only this result can end it
       const quietOnly = ids.length > 0 && ids.every((id) => this.quietInputs.has(id)) && !this.cliTurnRan
       this.cliTurnRan = false
+      this.turnNamed = false
       for (const id of ids) this.quietInputs.delete(id)
       // A result that answers only quiet inputs ended no turn: no finished turn, and no second reading of the same usage
       if (quietOnly) events = events.filter((e) => e.type !== 'turn_complete' && e.type !== 'usage_update')
@@ -619,6 +630,7 @@ export class ClaudeSession implements SessionHandle {
       this.stream.goal.commandSent()
     }
     const starting = !this.ledger.turnRunning
+    if (starting) this.turnNamed = false
     this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}) })
     this.ledger.turnStarted(CLAUDE_TURN)
     this.notify?.()

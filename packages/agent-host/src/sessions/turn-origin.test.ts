@@ -56,8 +56,8 @@ describe('a turn the tool opens for an earlier message', () => {
     expect(w.store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
     const other = await w.callerSession()
     await w.mgr.send(other, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
-    // The message goes in as any other at rest, and nothing is kept for a turn to name
-    expect(handleOf(other).ids.at(-1)).toBeUndefined()
+    // The message goes in named as any other (#1639), and nothing is kept for a hub
+    expect(handleOf(other).ids.at(-1)).toEqual(expect.any(String))
     expect(w.store.settings.appSetting(`input_origins:${other}`)).toBeNull()
   })
 
@@ -69,7 +69,9 @@ describe('a turn the tool opens for an earlier message', () => {
     expect(opened()).toHaveProperty('origin')
     handleOf(id).answer('done')
     await w.mgr.send(id, 'typed by the person')
-    expect(handleOf(id).ids.at(-1)).toBeUndefined()
+    // Named too (#1639), but no sender is kept for it: the turn it opens has no origin
+    opens(id, [handleOf(id).ids.at(-1)!])
+    expect(opened()).not.toHaveProperty('origin')
     opens(id, ['an-input-nobody-named'])
     expect(opened()).not.toHaveProperty('origin')
   })

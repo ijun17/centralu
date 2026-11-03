@@ -159,10 +159,11 @@ export class QueuedRequests {
      * did not wait on: marked as the input is handed in, so a tool that refuses it at once ends the request with that
      * end reported, and a delivery that fails before (a crash while waking) is said once, as not delivered.
      */
-    const handIn = (h: SessionHandle, input: string) => {
+    const handIn = (h: SessionHandle, input: string, inputId?: string) => {
       this.host.children.markReport(sessionId, caller.id)
       this.queuedHandedIn.add(sessionId)
-      h.send(input)
+      // Named, so the turn it starts is the requester's by the tool's word (#1639)
+      h.send(input, inputId ? { id: inputId } : undefined)
     }
     const from = { sessionId: caller.id, name: labelOf(this.host.store.messages, caller) }
     const project = this.host.projectRow(m.projectId)

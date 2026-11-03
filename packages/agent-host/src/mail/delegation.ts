@@ -119,17 +119,20 @@ export function turnRecorder(mail: MessageService, records: MailboxRecords, turn
     const child = mail.sessionAddress(sessionId)
     const taskId = turn.ownerId && (turn.by === 'work' || turn.added) ? (records.newestTask(mail.sessionAddress(turn.ownerId), child)?.id ?? null) : null
     const personWork = (): string | null => (turn.ownerId ? null : (records.newestTask(PERSON, child)?.id ?? null))
-    if (turn.by === 'person') turns.beginOther(sessionId, 'person', null)
-    else if (turn.added) turns.beginOther(sessionId, 'person', taskId, turn.ownerId)
+    // Decided again by the input the tool named (#1639): the same turn's row is corrected, not a new one begun
+    const record = (by: Parameters<MailTurns['beginOther']>[1], messageId: string | null, owner?: string) =>
+      turn.again ? turns.restate(sessionId, by, messageId, owner) : turns.beginOther(sessionId, by, messageId, owner)
+    if (turn.by === 'person') record('person', null)
+    else if (turn.added) record('person', taskId, turn.ownerId)
     // A report or notice about another session starts a turn of its own kind, not of a caller's send
-    else if (turn.source === 'report') turns.beginOther(sessionId, 'report', null)
-    else if (turn.source === 'app') turns.beginOther(sessionId, 'app', null)
+    else if (turn.source === 'report') record('report', null)
+    else if (turn.source === 'app') record('app', null)
     // The turn the person's own work starts is that task's: work handed on in it is caused by it, and its end waits for that work (§9.4)
     else {
       // The person's work has no caller's message behind its first turn (a script's or the RPC's first message reads as the CLI's own): it is the
       // person's task's turn all the same, started by the task, so what it hands on is caused by it (§9.4)
       const person = taskId === null ? personWork() : null
-      turns.beginOther(sessionId, turn.cli && person === null ? 'cli' : 'caller', taskId ?? person, turn.ownerId)
+      record(turn.cli && person === null ? 'cli' : 'caller', taskId ?? person, turn.ownerId)
     }
   }
 }

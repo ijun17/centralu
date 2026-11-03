@@ -85,6 +85,20 @@ describe('codex: the input a turn it started began from (#1604)', () => {
     await h.dispose()
   })
 
+  // #1639: a plain send goes in under the host's id too, so the turn it opens names it
+  it('names a plain send’s id as its client id, and says it as the turn opens', async () => {
+    const { h, startedFrom } = await session()
+    state.turnStartReply = async () => ({ turn: { id: 'plain-1' } })
+    h.send('the person types', { id: NOTE })
+    await tick()
+    expect(state.requests.find((r) => r.method === 'turn/start')?.params?.clientUserMessageId).toBe(NOTE)
+    turnStarted('plain-1')
+    item('plain-1', 'userMessage', NOTE)
+    expect(startedFrom).toEqual([null, [NOTE]])
+    completed('plain-1')
+    await h.dispose()
+  })
+
   it('says every message of a batch that was queued behind a compact and ran as one turn', async () => {
     const { h, startedFrom } = await session()
     h.send('/compact')

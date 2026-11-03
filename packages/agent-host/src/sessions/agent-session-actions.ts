@@ -262,7 +262,7 @@ export class AgentSessionActions {
               this.host.applyDeferredRestart(child.id)
             }
             try {
-              await this.host.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
+              await this.host.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input, inputId) => {
                 const fail = (e: Error) => {
                   if (!record) {
                     wait.fail(e)
@@ -278,7 +278,7 @@ export class AgentSessionActions {
                     void this.flow.tellNoteRefused(callerId, child.id, e.message)
                   }
                 }
-                void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
+                void h.sendTracked!(input, { complete: release, fail }, inputId ? { id: inputId } : undefined).then(release, fail)
               })
             } catch (e) {
               if (record) {

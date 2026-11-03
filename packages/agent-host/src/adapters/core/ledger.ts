@@ -117,8 +117,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     void this.enqueue(text, opts?.id ?? null, opts?.compact === true)
   }
 
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
-    return this.enqueue(text, null, false, observer)
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
+    return this.enqueue(text, opts?.id ?? null, false, observer)
   }
 
   private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver): Promise<void> {
@@ -160,8 +160,20 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   private begin(first: Queued, proc: AgentProcess): Turn {
     const turn: Turn = { input: first, stopAsked: false, proc }
     this.turn = turn
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+    // The input this turn runs for, read by the host while it handles the event (#1639): the one it starts with, or none named
+    this.startInputs = first.named ? [first.named] : []
+    try {
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+    } finally {
+      this.startInputs = null
+    }
     return turn
+  }
+
+  private startInputs: readonly string[] | null = null
+  /** The inputs the turn whose opening is being handled runs for (`SessionHandle.turnStartInputs`); null outside that event */
+  turnStartInputs(): readonly string[] | null {
+    return this.startInputs
   }
 
   private handleOf(turn: Turn): RunningTurn {
