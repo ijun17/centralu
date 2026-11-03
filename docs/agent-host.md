@@ -2757,6 +2757,20 @@ host is no longer asking, or the window no longer holds the ticket), a linked ma
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows
 none of them, and the agent's call is cut at the drain like any in-process tool call.
 
+**Without a keeper** (#1895, owner 2026-11-03: stop and continue on every machine). A window that starts its host itself (macOS `Direct`:
+a debug build, or the release once the app starts it so) is the host's parent, and a relaunch would end the host as a quit does. So
+`apply_update_relaunch` first stops the host for an update (`Supervisor::stop_host_for_update`), waits for it to end (up to
+`STOP_FOR_UPDATE_WAIT`, 15 s: the host's own shutdown ends at 10 s), starts no other, and then relaunches. The stop is the one a linked
+hub's `host.stop { forUpdate }` is (§4.8), asked by a line on the host's stdin, `{"op":"stop","forUpdate":true}`, since the window
+speaks no WebSocket and `host.stop` is refused to a host the app runs (a hub linked to it must not be able to stop it): the host
+takes it only from the window that started it (`CC_STARTED_BY=app`), through `stopFromRequest`, the function `host.stop` calls. The
+host the relaunched window starts continues the turns the stop ended, tells the agents of the background tasks and cards it ended,
+and opens the terminals and Run commands again. A host that does not end in time is stopped the usual way, and its turns end as a
+quit's. The update line says so (`RelaunchCheck.restartsHost`). Only where `relaunch_info` is ready, as with a keeper: from an app
+bundle the update replaced (macOS). No Linux package or Windows install is a bundle, so those keep "Restart Centralu to finish
+updating", and the busy report is the keeper's, so nothing applies by itself without one. A swap whose host holds no agents (a
+keeper without its child service) is the same stop: the drain begins it before it lets them go, and the host that takes over continues what it ended.
+
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. The
 relaunch itself loses nothing a keeper holds, but the relaunched window then switches the host by itself, and that
 switch is what a busy host can lose: a Centralu tool call still running after the 10 s drain (a `start_agent` or
@@ -3573,7 +3587,7 @@ the person's Continue would.
   `commands.state` were empty after the restart. They are not a session's, so they have no conversation mark and a list of their
   own (`recordUpdateEnded`, lifecycle/update-resume.ts; the shapes are in lifecycle/update-ended.ts), written by the stopping host in
   its first step (`recordEnded` in `stopPlan`, before the shells are killed: no await comes before the kill; only a stop that was
-  asked for an update records, `host.stop { forUpdate }`). Only what opening them again needs is kept, and nothing a shell printed or
+  asked for an update records, `host.stop { forUpdate }`, the desktop window's stop line or a drain that holds no agents: §4.5). Only what opening them again needs is kept, and nothing a shell printed or
   a person typed: per terminal its folder and size (`TerminalService.snapshot`); per running Run command its folder and command
   (`CommandRunner.runningSnapshot`), with the time of the stop. The next host takes the list whole, once, before it listens
   (`UpdateResumeLists.takeEnded`, `restartEnded`). **The list is removed first**, by the path the lists of turns are removed by, and

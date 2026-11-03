@@ -144,6 +144,10 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * A keeper too old to hold on is acceptable only with background mode on, where a window closing
  * never stopped anything; with it off this refuses, rather than cutting every turn.
  *
+ * A window that starts its host itself has no keeper to hold it: it stops the host for an update
+ * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
+ * which continues what that one ended.
+ *
  * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below (it
  * showed when this ran on the main thread; it runs off it now, #840 item 6). Through
  * `ExitRequested` with a code (our quit gate lets a programmatic exit through) and `Exit`, Tauri
@@ -158,11 +162,15 @@ async fn apply_update_relaunch(app: AppHandle) -> Result<(), String> {
         if !info.ready {
             return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
         }
-        if let Err(e) = sup.announce_relaunch() {
-            if sup.background() != Ok(true) {
-                return Err(format!(
-                    "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
-                ));
+        // Where this window starts its host itself (#1895), the host is stopped for an update, and given the time it needs,
+        // before the relaunch ends it; with a keeper, the keeper holds it
+        if !sup.stop_host_for_update() {
+            if let Err(e) = sup.announce_relaunch() {
+                if sup.background() != Ok(true) {
+                    return Err(format!(
+                        "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
+                    ));
+                }
             }
         }
         app.state::<QuitApproved>().0.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -221,8 +229,16 @@ fn leave_app_folder() {
 #[cfg(test)]
 mod keeper_command_tests {
     /// The `Supervisor` calls that send a request to the keeper and wait for its answer.
-    const WAITS_ON_KEEPER: [&str; 7] =
-        [".switch_build(", ".background(", ".set_background(", ".stop_agents(", ".restart_keeper(", ".announce_relaunch(", ".restart("];
+    const WAITS_ON_KEEPER: [&str; 8] = [
+        ".switch_build(",
+        ".background(",
+        ".set_background(",
+        ".stop_agents(",
+        ".restart_keeper(",
+        ".announce_relaunch(",
+        ".stop_host_for_update(",
+        ".restart(",
+    ];
 
     #[test]
     fn a_command_that_waits_on_the_keeper_runs_off_the_main_thread() {

@@ -107,6 +107,12 @@ describe('autoApplyDecision', () => {
     expect(autoApplyDecision({ ...idle, busy: null })).toEqual({ apply: false, waitingFor: 'something is running' })
   })
 
+  // #1895: without a keeper nothing reports busy, so the line must not say it waits for something that never comes
+  it('does not apply by itself, nor say it waits, where the relaunch stops the host', () => {
+    expect(autoApplyDecision({ ...idle, relaunch: { ...ready, restartsHost: true }, busy: null })).toEqual({ apply: false })
+    expect(autoApplyDecision({ ...idle, relaunch: { ...ready, restartsHost: true } })).toEqual({ apply: false })
+  })
+
   it('never relaunches under someone typing', () => {
     expect(autoApplyDecision({ ...idle, typing: true })).toEqual({ apply: false, waitingFor: 'you are typing' })
   })

@@ -38,11 +38,14 @@ export type AutoApplyInput = {
  *   command running (the host's one idle rule, `hostBusy`, reported through the keeper). Unknown
  *   counts as busy, as it does for the switch's question.
  * - Never while someone is typing.
+ * - Never from a window whose relaunch stops the host (no keeper, #1895): nothing reports whether the host is busy there, and
+ *   waiting for a report that never comes would only say "something is running" for good. The person presses the button.
  */
 export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingFor?: string } {
   const u = i.update
   if (!u?.autoApply || u.phase !== 'restart_required' || i.tried) return { apply: false }
   if (applyOffer(u, i.windowVersion, i.relaunch).kind !== 'apply') return { apply: false }
+  if (i.relaunch?.restartsHost) return { apply: false }
   if (i.busy !== false) return { apply: false, waitingFor: 'something is running' }
   if (i.typing) return { apply: false, waitingFor: 'you are typing' }
   return { apply: true }

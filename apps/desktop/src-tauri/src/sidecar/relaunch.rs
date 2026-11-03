@@ -1,5 +1,5 @@
 //! Whether "Apply now" can relaunch this window into the update just installed (#352). Unix only, as
-//! the keeper is: in direct mode the window refuses a relaunch (`Supervisor::relaunch_info`).
+//! the keeper is: elsewhere the window refuses a relaunch (`Supervisor::relaunch_info`).
 
 use super::RelaunchInfo;
 
@@ -32,7 +32,55 @@ pub(crate) fn relaunch_decision(
             "This window runs from {bundle}, which the update did not replace. Open the installed Centralu to use the new version."
         ));
     }
-    RelaunchInfo { ready: true, reason: None, version: None, bundle_path: Some(bundle.to_string()) }
+    RelaunchInfo { ready: true, bundle_path: Some(bundle.to_string()), ..Default::default() }
+}
+
+/**
+ * `relaunch_decision` for this window, from what is on disk now: this window's own build `app`, and the host folder the
+ * bundle carries (`host_dir`, None for a dev build, which has none to compare). The window that has a keeper and the one
+ * that starts its host itself ask the same question (#1895).
+ */
+pub(crate) fn relaunch_info(app: &crate::keeper::source::BuildSource, host_dir: Option<&std::path::Path>) -> RelaunchInfo {
+    use crate::keeper::source::BuildSource;
+    let exe = std::env::current_exe().unwrap_or_default();
+    let bundle = crate::keeper::client::bundle_of(&exe);
+    let on_disk = host_dir
+        .filter(|d| d.join("main.mjs").is_file() && exe.is_file())
+        .map(|d| BuildSource::from_host_dir(d, Some(bundle.to_string_lossy().to_string()), None));
+    let mut info = relaunch_decision(app, on_disk.as_ref(), bundle != exe, &bundle.to_string_lossy());
+    if info.ready {
+        info.version = bundle_version(&bundle);
+    }
+    info
+}
+
+/// What a window that starts its host itself compares the bundle on disk with (#1895): its own build as it started, and the
+/// host folder it carries. Kept at start, since the update replaces the folder the build would be read from.
+static DIRECT_APP: std::sync::OnceLock<(crate::keeper::source::BuildSource, Option<std::path::PathBuf>)> = std::sync::OnceLock::new();
+
+/// Keeps this window's own build for `direct_info`; the first call is the one that counts
+pub(crate) fn remember(host_dir: Option<std::path::PathBuf>, version: &str) {
+    let _ = DIRECT_APP.set((app_build(host_dir.as_deref(), version), host_dir));
+}
+
+/// `relaunch_info` for a window that starts its host itself: a relaunch there stops it for an update (`restarts_host`)
+pub(crate) fn direct_info() -> RelaunchInfo {
+    match DIRECT_APP.get() {
+        Some((build, host_dir)) => RelaunchInfo { restarts_host: true, ..relaunch_info(build, host_dir.as_deref()) },
+        None => RelaunchInfo { reason: Some("this window has not started its host yet".into()), ..Default::default() },
+    }
+}
+
+/// This window's own build, from the host folder it carries (None for a dev build) and the app's version
+pub(crate) fn app_build(host_dir: Option<&std::path::Path>, version: &str) -> crate::keeper::source::BuildSource {
+    use crate::keeper::source::BuildSource;
+    match host_dir {
+        Some(dir) => {
+            let exe = std::env::current_exe().unwrap_or_default();
+            BuildSource::from_host_dir(dir, Some(crate::keeper::client::bundle_of(&exe).to_string_lossy().to_string()), Some(version.to_string()))
+        }
+        None => BuildSource::dev(),
+    }
 }
 
 /// The version in a bundle's `Info.plist` (`CFBundleShortVersionString`), read as text: Tauri

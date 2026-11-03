@@ -69,7 +69,11 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
           content={
             <span className="flex flex-col gap-1">
               <span>{update.latest ? `${update.latest} is installed` : 'An update is installed'} (this is {APP_VERSION}).</span>
-              <span>Press to relaunch into it; running agents and terminals keep going.</span>
+              <span>
+                {relaunch?.restartsHost
+                  ? 'Press to relaunch into it; running turns go on once it is back, and open terminals and commands start again.'
+                  : 'Press to relaunch into it; running agents and terminals keep going.'}
+              </span>
               {waiting && <span data-testid="update-waiting">It applies by itself once idle: waiting because {waiting}.</span>}
               {update.error && <span>{update.error}</span>}
             </span>

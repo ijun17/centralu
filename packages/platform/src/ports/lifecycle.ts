@@ -81,20 +81,25 @@ export type RelaunchCheck = {
   reason?: string
   /** The version a relaunch would start, when the bundle says */
   version?: string
+  /**
+   * The relaunch stops the agent host, which the next one continues from (#1895): running turns go on once it is back, and
+   * open terminals and Run commands start again. Absent when a keeper holds the host through the relaunch
+   */
+  restartsHost?: boolean
 }
 
 /**
  * "Apply now" (#352): relaunching the window into the version the host just installed.
  *
- * Only a desktop app whose host is held by the keeper can offer this: the keeper is told first and
- * holds the host and every agent through the relaunch, whatever background mode says, and the new
- * window then switches the keeper and host to its build. A platform that cannot leaves
- * `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
+ * Only a desktop app can offer this. With a keeper, the keeper is told first and holds the host and every agent
+ * through the relaunch, whatever background mode says, and the new window then switches the keeper and host to its
+ * build. Without one, the window stops its host for an update first (#1895: `RelaunchCheck.restartsHost`). A platform that
+ * cannot leaves `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
  */
 export interface RelaunchPort {
   /** Whether a relaunch now would start a different build than this window (the bundle on disk was replaced) */
   check(): Promise<RelaunchCheck>
-  /** Announces the relaunch to the keeper, then relaunches. Rejects, saying why, when the agents could not be held */
+  /** Announces the relaunch to the keeper (or stops the host for an update), then relaunches. Rejects, saying why, when the agents could not be held */
   relaunch(): Promise<void>
   /**
    * Whether the host is running anything a person would lose (the keeper's activity report: a

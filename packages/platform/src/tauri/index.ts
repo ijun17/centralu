@@ -457,8 +457,9 @@ export async function pickDirectory(): Promise<string | null> {
 
 /**
  * "Apply now" (#352) through the Rust shell: `relaunch_info` says whether this window's bundle on
- * disk now holds another build, `apply_update_relaunch` tells the keeper and relaunches, and the
- * keeper's activity report (in `host-build`) is what an automatic apply waits on.
+ * disk now holds another build, `apply_update_relaunch` tells the keeper (or, without one, stops the
+ * host for an update, #1895) and relaunches, and the keeper's activity report (in `host-build`) is
+ * what an automatic apply waits on: there is none without a keeper, so nothing applies by itself there.
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {
@@ -588,9 +589,10 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
             get: () => invoke<boolean>('background_mode').catch(rethrowAsError),
             set: (on: boolean) => invoke<boolean>('set_background_mode', { on }).catch(rethrowAsError),
           },
-          relaunch: tauriRelaunchPort(),
         }
       : {}),
+    // Without a keeper too (#1895): the shell says whether it can relaunch, and stops the host for an update first
+    relaunch: tauriRelaunchPort(),
     system: new TauriSystemPort(),
   }
 }

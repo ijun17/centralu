@@ -170,6 +170,17 @@ test('one install and apply reaches the newest release after the banner became s
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
 })
 
+// #1895: where no keeper holds the host, the relaunch stops it and the next one continues, so the line does not say agents keep going
+test('the update line says a relaunch that stops the host stops it, and what comes back (#1895)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(() => { (window as any).__mock.relaunchCheck = { ready: true, version: '9999.0.0', restartsHost: true } })
+  await focus(page)
+  await expect(page.getByTestId('update-apply-now')).toBeVisible()
+  const tip = await tipOf(page, page.getByTestId('update-line'))
+  await expect(tip).toContainText('running turns go on once it is back')
+  await expect(tip).not.toContainText('keep going')
+})
+
 /**
  * An agent's "Apply now" (#665): the host asks the window over the event stream, and the window runs its own button's
  * path. The mock plays the host's half (`agentApply`); everything after the event is the real window.
