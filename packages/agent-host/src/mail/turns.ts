@@ -100,9 +100,10 @@ export class MailTurns {
 
   /**
    * Turns the previous host left open: the ones of sessions still in that turn (kept by the keeper, or continued after an update cut them) go
-   * on and are read back with their work message, starter and asker; the rest can never end and are closed `lost`
+   * on and are read back with their work message, starter and asker; the rest can never end and are closed `lost`. Returns those closed
    */
-  closeStale(): void {
+  closeStale(): { sessionId: string; turnSeq: number }[] {
+    const lost: { sessionId: string; turnSeq: number }[] = []
     for (const row of this.records.openTurns()) {
       if (this.opts.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
         const by = turnStartedBy(row.startedBy)
@@ -110,8 +111,10 @@ export class MailTurns {
         this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by, messageId: row.messageId, starter: row.starterId, ...(asker ? { asker } : {}) })
       } else {
         this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
+        lost.push({ sessionId: row.sessionId, turnSeq: row.turnSeq })
       }
     }
+    return lost
   }
 
   /** Mail is about to start a turn of the session: its work message (or null), the message that starts it, and for the orchestrator its asker. The turn's number */

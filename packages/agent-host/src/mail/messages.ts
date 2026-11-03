@@ -765,6 +765,24 @@ export class MessageService {
     })
   }
 
+  /**
+   * The session's turn `turnSeq` was cut with the host and nothing continues it (#1916): a crash or a plain restart, not an update's stop. The
+   * questions delivered in it that it did not answer were read, so no delivery gives them again: each is released `cut` and its sender told
+   * once (D25), so it can ask again. A task is not: the old report path tells its owner of the stop (#698)
+   */
+  turnCut(address: string, turnSeq: number): void {
+    this.run(() => {
+      const now = this.now()
+      const senders = new Set<string>()
+      for (const row of this.records.unansweredTo(address)) {
+        if (row.turnSeq !== turnSeq || row.settled !== null) continue
+        const m = this.records.message(row.messageId)
+        if (m && m.kind !== 'task' && this.records.markReleased(row.messageId, address, now, 'cut')) senders.add(m.sender)
+      }
+      for (const sender of senders) this.tellUnanswered(sender)
+    })
+  }
+
   /** The handoff (§7.7): `from`'s unsettled watched rows and unread mail move to `to`; the successor is told of each. Called inside the children's move */
   handOver(from: string, to: string, scope: HandOverScope): HandedOverMessage[] {
     return this.run(() => {
@@ -1060,6 +1078,7 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   stopped: 'the person stopped that session',
   error: 'that session stopped with an error',
   gone: 'that session is gone',
+  cut: 'its turn on it was cut when Centralu stopped, so ask again if you still need the answer',
 }
 
 /** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */

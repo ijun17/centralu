@@ -20,7 +20,7 @@ export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
 export type MailKind = (typeof MAIL_KINDS)[number]
 export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
 export type Settled = (typeof SETTLED)[number]
-export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone'] as const
+export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'cut'] as const
 export type ReleaseWhy = (typeof RELEASE_WHY)[number]
 
 /** What only Centralu writes about a message (§5.4). Every key optional; a key a newer build added is kept */
