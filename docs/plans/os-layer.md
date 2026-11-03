@@ -475,8 +475,9 @@ answer, and a test on memory says what the host does:
   (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`), leaving the process running: Node's own `child.kill('SIGHUP')` ends it as SIGKILL
   while `process.kill(pid, 'SIGHUP')` throws, and the `Os` takes the one rule for both.
 - `processes.stop`'s sweep on Windows ends what the child started between its spawn and its exit as recorded
-  (`GroupedChild.exitedAt`, shared with `app-process.ts` and `local-process.ts`), never up to the time of the sweep,
-  when its pid may already be another program's.
+  (`GroupedChild.exitedAt`, shared with `app-process.ts` and `local-process.ts`) plus one clock tick (`CLOCK_TICK_MS`: Node's
+  clock runs up to a tick behind the creation times Windows stamps), never up to the time of the sweep, when its pid may
+  already be another program's.
 
 `memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
 checks the in-memory OS against both on any OS (and a few cases more: a program's file while it runs, `EXDEV`, symlink
