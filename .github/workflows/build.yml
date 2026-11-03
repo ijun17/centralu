@@ -542,7 +542,7 @@ jobs:
         # tooling/test-durations.json (`tsx tooling/os-tests.ts --refresh-durations`, docs/plans/os-layer.md §6.4).
         run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="${{ runner.temp }}\vitest-times.json"
 
-      - name: Keep the test times
+      - name: Upload the test times
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -642,7 +642,7 @@ jobs:
             for (const x of files.slice(0, 25)) console.log(`${x.s.toFixed(1).padStart(7)} s  ${x.f}`)
           ' "$RUNNER_TEMP/vitest-times.json"
 
-      - name: Keep the test times
+      - name: Upload the test times
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

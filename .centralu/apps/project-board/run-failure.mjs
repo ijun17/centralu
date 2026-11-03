@@ -31,6 +31,14 @@ const SETUP_STEP = [
   /^Run (?:dtolnay\/rust-toolchain|swatinem\/rust-cache)@/i,
   /^(?:Install|Set up) .*\b(?:WebKit|Chromium|Firefox|browsers?|Playwright|system dependencies)\b/i,
 ]
+/**
+ * The steps that only store what the job made, named for it: a step that keeps results says `Upload ...` in its name (the step
+ * list gives only the name, and the action's own name is not in it for a step named by hand), and the `Post ...` steps GitHub
+ * adds. They run after the tests, so as the first step to fail they say the service was unreachable, not that a test broke
+ * (2026-11-03: `Failed to FinalizeArtifact: ... ENOTFOUND` after every test passed). An upload that is a check on the commit
+ * (`if-no-files-found: error`, to fail a build that bundled nothing) is not named so: its failure is the commit's.
+ */
+const STORE_STEP = [/^Upload /i, /^Post /i]
 /** A step that fetches packages: a setup step only when the failure names the network or a package source */
 const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
 const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
@@ -101,7 +109,7 @@ export function onFlakyList(name, list = []) {
  * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
  * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
  * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout` (`inSetup`, with its `step`, when the step the limit ended set the job up, #1503),
- * `runner`, `setup` (its first failed step set the job up, #1435), `flaky` or `cancelled`.
+ * `runner`, `setup` (its first failed step set the job up, #1435), `storage` (its first failed step only stored results), `flaky` or `cancelled`.
  */
 export function jobFailure(job, { flaky = [] } = {}) {
   if (!job || job.conclusion == null || OK.has(job.conclusion)) return null
@@ -127,6 +135,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
   // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
   // (an artifact upload that runs on failure) says nothing more.
   if (step && isSetupStep(step.name, `${notes}\n${job.log ?? ''}`)) return { real: false, cause: 'setup', step: step.name }
+  if (step && STORE_STEP.some((re) => re.test(step.name))) return { real: false, cause: 'storage', step: step.name }
   // Failed, and no reason to call it the runner's: the session's to look at, never rerun blind
   return { real: true, cause: step ? 'test' : 'no-step', step: step?.name ?? null }
 }
@@ -142,7 +151,7 @@ export function classifyRun(run, jobs, { flaky = [] } = {}) {
   const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, inSetup: x.f.inSetup === true, shutdown: x.f.shutdown === true, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
   const real = seen.find((x) => x.f.real)
   if (real) return pick(real)
-  for (const cause of ['timeout', 'runner', 'setup', 'flaky', 'cancelled']) {
+  for (const cause of ['timeout', 'runner', 'setup', 'storage', 'flaky', 'cancelled']) {
     const x = seen.find((y) => y.f.cause === cause)
     if (x) return pick(x)
   }
@@ -157,6 +166,7 @@ export const CAUSE_TEXT = {
   timeout: 'a job that hit its timeout',
   runner: 'a lost runner',
   setup: 'a failure in a setup step',
+  storage: 'a failure in a step that only stores results',
   flaky: 'a job on the known-flaky list',
   cancelled: 'cancelled, with no failed job',
 }

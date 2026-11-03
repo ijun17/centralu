@@ -366,11 +366,11 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
     // memory or disk, and GitHub then says only that the runner was shut down. It is looked for as a test failure, and
     // reverted if the hunt finds it. The first time, and a different job's, are still the runner's: rerun, and reported.
     const again = jobs.shutdown === true && rerun.shutdown === true && jobs.names.some((name) => (rerun.jobs ?? []).includes(name))
-    // The first attempt failed in a test, and the rerun failed before a test could run: that neither confirms the failure nor clears
+    // The first attempt failed in a test, and the rerun failed in a step that is not a test (setup, storing results): that neither confirms the failure nor clears
     // it, so no commit is blamed for it
     if (rerun.test)
-      return stop(`a test failed (${rerun.jobs.join(', ')}${rerun.line ? `:${rerun.line}` : ''}), and its rerun failed in ${what} before a test could run, so the failure was neither confirmed nor cleared. Nothing was reverted: rerun the job by hand.`)
-    if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
+      return stop(`a test failed (${rerun.jobs.join(', ')}${rerun.line ? `:${rerun.line}` : ''}), and its rerun failed in ${what}, so the failure was neither confirmed nor cleared. Nothing was reverted: rerun the job by hand.`)
+    if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && jobs.cause !== 'storage' && !jobs.inSetup)) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
       // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull
@@ -522,7 +522,7 @@ async function stepHunt(ctx) {
     // may be the commit's (it hangs, it exhausts the runner), so that probe stays red. So does a failed test, on its first failure (#1496):
     // a probe that had to fail twice would read red a quarter of the time for a break that fails half of them, and the bisect would
     // move past it and blame a later commit
-    if (why.kind === 'infrastructure' && !why.shutdown && (why.cause === 'setup' || why.cause === 'runner' || why.inSetup)) {
+    if (why.kind === 'infrastructure' && !why.shutdown && (why.cause === 'setup' || why.cause === 'runner' || why.cause === 'storage' || why.inSetup)) {
       const what = infraText(why.names, why.step, why.cause)
       if (probe.rerun) return await unjudged(`the full tier's run on ${short(probe.sha)} (a bisect step) failed in ${what}, the same way again after one rerun. No commit is blamed, and nothing was reverted.`)
       if (renew && !renew()) return { did: 'yielded' }
