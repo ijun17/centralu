@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
-import { MailPerson } from './person.js'
+import { MailPerson, type PersonHost } from './person.js'
 import { refusedFor } from './messages.test-helpers.js'
 import { oldThread } from './v61.test-helpers.js'
 
@@ -26,14 +26,21 @@ afterEach(() => {
 function ready(w: ReturnType<typeof hostWorld>) {
   w.afterReady()
   stops.push(w.stop)
+  /** What the host was asked to stop and tell when the person closed a chain (`SessionManager.mailWorkClosed`) */
+  const closed: Parameters<PersonHost['closed']>[0][] = []
   const person = new MailPerson(w.service, w.store.mailbox, w.delivery, {
     // A session named `gone` is no longer kept (trashed or deleted)
     session: (id) => (id === 'gone' ? undefined : { name: id, state: 'idle' }),
     legacyChain: (threadId) => w.store.legacyChain(threadId, undefined, 100),
     projectLabel: (projectId) => w.reach.projectLabel(projectId),
     untrusted: (projectId) => w.reach.untrusted(projectId),
+    turnOn: (id) => {
+      const turn = w.turns.current(id)
+      return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+    },
+    closed: (c) => void closed.push(c),
   })
-  return { ...w, person }
+  return { ...w, person, closed }
 }
 const dbOf = (w: ReturnType<typeof hostWorld>) => (w.store as unknown as { db: Database.Database }).db
 const bodies = (w: ReturnType<typeof hostWorld>, id: string) => w.to(id).map((d) => d.input.text).join('\n')
@@ -349,6 +356,102 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     const pair = vi.spyOn(r.turns, 'resumePair')
     r.person.resume({ threadId: mid(28) })
     expect(pair).toHaveBeenCalledWith(B, A)
+  })
+})
+
+describe('closing a chain a session works on, and its state, as on main (owner decisions on #1914)', () => {
+  /** The person's task to `b`, as a session started with a first message records it, and the turn it starts as the host records it */
+  function working(w: ReturnType<typeof ready>) {
+    w.clock.t += 10
+    const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'create_session', delivered: true })
+    w.hooks.turnStarted?.('b', { by: 'work', added: false, cli: true, source: 'caller' })
+    return task
+  }
+  const rowOf = (w: ReturnType<typeof ready>, id: string) => w.person.list().threads.find((t) => t.id === id)
+
+  it('Drop while the session’s turn is on the chain stops that turn and tells it in main’s words; the chain is done as dropped, and the stopped turn reports nothing', () => {
+    const w = ready(hostWorld())
+    const task = working(w)
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'running', working: true, assignee: { address: B } })
+    expect(w.person.close(task.id, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped', working: false })
+    expect(w.closed).toEqual([{ sessionId: 'b', stopped: true, text: `The person dropped thread ${task.id}; its work was stopped. Do not continue it.`, since: expect.any(Number) }])
+    // The interrupted turn's end owes the person no report, so nothing opens the chain again
+    expect(w.hooks.personWork?.report('b', { outcome: 'interrupted', body: '[Centralu] The work was interrupted.', then: 'review' })).toBe(false)
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'done', outcome: 'dropped' })
+  })
+
+  it('Mark done is not Drop: it says marked done, and a session not in a turn on the chain is told and not stopped', () => {
+    const w = ready(hostWorld())
+    const task = working(w)
+    w.endTurn('b')
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'running', working: false })
+    expect(w.person.close(task.id, 'finished')).toMatchObject({ state: 'done', outcome: 'finished' })
+    expect(w.closed).toEqual([{ sessionId: 'b', stopped: false, text: `The person marked done thread ${task.id}. Do not continue it.` }])
+  })
+
+  it('a turn on another chain is not working on this one, and closing this one stops nothing', () => {
+    const w = ready(hostWorld())
+    working(w)
+    const q = w.mail.send(B, { to: [PERSON], text: 'Unrelated question?', needsReply: true }).message
+    expect(rowOf(w, q.id)).toMatchObject({ state: 'open', working: false })
+    w.person.close(q.id)
+    expect(w.closed).toEqual([])
+  })
+
+  it('a turn on a reply deep in the chain is working on the chain, and a close on a later message stops it', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const root = w.mail.send(B, { to: [PERSON], text: 'Shall I start?', needsReply: true }).message
+    w.clock.t += 10
+    const go = w.mail.task(PERSON, B, { text: 'Yes, start', origin: 'person', delivered: true, replyTo: root.id })
+    w.hooks.turnStarted?.('b', { by: 'work', added: false, cli: true, source: 'caller' })
+    expect(rowOf(w, root.id)).toMatchObject({ working: true, state: 'running' })
+    w.person.close(go.id)
+    expect(w.closed).toMatchObject([{ sessionId: 'b', stopped: true }])
+    expect(rowOf(w, root.id)).toMatchObject({ state: 'done' })
+  })
+
+  it('a chain whose task went to a session trashed since closes: done as the person closed it, and nobody is told', () => {
+    const w = ready(hostWorld())
+    const task = working(w)
+    w.endTurn('b')
+    w.hooks.sessionGone('b')
+    expect(w.row(task.id, B)?.settled).toBe('gone')
+    expect(w.person.close(task.id, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped' })
+    expect(w.closed).toEqual([])
+  })
+
+  it('on an old thread’s id, Drop closes every chain moved from it as dropped; a later Mark done on a chain that opened again stands', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(40), owner: A, at: t }, [
+      { id: mid(40), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
+      { id: mid(41), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    ])
+    const r = ready(w)
+    r.person.close(tid(40), 'dropped')
+    expect([rowOf(r, mid(40)), rowOf(r, mid(41))].map((x) => [x?.state, x?.outcome])).toEqual([
+      ['done', 'dropped'],
+      ['done', 'dropped'],
+    ])
+    r.clock.t += 10
+    r.mail.send(A, { to: [PERSON], text: 'One more thing?', needsReply: true, replyTo: mid(41) })
+    expect(rowOf(r, mid(41))).toMatchObject({ state: 'open', outcome: null })
+    r.person.close(mid(41), 'finished')
+    expect(rowOf(r, mid(41))).toMatchObject({ state: 'done', outcome: 'finished' })
+    expect(rowOf(r, mid(40))).toMatchObject({ state: 'done', outcome: 'dropped' })
+  })
+
+  it('a task reported and not closed is in review; Mark done closes it as finished', () => {
+    const w = ready(hostWorld())
+    const task = working(w)
+    expect(w.hooks.personWork?.report('b', { outcome: 'finished', body: '[Centralu] The work finished.', then: 'review' })).toBe(true)
+    w.endTurn('b')
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'review', working: false })
+    w.person.close(task.id)
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'done', outcome: 'finished' })
+    // Reported: nobody is owed a word about it
+    expect(w.closed).toEqual([])
   })
 })
 

@@ -6,6 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import type { HostMail } from '../mail/host-mail.js'
+import { PERSON } from '../mail/address.js'
+import { MailPerson } from '../mail/person.js'
+import { inTurn } from '../idle.js'
 import { ChildReports } from './child-reports.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
@@ -213,5 +216,69 @@ describe('new work sent by mail after the first was reported', () => {
     expect(outcomes(forB.id)).toEqual([])
     expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'withdrawn' })
     expect(handleOf(b).sent.filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
+  })
+})
+
+describe('the person closing a chain whose work is going, over the real manager (3.10 as on main; owner decisions on #1914)', () => {
+  /** The person's window wired as main.ts wires it */
+  const personOf = () =>
+    new MailPerson(m.service, w.store.mailbox, m.delivery, {
+      session: (id) => {
+        const s = w.mgr.sessionInfo(id)
+        return s ? { name: s.name, state: s.state } : undefined
+      },
+      legacyChain: () => [],
+      projectLabel: (id) => id,
+      untrusted: () => false,
+      turnOn: (id) => {
+        const s = w.mgr.sessionInfo(id)
+        const turn = s && inTurn(s.state) ? m.turns.current(id) : undefined
+        return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+      },
+      closed: (c) => void w.mgr.mailWorkClosed(c),
+    })
+  /** A session at work on the person's task, which the mailbox delivered and started its turn with */
+  async function working() {
+    const helper = await w.callerSession()
+    handleOf(helper).acceptsAtOnce = true
+    const task = m.service.task(PERSON, addr(helper), { text: 'write the files', origin: 'person', delivered: false })
+    await due(helper)
+    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
+    expect(m.turns.current(helper)?.messageId).toBe(task.id)
+    return { helper, task }
+  }
+
+  it('Drop stops the session’s turn, tells it once without a wake in main’s words, and the stopped turn reports nothing to the person', async () => {
+    const { helper, task } = await working()
+    const person = personOf()
+    expect(person.list().threads[0]).toMatchObject({ id: task.id, state: 'running', working: true })
+    expect(person.close(task.id, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped' })
+    await w.until(() => handleOf(helper).quiet.length === 1)
+    expect(handleOf(helper).interrupted).toBe(1)
+    expect(handleOf(helper).quiet[0]).toContain(`[Centralu] The person dropped thread ${task.id}; its work was stopped. Do not continue it.`)
+    await turnEnds(helper, 'stopped')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(outcomes(task.id)).toEqual([])
+    expect(person.list().threads[0]).toMatchObject({ id: task.id, state: 'done', outcome: 'dropped', unread: 0 })
+  })
+
+  it('stops the background work the stopped turn started, and leaves work it did not start running (#1474)', async () => {
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const { helper, task } = await working()
+    const h = handleOf(helper)
+    h.event({ type: 'tool_call', sessionId: helper, callId: 'c-this', summary: { tool: 'Bash', title: 'pnpm test --watch', paths: [] } })
+    h.event({
+      type: 'background_tasks',
+      sessionId: helper,
+      live: [
+        { id: 't-this', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c-this' },
+        { id: 't-server', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
+      ],
+    })
+    personOf().close(task.id, 'finished')
+    await w.until(() => h.quiet.length === 1)
+    expect(h.interrupted).toBe(1)
+    expect(h.stoppedTasks).toEqual(['t-this'])
+    expect(h.quiet[0]).toContain(`The person marked done thread ${task.id}; its work was stopped.`)
   })
 })

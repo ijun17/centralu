@@ -15,7 +15,17 @@ export type PersonHost = {
   projectLabel(projectId: string): string
   /** Whether the project is not trusted (`MailReach.untrusted`, §7.2) */
   untrusted(projectId: string): boolean
+  /** The turn going in the session, from the turn records (`MailTurns.current`, while the session is in a turn): its work message, else its starter */
+  turnOn(sessionId: string): { work: string | null; startedAt: number } | undefined
+  /**
+   * A chain the person closed was the session's work: stop its turn on it when `stopped` (with the background work that turn started), and tell it
+   * `text` without a wake (`SessionManager.mailWorkClosed`)
+   */
+  closed(c: { sessionId: string; stopped: boolean; text: string; since?: number }): void
 }
+
+/** How the person closes a chain: Mark done is `finished`, Drop is `dropped` */
+export type CloseOutcome = 'finished' | 'failed' | 'stopped' | 'dropped'
 
 /** How many messages one `mail.thread` returns; `more` says there are further ones */
 const THREAD_PAGE = 100
@@ -144,20 +154,42 @@ export class MailPerson {
   }
 
   /**
-   * The person's Mark done or Drop: nothing in the chain waits for them any more, and their own questions in it wait for no answer. Nothing is
-   * withdrawn: what the person sent is still delivered, and a task the person gave is still reported
+   * The person's Mark done (`finished`) or Drop (`dropped`), on the whole chain and on every chain an old thread's id names: nothing in it waits for them
+   * any more, their own questions in it wait for no answer, and the tasks they gave in it are closed, so no report of them opens it again. A session
+   * whose turn is on the chain (the turn records say so) is stopped, and it and every session the person's open task in it went to are told once, in
+   * Centralu's words (3.10). Nothing is withdrawn: what the person sent is still delivered
    */
-  close(threadId: string): MailThreadRow {
+  close(threadId: string, outcome: CloseOutcome = 'finished'): MailThreadRow {
     const roots = this.rootsOf(threadId)
     const root = roots[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    const now = Date.now()
     // Every chain an old thread's id names: the window showed them as one thread
     for (const r of roots) {
-      const ids = this.shown(r).map((s) => s.m.id)
-      this.records.closeFor(PERSON, ids, Date.now())
-      for (const id of ids) {
-        const m = this.records.message(id)
-        if (m?.sender === PERSON && m.needsReply) for (const row of this.records.recipients(id)) this.records.settle(id, row.recipient, 'done', Date.now())
+      const chain = this.chainOf(r)
+      const working = this.workers(chain)
+      // The sessions whose work it was: one in a turn on it, and each one a task of the person's in it went to that has not reported
+      const helpers = new Set(working.map((w) => w.sessionId))
+      for (const m of chain) {
+        if (m.sender !== PERSON || m.kind !== 'task') continue
+        for (const row of this.records.recipients(m.id)) {
+          const party = parseAddress(row.recipient)
+          if (party?.kind === 'session' && row.settled === null && this.here(row.recipient)) helpers.add(party.sessionId)
+        }
+      }
+      // What the person reads of it: a row held out of their sight is not theirs to close
+      this.records.closeFor(
+        PERSON,
+        this.shown(r).map((s) => s.m.id),
+        now,
+      )
+      for (const m of chain) {
+        if (m.sender === PERSON && (m.needsReply || m.kind === 'task')) for (const row of this.records.recipients(m.id)) this.records.settle(m.id, row.recipient, 'done', now)
+      }
+      this.records.markClosed(r, outcome, now)
+      for (const sessionId of helpers) {
+        const turn = working.find((w) => w.sessionId === sessionId)
+        this.host.closed({ sessionId, stopped: turn !== undefined, text: closedWords(r, outcome, turn !== undefined), ...(turn ? { since: turn.startedAt } : {}) })
       }
       // The window that has the chain open reads it again
       this.service.announce(r)
@@ -224,6 +256,27 @@ export class MailPerson {
 
   // ── Chains ──
 
+  /** Every message of the chain, readable by the person or not: what a turn's work may be */
+  private chainOf(root: string): MailRow[] {
+    return this.records.numbered(root, CHAIN_CAP).map(({ m }) => m)
+  }
+
+  /** The sessions of the chain whose turn going now is on it: the turn records name a message of the chain as that turn's work (or its starter) */
+  private workers(chain: readonly MailRow[]): { sessionId: string; address: string; startedAt: number }[] {
+    const ids = new Set(chain.map((m) => m.id))
+    const sessions = new Map<string, string>()
+    for (const m of chain) {
+      for (const address of [m.sender, ...this.records.recipients(m.id).map((r) => r.recipient)]) {
+        const party = parseAddress(address)
+        if (party?.kind === 'session') sessions.set(party.sessionId, address)
+      }
+    }
+    return [...sessions].flatMap(([sessionId, address]) => {
+      const turn = this.host.turnOn(sessionId)
+      return turn && turn.work !== null && ids.has(turn.work) ? [{ sessionId, address, startedAt: turn.startedAt }] : []
+    })
+  }
+
   /** Every chain an id names: a message's root, or each chain moved from an old thread, newest first */
   private rootsOf(id: string): string[] {
     const m = this.records.message(id)
@@ -269,8 +322,10 @@ export class MailPerson {
   }
 
   /**
-   * A chain as the window's list row. Done when the person said so (a row to them settled `done`) and nothing in it waits for them or for an answer to
-   * them; open otherwise, so the person may always write in a chain that is not done
+   * A chain as the window's list row. Done when the person closed it (`facts.closed` on its root, or an older close: a row to them settled `done`) and
+   * nothing in it waits for them or for an answer to them, with how they closed it. Otherwise running while a session's turn is on it or a task the person gave in it is
+   * not reported, in review once such a task is reported, and open for the rest; the person may always write in a chain that is not done. The session
+   * named on it is the one whose turn is on it, else the first one the person's first message went to
    */
   private row(root: string, held: number): MailThreadRow | null {
     const all = this.shown(root).map((s) => s.m)
@@ -278,16 +333,21 @@ export class MailPerson {
     const last = all.at(-1)
     if (!first || !last) return null
     const toPerson = all.flatMap((m) => this.records.recipient(m.id, PERSON) ?? [])
+    const tasks = all.filter((m) => m.sender === PERSON && m.kind === 'task').flatMap((m) => this.records.recipients(m.id).filter((r) => parseAddress(r.recipient)?.kind === 'session'))
     const waits =
       toPerson.some((r) => r.settled === null) ||
       all.some((m) => m.sender === PERSON && (m.needsReply || m.kind === 'task') && this.records.recipients(m.id).some((r) => r.settled === null))
-    const closed = toPerson.some((r) => r.settled === 'done')
-    const assignee = first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined
+    // Closed by the person: a row to them or a task of theirs settled `done`, or the close recorded on the root (a task to a session gone since)
+    const closedAs = this.records.message(root)?.facts.closed?.outcome
+    const done = (closedAs !== undefined || toPerson.some((r) => r.settled === 'done') || tasks.some((r) => r.settled === 'done')) && !waits
+    const working = done ? [] : this.workers(this.chainOf(root))
+    const state = done ? 'done' : working.length > 0 || tasks.some((r) => r.settled === null) ? 'running' : tasks.some((r) => r.settled === 'reported') ? 'review' : 'open'
+    const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
     return {
       id: root,
       subject: oneLineText(first.body, SUBJECT_CHARS),
-      state: closed && !waits ? 'done' : 'open',
-      outcome: null,
+      state,
+      outcome: done ? (closedAs ?? 'finished') : null,
       next: null,
       projectId: first.senderProject,
       owner: this.party(first.sender),
@@ -295,7 +355,7 @@ export class MailPerson {
       unread: toPerson.filter((r) => r.readAt === null && !hiddenFromPerson(r)).length,
       held,
       blocked: 0,
-      working: false,
+      working: working.length > 0,
       createdAt: first.createdAt,
       updatedAt: last.createdAt,
       last: { sender: this.party(last.sender), kind: windowKind(last), preview: oneLineText(last.body, PREVIEW_CHARS), at: last.createdAt },
@@ -345,6 +405,12 @@ export class MailPerson {
         : {}),
     }
   }
+}
+
+/** What a session whose work the person closed is told, in main's words (3.10): what the person did, whether its turn was stopped, and not to go on */
+function closedWords(root: string, outcome: CloseOutcome, stopped: boolean): string {
+  const what = outcome === 'dropped' ? 'dropped' : outcome === 'finished' ? 'marked done' : 'closed'
+  return `The person ${what} thread ${root}${stopped ? '; its work was stopped' : ''}. Do not continue it.`
 }
 
 /** The thread word the window shows for a message: a moved one's own (`legacyKind`), else what the message is in the thread words */

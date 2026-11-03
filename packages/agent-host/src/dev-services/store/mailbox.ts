@@ -50,6 +50,8 @@ export const MailFacts = z.looseObject({
   legacyKind: z.string().optional(),
   /** The recipients an older build's person released a moved message to: never held again for them (§6.3) */
   releasedTo: z.array(z.string()).optional(),
+  /** On a chain's root: how the person last closed the chain (Mark done `finished`, Drop `dropped`), which the window shows while it stays done */
+  closed: z.object({ outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), at: z.number() }).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
@@ -488,6 +490,11 @@ export class MailboxRecords {
    */
   closeFor(recipient: string, ids: readonly string[], at: number): number {
     return this.update(`settled = 'done', settled_at = ?`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
+  }
+
+  /** How the person closed the chain rooted at `rootId` (`facts.closed`): the last close stands */
+  markClosed(rootId: string, outcome: 'finished' | 'failed' | 'stopped' | 'dropped', at: number): void {
+    this.db.prepare(`UPDATE mail SET facts = json_set(CASE WHEN json_valid(facts) THEN facts ELSE '{}' END, '$.closed', json(?)) WHERE id = ?`).run(JSON.stringify({ outcome, at }), rootId)
   }
 
   /** The person's Dismiss of `uncertain` or `failed` mail: never delivered, held against no one */

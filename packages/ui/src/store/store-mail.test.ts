@@ -164,6 +164,16 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread?.thread.assignee).toMatchObject({ sessionId: 's2' })
     expect(useStore.getState().mailThread?.messages.at(-1)).toMatchObject({ kind: 'assign', body: 'please take it' })
   })
+
+  it('closing a thread a session is working on reads back the host’s close: done as dropped, no longer working', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'work', from: worker, body: 'do it', kind: 'assign', state: 'running', assignee: worker, working: true })
+    await useStore.getState().openMailThread(id)
+    expect(useStore.getState().mailThread?.thread).toMatchObject({ state: 'running', working: true })
+    expect(await useStore.getState().closeMail('dropped')).toBe(true)
+    await vi.waitFor(() => expect(useStore.getState().mailThread?.thread).toMatchObject({ state: 'done', outcome: 'dropped', working: false }))
+    expect(platform.mockMail.calls).toEqual(['stop:s1'])
+  })
 })
 
 describe('mail held for the person', () => {

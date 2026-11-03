@@ -17,6 +17,7 @@ describe('naming the parties', () => {
 
 describe('the thread’s state', () => {
   it('is a word, with how it ended when it is done and did not finish, and a word a newer host wrote as it wrote it', () => {
+    expect(threadStateLabel({ state: 'running', outcome: null })).toBe('Running')
     expect(threadStateLabel({ state: 'review', outcome: null })).toBe('In review')
     expect(threadStateLabel({ state: 'done', outcome: 'finished' })).toBe('Done')
     expect(threadStateLabel({ state: 'done', outcome: 'dropped' })).toBe('Done (dropped)')

@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
-import { activityCounts, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
+import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -402,6 +402,13 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
   projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
   untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
+  // A session's turn on a chain, from the turn records while the session is in a turn: what Mark done and Drop ask about and stop (3.10)
+  turnOn: (id) => {
+    const s = mgr.sessionInfo(id)
+    const turn = s && inTurn(s.state) ? hostMailbox.turns.current(id) : undefined
+    return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+  },
+  closed: (c) => void mgr.mailWorkClosed(c),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty

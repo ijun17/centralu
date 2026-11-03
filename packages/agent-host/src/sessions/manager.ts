@@ -986,6 +986,48 @@ export class SessionManager {
     return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
   }
 
+  /**
+   * A chain the person closed in the Inbox was the session's work (docs/plans/mailbox.md §12, 3.10 as on main): its work is not wanted. A turn on it
+   * (`stopped`) is stopped as `agent_session stop` stops it, with the background work that turn's own tool calls started since `since`
+   * (`parentCallId` names the call); work the tool cannot place, and another turn's, is left running. The person's task is closed already, so the
+   * stopped turn reports nothing. The session is told once, in Centralu's words, without a wake: as quiet input into a live process, and not at all
+   * to a tool with no quiet input (Codex starts a turn for any input) or a session that sleeps
+   */
+  async mailWorkClosed(c: { sessionId: string; stopped: boolean; text: string; since?: number }): Promise<void> {
+    const m = this.meta.get(c.sessionId)
+    if (!m || this.handingOver || this.disposing) return
+    if (c.stopped) {
+      const calls = new Set(
+        c.since === undefined
+          ? []
+          : this.store.messages
+              .loadMessages(c.sessionId, 400)
+              .filter((x) => x.kind === 'tool_call' && x.ts >= (c.since ?? 0))
+              .map((x) => (typeof x.payload === 'object' && x.payload !== null && 'callId' in x.payload ? x.payload.callId : undefined))
+              .filter((id): id is string => typeof id === 'string'),
+      )
+      const tasks = this.reports.ownTasksRunning(c.sessionId).filter((t) => t.parentCallId !== undefined && calls.has(t.parentCallId))
+      try {
+        this.interrupt(c.sessionId)
+      } catch {
+        // No process: there is no turn to stop
+      }
+      for (const t of tasks) {
+        try {
+          await this.sessionSettings.stopBackgroundTask(c.sessionId, t.id)
+        } catch {
+          // Not stoppable from here: the tool ends it with its process
+        }
+      }
+    }
+    if (!this.handles.has(c.sessionId) || this.adapters.get(m.tool)?.quietInput !== true) return
+    try {
+      await this.events.deliverMail(c.sessionId, { text: `[Centralu] ${c.text}`, quiet: true, line: '✉ Centralu told it a thread of its was closed' })
+    } catch (e) {
+      console.error(`[mail] could not tell ${c.sessionId.slice(0, 8)} that its thread was closed (${errorMessage(e)})`)
+    }
+  }
+
   /** Whether a session can be told of mail now, and how (`ReceiverState`, mail/delivery.ts) */
   private mailReceiver(id: string): ReceiverState {
     const m = this.meta.get(id)

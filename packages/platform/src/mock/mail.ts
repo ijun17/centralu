@@ -45,7 +45,7 @@ export class MailMock {
     kind?: string
     state?: string
     assignee?: MailParty | null
-    /** A turn of the thread is going in its assignee: Drop and Mark done ask first (3.10) */
+    /** A turn of the thread is going in its assignee: Drop and Mark done ask first, and closing stops that turn and tells the session (3.10) */
     working?: boolean
     held?: { reason: string; recipient: MailParty }
   }): string {
@@ -151,8 +151,16 @@ export class MailMock {
     },
     close: async (threadId, outcome) => {
       const t = this.must(threadId)
+      // As the host does (3.10): the session whose turn is on the thread is stopped, and told in Centralu's words without a wake
+      const helper = t.row.working ? t.row.assignee?.sessionId : null
+      if (helper) {
+        this.calls.push(`stop:${helper}`)
+        this.emit({ type: 'state_change', sessionId: helper, state: 'waiting_input', reason: 'interrupted' })
+        this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it a thread of its was closed' })
+      }
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
+      t.row.working = false
       this.touch(t)
       return { ...t.row }
     },
