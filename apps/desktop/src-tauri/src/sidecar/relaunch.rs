@@ -64,10 +64,13 @@ pub(crate) fn remember(host_dir: Option<std::path::PathBuf>, version: &str) {
 }
 
 /// `relaunch_info` for a window that starts its host itself: a relaunch there stops it for an update (`restarts_host`)
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // only macOS offers a relaunch without a keeper
 pub(crate) fn direct_info() -> RelaunchInfo {
+    let not = |reason: &str| RelaunchInfo { reason: Some(reason.into()), ..Default::default() };
     match DIRECT_APP.get() {
-        Some((build, host_dir)) => RelaunchInfo { restarts_host: true, ..relaunch_info(build, host_dir.as_deref()) },
-        None => RelaunchInfo { reason: Some("this window has not started its host yet".into()), ..Default::default() },
+        Some((build, Some(host_dir))) => RelaunchInfo { restarts_host: true, ..relaunch_info(build, Some(host_dir)) },
+        Some((_, None)) => not("This window does not run the host bundled with the app, so relaunching would not start the update."),
+        None => not("This window has not started its host yet."),
     }
 }
 

@@ -310,7 +310,7 @@ impl Supervisor {
 
     /// Whether "Apply now" can relaunch this window into the update just installed (#352). With the
     /// keeper, which holds the host and every agent through it. Where this window starts the host
-    /// itself (unix), the relaunch stops the host for an update first and the next one continues what
+    /// itself (macOS), the relaunch stops the host for an update first and the next one continues what
     /// it ended (#1895). Elsewhere a relaunch would only be the quit the update is meant to avoid.
     pub fn relaunch_info(&self) -> RelaunchInfo {
         match self.choice() {
@@ -319,15 +319,10 @@ impl Supervisor {
                 reason: Some("not attached to the background keeper".into()),
                 ..Default::default()
             }),
-            #[cfg(unix)]
+            #[cfg(target_os = "macos")]
             Choice::Direct => relaunch::direct_info(),
-            _ => RelaunchInfo {
-                reason: Some(
-                    "This build holds the agent host itself, so relaunching would stop running agents. Quit and open Centralu again to finish."
-                        .into(),
-                ),
-                ..Default::default()
-            },
+            // Where nothing relaunches into the new build (a quit and open is the update): no reason, as before the port was offered here
+            _ => RelaunchInfo::default(),
         }
     }
 

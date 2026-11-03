@@ -360,12 +360,9 @@ impl Supervisor {
             Err(_) => None,
         };
         if let Some(pid) = pid {
+            // The watcher takes the child out when its stdout closes, which is when the host has exited
             if self.send_line(STOP_FOR_UPDATE_LINE).is_ok() {
-                let deadline = Instant::now() + wait;
-                // The watcher takes the child out when its stdout closes, which is when the host has exited
-                while self.pid() == Some(pid) && Instant::now() < deadline {
-                    thread::sleep(Duration::from_millis(50));
-                }
+                wait_until(wait, || self.pid() != Some(pid));
             }
         }
         self.shutdown();
@@ -711,6 +708,18 @@ pub fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// Polls the condition until it holds or the wait is over; whether it held
+fn wait_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + wait;
+    while Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
 /**
  * TERM to the host alone, a grace period, then TERM to its whole group.
  *
@@ -728,7 +737,7 @@ pub fn stop_child(child: &mut Child) {
  * `host.lock` (#14). On unix stdin is kept open until the end, so EOF does not race the signal
  * into a second `shutdown()`.
  */
-fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl FnMut() -> bool) {
+fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, gone: impl FnMut() -> bool) {
     let _stdin_until_the_end = if os::CLOSE_STDIN_TO_STOP {
         drop(stdin);
         None
@@ -736,15 +745,7 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, mut gone: impl Fn
         stdin
     };
     kill_pid(pid);
-    let deadline = Instant::now() + STOP_GRACE;
-    let mut ended = false;
-    while Instant::now() < deadline {
-        if gone() {
-            ended = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
+    let ended = wait_until(STOP_GRACE, gone);
     // A host still running pins its group's number, so the group is signalled. One that ended:
     // unix signals the group (its orphans) only while the number cannot be someone else's
     // (`os::group_signal_after_exit_is_safe`: no new process lives under the leader's pid);

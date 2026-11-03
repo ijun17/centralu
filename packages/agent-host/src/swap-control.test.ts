@@ -104,6 +104,18 @@ describe('the control channel on the host’s stdin (#280 step 3)', () => {
     expect(seen).toEqual(['drain 2'])
   })
 
+  it('keeps the last line of an op that came before its handler, and gives it when the handler is set (#1895)', async () => {
+    const input = new PassThrough()
+    const ch = new ControlChannel(input)
+    input.write('{"op":"stop"}\n{"op":"stop","forUpdate":true}\n')
+    await new Promise((r) => setImmediate(r))
+    const seen: (boolean | undefined)[] = []
+    ch.on('stop', (m) => seen.push(m.forUpdate))
+    input.write('{"op":"stop"}\n')
+    await new Promise((r) => setImmediate(r))
+    expect(seen).toEqual([true, undefined])
+  })
+
   it('a waiter is rejected when the keeper closes the pipe', async () => {
     const input = new PassThrough()
     const ch = new ControlChannel(input)

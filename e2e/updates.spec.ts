@@ -223,3 +223,17 @@ test('an older build on disk is not offered as the installed update, to the pers
   expect(out.error).toContain('0.0.0-alpha')
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
 })
+
+// #1895: where the shell cannot relaunch (Windows, Linux) it answers "not ready" with no reason; the tooltip is the same sentence as before it answered at all
+test('a shell that answers "not ready" with no reason leaves the restart tooltip as it was (#1895)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.relaunchCheck = { ready: false }
+    m.offerUpdate('9.9.1')
+  })
+  await page.getByTestId('update-line').click()
+  await focus(page)
+  await expect(page.getByTestId('update-line')).toHaveText('Restart to update')
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toHaveText('Restart Centralu to finish updating to 9.9.1.')
+})

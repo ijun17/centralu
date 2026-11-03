@@ -311,6 +311,8 @@ describe('the host process, started for real', () => {
       plain: async (h: Running) => void h.p.stdin!.end(),
     },
   }
+  // An update stop that never reaches the host is a failure in seconds, not the runner's timeout
+  const exitsSoon = (h: { exited: Promise<number | null> }) => Promise.race([h.exited, settle(30_000 * SLOW).then(() => 'still running')])
   const bringsBack = async (how: (typeof stops)[keyof typeof stops]) => {
     const s = setup()
     const token = 'token-handed-on-stdin-0123456789'
@@ -338,7 +340,7 @@ describe('the host process, started for real', () => {
     // It is running when the stop comes: what the stop lists is what is running
     expect((await state(first.port, id)).runs).toEqual([expect.objectContaining({ command: run, running: true })])
     await how.update(first, token)
-    expect(await first.exited).toBe(0)
+    expect(await exitsSoon(first)).toBe(0)
 
     // The update's stop listed them: the next host has a terminal with nothing in it but its own start, and the command running again
     const second = await boot()
@@ -360,6 +362,15 @@ describe('the host process, started for real', () => {
   it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', () => bringsBack(stops.hub), 180_000 * SLOW)
   it("the same for the window's stop line on the host's stdin (#1895)", () => bringsBack(stops.window), 180_000 * SLOW)
   it('the same for a keeper draining a host that holds no agents for a swap (#1895)', () => bringsBack(stops.drain), 180_000 * SLOW)
+
+  it("the window's stop line that comes while the host is still starting is not lost (#1895)", async () => {
+    const s = setup()
+    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_STARTED_BY: 'app' })
+    // The token and the stop in one go: the host reads the first, and has not wired its endings when the second arrives
+    host.p.stdin.write(`${JSON.stringify({ token: 'token-handed-on-stdin-0123456789' })}\n${JSON.stringify({ op: 'stop', forUpdate: true })}\n`)
+    expect(await exitsSoon(host)).toBe(0)
+    expect(s.log()).toContain('asked to stop (the window, for an update)')
+  }, 60_000 * SLOW)
 
   it('without --watch-parent the end of stdin means nothing, and a signal still shuts it down (HO7)', async () => {
     const s = setup()
