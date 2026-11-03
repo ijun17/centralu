@@ -234,6 +234,17 @@ export class MessageRecords {
     return readRows(raw)
   }
 
+  /** Every user row of the session after `afterSeq`, oldest first, however many (#1639: the messages its tool may still hold) */
+  loadUserRowsFrom(sessionId: string, afterSeq: number): StoredMessage[] {
+    const raw = this.db
+      .prepare<unknown[], (StoredMessage & { payload: string })>(
+        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn({})}, ts FROM messages
+         WHERE session_id = ? AND seq > ? AND role = 'user' ORDER BY seq ASC`,
+      )
+      .all(sessionId, afterSeq)
+    return readRows(raw)
+  }
+
   /**
    * The seq of this session's last point where the model lost what came before (#974): a compaction that folded
    * something (a failed one did not), or a fresh conversation (`conversation_reset`, Claude Code's `/clear`). Null when

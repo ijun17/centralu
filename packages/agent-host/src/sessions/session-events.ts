@@ -228,9 +228,8 @@ export class SessionEvents {
          */
         if (e.type === 'state_change' && e.state === 'working') {
           const named = handle?.turnStartInputs?.()
-          started = this.host.children.takeInputOrigin(m.id, named)
-          // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639)
-          this.host.children.turnNamed(m.id, named)
+          // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639); and the hub's message it ran for
+          started = this.host.children.turnNamed(m.id, named)
         }
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with

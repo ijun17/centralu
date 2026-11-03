@@ -35,6 +35,16 @@ const start = (requestId: string, callerId: string, extra: Partial<AgentStartRec
   ...extra,
 })
 
+/** Session 's' in the store, so its rows can be written (#1639: a host reads the held messages back from them) */
+const seedSession = () => {
+  store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  store.sessions.upsertSession({
+    id: 's', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 's', autoNamed: false, state: 'idle',
+    lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+    verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+  })
+}
 const request = (id: string, sessionId: string, callerSessionId: string): QueuedRequest => ({
   id, sessionId, callerSessionId, via: 'agent_session', text: id, queuedAt: Date.now(), openedByAuto: false,
 })
@@ -692,141 +702,113 @@ describe('whose a turn is', () => {
 // #1604: a sender's note into a running turn that the tool runs as the next turn is named back by the turn that opens
 describe('what a turn that opens ran for', () => {
   const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
+  /** A hub's message given the tool as `id`, at rest or into the running turn (#1639: an entry, with its origin) */
+  const hub = (id: string, seq = note.seq, inTurn = false) => {
+    own.noteMessage('s', 'work', inTurn, true, false, id, 'caller', seq)
+    own.noteInputOrigin('s', id, { ...note, seq })
+  }
 
   it('names the sender and row of the note the turn opens for, once', () => {
-    own.noteInputOrigin('s', 'note-id', note)
-    expect(own.takeInputOrigin('s', ['other-id', 'note-id'])).toEqual(note)
-    expect(own.takeInputOrigin('s', ['note-id'])).toBeUndefined()
+    hub('note-id')
+    expect(own.turnNamed('s', ['other-id', 'note-id'])).toEqual(note)
+    expect(own.turnNamed('s', ['note-id'])).toBeUndefined()
   })
 
   it('names nothing for a turn the tool opens with no input of a sender, or when the tool does not say', () => {
-    own.noteInputOrigin('s', 'note-id', note)
-    expect(own.takeInputOrigin('s', [])).toBeUndefined()
-    expect(own.takeInputOrigin('s', null)).toBeUndefined()
-    expect(own.takeInputOrigin('s', undefined)).toBeUndefined()
-    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+    hub('note-id')
+    expect(own.turnNamed('s', [])).toBeUndefined()
+    expect(own.turnNamed('s', null)).toBeUndefined()
+    expect(own.turnNamed('s', undefined)).toBeUndefined()
+    expect(own.turnNamed('s', ['note-id'])).toEqual(note)
   })
 
-  it('forgets a note the turn it went into took in: no later turn opens for it', () => {
+  it('forgets a note the turn it went into took in, and keeps one it did not take, for the turn the tool runs it as', () => {
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
-    own.noteMessage('s', 'work', true, true, false, 'note-id')
-    own.noteInputOrigin('s', 'note-id', note)
-    own.turnEnded('s', ['note-id'])
-    expect(own.takeInputOrigin('s', ['note-id'])).toBeUndefined()
-  })
-
-  it('keeps a note the turn did not take in, for the turn the tool runs it as', () => {
-    own.noteMessage('s', 'work', false, true)
-    own.turnStarted('s')
-    own.noteMessage('s', 'work', true, true, false, 'note-id')
-    own.noteInputOrigin('s', 'note-id', note)
-    own.turnEnded('s', [])
-    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+    hub('taken', 7, true)
+    hub('not-taken', 8, true)
+    own.turnEnded('s', ['taken'])
+    expect(own.turnNamed('s', ['taken'])).toBeUndefined()
+    expect(own.turnNamed('s', ['not-taken'])).toEqual({ ...note, seq: 8 })
   })
 
   it('takes off every note given before the last one a turn names: the tool runs them in order, and says only the last of a batch', () => {
-    for (const [i, id] of ['a', 'b', 'c', 'd'].entries()) own.noteInputOrigin('s', id, { ...note, seq: 10 + i })
-    expect(own.takeInputOrigin('s', ['c'])).toEqual({ ...note, seq: 12 })
+    for (const [i, id] of ['a', 'b', 'c', 'd'].entries()) hub(id, 10 + i)
+    expect(own.turnNamed('s', ['c'])).toEqual({ ...note, seq: 12 })
     // None of the batch is left, and the one given after it still is
-    expect(own.takeInputOrigin('s', ['a'])).toBeUndefined()
-    expect(own.takeInputOrigin('s', ['b'])).toBeUndefined()
-    expect(own.takeInputOrigin('s', ['d'])).toEqual({ ...note, seq: 13 })
+    expect(own.turnNamed('s', ['a'])).toBeUndefined()
+    expect(own.turnNamed('s', ['b'])).toBeUndefined()
+    expect(own.turnNamed('s', ['d'])).toEqual({ ...note, seq: 13 })
   })
 
-  it("takes off a batch a turn took in at its end too, and keeps what was given after the last it names", () => {
-    own.noteInputOrigin('s', 'task', { ...note, seq: 1 })
-    own.noteInputOrigin('s', 'note-1', { ...note, seq: 2 })
-    own.noteInputOrigin('s', 'note-2', { ...note, seq: 3 })
-    own.turnEnded('s', ['note-1'])
-    expect(own.takeInputOrigin('s', ['task'])).toBeUndefined()
-    expect(own.takeInputOrigin('s', ['note-2'])).toEqual({ ...note, seq: 3 })
-  })
-
-  it('also names a message given at rest, for the turn the tool opens for it after another', () => {
-    own.noteInputOrigin('s', 'at-rest', { ...note, seq: 5 })
-    expect(own.takeInputOrigin('s', ['at-rest'])).toEqual({ ...note, seq: 5 })
-  })
-
-  it('keeps what a tool that does not name its inputs may still run as a turn after the one it was sent into', () => {
+  it('keeps for one turn what a tool that does not name its inputs may run as a turn after the one it was sent into', () => {
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
-    own.noteMessage('s', 'work', true, true, false, 'note-id')
-    own.noteInputOrigin('s', 'note-id', note)
+    hub('note-id', 7, true)
     // Codex: every message sent to a running turn is taken to have joined it, yet one it ran as a turn after is named when that turn opens
     own.turnEnded('s', undefined)
-    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+    expect(JSON.parse(store.settings.appSetting('input_origins:s')!)).toEqual([['note-id', note]])
+    own.turnStarted('s')
+    expect(own.turnNamed('s', ['note-id'])).toEqual(note)
+    own.turnEnded('s', undefined)
+    // A turn that opens for something else: it went into the turn before, and is done with
+    hub('steered', 9, true)
+    own.turnEnded('s', undefined)
+    own.turnStarted('s')
+    expect(own.turnNamed('s', ['other'])).toBeUndefined()
+    expect(own.turnNamed('s', ['steered'])).toBeUndefined()
   })
 
   it('keeps them across a host swap: a host that takes over the session still says whose message the turn it runs is for', () => {
-    own.noteInputOrigin('s', 'note-id', note)
-    const next = new ChildOwnership(store)
-    expect(next.takeInputOrigin('s', ['note-id'])).toEqual(note)
+    seedSession()
+    store.messages.appendMessages([{ sessionId: 's', seq: 7, role: 'user', kind: 'text', payload: { text: 't', inputId: 'note-id', from: note.from }, ts: 1 }])
+    hub('note-id')
+    expect(new ChildOwnership(store).turnNamed('s', ['note-id'])).toEqual(note)
     // And what it took off stays off for the one after it
-    expect(new ChildOwnership(store).takeInputOrigin('s', ['note-id'])).toBeUndefined()
+    expect(new ChildOwnership(store).turnNamed('s', ['note-id'])).toBeUndefined()
   })
 
-  it('keeps what two hosts write for one session during a swap: neither overwrites the other with a list read earlier', () => {
-    const leaving = new ChildOwnership(store)
-    const taking = new ChildOwnership(store)
-    leaving.noteInputOrigin('s', 'from-leaving', { ...note, seq: 1 })
-    taking.noteInputOrigin('s', 'from-taking', { ...note, seq: 2 })
-    leaving.noteInputOrigin('s', 'later-from-leaving', { ...note, seq: 3 })
-    expect(leaving.takeInputOrigin('s', ['from-taking'])).toEqual({ ...note, seq: 2 })
-    expect(taking.takeInputOrigin('s', ['later-from-leaving'])).toEqual({ ...note, seq: 3 })
-  })
-
-  it('keeps the most recent sixty-four a session was given, not every one for the life of the session', () => {
-    for (let i = 0; i < 70; i++) own.noteInputOrigin('s', `id-${i}`, { ...note, seq: i })
-    expect(new ChildOwnership(store).takeInputOrigin('s', ['id-0'])).toBeUndefined()
-    expect(new ChildOwnership(store).takeInputOrigin('s', ['id-69'])).toEqual({ ...note, seq: 69 })
-  })
-
-  it("keeps what a tool that does not name its inputs was given while the turn ran, and takes off what was given before it began", () => {
-    own.noteInputOrigin('s', 'before-the-turn', { ...note, seq: 4 })
-    own.noteTurnStart('s', 5)
-    own.noteInputOrigin('s', 'during-the-turn', { ...note, seq: 6 })
-    // Codex: a message given while the turn ran may be run as a turn right after it, and is named when that turn opens; what was given before this turn began is done with, named or merged
-    own.turnEnded('s', undefined)
-    expect(own.takeInputOrigin('s', ['before-the-turn'])).toBeUndefined()
-    expect(own.takeInputOrigin('s', ['during-the-turn'])).toEqual({ ...note, seq: 6 })
+  it('writes the most recent sixty-four held for a build before #1639, not every one for the life of the session', () => {
+    for (let i = 0; i < 70; i++) hub(`id-${i}`, i)
+    const written = JSON.parse(store.settings.appSetting('input_origins:s')!) as [string, unknown][]
+    expect(written).toHaveLength(64)
+    expect(written.at(-1)).toEqual(['id-69', { ...note, seq: 69 }])
   })
 
   it('takes off the same when the tool cannot tell what a turn took in (an older Claude Code, a turn lost in a swap)', () => {
-    own.noteInputOrigin('s', 'before-the-turn', { ...note, seq: 4 })
-    own.noteTurnStart('s', 5)
+    hub('before-the-turn', 4)
+    own.turnStarted('s')
     own.turnEnded('s', null)
-    expect(own.takeInputOrigin('s', ['before-the-turn'])).toBeUndefined()
+    expect(own.turnNamed('s', ['before-the-turn'])).toBeUndefined()
+    expect(JSON.parse(store.settings.appSetting('input_origins:s')!)).toEqual([])
   })
 
   it('takes off all of them when the process went with the turn: it runs none of what it was given after', () => {
-    own.noteTurnStart('s', 1)
-    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
-    own.noteInputOrigin('s', 'b', { ...note, seq: 3 })
+    hub('a', 2)
+    hub('b', 3)
     // A control: a turn that ended whole and named nothing keeps them
     own.turnEnded('s', [])
-    expect(new ChildOwnership(store).takeInputOrigin('s', ['b'])).toEqual({ ...note, seq: 3 })
-    own.noteInputOrigin('s', 'b', { ...note, seq: 3 })
-    own.noteTurnStart('s', 3)
+    expect(own.turnNamed('s', ['a'])).toEqual({ ...note, seq: 2 })
     own.turnEnded('s', [], true)
     expect(store.settings.appSetting('input_origins:s')).toBeNull()
-    expect(own.takeInputOrigin('s', ['a', 'b'])).toBeUndefined()
+    expect(own.turnNamed('s', ['b'])).toBeUndefined()
   })
 
   it('takes off all of them when the tool holds none any more: a stop, a new process', () => {
-    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
+    hub('a', 2)
     own.dropInputOrigins('s')
-    expect(own.takeInputOrigin('s', ['a'])).toBeUndefined()
+    expect(own.turnNamed('s', ['a'])).toBeUndefined()
     expect(store.settings.appSetting('input_origins:s')).toBeNull()
   })
 
   it("keeps nothing of a session's turns when it is deleted: neither its origins nor where its turns began", () => {
-    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
+    hub('a', 2)
     own.noteTurnStart('s', 1)
     expect(store.settings.appSetting('turn_span:s')).not.toBeNull()
     own.forgetTurns('s')
     expect(store.settings.appSetting('input_origins:s')).toBeNull()
     expect(store.settings.appSetting('turn_span:s')).toBeNull()
+    expect(store.settings.appSetting('turn_inputs:s')).toBeNull()
   })
 })
 
@@ -834,7 +816,10 @@ describe('what a turn that opens ran for', () => {
 describe('where the last turn that ended began', () => {
   const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
   /** A hub gives the session messages: only those have their turns kept */
-  const followed = () => own.noteInputOrigin('s', 'task', note)
+  const followed = () => {
+    own.noteMessage('s', 'work', false, true, false, 'task', 'caller', note.seq)
+    own.noteInputOrigin('s', 'task', note)
+  }
 
   it('is kept for the turns of a session a hub gave messages, and for no other', () => {
     own.noteTurnStart('other', 4)
@@ -1024,13 +1009,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
   })
 
   it('a host that takes the session over reads the held messages back from their rows, after the last one spent', () => {
-    store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    store.sessions.upsertSession({
-      id: 's', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 's', autoNamed: false, state: 'idle',
-      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
-      verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
-      parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
-    })
+    seedSession()
     const row = (seq: number, payload: Record<string, unknown>) => ({ sessionId: 's', seq, role: 'user' as const, kind: 'text' as const, payload: { text: 't', ...payload }, ts: 1 })
     store.messages.appendMessages([
       row(1, { inputId: 'person-1' }),
@@ -1042,11 +1021,80 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
     own.turnStarted('s')
     own.turnNamed('s', ['person-1'])
-    expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toEqual({ spent: 1 })
+    expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toEqual({ spent: 1, named: true })
     const next = new ChildOwnership(store)
     next.turnStarted('s')
     expect(next.starterOf('s')).toEqual({ by: 'work' })
     next.turnNamed('s', ['person-2'])
     expect(next.starterOf('s')).toEqual({ by: 'work', added: true })
+  })
+
+  // Review of #1929: what a host that takes a kept session over mid-turn reads back
+  describe('across a keeper swap', () => {
+    const user = (seq: number, inputId: string, from?: string) =>
+      ({ sessionId: 's', seq, role: 'user' as const, kind: 'text' as const, payload: { text: 't', inputId, ...(from ? { from: { sessionId: from, name: from } } : {}) }, ts: 1 })
+    beforeEach(() => seedSession())
+
+    it('a work turn the person wrote into stays the work’s, with the person noted: the caller’s report is not held back', () => {
+      store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
+      own.markReport('s', 'caller')
+      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.turnStarted('s')
+      own.turnNamed('s', ['caller-1'])
+      own.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
+      const next = new ChildOwnership(store)
+      next.adoptReport('s', 'caller', null)
+      expect(next.personInTurn('s')).toBe(true)
+      // The CLI names both at the end: the caller's it opened from, and the person's it took in at a tool round
+      expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
+    })
+
+    it('a turn the person took over before the swap stays theirs when the new host hears the opening named', () => {
+      store.messages.appendMessages([user(1, 'caller-1', 'c')])
+      own.markReport('s', 'caller')
+      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.turnStarted('s')
+      own.takeTurn('s')
+      const next = new ChildOwnership(store)
+      next.adoptReport('s', 'caller', null)
+      next.turnNamed('s', ['caller-1'])
+      expect(next.starterOf('s')).toEqual({ by: 'person' })
+    })
+
+    it('reads back a message held before anything was ever spent: a new session’s first one', () => {
+      store.messages.appendMessages([user(1, 'person-1')])
+      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      expect(next.starterOf('s')).toEqual({ by: 'person' })
+      expect(next.continuesPause('s', 'caller')).toBe(false)
+    })
+
+    it('reads back however many rows a long turn wrote after the last message spent', () => {
+      const steps = Array.from({ length: 600 }, (_, i) => ({ sessionId: 's', seq: 2 + i, role: 'assistant' as const, kind: 'text' as const, payload: { text: 'step' }, ts: 1 }))
+      store.messages.appendMessages([user(1, 'caller-1', 'c'), ...steps, user(602, 'person-1')])
+      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.turnStarted('s')
+      own.turnNamed('s', ['caller-1'])
+      own.turnEnded('s', ['caller-1'])
+      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 602)
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      expect(next.starterOf('s')).toEqual({ by: 'person' })
+    })
+  })
+
+  it('a person’s message held over a turn’s end and taken into the next work turn at a tool round is noted on it, and is in it while it runs', () => {
+    own.noteMessage('s', 'work', false, false, false, 'caller-0')
+    own.turnStarted('s')
+    own.turnNamed('s', ['caller-0'])
+    own.noteMessage('s', 'work', true, true, false, 'caller-1')
+    own.noteMessage('s', 'person', true, true, false, 'person-1')
+    // Neither was taken: both wait for the next turn, which opens on the caller's
+    expect(own.turnEnded('s', ['caller-0'])).toEqual({ by: 'work' })
+    own.turnStarted('s')
+    own.turnNamed('s', ['caller-1'])
+    expect(own.personInTurn('s')).toBe(true)
+    expect(own.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
   })
 })

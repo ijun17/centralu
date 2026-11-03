@@ -76,6 +76,9 @@ type Open = LastTurn & {
  * **A turn continued after a restart or an update is not mail-started** (§8.2 step 6): nothing begins it here, its row is read back (`closeStale`
  * with `keepOpen`), so `current` gives the original turn's starter and asker, and it adds no row the cap or the pair guard could count.
  */
+/** What started a turn the mailbox did not: the person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it */
+const causeOf = (by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null): string | null => (by === 'caller' ? messageId : null)
+
 export class MailTurns {
   private readonly now: () => number
   private readonly o: { turnsPerHour: number; tokensPerHour: number; emptyInARow: number }
@@ -131,8 +134,7 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     const startedAt = this.now()
-    // The person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it
-    const starter = by === 'caller' ? messageId : null
+    const starter = causeOf(by, messageId)
     this.records.startTurn({ sessionId, turnSeq: seq, messageId, starterId: starter, startedBy: by, startedAt })
     this.open.set(sessionId, { seq, startedAt, acted: false, tokens: 0, by, messageId, starter, ...(owner ? { owner } : {}) })
   }
@@ -144,7 +146,7 @@ export class MailTurns {
   restate(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null, owner?: string): void {
     const turn = this.open.get(sessionId)
     if (!turn || turn.by === 'mail') return
-    const starter = by === 'caller' ? messageId : null
+    const starter = causeOf(by, messageId)
     turn.by = by
     turn.messageId = messageId
     turn.starter = starter
