@@ -102,9 +102,9 @@ const readMail = async (h: Host, orc: string) => expect((await h.mgr.runOrchestr
 /**
  * The first host: the orchestrator reads its mail and answers a request after reading `what` (a session of the asker's own project, or one of
  * another), and its turn ends. Then the host goes (`how`), and the next one starts on the same store with the orchestrator's conversation, resumed
- * or taken over, and the orchestrator reads its mail again for the next request. `between`: what happens to the store while no host of this build has it
+ * or taken over, and the orchestrator reads its mail again for the next request
  */
-async function readThenRestart(what: 'own project' | 'other project', how: 'quit' | 'swap', between?: (store: Store, orc: string) => void) {
+async function readThenRestart(what: 'own project' | 'other project', how: 'quit' | 'swap') {
   const a = await startHost()
   const orc = (await a.mgr.createSession({ projectId: null, cwd: data, tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })).id
   const acme = await project(a, 'Acme')
@@ -116,11 +116,6 @@ async function readThenRestart(what: 'own project' | 'other project', how: 'quit
   a.adapter.handleOf(orc)!.finishTurn()
   await settle()
   await stopHost(a, how)
-  if (between) {
-    const store = new Store(`${data}/store.db`)
-    between(store, orc)
-    store.close()
-  }
 
   const b = await startHost(how === 'swap' ? new Set([orc]) : new Set())
   if (how === 'swap') await b.mgr.adoptKept([{ sessionId: orc, tool: 'claude', process: new FakeProcess() }])
@@ -153,13 +148,24 @@ describe('a reply to a session after the host restarted (#1926)', () => {
   }
 
   it('a build that keeps no record served the conversation in between (a rollback, then forward again): the reply is put to the person', async () => {
+    const { b, orc, asker, request, reply } = await readThenRestart('own project', 'quit')
+    expect(await settled(reply)).toMatchObject({ text: expect.stringContaining(`It answers ${request}`) })
+    b.adapter.handleOf(orc)!.finishTurn()
+    await settle()
+    await stopHost(b, 'quit')
     // What that build's turn read is not in the record; its messages are in the transcript, which every build writes
-    const { b, orc, reply } = await readThenRestart('own project', 'quit', (store, id) =>
-      store.messages.appendMessages([{ sessionId: id, seq: store.messages.nextSeq(id), role: 'assistant', kind: 'text', payload: { text: 'read elsewhere' }, ts: Date.now() }]),
-    )
-    await eventually(() => !!card(b, orc))
-    expect(card(b, orc)!.text).toContain('not seen from its beginning')
-    b.mgr.respondApproval(orc, card(b, orc)!.requestId, 'deny')
-    expect((await reply).isError).toBe(true)
+    const rolledBack = new Store(`${data}/store.db`)
+    rolledBack.messages.appendMessages([{ sessionId: orc, seq: rolledBack.messages.nextSeq(orc), role: 'assistant', kind: 'text', payload: { text: 'read elsewhere' }, ts: Date.now() }])
+    rolledBack.close()
+
+    const c = await startHost()
+    await c.mgr.resumeSession(orc)
+    const third = await ask(c, orc, asker, 'one more thing')
+    await readMail(c, orc)
+    const again = c.mgr.runOrchestratorTool(orc, 'centralu_run', { command: 'mail', args: { action: 'reply', thread: third, text: 'nothing new' } })
+    await eventually(() => !!card(c, orc))
+    expect(card(c, orc)!.text).toContain('not seen from its beginning')
+    c.mgr.respondApproval(orc, card(c, orc)!.requestId, 'deny')
+    expect((await again).isError).toBe(true)
   })
 })
