@@ -220,6 +220,8 @@ describe("a handoff moves the original's mail to the session that took over (#15
     expect(h.mgr.listSessions().find((x) => x.id === child)!.askedBy).toBe(original)
     const note = readFileSync(handoffNotePath(project, original), 'utf8')
     expect(note).toContain(`"write the tests" — stays with the previous session — handle: ${child}.`)
+    // The original is told too, though nothing else moved
+    expect(events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: original, text: expect.stringContaining(`Nothing moved to “You are taking over. Read the note.” [${heir}]. Still with this session, since their reports finish a task it was given: “write the tests” [${child}].`) }))
 
     h.claude.handles.get(child)!.answer('tests written')
     // The child's report is the original's to read: its delivery wakes the original, whose turn is the task's work
@@ -232,6 +234,24 @@ describe("a handoff moves the original's mail to the session that took over (#15
     h.claude.handles.get(original)!.answer('landed')
     await eventually(() => read.reportsOn(task.id).length === 2)
     expect(read.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['waiting', 'finished'])
+  })
+
+  it("case 8 (#1932 review), a child started in a turn a report woke is no upstream work: it moves", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    // A's report wakes the original, which starts B in that turn: the cause of B's task is a report, which is never settled
+    const first = await startChild(h, parent, 'first piece')
+    h.claude.handles.get(first)!.answer('first done')
+    await eventually(async () => {
+      await h.m.delivery.process(at(parent))
+      return h.claude.handles.get(parent)!.sent.length > 0
+    }, 5 * DEBOUNCE_MS)
+    const second = await startChild(h, parent, 'second piece')
+    expect(store.mailbox.carriesUpstream(parent, second)).toBe(false)
+
+    const heir = await handOff(h, project, parent, false)
+    expect(h.mgr.listSessions().find((x) => x.id === second)!.askedBy).toBe(heir)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).not.toContain('stays with the previous session')
   })
 
   it('case 5 (guard), a settled child given more work by the successor reports to the successor', async () => {

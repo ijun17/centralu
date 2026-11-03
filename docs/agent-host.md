@@ -1363,10 +1363,14 @@ original's things is in this table; the bullets below say how.
 - **A child that does the work the original owes its own giver stays** (#1932, `kept` only). When the original was asked for a task, handed
   the work on to a child and answered `waiting`, that child's report is what finishes the task, and the task (with the report owed
   for it) is the original's. Moved, the report would go to the successor, which does not know the task, and the giver would never be told the end.
-  So such a child (`MailboxRecords.carriesUpstream`: a task from the original to it, still open, whose cause is a task the original was given,
-  still open) keeps answering to the original: its report wakes the original, whose turn finishes the task as before. It is not counted in the
-  notice; the note lists it as "stays with the previous session", and the successor does not follow it. An original that goes (`goes`) gives its
-  tasks away with the rest. A request the original queued for such a child still moves with the other queued requests.
+  So such a child (`MailboxRecords.carriesUpstream`: a task from the original to it, still open, whose cause is a **task** the original was given,
+  still open; a report, notice or message that started the turn is never settled and does not count, as in `handedOnFrom`) keeps answering to the
+  original: its report wakes the original, whose turn finishes the task as before. The note lists it as "stays with the previous session", and the
+  successor does not follow it; the original's notice names it too ("Still with this session, …"), also when nothing else moved. Requests the
+  original queued for it stay with the original (`moveChildren` moves a queued request only for a session that moves). A child with two open
+  tasks, one caused upstream and one not, stays whole. Only local children are looked at: a child on a linked machine moves with its caller
+  (`moveCaller`) before this is decided. An original that goes (`goes`) gives its tasks away with the rest, and the answer to the task given
+  to it is not finished there either (a separate gap).
 - **Who may hand over** is not checked here: `moveChildren` trusts its caller. Two callers reach it through
   `createSession`: the person's handoff (the window's RPC) and the orchestrator's `handoff_session`, after
   `HandoffFlow` has checked its authority over the original (§1.2.6). Any other agent-facing path must check its

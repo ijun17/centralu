@@ -1049,7 +1049,7 @@ export class ChildOwnership {
       this.notes.delete(key)
       this.notes.set(`${to}>${key.slice(from.length + 1)}`, n)
     }
-    if (move.queued) for (const list of this.queues.values()) for (const r of list) if (r.callerSessionId === from) r.callerSessionId = to
+    if (move.queued) for (const list of this.queues.values()) for (const r of list) if (r.callerSessionId === from && moving.has(r.sessionId)) r.callerSessionId = to
     for (const [id, wait] of this.linked) {
       if (wait.orchestratorId !== from || !moving.has(id)) continue
       wait.orchestratorId = to

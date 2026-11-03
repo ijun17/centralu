@@ -177,7 +177,7 @@ export class HandoffChildren {
     }
     const childIds = [...this.host.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
-    const every = removed ? new Set(childIds) : new Set<string>([
+    const linked = removed ? new Set(childIds) : new Set<string>([
       ...queuedBy,
       ...delegated.map((d) => d.sessionId),
       ...[...this.host.children.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
@@ -189,18 +189,24 @@ export class HandoffChildren {
      * the task, with the report owed for it, is the original's. Moved, the report would go to the successor and the giver would never be told the end.
      * It answers to the original as before; the note says so. An original that goes (`goes`) gives its tasks away with it
      */
-    const staying = scope === 'kept' ? [...every].filter((id) => this.host.store.mailbox.carriesUpstream(from, id)) : []
-    const linked = new Set([...every].filter((id) => !staying.includes(id)))
+    const staying = new Set<string>()
+    if (scope === 'kept') {
+      for (const id of linked) {
+        if (!this.host.store.mailbox.carriesUpstream(from, id)) continue
+        staying.add(id)
+        linked.delete(id)
+      }
+    }
     /*
      * A child the original is waiting on in a call right now: that wait took its report mark down (`awaitAgent`) and is
      * about to be ended, so the report is owed to the new session instead
      */
     const armReports = delegated
-      .filter((d) => d.agent && !d.settled && (d.waiters ?? 0) > 0 && this.host.children.awaitingReport.get(d.sessionId) !== from && !staying.includes(d.sessionId))
+      .filter((d) => d.agent && !d.settled && (d.waiters ?? 0) > 0 && this.host.children.awaitingReport.get(d.sessionId) !== from && !staying.has(d.sessionId))
       .map((d) => d.sessionId)
     const moved: MovedChild[] = []
     // They are the note's lines only: nothing about them moves, so they are no part of the notice or the counts
-    const stays = staying.flatMap((id): MovedChild[] =>
+    const stays = [...staying].flatMap((id): MovedChild[] =>
       this.host.meta.has(id)
         ? [{
             handle: id, name: this.host.nameOf(id), state: 'stays with the previous session',
@@ -249,7 +255,12 @@ export class HandoffChildren {
      * until it goes, when all of it moves (scope `removed`)
      */
     const mailWhich = scope === 'kept' ? (sessions.length ? { senders: sessions } : null) : 'all'
-    if (!moved.length && mailWhich === null) return stays
+    // The original is told of a child that stays, also when nothing else moves
+    const stayText = stays.length ? `Still with this session, since their reports finish a task it was given: ${stays.map((c) => `“${c.name}” [${c.handle}]`).join('; ')}.` : ''
+    if (!moved.length && mailWhich === null) {
+      if (stays.length) this.host.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text: `Nothing moved to “${heir.name}” [${to}]. ${stayText}` })
+      return stays
+    }
     let threads: HandedOverMessage[] = []
     try {
       this.host.store.children.moveChildren(
@@ -272,7 +283,10 @@ export class HandoffChildren {
     // The unread report of a finished child, which is listed as a count, is no line of its own either
     const foldedSessions = new Set(moved.filter((c) => c.folded).map((c) => c.handle))
     moved.push(...threads.map((t) => movedMessage(t, t.kind === 'report' && t.about !== undefined && foldedSessions.has(t.about))))
-    if (!moved.length) return stays
+    if (!moved.length) {
+      if (stays.length) this.host.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text: `Nothing moved to “${heir.name}” [${to}]. ${stayText}` })
+      return stays
+    }
     /*
      * The unread mail that moved waits for the successor. One being created takes it at the end of its first turn, after the note;
      * a successor that is told now (an original removed later) is poked once the move has committed
@@ -313,9 +327,9 @@ export class HandoffChildren {
       const finished = `${folded} finished session${folded === 1 ? '' : 's'}`
       this.host.onEvent({
         type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff',
-        text: items.length
+        text: (items.length
           ? `Handed over to “${heir.name}” [${to}], which follows them from now on: ${items.join('; ')}. This session no longer does.${folded ? ` ${finished} also moved to “${heir.name}”.` : ''}`
-          : `${finished} moved to “${heir.name}” [${to}], which follows ${folded === 1 ? 'it' : 'them'} from now on. This session no longer does.`,
+          : `${finished} moved to “${heir.name}” [${to}], which follows ${folded === 1 ? 'it' : 'them'} from now on. This session no longer does.`) + (stayText ? ` ${stayText}` : ''),
       })
     }
     console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail message(s)`)

@@ -636,6 +636,19 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(await next.mgr.agentSession(first, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.not.stringContaining('A handoff gave') })
   })
 
+  it('moves the requests the original queued only for the sessions that move (#1932)', async () => {
+    const h = host()
+    const { parent } = await parentOf(h)
+    const moves = await startChild(h, parent, 'moves')
+    const stays = await startChild(h, parent, 'stays')
+    const request = (id: string, sessionId: string) => ({ id, sessionId, callerSessionId: parent, via: 'agent_session' as const, text: 'more', queuedAt: 1, openedByAuto: null })
+    store.children.addQueuedRequest(request('q-moves', moves))
+    store.children.addQueuedRequest(request('q-stays', stays))
+
+    store.children.moveChildren(parent, 'successor', { sessions: [moves], startRequests: [], queued: true })
+    expect(store.children.listQueuedRequests().map((r) => [r.id, r.callerSessionId])).toEqual([['q-moves', 'successor'], ['q-stays', parent]])
+  })
+
   it('leaves a settled child with the original when the store fails mid-move', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

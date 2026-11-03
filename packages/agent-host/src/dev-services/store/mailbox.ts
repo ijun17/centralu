@@ -650,7 +650,8 @@ export class MailboxRecords {
 
   /**
    * Whether session `ownerId` gave session `childId` a task, still open, while it worked on a task it was given that is still open (`cause_id`, §9.4): the
-   * child does the work `ownerId` owes its own giver, and its report is what finishes that task (#1932). From the two sessions' ids alone
+   * child does the work `ownerId` owes its own giver, and its report is what finishes that task (#1932). The cause must be a task, as `handedOnFrom`
+   * reads it: a report, notice or message that started the turn is never watched, so its row never settles. From the two sessions' ids alone
    */
   carriesUpstream(ownerId: string, childId: string): boolean {
     return (
@@ -658,7 +659,7 @@ export class MailboxRecords {
         .prepare(
           `SELECT 1 FROM mail m JOIN mail_recipients r ON r.message_id = m.id
             WHERE m.kind = 'task' AND m.sender LIKE ? AND r.recipient LIKE ? AND r.settled IS NULL AND m.cause_id IS NOT NULL
-              AND EXISTS (SELECT 1 FROM mail_recipients up WHERE up.message_id = m.cause_id AND up.recipient LIKE ? AND up.settled IS NULL) LIMIT 1`,
+              AND EXISTS (SELECT 1 FROM mail c JOIN mail_recipients up ON up.message_id = c.id WHERE c.id = m.cause_id AND c.kind = 'task' AND up.recipient LIKE ? AND up.settled IS NULL) LIMIT 1`,
         )
         .get(`session:%/${ownerId}`, `session:%/${childId}`, `session:%/${ownerId}`) !== undefined
     )
