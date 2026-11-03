@@ -84,6 +84,8 @@ type Turn = {
   compacted: boolean
   /** The session's running cost the agent last said in this turn (`usage_update.cost`, a total) */
   costTotal: number | null
+  /** The provider refused this turn (`AcpToolShape.refusalOf`): the tool was cancelled, and the turn ends so when it answers */
+  refusal: string | null
 }
 
 /** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
@@ -353,20 +355,28 @@ class AcpWire implements ToolWire {
   }
 
   startTurn(input: TurnInput, core: RunningTurn): void {
-    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
+    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null, refusal: null }
     this.turn = turn
     // `session/prompt` has no earlier answer: the write is the nearest the agent says it took the input (§2.3)
     this.io.inputAccepted(input.id)
     void this.prompt(turn)
   }
 
-  /** The provider refused the running turn and the tool only retries (`AcpToolShape.refusalOf`): the turn ends now, and the tool stops retrying */
+  /**
+   * The provider refused the running turn and the tool only retries (`AcpToolShape.refusalOf`): the tool is cancelled so it
+   * stops retrying, and the turn ends as refused when it answers, as a Stop does, so the next input never meets a turn still
+   * unwinding
+   */
   private onStderrLine(line: string): void {
-    const words = this.turn ? this.deps.shape?.refusalOf?.(line) : null
-    if (!this.turn || !words) return
-    const message = `${this.label}'s model refused the turn: ${words}`
+    const turn = this.turn
+    const words = turn && !turn.refusal ? this.deps.shape?.refusalOf?.(line, this.conversation ?? '') : null
+    if (!turn || !words) return
+    turn.refusal = `${this.label}'s model refused the turn: ${words}`
     this.conn.notify('session/cancel', { sessionId: this.conversation })
-    this.turn.core.end({ how: 'failed', error: { code: 'internal', message, retryable: false }, inputError: new Error(message) })
+  }
+
+  private refusedEnding(message: string): TurnEnding {
+    return { how: 'failed', error: { code: 'internal', message, retryable: false }, inputError: new Error(message) }
   }
 
   private async prompt(turn: Turn): Promise<void> {
@@ -376,6 +386,10 @@ class AcpWire implements ToolWire {
         await this.conn.request('session/prompt', { sessionId: this.conversation, prompt: [{ type: 'text', text: turn.input.text }] }, NO_TIMEOUT_MS),
       )
     } catch (err) {
+      if (turn.refusal) {
+        turn.core.end(this.refusedEnding(turn.refusal))
+        return
+      }
       const failure = err instanceof Error ? err : new Error(String(err))
       // Not signed in (`signInWanted`): said as such, so the screen offers the sign-in rather than a retry
       if (Reflect.get(failure, 'code') === 'not_logged_in') {
@@ -385,7 +399,7 @@ class AcpWire implements ToolWire {
       turn.core.end({ how: 'failed', error: { code: 'internal', message: `${this.label}: ${failure.message}`, retryable: true }, inputError: failure })
       return
     }
-    turn.core.end(this.endingOf(result), () => this.endEvents(result, turn))
+    turn.core.end(turn.refusal ? this.refusedEnding(turn.refusal) : this.endingOf(result), () => this.endEvents(result, turn))
   }
 
   private endingOf(result: PromptResult): TurnEnding {

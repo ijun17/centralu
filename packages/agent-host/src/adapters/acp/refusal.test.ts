@@ -7,7 +7,7 @@ import type { AcpProfile } from './profile.js'
 /**
  * #1569: a tool whose model's provider refuses a turn (a usage limit, a quota) may retry on its own and send no frame
  * meanwhile (OpenCode, measured: about 70 s of silence, then a JSON-RPC error). A profile that can tell from the tool's
- * stderr (`AcpToolShape.refusalOf`) ends the turn at once, with the provider's words, and tells the tool to stop retrying.
+ * stderr (`AcpToolShape.refusalOf`) cancels the tool at once so it stops retrying, and the turn ends with the provider's words.
  */
 
 class FakeAdapter extends AcpAdapter {
@@ -56,21 +56,26 @@ const isPrompt = (m: Record<string, unknown>) => m.method === 'session/prompt'
 const isError = (e: NormalizedEvent) => e.type === 'error'
 
 describe('a provider refusal the tool only retries quietly', () => {
-  it('ends the turn at once with the provider’s words, and tells the tool to stop retrying', async () => {
+  it('cancels the tool at once and ends the turn with the provider’s words when it answers, before the next input starts', async () => {
     const w = await start()
     w.handle.send('hello')
     await w.peer().next(isPrompt)
-    w.peer().stderr.write('noise\nrefused: Free usage limit reached\n')
+    // Said twice, as a retrying tool does: one cancel, one ending
+    w.peer().stderr.write('noise\nrefused: Free usage limit reached\nrefused: Free usage limit reached\n')
+    await w.peer().next((m) => m.method === 'session/cancel')
+    w.handle.send('again')
+    // The tool is still unwinding its turn: nothing ends, and the next input waits for it
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+    expect(w.events.some(isError)).toBe(false)
+    expect(w.peer().methods().filter((m) => m === 'session/prompt')).toHaveLength(1)
+    w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
     const err = await w.event(isError)
     expect(err).toMatchObject({ type: 'error', error: { code: 'internal', message: "Fake's model refused the turn: Free usage limit reached", retryable: false } })
-    await w.peer().next((m) => m.method === 'session/cancel')
-    // The turn the tool answers late (cancelled, after its retry stopped) adds nothing, and the next message is a turn of its own
-    w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
-    w.handle.send('again')
     await w.peer().next((m) => isPrompt(m) && JSON.stringify(m).includes('again'))
     w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
     await w.event((e) => e.type === 'turn_complete')
     expect(w.events.filter(isError)).toHaveLength(1)
+    expect(w.peer().methods().filter((m) => m === 'session/cancel')).toHaveLength(1)
   })
 
   it('says nothing about a line with no turn running, or one that is not a refusal', async () => {

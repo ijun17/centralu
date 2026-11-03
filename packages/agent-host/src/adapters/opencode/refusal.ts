@@ -7,12 +7,23 @@
  *
  * `small=true` is the title it asks a small model for, which fails the same way and is not the turn.
  */
-const STREAM_ERROR = /message="stream error".* small=false .*error\.error="(?:AI_\w+: )?(.*?)"\s*$/
+const STREAM_ERROR = /message="stream error".* session\.id=(\S+) small=false .*error\.error="(?:AI_\w+: )?(.*?)"\s*$/
 
-/** A refusal that will not clear by retrying within the turn: a usage limit, a quota, credits, a rate limit */
-const LIMIT = /usage limit|limit reached|quota|credits|billing|rate.?limit|\b429\b/i
+/**
+ * A refusal that will not clear by retrying: a usage limit, a quota, credits. A rate limit is left out: it passes in seconds
+ * or a minute, which OpenCode waits for (the provider's `retry-after`), and ending the turn would turn a slow answer into a
+ * failure
+ */
+const NO_RETRY = /usage limit|quota|credits|billing/i
 
-export function openCodeRefusal(line: string): string | null {
-  const words = STREAM_ERROR.exec(line)?.[1]?.trim()
-  return words && LIMIT.test(words) ? words : null
+/** The provider's words for a refusal of `conversation`'s own request (not a sub-agent's, nor the title's), or null */
+export function openCodeRefusal(line: string, conversation: string): string | null {
+  const found = STREAM_ERROR.exec(line)
+  if (found?.[1] !== conversation || !found[2] || !NO_RETRY.test(found[2])) return null
+  // The log quotes a value that has spaces as JSON does
+  try {
+    return String(JSON.parse(`"${found[2]}"`)).trim()
+  } catch {
+    return found[2].trim()
+  }
 }
