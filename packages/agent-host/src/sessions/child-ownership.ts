@@ -661,9 +661,10 @@ export class ChildOwnership {
   }
   /**
    * The session's held messages (#1639), read back the first time this host asks: every user row after `spent` with an input id, and the
-   * running turn's state as the host before left it. A user row with no input id was written by something else that ran the session (a
-   * build before #1639 after a rollback, a turn run outside Centralu): what was given before it is done with. With no `turn_inputs` at all, a
-   * build before #1639 left the session (`legacyHeld`)
+   * running turn's state as the host before left it. This build gives every user row an input id except two: the first prompt (the first
+   * row, before any message) and the words read back from the tool's own record (`transcript`, which a late catch-up can store after a
+   * message just given; skipped). Any other user row without one was written by a build before #1639 after a rollback, which ran the
+   * session: what was given before it is done with. With no `turn_inputs` at all, a build before #1639 left the session (`legacyHeld`)
    */
   private held(sessionId: string): Entry[] {
     let held = this.entries.get(sessionId)
@@ -676,7 +677,7 @@ export class ChildOwnership {
         const e = entryOf(row)
         const mark = e && kept.marks[e.id]
         if (e) held.push({ ...e, joined: mark === 'joined', ...(mark === 'after' || mark === 'carried' ? { [mark]: true as const } : {}) })
-        else [held, spent] = [[], row.seq]
+        else if (asObj(row.payload).transcript !== true) [held, spent] = [[], row.seq]
       }
       if (spent !== null) this.spentAt.set(sessionId, spent)
       if (kept.named) this.named.add(sessionId)

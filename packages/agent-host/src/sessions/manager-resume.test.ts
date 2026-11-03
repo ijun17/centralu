@@ -612,6 +612,9 @@ describe('catching up on a conversation continued outside', () => {
 
     expect(await texts(call, s.id)).toEqual(['First question', 'First answer', 'something said in the terminal', 'a terminal answer'])
     expect(events.some((e) => e.type === 'history_synced')).toBe(true)
+    // #1639: words read from the tool's record carry no input id, and say so, so they never read as rows an older build wrote
+    const rows = (await call('messages.load', { sessionId: s.id, limit: 200 })) as { role: string; payload: { text?: string; transcript?: boolean } }[]
+    expect(rows.find((r) => r.payload.text === 'something said in the terminal')?.payload.transcript).toBe(true)
   })
 
   it('appends nothing when nothing happened outside', async () => {

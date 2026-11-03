@@ -1125,6 +1125,14 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ spent: 2 })
     })
 
+    it('keeps what was held before words a late catch-up read back from the tool’s own record', () => {
+      store.messages.appendMessages([user(1, 'person-1'), { ...user(2, 'x'), payload: { text: 'said in a terminal', transcript: true } }])
+      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      expect(next.starterOf('s')).toEqual({ by: 'person' })
+    })
+
     it('reads back however many rows a long turn wrote after the last message spent', () => {
       const steps = Array.from({ length: 600 }, (_, i) => ({ sessionId: 's', seq: 2 + i, role: 'assistant' as const, kind: 'text' as const, payload: { text: 'step' }, ts: 1 }))
       store.messages.appendMessages([user(1, 'caller-1', 'c'), ...steps, user(602, 'person-1')])
