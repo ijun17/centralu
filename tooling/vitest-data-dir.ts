@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
+import { rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll } from 'vitest'
 
 /*
- * **Each test file gets a data folder of its own** (#368).
+ * **Each test file gets a temporary folder of its own, and its data folder is in it** (#368).
  *
  * Tests never write to the person's `~/.centralu` (see vitest.config.ts), so they need some data
  * folder. It used to be one fixed folder, `<tmp>/centralu-test-data`, shared by every test file of
@@ -19,7 +20,21 @@ import { afterAll } from 'vitest'
  * Vitest runs each test file in a fresh worker (`isolate`), and setup files run before the file is
  * imported, so a folder made here is the file's alone. A test that needs a folder of its own for
  * one case still sets `CC_DATA_DIR` itself.
+ *
+ * **The file's temporary folder is the file's `tmpdir()`, and is removed when the file ends.** Tests made their folders
+ * with `mkdtempSync(join(tmpdir(), ...))` in 340 places and removed them by hand, or did not: after two weeks of runs a
+ * development machine held 13,209 `cc-*` folders (81 GB), from tests that never removed theirs (`store.test.ts`,
+ * `bundle-stage.test.ts`, `project-board-wait-checks.test.ts`), whose removal threw or was skipped when the test failed
+ * first (`cross-project.test-helpers.ts`), or that ended before their cleanup. Pointing the temporary folder of the
+ * worker (and of every process it starts) at a folder of the file's own and removing that folder last makes leaving one
+ * impossible, whatever a test did. A folder that cannot be removed (a process of a test still works in it) fails the
+ * file and names what is left, so it is seen instead of kept.
  */
+// In the run's folder (`vitest-tmp-root.ts`), which also takes a skipped file's, whose hooks do not run
+const own = mkdtempSync(join(process.env.CC_TEST_RUN_TMP ?? tmpdir(), 'cc-test-'))
+process.env.TMPDIR = own
+process.env.TMP = own
+process.env.TEMP = own
 const dir = mkdtempSync(join(tmpdir(), 'centralu-test-data-'))
 process.env.CC_DATA_DIR = dir
 /*
@@ -29,12 +44,13 @@ process.env.CC_DATA_DIR = dir
  */
 process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-config')
 
-// Last of the file's afterAll hooks (they run in reverse order of registration). A process a test
-// started may still be writing into it on Windows; what it leaves behind is in the temp folder.
-afterAll(() => {
+// Last of the file's afterAll hooks (they run in reverse order of registration)
+afterAll(async () => {
   try {
-    rmSync(dir, { recursive: true, force: true })
-  } catch {
-    // left for the OS to clear with the rest of the temp folder
+    // Windows will not remove a folder a process still works in, which the last test's processes may be ending
+    await rm(own, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  } catch (e) {
+    const left = await readdir(own).catch(() => [])
+    throw new Error(`the test file's temporary folder ${own} could not be removed (${(e as NodeJS.ErrnoException).code}); left in it: ${left.join(', ') || 'nothing seen'}`)
   }
 })
