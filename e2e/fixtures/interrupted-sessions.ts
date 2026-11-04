@@ -93,6 +93,27 @@ export function interruptedSessionTests() {
     await expect(mark(page, s)).toHaveAttribute('data-interruption', 'quit')
   })
 
+  test("a session the computer's shutdown stopped says so in the inbox and above the composer, with the same Continue (#1397)", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    await newSession(page, 'alpha')
+    await emit(page, [
+      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'This turn stopped before it finished: the computer shut down, restarted or signed out while it was running. Send a message to continue.' },
+      { type: 'interruption', sessionId: s, interruption: { reason: 'shutdown', at: Date.now() } },
+    ])
+
+    await openInbox(page)
+    await expect(item(page, s)).toContainText('Stopped: the computer shut down, restarted or signed out')
+    await expect(page.getByTestId(`inbox-continue-${s}`)).toBeVisible()
+    await expect(mark(page, s)).toHaveAttribute('data-interruption', 'shutdown')
+    await page.keyboard.press('Escape')
+    await page.getByTestId(`session-row-${s}`).click()
+    const note = page.getByTestId('interrupted-note')
+    await expect(note).toContainText('The last turn did not finish: the computer shut down, restarted or signed out while it was running.')
+    await page.getByTestId('interrupted-continue').click()
+    await expect(note).toHaveCount(0)
+  })
+
   test('a tool reconnecting for too long is listed while it lasts, with nothing to continue', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     const s = await newSession(page, 'alpha')

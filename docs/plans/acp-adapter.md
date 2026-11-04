@@ -39,7 +39,7 @@ tool switch (`SessionStart`) leaves a refused tool out instead, as it leaves out
 
 ### 0.2 Cursor, measured logged in (agent 2026.10.22-27dcf5f, Windows 11, model Auto)
 
-Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight scenarios; they replay in
+Recorded through the adapter itself (`scripts/frames-record.mts`, §10.5) in eight scenarios; they replay in
 `adapters/acp/replay.test.ts`. What the bundle reading of §1.1 said, and what the runs showed:
 
 - **No `usage_update`, no compaction updates** in any run. `/compact` is answered with ordinary text and `end_turn`.

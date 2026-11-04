@@ -152,6 +152,12 @@ export class Shutdown {
       /** How long a leave may take before it exits anyway */
       boundMs?: number
       setTimer?: (f: () => void, ms: number) => void
+      /**
+       * Waited for before a leave stops anything, whichever way it began (a signal, the parent going, a stop asked for): the host
+       * asks the system whether it is ending, and writes the answer before its agents go (#1397, system-end.ts). It is the caller's
+       * to keep short; the bound below counts it. `undefined`: nothing to wait for, and the leave begins in this call (HO8)
+       */
+      beforeLeave?: () => Promise<void> | undefined
     },
   ) {}
 
@@ -180,7 +186,9 @@ export class Shutdown {
     if (this.ending) return this.ending
     // A drain already stopping the services owns the ending: it exits when it has said `drained`
     if (this.stopping) return this.stopping.catch(() => {})
-    const stopped = this.stopServices(mode, handOver)
+    this.mode = mode
+    const before = this.o.beforeLeave?.()?.catch(() => {})
+    const stopped = before ? before.then(() => this.stopServices(mode, handOver)) : this.stopServices(mode, handOver)
     const setTimer = this.o.setTimer ?? ((f, ms) => void setTimeout(f, ms).unref())
     setTimer(() => this.force(`did not finish within ${this.o.boundMs ?? SHUTDOWN_BOUND_MS}ms`), this.o.boundMs ?? SHUTDOWN_BOUND_MS)
     this.ending = stopped

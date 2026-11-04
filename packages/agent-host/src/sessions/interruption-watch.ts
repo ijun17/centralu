@@ -1,4 +1,4 @@
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import { SHUTDOWN_WORDS, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -8,6 +8,12 @@ import type { SessionTrashHost } from './session-trash.js'
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 'handingOver' | 'meta'> & Pick<SessionTrashHost, 'record'>
+
+/** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the system ended under the host (#1397) */
+const LOST_TURN_LINE = {
+  quit: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
+  shutdown: `This turn stopped before it finished: ${SHUTDOWN_WORDS} while it was running. Send a message to continue.`,
+} as const
 
 /**
  * A session's `interruption` (#698), kept with its events: the turn's ending as `interruptionAfter` reads it, the
@@ -65,19 +71,20 @@ export class InterruptionWatch {
 
   /**
    * The turn went with its process (#698): a start found the session mid-turn with no process left (a full quit, a
-   * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. The session is reset to
+   * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. `shutdown`: the start found the
+   * last host recorded the system ending (a shutdown, restart or sign-out, #1397), which is said so rather than as a quit. The session is reset to
    * `idle`, which used to leave no mark at all: the conversation simply stopped. A line now says so, and the
    * interruption puts the session in the inbox with a way to continue.
    */
-  markStoppedByQuit(m: SessionInfo, announce: boolean): void {
-    m.interruption = { reason: 'quit', at: Date.now() }
+  markTurnLost(m: SessionInfo, announce: boolean, reason: 'quit' | 'shutdown' = 'quit'): void {
+    m.interruption = { reason, at: Date.now() }
     const notice: NormalizedEvent = {
       type: 'notice',
       sessionId: m.id,
       level: 'warning',
       from: 'Centralu',
       label: 'stopped',
-      text: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
+      text: LOST_TURN_LINE[reason],
     }
     const seq = this.host.record.persistMessage(notice, m)
     if (!announce) return

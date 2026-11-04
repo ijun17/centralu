@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import { ClaudeStreamNormalizer } from './normalize.js'
+import { recordedWhere } from './recorded.test-helpers.js'
 import { sdk } from './sdk-message.test-helpers.js'
 
 /**
@@ -89,11 +90,24 @@ const shellStopped = [
 ]
 
 const feed = (messages: unknown[], n = new ClaudeStreamNormalizer('s1')) => ({ n, events: messages.flatMap((m) => n.push(sdk(m))) })
-const lastTasks = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'background_tasks').at(-1) as
-  | Extract<NormalizedEvent, { type: 'background_tasks' }>
-  | undefined
+const lastTasks = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'background_tasks').at(-1)
 const byId = (tasks: BackgroundTask[] | undefined) => Object.fromEntries((tasks ?? []).map((t) => [t.id, t]))
 
+describe('a shell that ends on its own (recorded: background)', () => {
+  const messages = recordedWhere('background', (m) => m.type === 'system' && /^(background_tasks_changed|task_started|task_updated|task_notification)$/.test(String(m.subtype)))
+
+  it('is live with its kind and the call that launched it, then ends once as completed and leaves the live set', () => {
+    const { events } = feed(messages)
+    const levels = events.filter((e) => e.type === 'background_tasks')
+    const live = levels.find((l) => l.live.some((t) => t.parentCallId))?.live[0]
+    expect(live).toMatchObject({ kind: 'shell', parentCallId: 'toolu_000001', stopsWithTurn: false, stoppable: true, status: 'running' })
+    const ended = levels.flatMap((l) => l.ended ?? [])
+    expect(ended).toEqual([expect.objectContaining({ id: live!.id, kind: 'shell', status: 'completed', parentCallId: 'toolu_000001' })])
+    expect(levels.at(-1)?.live).toEqual([])
+  })
+})
+
+// The agent beside the shell, an interrupt and a failure have no cheap real run (a background subagent costs a model turn of its own, a Stop mid-task is a race): these stay as measured by hand
 describe('a Claude session reports its background work (#290)', () => {
   it('the live set names each task, its kind, the call that launched it, and what an interrupt does to it', () => {
     const { events } = feed(launched)

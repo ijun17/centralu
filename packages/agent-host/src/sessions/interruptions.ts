@@ -1,4 +1,4 @@
-import type { Interruption, NormalizedEvent } from '@cc/protocol'
+import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 
 /**
@@ -102,12 +102,17 @@ export function interruptionWords(i: Interruption): string {
       return 'stopped: network error'
     case 'quit':
       return 'stopped: Centralu quit during its turn'
+    case 'shutdown':
+      return `stopped: ${SHUTDOWN_WORDS} during its turn`
     case 'interrupted':
       return 'stopped: its tool interrupted the turn'
     case 'reconnecting':
       return `reconnecting to its API for ${Math.max(1, Math.round((Date.now() - i.at) / 60_000))} min`
   }
 }
+
+/** A turn that went with its process: Centralu quit, or the system ended under the host (#1397). Both wait for the person's Continue, and neither is a failure of the work */
+export const wentWithItsProcess = (i: Interruption | null | undefined): boolean => i?.reason === 'quit' || i?.reason === 'shutdown'
 
 /** The line the conversation shows where that note went in */
 export const UPDATE_CONTINUE_LINE = 'Centralu was updated during this turn, which stopped it; Centralu continued it on the new version.'

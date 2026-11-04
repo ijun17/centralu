@@ -8,33 +8,35 @@ import { DIFF_PREVIEW_CHARS } from '../file-changes.js'
 import { IMAGE_MAX_BYTES } from '../images.js'
 import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
+import { recordedApprovals, recordedWhere } from './recorded.test-helpers.js'
 import { sdk } from './sdk-message.test-helpers.js'
 
 const SID = 's1'
 const n = (msg: unknown) => normalizeMessage(sdk(msg), SID)
 
 describe('streaming deltas', () => {
-  it('stream_event content_block_delta → message_delta', () => {
-    const out = n({
-      type: 'stream_event',
-      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello' } },
-    })
-    expect(out).toEqual([{ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'hello' }])
+  const deltas = (scenario: string, kind: string) => recordedWhere(scenario, (m) => m.type === 'stream_event' && (m.event as { delta?: { type?: string } }).delta?.type === kind)
+
+  it('each text_delta the CLI streamed becomes a message_delta of the same text, in order', () => {
+    const sent = deltas('big-output', 'text_delta').map((m) => (m as unknown as { event: { delta: { text: string } } }).event.delta.text)
+    expect(sent.length).toBeGreaterThan(5)
+    const out = deltas('big-output', 'text_delta').flatMap(n)
+    expect(out.map((e) => e.type)).toEqual(sent.map(() => 'message_delta'))
+    expect(out.map((e) => (e as { text: string }).text)).toEqual(sent)
+    expect(sent.join('')).toContain('150')
   })
 
   /*
    * Thinking (measured in #58): the body is always "" (encrypted), and only an
-   * `estimated_tokens` increment arrives. So only the fact of progress (`estTokens`) becomes an
-   * event — an empty delta is still nothing at all.
+   * `estimated_tokens` increment arrives, which is `null` on the delta that closes the block (recorded). So only the
+   * fact of progress (`estTokens`) becomes an event — an empty delta is still nothing at all.
    */
-  it('a thinking_delta\'s token estimate becomes a reasoning_delta', () => {
-    const out = n({
-      type: 'stream_event',
-      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '', estimated_tokens: 150 } },
-    })
-    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, estTokens: 150 }])
+  it('a thinking_delta\'s token estimate becomes a reasoning_delta, and the closing one with none is nothing', () => {
+    const out = deltas('basic', 'thinking_delta').map((m) => n(m))
+    expect(out).toEqual([[{ type: 'reasoning_delta', sessionId: SID, estTokens: 50 }], []])
   })
 
+  // No real run sends it: the CLI encrypts its thinking, so a delta never carries the words (hand-written on purpose)
   it('if thinking ever arrives with text, it flows through as-is', () => {
     const out = n({
       type: 'stream_event',
@@ -108,11 +110,19 @@ describe('an assistant body that arrives with no deltas', () => {
 
 describe('tool calls (the actual shape from the spike)', () => {
   it('a Bash tool_use becomes a tool_call, with the full command text as its title', () => {
-    const out = n({
-      type: 'assistant',
-      message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'npm run build' } }] },
-    })
-    expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build' } })
+    const call = recordedWhere('tools', (m) => m.type === 'assistant' && JSON.stringify(m).includes('"name":"Bash"'))
+    const out = call.flatMap(n).filter((e) => e.type === 'tool_call')
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'toolu_000003', summary: { tool: 'Bash', title: 'touch tools-done.txt' } })
+  })
+
+  // Found by the recordings: on Windows the CLI offers a PowerShell tool beside Bash, and it ran the commands. It is a command like Bash is
+  it('a PowerShell tool_use is a command too: its command is the title, and the approval it asks for is a command card', () => {
+    const out = recordedWhere('approval', (m) => m.type === 'assistant' && JSON.stringify(m).includes('"name":"PowerShell"')).flatMap(n).filter((e) => e.type === 'tool_call')
+    expect(out[0]).toMatchObject({ summary: { tool: 'PowerShell', title: 'touch probe-1.txt' } })
+    const asked = recordedApprovals('approval')[0]!
+    expect(asked.tool).toBe('PowerShell')
+    expect(approvalDetail(asked.tool, asked.input, '/p')).toEqual({ kind: 'command', command: 'touch probe-1.txt', cwd: '/p' })
   })
 
   it('a Write marks its file (for conflict detection) once its result says it went through', () => {
@@ -215,11 +225,11 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(toolSummary('Read', { file_path: '/a.ts' })).not.toHaveProperty('readOnly')
   })
 
-  it('tool_result decides ok', () => {
-    const out = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'M0_SPIKE_OK' }] } })
-    expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1', ok: true, summary: 'M0_SPIKE_OK' })
-    const err = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'nope', is_error: true }] } })
-    expect(err[0]).toMatchObject({ ok: false })
+  it('tool_result decides ok: a read or a command that ran is, a command the person refused is not', () => {
+    const results = (scenario: string) => recordedWhere(scenario, (m) => m.type === 'user' && JSON.stringify(m).includes('"tool_result"')).flatMap(n).filter((e) => e.type === 'tool_result')
+    expect(results('tools')[0]).toMatchObject({ type: 'tool_result', callId: 'toolu_000001', ok: true, summary: '1\tThe sky is red.\n2\t' })
+    expect(results('approval').map((r) => (r as { ok: boolean }).ok)).toEqual([true, false, true, true])
+    expect(results('approval')[1]).toMatchObject({ summary: 'Denied by user' })
   })
 
   it('a result of text blocks reads as its text on the card, not as their JSON (#843)', () => {
@@ -301,7 +311,10 @@ describe('tool calls (the actual shape from the spike)', () => {
 
 describe('normalizing an approval request (input to the banner\'s judgment)', () => {
   it('Bash becomes command (in-place banner approval is possible)', () => {
-    expect(approvalDetail('Bash', { command: 'npm test' }, '/p')).toEqual({ kind: 'command', command: 'npm test', cwd: '/p' })
+    // The edit is asked too (the `edits` preset grants it later, in the session's cards); the command is the one that reaches the person
+    const asked = recordedApprovals('tools').filter((x) => x.tool === 'Bash')
+    expect(asked).toHaveLength(1)
+    expect(approvalDetail(asked[0]!.tool, asked[0]!.input, '/p')).toEqual({ kind: 'command', command: 'touch tools-done.txt', cwd: '/p' })
   })
 
   it('Write/Edit become file_edit (a diff needs to be shown)', () => {
@@ -355,7 +368,10 @@ describe('a limit (M0 finding: rate_limit_event)', () => {
    * vocabulary only means the test protects our own imagination.
    */
   it('a warning is not a limit — no event for allowed_warning', () => {
-    expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1786750200, rateLimitType: 'five_hour' } })).toEqual([])
+    const warnings = recordedWhere('basic', (m) => m.type === 'rate_limit_event')
+    expect(warnings).not.toHaveLength(0)
+    expect(warnings.every((w) => (w as unknown as { rate_limit_info: { status: string } }).rate_limit_info.status === 'allowed_warning')).toBe(true)
+    expect(warnings.flatMap(n)).toEqual([])
   })
 
   it('rejected produces limit_reached, with the reset time converted to ISO', () => {
@@ -388,8 +404,16 @@ describe('the result message (usage, context, completion)', () => {
   })
 
   it('carries usage and cost', () => {
-    const u = n(RESULT).find((e) => e.type === 'usage_update')
-    expect(u).toMatchObject({ tokens: { outputTokens: 186, costUsd: 0.0078 } })
+    const [first] = recordedWhere('basic', (m) => m.type === 'result')
+    const cost = (first as unknown as { total_cost_usd: number }).total_cost_usd
+    expect(n(first).find((e) => e.type === 'usage_update')).toMatchObject({ tokens: { inputTokens: 1176, outputTokens: 21, cacheReadTokens: 17575, cacheCreationTokens: 3512, costUsd: cost } })
+  })
+
+  it('a turn the CLI could not run (a model that does not exist) is an error with the CLI’s own words — its result says success and is_error', () => {
+    const [failed] = recordedWhere('failed', (m) => m.type === 'result')
+    expect(failed).toMatchObject({ subtype: 'success', is_error: true, terminal_reason: 'api_error' })
+    expect(n(failed).at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: expect.stringContaining('no-such-model-xyz') } })
+    expect(n(failed).some((e) => e.type === 'turn_complete')).toBe(false)
   })
 
   /*
@@ -418,9 +442,13 @@ describe('the result message (usage, context, completion)', () => {
   })
 
   it('ends with turn_complete on success', () => {
-    expect(n(RESULT).at(-1)).toEqual({ type: 'turn_complete', sessionId: SID })
+    expect(recordedWhere('basic', (m) => m.type === 'result').map((r) => n(r).at(-1))).toEqual([
+      { type: 'turn_complete', sessionId: SID },
+      { type: 'turn_complete', sessionId: SID },
+    ])
   })
 
+  // No cheap real run ends this way (it needs a turn limit or a schema the model cannot meet), so these two are written by hand
   it('emits an error on failure', () => {
     const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: 'max turns exceeded' })
     expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: 'max turns exceeded' } })
@@ -451,17 +479,18 @@ describe('the result message (usage, context, completion)', () => {
  * status:'compacting' → (39.1 seconds) → status:null (+compact_result) → compact_boundary
  */
 describe('compaction — saying what is currently happening', () => {
+  const statuses = (status: string | null) => recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'status' && m.status === status)
+
   it('reports activity when compaction starts (must be distinguishable from waiting for a response)', () => {
-    expect(n({ type: 'system', subtype: 'status', status: 'compacting' })).toEqual([
-      { type: 'activity', sessionId: SID, activity: 'compacting' },
-    ])
+    expect(statuses('compacting').flatMap(n)).toEqual([{ type: 'activity', sessionId: SID, activity: 'compacting' }])
   })
 
-  it('has no activity during an ordinary request', () => {
-    expect(n({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([
-      { type: 'activity', sessionId: SID, activity: null },
-    ])
+  it('has no activity during an ordinary request, and none when compaction ends well (recorded: compact_result success)', () => {
+    expect(statuses('requesting').flatMap(n)).toEqual(statuses('requesting').map(() => ({ type: 'activity', sessionId: SID, activity: null })))
+    expect(statuses(null).flatMap(n)).toEqual([{ type: 'activity', sessionId: SID, activity: null }])
   })
+
+  // A compaction the CLI refuses cannot be asked for cheaply (it needs a conversation too short to compact): written by hand
 
   it('does not swallow a compaction failure — records the reason as well', () => {
     const out = n({
@@ -478,13 +507,9 @@ describe('compaction — saying what is currently happening', () => {
   })
 
   it('compact_boundary becomes a marker (Claude never had this marker until now)', () => {
-    const out = n({
-      type: 'system',
-      subtype: 'compact_boundary',
-      compact_metadata: { trigger: 'manual', pre_tokens: 25485, post_tokens: 3686, duration_ms: 39099 },
-    })
-    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686, trigger: 'manual' }])
-    // The tool's own at its threshold says so, which Centralu does not take for its compact (#1451)
+    const out = recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'compact_boundary').flatMap(n)
+    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 21274, after: 3318, trigger: 'manual' }])
+    // The tool's own at its threshold says so, which Centralu does not take for its compact (#1451); an automatic one needs a window to fill, so it is written by hand
     expect(n({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, post_tokens: 20000 } })).toEqual([
       { type: 'compaction', sessionId: SID, failed: false, before: 900000, after: 20000, trigger: 'auto' },
     ])
