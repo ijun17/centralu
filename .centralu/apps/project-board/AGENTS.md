@@ -235,7 +235,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   attribution lines (`squashMessage`). Only GitHub's word that it merged counts, read back after every
   `gh pr merge`: it can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head), and it can fail on the connection ("EOF") after GitHub merged (#1958): merged at the head
-  that was read is a landing, not a refusal. Closing a lower is read back the same way. A stack lands only when the top merged into the default branch, here or found merged
+  that was read is a landing, not a refusal (and when GitHub cannot be asked afterwards either, a failed poll, tried again). Closing a lower is read back the same way. A stack lands only when the top merged into the default branch, here or found merged
   (a driver stopped between the merge and writing it down, or by hand): then each head branch is
   deleted and the lowers closed, a branch kept when another open pull request is based on it (deleting
   it would close that one). Found merged into another branch, nothing is closed or deleted. Never

@@ -1329,6 +1329,7 @@ const fail = (msg) => { process.stderr.write('gh: ' + msg + '\n'); process.exit(
 const R = 'repos/ijun17/centralu'
 const path = args[0] === 'api' ? args.filter((a) => a.startsWith('repos/'))[0] : null
 const write = (w) => { st.writes = [...(st.writes ?? []), w]; const patch = st.on && st.on[w[0] + ':' + w[1]]; if (patch) for (const [k, v] of Object.entries(patch)) st[k] = { ...st[k], ...v }; save() }
+if (st.viewLost && st.viewLost.n > 0 && args[0] === 'pr' && args[1] === 'view') { st.viewLost.n--; save(); fail('Post "https://api.github.com/graphql": EOF') }
 if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
 if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
@@ -2222,8 +2223,16 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
   })
 
-  it('reads the pull request back when gh pr merge fails on the connection: merged at the head it read is a landing, not a refusal', async () => {
-    runtime(ghState({ prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77) }, mergeLost: 'Post "https://api.github.com/graphql": EOF' }))
+  it('reads the pull request back when gh pr merge fails on the connection: merged at the head it read is a landing, not a refusal (#1958)', async () => {
+    const EOF = 'Post "https://api.github.com/graphql": EOF'
+    const fresh = async (state: Gh) => {
+      await rt?.dispose({ awaitTree: true })
+      rt = null
+      rmFakeDir(join(root, 'data'))
+      mkdirSync(join(root, 'data'))
+      runtime(state)
+    }
+    runtime(ghState({ prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77) }, mergeLost: EOF }))
     await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge GitHub made')
     expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
@@ -2231,24 +2240,23 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(notices().map((e) => e.text).join(' ')).not.toContain('refused')
     expect(notices().at(-1)!.text).toContain('merged #77')
     expect(notices().at(-1)!.text).not.toContain('merged before this poll')
-  })
-
-  it('still refuses when gh pr merge fails and GitHub shows the pull request unmerged, or merged at another head', async () => {
-    runtime(ghState({ mergeError: 'Post "https://api.github.com/graphql": EOF' }))
+    // Nothing merged: still a refusal, with what gh said
+    await fresh(ghState({ mergeError: EOF }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     const q = await until((x) => stateOf(x) === 'attention', 'attention')
     expect(q.queue[0].reason).toMatchObject({ kind: 'refused' })
     expect(q.queue[0].reason.text).toContain('EOF')
     expect(writes()).toEqual([])
-    await rt!.dispose({ awaitTree: true })
-    rt = null
     // Merged at a head the queue did not read (a push and a merge by hand in between): not the squash it asked for
-    rmFakeDir(join(root, 'data'))
-    mkdirSync(join(root, 'data'))
-    runtime(ghState({ mergeLost: 'Post "https://api.github.com/graphql": EOF', mergedAt: SHA2 }))
+    await fresh(ghState({ mergeLost: EOF, mergedAt: SHA2 }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'attention', 'attention for a merge at another head')
     expect(itemsOnDisk()[0]!.reason).toMatchObject({ kind: 'refused' })
+    // The read-back is lost too: nobody knows whether it merged, so no refusal; the next poll reads it and finds it merged
+    await fresh(ghState({ mergeLost: EOF, on: { 'merge:77': { viewLost: { n: 1 } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge found on the next poll')
+    expect(notices().map((e) => e.text).join(' ')).not.toContain('refused')
   })
 
   it('counts a lower closed when gh lost the answer to the close, and deletes its branch', async () => {
