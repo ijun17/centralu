@@ -519,9 +519,18 @@ default 4: the owner's, 2026-10-19, this repository's too).
   branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
   batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
   goes on with its own CI and is not batched again on that head; so does one GitHub will not merge
-  into it for another reason (a 404 or 422, a head gone, already in main). With two or more merged, the CI
+  into it for another reason (a 404 or 422, a head gone, already in main). **A lost answer is not a
+  refusal** (#1961, as #1958 for a squash): a `POST /merges` that fails on the connection ("EOF") or with a 5xx
+  (`GitHubError.lost`) may have been done, and a member left in the branch unseen would have the later ones tested
+  with it and landed from a tree no run saw without it. The branch's head is read back (`readBack`, the one
+  helper the squash uses too): moved, the merge is done and the member is a step; not moved, GitHub did not
+  do it and the member is left out as for a refusal; not readable, the batch is dropped, since the branch is
+  unknown (a rate limit, no network or no login still pauses and builds the batch again from the start).
+  With two or more merged, the CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
-  permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
+  permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled. A lost
+  answer to the dispatch is read back the same way, from the runs on the branch's head: a run there means it
+  started and the batch goes on; none, or unreadable, is a refusal as before.
   Then the members' own runs that have not started are cancelled (with two tiers, every one not
   finished: the batch's full run tests what a quick run does, and the runners are the batch's), each
   written down before it is cancelled (`cancelled`, which a batch split or re-formed from this one
@@ -583,7 +592,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
   after "ended (stopped)" (#1527). Batch events are for the screen, not a session; a member's merge is its owner's
   news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
-  red and split, the default branch moved, dispatch refused, a conflict).
+  red and split, the default branch moved, dispatch refused, a conflict, lost answers to a merge into the
+  branch and to the dispatch).
 
 ### Two tiers of CI (2026-10-18)
 
@@ -677,7 +687,7 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   with files, main and its tree, batch branches, runs that take time (all checks reported a moment before the run is completed),
   fail, are cancelled and rerun, skip a shard, or have a stand-in report a shard's name, and on every full run the stand-in
   skipped under its unexpanded matrix name, as GitHub reports it (and one case runs on the recorded job list of run 40247598237); main moving, pushes, unqueueing, a judge
-  that is missing or crashes, an older board's batch with no tier. It checks every landing against the model's own table of
+  that is missing or crashes, an older board's batch with no tier, lost answers to a merge into the branch (before or after GitHub did it), to the dispatch and to a read of the branch's head, where the batch's steps must be the branch's members at every tick). It checks every landing against the model's own table of
   files (not the judge's answer) and the run that proved it. Change the queue's steps and this runs them.
 - **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
   the default branch as it is then, so a half that passes lands before the other half is tried, and a

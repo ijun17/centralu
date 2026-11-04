@@ -47,7 +47,7 @@ import {
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
-import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
+import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, readBack, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
 import { systemNow } from './clock.mjs'
@@ -202,6 +202,17 @@ async function build(b, ctx) {
       r = await mergeInto(repo, b.branch, m.head, `Merge queue batch ${b.id}: #${m.pr} ${m.title}`)
     } catch (e) {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      // The answer was lost (gh's "EOF", a 5xx): GitHub may have merged it. The branch says, and only its head moving
+      // counts (this is its one writer): left in the branch unseen, the later members would be tested with it, and land
+      // from a tree CI never ran without it (#1961). A branch that cannot be read is not gone on with
+      if (e.lost) {
+        const now = await readBack(() => readCommit(repo, b.branch))
+        if (!now) return drop(b, ctx, `GitHub's answer to merging #${m.pr} into it was lost, and the branch could not be read afterwards (${e.message}); its pull requests go back to their own CI.`, { batchless: false })
+        if (now.sha !== (steps.at(-1)?.sha ?? main.sha)) {
+          steps.push({ pr: m.pr, head: m.head, sha: now.sha, tree: now.tree })
+          continue
+        }
+      }
       // Not a conflict, but GitHub would not merge it (a head gone, a 404 or 422): as a conflict, it is left out
       refused.push(m.pr)
       continue
@@ -232,7 +243,15 @@ async function build(b, ctx) {
   try {
     // Landing after the fast tier (#1259): the batch runs the quick tier on what lands, the heavy jobs too when it changes the screen
     const inputs = dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier, screenInputs: CI.screen?.inputs })
-    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, inputs)
+    for (const w of CI.workflows) {
+      try {
+        await dispatchWorkflow(repo, workflowFile(w), b.branch, inputs)
+      } catch (e) {
+        // A lost answer after GitHub started the run: its run on the batch's head says so, and the batch goes on (#1961)
+        const seen = e instanceof GitHubError && e.lost ? await readBack(() => readWorkflowChecks(repo, steps.at(-1).sha, { workflows: [w], branch: b.branch })) : null
+        if (!seen?.runs.length) throw e
+      }
+    }
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why

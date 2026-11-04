@@ -52,7 +52,7 @@ vi.mock('../.centralu/apps/project-board/github.mjs', async (importOriginal) => 
     ...actual,
     readRepo: async () => ({ permissions: { admin: false, maintain: true, push: true }, defaultBranch: 'main' }),
     readPr: async (_repo: string, n: number) => w().readPr(n),
-    readCommit: async () => w().readMain(),
+    readCommit: async (_repo: string, ref: string) => w().readCommit(ref),
     readRequired: async () => ({ names: w().required, unresolved: [], added: 0, source: 'the model' }),
     readWorkflowChecks: async (_repo: string, sha: string, o: { branch?: string }) => w().readWorkflowChecks(sha, o?.branch),
     readChecks: async (_repo: string, sha: string) => w().readWorkflowChecks(sha).reported,
@@ -234,6 +234,24 @@ class World {
 
   // --- main, branches and files
   readMain = () => ({ sha: this.main.sha, tree: this.main.tree })
+  /** A branch's head (a batch's), else main's. The read can fail on the connection (`lost.read`), as any of them can */
+  readCommit(ref: string) {
+    const b = this.branches.get(ref)
+    if (!b) return this.readMain()
+    if (this.lost.read > 0 && this.rand() < this.lost.read) {
+      this.lostCount.read++
+      throw new (this.errorClass())('github', 'GitHub answered with an error: Get "https://api.github.com/repos/commits": EOF')
+    }
+    return { sha: b.sha, tree: b.tree }
+  }
+  /**
+   * Chances that GitHub's answer to a write is lost: the merge into a batch branch (half of them before GitHub did it, half
+   * after), the start of a workflow (after it did it), and the read of a branch's head. What the queue can know of the
+   * branch is only what it reads back.
+   */
+  lost = { merge: 0, dispatch: 0, read: 0 }
+  lostCount = { mergeBefore: 0, mergeAfter: 0, dispatch: 0, read: 0 }
+  private lose = (what: string) => new (this.errorClass())('github', `GitHub refused ${what}: Post "https://api.github.com/repos": EOF`, { lost: true })
   /** Something merges into main that the queue did not (a merge by hand) */
   externalMerge() {
     this.main = { sha: `m${++this.counter}`, tree: this.tree(this.main.tree, `external${this.counter}`) }
@@ -252,10 +270,20 @@ class World {
     if (!b) throw new (this.errorClass())('github', `no branch ${name}`)
     const p = [...this.prs.values()].find((x) => x.head === head)
     if (!p) throw new (this.errorClass())('github', `no commit ${head}`)
+    const lose = this.lost.merge > 0 && this.rand() < this.lost.merge
+    const before = lose && this.rand() < 0.5
+    if (before) {
+      this.lostCount.mergeBefore++
+      throw this.lose(`to merge ${head} into ${name}`)
+    }
     b.tree = this.tree(b.tree, head)
     b.sha = `b${++this.counter}`
     b.members.push({ n: p.n, head, files: [p.file] })
     b.steps.set(head, b.tree)
+    if (lose) {
+      this.lostCount.mergeAfter++
+      throw this.lose(`to merge ${head} into ${name}`)
+    }
     return { sha: b.sha, tree: b.tree }
   }
   readFile(path: string) {
@@ -267,10 +295,10 @@ class World {
     if (!b || this.compareNull) return null
     return b.members.flatMap((m) => m.files)
   }
-  errorClass(): new (kind: string, message: string) => Error {
+  errorClass(): new (kind: string, message: string, opts?: { lost?: boolean }) => Error {
     return this.githubError
   }
-  githubError!: new (kind: string, message: string) => Error
+  githubError!: new (kind: string, message: string, opts?: { lost?: boolean }) => Error
 
   /** The squash of a pull request into main, and what the model checks about it before it happens */
   mergePr(n: number, sha: string): string | null {
@@ -384,6 +412,10 @@ class World {
     if (!b) throw new (this.errorClass())('github', `no branch ${branch}`)
     this.runs.push(this.startRun(b.sha, branch, 'workflow_dispatch', inputs?.tier === 'quick' ? 'quick' : 'full'))
     this.dispatches.push({ branch, inputs })
+    if (this.lost.dispatch > 0 && this.rand() < this.lost.dispatch) {
+      this.lostCount.dispatch++
+      throw this.lose(`to start ${branch}`)
+    }
   }
   dispatches: { branch: string; inputs: Record<string, string> | null }[] = []
   rerun(runId: number, failedOnly: boolean) {
@@ -594,6 +626,31 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     expect(totals.dispatchedFull).toBeGreaterThan(20)
     expect(totals.dispatchedQuick).toBeGreaterThan(20)
     expect(totals.stops).toBeGreaterThan(20)
+  })
+
+  // #1961: GitHub's answer to a write on a batch branch is lost, before or after it did the write, and the read of the branch
+  // fails now and then. The queue's view of what is in the branch (its steps) must be the branch's (the model's), and whatever
+  // lands must be a tree CI ran (the check on every landing)
+  it("keeps the batch's steps the branch's members when answers are lost (#1961)", async () => {
+    const lost = { mergeBefore: 0, mergeAfter: 0, dispatch: 0, read: 0 }
+    let landed = 0
+    for (let seed = 401; seed <= 430; seed++) {
+      const r = await simulate(seed, {
+        setup: (w) => (w.lost = { merge: 0.3, dispatch: 0.2, read: 0.25 }),
+        during: (w, q) => {
+          for (const b of q.batches as { branch: string; state: string; steps?: { head: string }[] }[]) {
+            const branch = w.branches.get(b.branch)
+            if (!branch || !['ci', 'landing'].includes(b.state)) continue
+            expect(b.steps?.map((x) => x.head), `seed ${seed}: ${b.branch} as the queue sees it`).toEqual(branch.members.map((m) => m.head))
+          }
+        },
+      })
+      for (const k of Object.keys(lost) as (keyof typeof lost)[]) lost[k] += r.world.lostCount[k]
+      landed += r.world.landings.length
+    }
+    // The sequences reach every kind of lost answer, and batches land through them
+    for (const [k, n] of Object.entries(lost)) expect(n, k).toBeGreaterThan(5)
+    expect(landed).toBeGreaterThan(20)
   })
 
   // A judge that cannot answer (it is missing, it crashes, GitHub lists too many files) is no reason to land after the fast tier:

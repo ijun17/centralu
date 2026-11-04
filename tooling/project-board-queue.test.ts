@@ -1370,16 +1370,31 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (st.mainError) fail('Not Found (HTTP 404)')
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
   out({ sha: m.sha, commit: { tree: { sha: m.tree } } })
+} else if (path && path.startsWith(R + '/commits/queue%2F')) {
+  // A batch branch's head: where the merges left it (headLost: reads that fail on the connection first)
+  st.headReads = (st.headReads ?? 0) + 1
+  save()
+  if (st.headLost && st.headLost.n > 0) { st.headLost.n--; save(); fail('Get "https://api.github.com/' + path + '": EOF') }
+  const head = (st.heads ?? {})[decodeURIComponent(path.slice((R + '/commits/').length))]
+  if (!head) fail('Not Found (HTTP 404)')
+  out({ sha: head.sha, commit: { tree: { sha: head.tree } } })
 } else if (path === R + '/git/refs' && args.includes('POST')) {
   const body = JSON.parse(stdin)
   if ((st.refs ?? []).includes(body.ref)) fail('Reference already exists (HTTP 422)')
   write(['branch', body.ref.replace('refs/heads/', ''), body.sha])
+  st.heads = { ...st.heads, [body.ref.replace('refs/heads/', '')]: st.main ?? { sha: 'main0', tree: 'tree-main0' } }
+  save()
   out({ ref: body.ref })
 } else if (path === R + '/merges') {
   const body = JSON.parse(stdin)
   write(['merge-into', body.head, body.base])
   if ((st.conflicts ?? []).includes(body.head)) fail('Merge conflict (HTTP 409)')
   if ((st.mergeErrors ?? []).includes(body.head)) fail('Not Found (HTTP 404)')
+  // The connection dropped before GitHub did it (intoDropped), or after (intoLost): the branch moves only in the second
+  if ((st.intoDropped ?? []).includes(body.head)) fail('Post "https://api.github.com/' + R + '/merges": EOF')
+  st.heads = { ...st.heads, [body.base]: { sha: 'batch-' + body.head, tree: 'tree-' + body.head } }
+  save()
+  if ((st.intoLost ?? []).includes(body.head)) fail('Post "https://api.github.com/' + R + '/merges": EOF')
   out({ sha: 'batch-' + body.head, commit: { tree: { sha: 'tree-' + body.head } } })
 } else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
   const body = JSON.parse(stdin)
@@ -1392,6 +1407,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
     st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 7000 + st.dispatched.length, run_attempt: 1, head_sha: head, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: answer, created_at: '2099-01-01T00:00:00Z' }] }
   }
   write(['dispatch', body.ref])
+  // The run started, and the connection dropped before the answer
+  if (st.dispatchLost) fail(st.dispatchLost)
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
@@ -3132,6 +3149,81 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(batchesOnDisk()).toHaveLength(1)
     expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
     expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
+  })
+
+  // #1961: the answer to POST /merges was lost after GitHub merged the member. Counted as refused, it stayed in the branch,
+  // and the batch went on with a tree the member was in and CI's verdict covered, landing the rest from a tree no run saw
+  describe('when the answer to a write on the batch branch is lost (#1961)', () => {
+    const landsBoth = async () => {
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+      await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end')
+    }
+
+    it('counts the member merged when the branch moved, and builds, tests and lands the batch with it', async () => {
+      runtime(batchState({ intoLost: [A] }))
+      await landsBoth()
+      expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1'])
+      expect(batchesOnDisk()[0].steps).toEqual([
+        { pr: 77, head: A, sha: `batch-${A}`, tree: `tree-${A}` },
+        { pr: 78, head: B, sha: `batch-${B}`, tree: `tree-${B}` },
+      ])
+      expect(batchEvents().filter((t) => t.includes('would not merge'))).toEqual([])
+      expect(batchEvents().at(-1)).toBe('Batch queue/batch-1: landed #77, #78; main at main-78 is the tree CI tested.')
+      // The head of the branch was read once, for the one lost answer
+      expect(gh().headReads).toBe(1)
+    })
+
+    it('drops the batch when the branch cannot be read afterwards, and goes on with none of it', async () => {
+      runtime(batchState({ intoLost: [A], headLost: { n: 1 } }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      // Nothing after the unknown merge was built on the branch, nothing was started on it, and nobody was blamed
+      expect(writes().map(short2).slice(0, 3)).toEqual(['branch queue/batch-1', `merge-into ${A}`, 'delete queue/batch-1'])
+      expect(batchEvents().find((t) => t.includes('was lost'))).toContain("GitHub's answer to merging #77 into it was lost, and the branch could not be read afterwards")
+      expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
+      // They are batched again, and now the branch can be read
+      await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start')
+    })
+
+    it('leaves a member out when the branch did not move (the answer was lost before GitHub merged it), as for a refusal', async () => {
+      runtime(batchState({ intoDropped: [B] }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
+      expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
+      expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
+      expect(gh().headReads).toBe(1)
+    })
+
+    it('does not read the branch back after a refusal GitHub answered', async () => {
+      runtime(batchState({ mergeErrors: [B] }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
+      expect(gh().headReads ?? 0).toBe(0)
+    })
+
+    it('goes on when the answer to starting CI was lost and the run started', async () => {
+      runtime(batchState({ dispatchLost: 'Post "https://api.github.com/repos/ijun17/centralu/actions/workflows/build.yml/dispatches": EOF' }))
+      await landsBoth()
+      expect(writes().map(short2).slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
+      expect(queueOnDisk().batchOff ?? null).toBeNull()
+    })
+
+    it('stops making batches for an hour when the answer to starting CI was lost and no run is there', async () => {
+      const base = batchState()
+      runtime(batchState({ dispatchLost: 'EOF', on: { ...base.on, 'dispatch:queue/batch-1': {} } }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      expect(queueOnDisk().batchOff.reason).toContain('EOF')
+      expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'delete queue/batch-1'])
+    })
   })
 
   it("does not batch a fork's pull request", async () => {
