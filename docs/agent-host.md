@@ -3400,7 +3400,7 @@ host that crashed or is missing, not one the person stopped:
     (the question) becomes the line, `WM_ENDSESSION` with `wParam` FALSE (another program refused) the `cancelled` one; a Restart Manager's
     request to close (`ENDSESSION_CLOSEAPP`) is neither. In direct mode the line goes on the host's stdin. With `serve --window` the host is
     no child of the window, so the line goes to the launcher, which passes it on over the host's socket as `host.systemEnding { cancelled? }`
-    (`serve-window.mjs`, everyday rights, a mark of a fixed shape like `host.handover`; never through a link).
+    (`serve-window.mjs`, with the window's full credential: a limited one is refused, since a false end would relabel a real crash as the system's; never through a link). A sign-out (`ENDSESSION_LOGOFF`) is not passed on to a serve host in a network logon, which a sign-out does not end.
   - **macOS**: the window observes `NSWorkspaceWillPowerOffNotification` (a shutdown, a restart and a log out; there is no notice for one
     being called off, so the host's 2 minutes do that) and writes the line itself in direct mode or sends the keeper `system_ending` (a
     window's only) under one. The keeper, which launchd stops with the host and the agents, handles SIGTERM itself (`os::on_system_stop`):

@@ -29,7 +29,7 @@ import { say, sleep } from './serve-util.mjs'
  *   since it serves the hub's link too.
  * - A line `{"op":"system-ending"}` on that stdin (`"cancelled":true` calls it off) is the window saying the system is ending, a
  *   shutdown, restart or sign-out (#1970): the host this runs is no child of the window and hears nothing of it, so this tells it by
- *   `host.systemEnding`, with the limited credential (everyday rights, as `host.handover`).
+ *   `host.systemEnding`, with the window's full credential. A sign-out (`"logoff":true`) is not told to a host in a network logon, which it does not end.
  * - The host stops answering for `misses` polls in a row (the hand-over's gap, or it ended): this exits 1, and the
  *   window's supervisor starts this again, which finds the new host or starts one.
  *
@@ -89,9 +89,10 @@ export async function runWindow({
   const tellEnding = async (line) => {
     const op = parseLine(line)
     if (op?.op !== 'system-ending') return
-    const { port, token: limited, proofKey } = readServeState(dataDir) ?? {}
-    if (!limited) return
-    const sent = await ask({ port: port ?? DEFAULT_SERVE_PORT, token: limited, proofKey, protocolVersion: (await probe()).protocolVersion ?? protocolVersion, method: 'host.systemEnding', params: op.cancelled === true ? { cancelled: true } : {} })
+    // A sign-out does not end a host the ssh logon of a hub started: it runs on
+    if (op.logoff === true && op.cancelled !== true && (await probe()).logon === 'network') return
+    const { port, proofKey } = readServeState(dataDir) ?? {}
+    const sent = await ask({ port: port ?? DEFAULT_SERVE_PORT, token, proofKey, protocolVersion, method: 'host.systemEnding', params: op.cancelled === true ? { cancelled: true } : {} })
     if (!sent) say('the host did not take the notice that the system is ending')
   }
 
@@ -102,7 +103,9 @@ export async function runWindow({
       done = true
       resolve(code)
     }
-    stdin.on('data', lineReader((line) => void tellEnding(line)))
+    // One after the other: the call-off must not overtake the notice it calls off
+    let told = Promise.resolve()
+    stdin.on('data', lineReader((line) => void (told = told.then(() => tellEnding(line)).catch(() => {}))))
     stdin.once('end', () => finish(0))
     stdin.once('close', () => finish(0))
     stdin.resume()

@@ -87,7 +87,6 @@ With the limited credential: runs.
 - `host.activity`
 - `host.handover`
 - `host.stop`
-- `host.systemEnding`
 - `machines.activity`
 - `machines.askConsents`
 - `machines.cancelUpdate`
@@ -215,6 +214,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `apps.viewFrame`
 - `apps.viewMessage`
 - `grid.set`
+- `host.systemEnding`
 - `mail.close`
 - `mail.held`
 - `mail.list`

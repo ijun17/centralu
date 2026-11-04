@@ -368,8 +368,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
    * launcher says it with the limited credential and no full one crosses a port for it; `host.stop` does far more
    */
   'host.handover': 'everyday',
-  /** The window telling the serve host the system is ending (#1970): a mark of a fixed shape, which moves and stops nothing, said with the limited credential as `host.handover` is */
-  'host.systemEnding': 'everyday',
+  /** The window telling the serve host the system is ending (#1970): said with the window's full credential. An everyday one could plant a false end that relabels a real crash as the system's (#1397) */
+  'host.systemEnding': 'window',
   'host.hubOffer': 'link',
 
   // The window's own state, preferences, themes and approval rules

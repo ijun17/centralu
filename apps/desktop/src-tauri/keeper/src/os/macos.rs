@@ -24,6 +24,8 @@ fn die_by_term() {
 
 extern "C" fn on_term(_sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
     // SAFETY: the kernel gives a valid siginfo to a SA_SIGINFO handler; read and write are async-signal-safe
+    // SAFETY: errno is this thread's; a handler leaves it as it found it
+    let errno = unsafe { *libc::__error() };
     let (from, fd) = unsafe { ((*info).si_pid, STOP_PIPE.load(std::sync::atomic::Ordering::Relaxed)) };
     if super::is_system_stop(from) && fd >= 0 {
         // A thread takes it from here: nothing that locks or allocates runs in a handler
@@ -31,6 +33,8 @@ extern "C" fn on_term(_sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut 
     } else {
         die_by_term()
     }
+    // SAFETY: as above
+    unsafe { *libc::__error() = errno };
 }
 
 /// Runs `told` when launchd stops this process (SIGTERM from pid 1, `is_system_stop`), and then ends the process as the signal
