@@ -176,6 +176,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** Sessions of the remote the hub shows / hides, by the remote's id. Events of any other session are not passed on */
   private shown = new Set<string>()
   private hidden = new Set<string>()
+  /** The remote's coordinators as it last gave them: not shown, but read by a reader (#1941, `unshown`) */
+  private readonly coordinators = new Map<string, Record<string, unknown>>()
   protected retryTimer: ReturnType<typeof setTimeout> | undefined
   private attempt = 0
   /** Starts the backoff over once the host that last said hello has stayed up `STABLE_MS` */
@@ -788,6 +790,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (kind === 'sessions') {
       this.shown.clear()
       this.hidden.clear()
+      this.coordinators.clear()
       for (const s of list) this.classify(s)
       this.deps.mirror.replace(this.id, 'sessions', list.filter((s) => !hiddenKind(s)))
     } else {
@@ -797,6 +800,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   hides(session: unknown): boolean {
     return hiddenKind(session)
+  }
+
+  unshown(sessionId: string): unknown {
+    return this.coordinators.get(sessionId)
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────────────────
@@ -1404,6 +1411,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         this.classify(raw.session)
         if (isObj(raw.session) && !hiddenKind(raw.session)) this.deps.mirror.upsertSession(this.id, raw.session)
       }
+      if (raw.type === 'session_deleted') this.coordinators.delete(sid)
       if (!this.shown.has(sid)) return
       if (raw.type === 'session_deleted') {
         this.shown.delete(sid)
@@ -1425,6 +1433,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (!isObj(s) || typeof s.id !== 'string') return
     if (hiddenKind(s)) this.hidden.add(s.id)
     else this.shown.add(s.id)
+    if (s.kind === 'coordinator') this.coordinators.set(s.id, s)
   }
 
   private transportDown(reason: string): void {

@@ -125,8 +125,8 @@ export class LinkedHost {
   /**
    * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
    * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
-   * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
-   * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
+   * host: no calling session, and this host's orchestrator left out (§3.4, #1941): its coordinators are read, though the
+   * hub's window does not show them. Bounded per call, since the caller is another machine.
    */
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
@@ -149,7 +149,7 @@ export class LinkedHost {
        */
       lastAnswer: async (sessionId, maxChars, turn, since) => {
         const m = this.host.meta.get(sessionId)
-        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        if (!m || m.kind === 'orchestrator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
         const span = turn ? this.host.children.turnRows(sessionId, since) : undefined
         const text = lastResponse(rows, span)

@@ -38,6 +38,8 @@ export interface RoutedMachine {
   observe(kind: 'sessions' | 'projects', list: unknown[]): void
   /** A session of the remote the hub does not show: its orchestrator and coordinators (§3.4) */
   hides(session: unknown): boolean
+  /** A coordinator of the remote, which the hub does not show but a reader reads (#1941): its row as the remote last gave it. Absent: none kept */
+  unshown?(sessionId: string): unknown
   /**
    * Not connected, and nothing here will connect it until the person presses Connect (#1341): they disconnected it, or
    * its Auto reconnect is off and the attempt at the hub's start is over. Absent: a machine the hub keeps trying

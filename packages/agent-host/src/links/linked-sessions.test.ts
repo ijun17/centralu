@@ -418,7 +418,7 @@ describe("a linked machine in every session's list and search (#984)", () => {
     expect(notSearched).toEqual(['Slow box (did not answer within 30 ms)'])
   })
 
-  it("tells a reader from the mirror whether a machine's session is an app's and whether its project is trusted", () => {
+  it("tells a reader from the mirror whether a machine's session's project is trusted, and nothing of its orchestrator (#1941)", () => {
     const m = machine(
       {},
       {
@@ -435,11 +435,12 @@ describe("a linked machine in every session's list and search (#984)", () => {
       },
     )
     const reader = linkedSessions(() => [m])
+    // An app's agent reads as its project does, a builder with no project as trusted; the orchestrator, one not held and a bare id as nothing
     expect(['m1.w1', 'm1.w2', 'm1.ag', 'm1.bu', 'm1.or', 'm1.gone', 'w1'].map((id) => reader.readerFacts(id))).toEqual([
-      { app: false, trusted: true },
-      { app: false, trusted: false },
-      { app: true, trusted: true },
-      { app: true, trusted: false },
+      { trusted: true },
+      { trusted: false },
+      { trusted: true },
+      { trusted: true },
       null,
       null,
       null,
