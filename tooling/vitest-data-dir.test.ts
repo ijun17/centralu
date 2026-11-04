@@ -17,7 +17,8 @@ describe('the data folder a test file runs against', () => {
   it('is a fresh temporary folder of its own, not one shared with other files', () => {
     const dir = process.env.CC_DATA_DIR!
     expect(dirname(dir)).toBe(tmpdir())
-    expect(basename(dir)).toMatch(/^centralu-test-data-[A-Za-z0-9]{6}$/)
+    expect(basename(dir)).toBe('data')
+    expect(basename(dirname(dir))).toMatch(/^ct-[A-Za-z0-9]{6}$/)
     expect(existsSync(dir)).toBe(true)
     // Nothing else has written into it: this file has not started a host or a manager
     expect(readdirSync(dir)).toEqual([])
@@ -48,7 +49,7 @@ describe('a data folder a test sets for itself', () => {
  */
 describe('the temporary folder of a test file', () => {
   it('is the test file own folder, in which its data folder is made', () => {
-    expect(basename(tmpdir())).toMatch(/^cc-test-[A-Za-z0-9]{6}$/)
+    expect(basename(tmpdir())).toMatch(/^ct-[A-Za-z0-9]{6}$/)
     expect(dirname(process.env.CC_DATA_DIR!)).toBe(tmpdir())
   })
 
@@ -56,15 +57,17 @@ describe('the temporary folder of a test file', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const probe = mkdtempSync(join(tmpdir(), 'probe-'))
     try {
+      let output = ''
       const code = await new Promise<number | null>((resolve) => {
         const child = execFile(
           process.execPath,
           [fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url)), 'run', '--project', 'unit', '--maxWorkers=1', 'tooling/fixtures/leak/leak-probe.test.ts'],
           { cwd: root, timeout: 90_000 * SLOW, env: { ...process.env, CC_LEAK_PROBE: probing, TMPDIR: probe, TMP: probe, TEMP: probe, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' } },
-          () => resolve(child.exitCode),
+          (_e, stdout, stderr) => ((output = `${stdout}
+${stderr}`), resolve(child.exitCode)),
         )
       })
-      expect(code).toBe(0)
+      expect(code, output).toBe(0)
       // node's own compile cache goes to the temporary folder the process started with; it is not a test's
       expect(readdirSync(probe).filter((n) => n !== 'node-compile-cache')).toEqual([])
     } finally {

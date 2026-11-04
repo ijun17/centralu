@@ -107,12 +107,12 @@ static class Launcher {
 
 let launcherCache: string | undefined
 
-/** The compiled launcher, built once per machine and source in the temp folder */
+/** The compiled launcher, built once per test run and source in the run's temporary folder (`tooling/vitest-tmp-root.ts`) */
 function launcher(): string {
   if (launcherCache) return launcherCache
   const windir = process.env.SystemRoot || 'C:\\Windows'
   const csc = join(windir, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
-  const folder = join(tmpdir(), `cc-fake-exe-${createHash('sha256').update(LAUNCHER_CS).digest('hex').slice(0, 12)}`)
+  const folder = join(process.env.CC_TEST_RUN_TMP ?? tmpdir(), `cc-fake-exe-${createHash('sha256').update(LAUNCHER_CS).digest('hex').slice(0, 12)}`)
   const exe = join(folder, 'launcher.exe')
   if (!existsSync(exe)) {
     mkdirSync(folder, { recursive: true })
@@ -183,8 +183,9 @@ export function insideOf(base: string, dir: string): boolean {
 /**
  * Removes a test's folder without blocking the event loop, and briefly: 3 retries, about 3 s on Windows (measured: Node's
  * backoff makes 10 retries last close to a minute on a held folder), inside a hook's time limit. On Windows a folder something still holds (a process whose working
- * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the system's cleanup of the
- * temporary folder instead of failing the test that used it, when it is inside that folder (#1346, #1312). Anywhere
+ * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the removal of the test file's
+ * temporary folder when the file ends (`tooling/vitest-data-dir.ts`, which retries longer and fails the file if it still
+ * cannot) instead of failing the test that used it, when it is inside the temporary folder (#1346, #1312). Anywhere
  * else, or on another platform, the error stands.
  */
 export async function removeFakeDir(dir: string, os: { platform: NodeJS.Platform; tmp: string } = { platform: process.platform, tmp: tmpdir() }): Promise<void> {

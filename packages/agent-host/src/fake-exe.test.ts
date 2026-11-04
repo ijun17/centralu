@@ -12,7 +12,7 @@ import { removeTree } from './temp-dir.test-helpers.js'
 /**
  * A test's cleanup of its folder (#1346): on Windows a folder a process still holds cannot be removed, and the board
  * queue tests' cleanup failed with `EBUSY ... rmdir` while something worked in it. `removeFakeDir` retries briefly
- * without blocking the event loop, then leaves such a folder to the system's temporary-folder cleanup instead of failing
+ * without blocking the event loop, then leaves such a folder to the removal of the test file's temporary folder instead of failing
  * the test, only inside the temporary folder and only on Windows.
  */
 

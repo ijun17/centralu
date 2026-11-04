@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,11 +31,12 @@ import { afterAll } from 'vitest'
  * file and names what is left, so it is seen instead of kept.
  */
 // In the run's folder (`vitest-tmp-root.ts`), which also takes a skipped file's, whose hooks do not run
-const own = mkdtempSync(join(process.env.CC_TEST_RUN_TMP ?? tmpdir(), 'cc-test-'))
+const own = mkdtempSync(join(process.env.CC_TEST_RUN_TMP ?? tmpdir(), 'ct-'))
 process.env.TMPDIR = own
 process.env.TMP = own
 process.env.TEMP = own
-const dir = mkdtempSync(join(tmpdir(), 'centralu-test-data-'))
+const dir = join(own, 'data')
+mkdirSync(dir)
 process.env.CC_DATA_DIR = dir
 /*
  * **Nor do tests read the person's Claude settings** (#382). The orchestrator and coordinators take the person's own
@@ -48,7 +49,7 @@ process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-config')
 afterAll(async () => {
   try {
     // Windows will not remove a folder a process still works in, which the last test's processes may be ending
-    await rm(own, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    await rm(own, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 5, retryDelay: 100 })
   } catch (e) {
     const left = await readdir(own).catch(() => [])
     throw new Error(`the test file's temporary folder ${own} could not be removed (${e instanceof Error ? e.message : String(e)}); left in it: ${left.join(', ') || 'nothing seen'}`)
