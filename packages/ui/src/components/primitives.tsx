@@ -33,6 +33,8 @@ export function interruptionLabel(i: Interruption): string {
       return 'Stopped: network'
     case 'quit':
       return 'Stopped: Centralu quit or restarted'
+    case 'shutdown':
+      return 'Stopped: computer shut down'
     case 'interrupted':
       return 'Stopped: interrupted'
     case 'reconnecting':

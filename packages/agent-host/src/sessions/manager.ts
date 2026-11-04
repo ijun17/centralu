@@ -145,6 +145,7 @@ import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
+import { crashedInShutdown, type ShutdownWindow } from '../lifecycle/computer-shutdown.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import type { Ended } from '../lifecycle/update-ended.js'
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
@@ -401,6 +402,11 @@ export class SessionManager {
        * (`continueCutTurns`). This host writes it in turn when a linked hub stops it for an update (`stopForUpdate`)
        */
       updateResume?: UpdateResumeFolder
+      /**
+       * The span the computer shut down under the last host in, when this start finds it did (lifecycle/computer-shutdown.ts, #1397): a
+       * session in a turn the host lost, or ended by `adapter_crashed` inside it, stopped because of that, and says so
+       */
+      computerShutdown?: ShutdownWindow | null
       /** How handoff_session waits for an agent's note (#694); tests shorten it */
       handoffTimings?: HandoffTimings
     } = {},
@@ -578,19 +584,26 @@ export class SessionManager {
        */
       const goesOn = cut && !!lists?.cut(s.id, s.lastSeq)
       const stale = cut && !goesOn
-      const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
+      /*
+       * Or a session the computer's shutdown ended with an `adapter_crashed` while the last host was still alive (#1397): its
+       * agent got the system's termination and exited 0, and the host wrote the error before it went too. It is no crash and
+       * stopped no later than a turn the host lost, so it is reset and marked the same way
+       */
+      const crashedAtShutdown = !cut && crashedInShutdown(s, store.messages.loadMessages(s.id, 5), keeperOpts.computerShutdown)
+      const lost = stale || crashedAtShutdown
+      const fixed = lost ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
       // Started from a linked computer (#1273): kept beside the row, as its depth is
       this.meta.set(s.id, withHubMark(store.settings, fixed))
-      if (stale) {
-        console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
+      if (lost) {
+        console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle${keeperOpts.computerShutdown ? ' (the computer shut down)' : ''}`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
-        this.interruptions.markStoppedByQuit(fixed, false)
+        this.interruptions.markTurnLost(fixed, false, keeperOpts.computerShutdown ? 'shutdown' : 'quit')
         store.sessions.upsertSession(fixed)
         // The turn the last host was in never sent its end and no process holds what it was given (#1604); whose it was says who is told (#1946)
         cutTurns.set(s.id, this.children.processGone(s.id))
         stoppedByQuit.push(fixed)
       }
-      const stopped = stale ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
+      const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
       if (stopped) stoppedBy.set(s.id, stopped)
       if (goesOn) {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
@@ -1157,7 +1170,7 @@ export class SessionManager {
     // The same statement the window gets, through the same rules (#428)
     const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
     this.events.applyStateHint(change, m)
-    this.interruptions.markStoppedByQuit(m, true)
+    this.interruptions.markTurnLost(m, true)
     this.store.sessions.upsertSession(m)
     this.emit(change)
     // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)

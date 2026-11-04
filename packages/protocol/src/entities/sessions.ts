@@ -36,8 +36,11 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  *
  *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
  *                 response, the computer slept), after the tool's own retries
- *   quit          Centralu quit or the computer restarted while the turn ran, and the process went with it: a start
+ *   quit          Centralu quit or restarted while the turn ran, and the process went with it: a start
  *                 found the session `working` with no process left and reset it to `idle`
+ *   shutdown      the computer shut down, restarted or logged out while the turn ran (#1397): the next start found the
+ *                 session in that turn or ended by `adapter_crashed` between the host's last sign of life and the boot,
+ *                 and reset it to `idle`. Not a crash, and continued the same way as `quit`
  *   interrupted   the tool interrupted the turn, and neither the person nor Centralu asked it to (Codex's
  *                 `turn/completed` with `interrupted` that no Stop of ours preceded)
  *   reconnecting  still `working`, but the tool has been reconnecting to its API for longer than the host's bound
@@ -47,7 +50,7 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  * newer host reads as `interrupted`, which still says "this turn did not finish".
  */
 export const InterruptionReason = z
-  .enum(['network', 'quit', 'interrupted', 'reconnecting'])
+  .enum(['network', 'quit', 'shutdown', 'interrupted', 'reconnecting'])
   .catch('interrupted')
 export type InterruptionReason = z.infer<typeof InterruptionReason>
 

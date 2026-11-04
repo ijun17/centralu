@@ -3,7 +3,7 @@ import { readHandedToken } from './lifecycle/handed-token.js'
 import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
-import { hostname } from 'node:os'
+import { hostname, uptime } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
@@ -20,7 +20,7 @@ import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MailPerson } from './mail/person.js'
-import { hostMail, mailSessionsOf } from './mail/host-mail.js'
+import { MAIL_HEARTBEAT_KEY, hostMail, mailSessionsOf } from './mail/host-mail.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -55,7 +55,8 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
+import { bootTimeOf, computerShutdownWindow } from './lifecycle/computer-shutdown.js'
+import { clearStoppedMark, markQuit, stoppedOnPurpose, updateResumeFolder } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
@@ -264,6 +265,8 @@ const ownership = lock
 process.on('exit', ownership.release)
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
+// Read first: a quit the person asked for is not the computer's shutdown, whenever the computer went down after it (#1397)
+const lastStopWasThePersons = dbPath !== ':memory:' && stoppedOnPurpose(dirname(dbPath))
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
 // The turns an update cut when it stopped the host before this one, and where this one lists those its own update stop ends (#1618)
 const updateResume = dbPath === ':memory:' ? undefined : updateResumeFolder(dirname(dbPath))
@@ -336,7 +339,12 @@ const mgr = new SessionManager(
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
-  { ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}), ...(updateResume ? { updateResume } : {}) },
+  {
+    ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}),
+    ...(updateResume ? { updateResume } : {}),
+    // The host's last sign of life against the boot: the computer went down under the last host, or it did not (#1397)
+    computerShutdown: computerShutdownWindow({ lastAliveAt: Number(store.settings.appSetting(MAIL_HEARTBEAT_KEY)) || null, bootAt: bootTimeOf(Date.now(), uptime()), stoppedOnPurpose: lastStopWasThePersons }),
+  },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
 mgr.useProjectsHome(() => projectsHome())
