@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -220,8 +221,8 @@ describe('an address opened for the person through the broker', () => {
  */
 describe.runIf(process.platform === 'win32')('a terminal through the real broker (Windows)', () => {
   it('runs input, output, resize, exit and close end to end', async () => {
-    // Holds the files the test plants. No shell runs in it: a process that has ended still holds its working folder for a while
-    // (seconds under load, measured) before Windows lets go of it, and removing the folder then fails with EBUSY
+    // Holds the files the test plants. No shell runs in it: a process that already reads as exited still holds its working folder
+    // for a moment before Windows lets go of it (milliseconds, about 2 s at worst under load), and removing it then fails with EBUSY (#1952)
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-broker-term-')))
     const shellsIn = process.cwd()
     const broker = PtyBroker.start(brokerPath())
@@ -229,7 +230,8 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     onTestFinished(async (test) => {
       broker.close()
       await cleanUp(pids, test)
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      // Async: the synchronous `rmSync` does not retry, whatever `maxRetries` says
+      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
     })
     const exits: (number | null)[] = []
     const svc = new TerminalService((e) => {
@@ -261,12 +263,15 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     // Closing a tab ends its shell and what it started, as without the broker
     const t2 = svc.create(shellsIn, 100, 30)
     await settle(() => t2.history(), prompt, 60_000 * SLOW)
+    svc.input(t2.id, 'Write-Output ("mark" + "er2-" + $PID)\r')
+    const shell2 = Number((await settle(() => /marker2-(\d+)/.exec(t2.history()), Boolean, 30_000 * SLOW))![1])
+    pids.push(shell2)
     const pidFile = join(dir, 'pids')
     svc.input(t2.id, `& '${process.execPath}' '${plantTreeScript(dir)}' '${pidFile}' 2\r`)
     const tree = await settle(() => treePids(pidFile), (p) => p.length === 3, 30_000 * SLOW)
     pids = [...pids, ...tree]
     svc.close(t2.id)
-    expect(await settle(() => tree.filter(isAlive), (left) => left.length === 0, 15_000 * SLOW)).toEqual([])
+    expect(await settle(() => [shell2, ...tree].filter(isAlive), (left) => left.length === 0, 15_000 * SLOW)).toEqual([])
   }, 180_000 * SLOW)
 })
 
