@@ -237,8 +237,8 @@ export class RemoteAgents {
   private readonly personHeld = new Set<string>()
   /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
   private readonly lastSeq = new Map<string, number>()
-  /** Children whose held note is being sent now (`drain`): one at a time */
-  private readonly draining = new Set<string>()
+  /** Children whose held note is being sent now (`drain`): one at a time; true when the child was freed again meanwhile, so the answer being waited on may be older than that */
+  private readonly draining = new Map<string, boolean>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -1056,8 +1056,10 @@ export class RemoteAgents {
     const reader = this.host.linkedReader
     const head = this.of(sessionId)?.queued?.[0]
     const machineId = this.of(sessionId)?.machineId
-    if (!head || !reader || machineId === undefined || this.draining.has(sessionId) || !reader.machineLinked(machineId)) return
-    this.draining.add(sessionId)
+    if (!head || !reader || machineId === undefined || !reader.machineLinked(machineId)) return
+    // The one under way may be waiting on a read that found the child in a turn this event has just ended: it goes round again
+    if (this.draining.has(sessionId)) return void this.draining.set(sessionId, true)
+    this.draining.set(sessionId, false)
     try {
       const now = await reader.read(sessionId, 1)
       // A stop, a handoff or a deletion during the read: what is first now, and whose child it is now, decide
@@ -1075,7 +1077,9 @@ export class RemoteAgents {
       taken()
       void this.tellQueuedFailed(rec, sent.error)
     } finally {
+      const again = this.draining.get(sessionId)
       this.draining.delete(sessionId)
+      if (again) this.scheduleDrain(sessionId)
     }
   }
 
