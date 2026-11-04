@@ -55,7 +55,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** What reaches the parent's model is a wake naming the source; the report's text is in the parent's conversation */
 const reports = (h: Handle | undefined, child: string) => (h?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))
-const stored = (parent: string) => store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work finished'))
+const stored = (parent: string) => store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work ended its turn'))
 
 describe('the report a child owes its parent, across a host swap (#646)', () => {
   it('is written to the store when it is asked for, and cleared once delivered', async () => {

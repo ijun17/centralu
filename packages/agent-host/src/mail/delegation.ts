@@ -58,6 +58,13 @@ export function personReportRecorder(
   }
 }
 
+/**
+ * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is for the session's own
+ * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
+ * words, and the report must not contradict them
+ */
+export const TURN_ENDED = "[Centralu] The assigned work ended its turn. Whether the work is done, its last response says."
+
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }
 
@@ -92,7 +99,7 @@ export function answerRecorder(
       ...(startedAt !== undefined ? { startedAt } : {}),
       ...(waiting > 0 ? { outcome: 'waiting' as const, waitingOn: waiting } : { outcome: how.ok ? ('finished' as const) : ('failed' as const) }),
       body: how.ok
-        ? `[Centralu] The assigned work finished.\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`
+        ? `${TURN_ENDED}\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`
         : `[Centralu] The assigned work did not finish.\nid: ${childId}\n\nIts tool's error, by kind: ${how.error}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
       ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
     })

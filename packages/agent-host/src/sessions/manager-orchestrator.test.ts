@@ -174,7 +174,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     await rpc('agents.send', { sessionId: orc.id, text: 'anything new?' })
     await eventually(() => (adapter.handleOf(orc.id)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${a.id}`)))
     const sent = adapter.handleOf(orc.id)!.sent
-    expect(sent.filter((t) => t.includes('[Centralu] The assigned work finished.'))).toHaveLength(1)
+    expect(sent.filter((t) => t.includes('[Centralu] The assigned work ended its turn.'))).toHaveLength(1)
     expect(sent.indexOf('anything new?')).toBeLessThan(sent.findIndex((t) => t.includes(`sourceSessionId: ${a.id}`)))
   })
 

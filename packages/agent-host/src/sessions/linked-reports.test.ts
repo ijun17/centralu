@@ -521,16 +521,28 @@ describe('a machine whose link drops or comes back', () => {
     status('m1', 'unreachable')
     await flush()
     expect(delivered).toHaveLength(3)
-    // A machine that cannot be reached cannot be read: the preview points at the pause, which carried its last words
+    // A machine that cannot be reached cannot be read: the report keeps the words the pause was written with, marked as read then
     expect(delivered[2]).toEqual({
       orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site',
-      preview: '(in the paused report before this one)', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify] },
+      preview: 'last words of m1.w1', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify], asRead: true },
     })
     // m10 kept its wait and what the hub knew of its work: its next turn end, with that work still running, is no report
     expect(children.linkedReports.get('m10.w1')?.paused).toEqual([build])
     turn('m10.w1')
     await flush()
     expect(delivered).toHaveLength(3)
+  })
+
+  it('a link that drops after a pause whose words were empty keeps the pointer to that pause, not words it never read', async () => {
+    said = () => ''
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    status('m1', 'unreachable')
+    await flush()
+    expect(delivered[1]).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box', paused: [verify] } })
+    expect(delivered[1]?.work).not.toHaveProperty('asRead')
   })
 
   it('a turn in progress keeps its wait across a drop, and reports when it ends after the link is back', async () => {
@@ -605,7 +617,7 @@ describe('a machine removed from Centralu', () => {
     reports.observe({ type: 'machine_resync', machineId: 'm1' })
     await flush()
     expect(delivered.slice(1)).toEqual([
-      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: '(in the paused report before this one)', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify] } },
+      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify], asRead: true } },
       // Not an empty last response (#1186): nothing could be read, and it says why
       { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '(not read: its machine could not be reached)', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
     ])

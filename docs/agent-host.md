@@ -563,7 +563,8 @@ below retained for `safe` and `normal`:
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
-   ended (finished, failed, paused on its own background work, a usage limit, cut short), the session's id, the
+   ended (the turn ended, failed, paused on its own background work, a usage limit, cut short; a completed turn is
+   never called the work finished, since whether it is done is the session's own word, #1902), the session's id, the
    kind of its tool's error (`errorKind`: overloaded, usage limit, network, refused, other), how to go on, and
    `read_session(sessionId, around=<its last response's seq>)`, which shows the last response and the error, an error
    row being one `role: "error"` line; the last response itself, the error's words, the session's and project's names
@@ -628,7 +629,8 @@ below retained for `safe` and `normal`:
    sessions here; a new `send_to_session` to that session replaces the report, as before. While that send is out, the
    session's events go to the new wait; a send that fails puts the paused report back and starts its settle wait again.
    The machine's link dropping while the report is paused sends it at once, saying the link dropped before the work
-   ended and to read the session once it is back (the hub would not see the end), or as settled when the work had
+   ended and to read the session once it is back (the hub would not see the end; the report carries the last response
+   the hub read there, marked as read before the machine went out of reach, #1186), or as settled when the work had
    already ended and only the settle wait was running. A dropped link forgets that machine's task lists until it is
    back. A turn in progress keeps its wait across a drop, as before. The same report is kept for an `ask_project` task there
    whose turn ended on its own background work (`oweAsker`, §1.2.4, #1457): the asking session is its owner, and the call

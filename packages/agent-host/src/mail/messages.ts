@@ -1089,7 +1089,8 @@ export class MessageService {
       ...(answered?.sender === recipient ? { answers: answered.id } : {}),
       ...(typeof m.facts.clarifies === 'string' ? { clarifies: m.facts.clarifies } : {}),
       ...(typeof about === 'string' && parseAddress(about) ? { about } : {}),
-      ...(m.facts.outcome ? { outcome: m.facts.outcome } : {}),
+      // The stored word `finished` is the host's knowledge that a turn ended, not that the work is done (#1902): the model reads it as that
+      ...(m.facts.outcome ? { outcome: m.facts.outcome === 'finished' ? 'turn_ended' : m.facts.outcome } : {}),
       ...(m.facts.error ? { error: m.facts.error } : {}),
       ...(m.facts.reason ? { reason: m.facts.reason } : {}),
       ...(m.facts.paused !== undefined ? { paused: m.facts.paused } : {}),

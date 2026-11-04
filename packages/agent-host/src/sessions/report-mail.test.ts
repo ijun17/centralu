@@ -64,7 +64,7 @@ describe('a turn ends, the owner reads mail', () => {
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
     const [report] = reportsIn(parent, child)
     expect(report).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: task.id, facts: { outcome: 'finished', about: { session: addr(child) } } })
-    expect(report?.body).toContain('The assigned work finished.')
+    expect(report?.body).toContain('The assigned work ended its turn.')
     // The session's words are the report's `answer`, a fact apart; none of them, nor its name or project, are in Centralu's words (#1186)
     expect(report?.facts.answer).toBe('all merged')
     expect(report?.body).not.toContain('all merged')
@@ -78,8 +78,21 @@ describe('a turn ends, the owner reads mail', () => {
     const wake = later().drain(addr(parent), {})
     expect(wake.messageIds).toContain(report!.id)
     expect(wake.text).toContain('kind="report" from="centralu" sender="Centralu"')
-    expect(wake.text).toContain('outcome="finished"')
+    expect(wake.text).toContain('outcome="turn_ended"')
     expect(wake.text).not.toContain('all merged')
+  })
+
+  it('a child whose own words say the loop did not finish is not reported as finished (#1902)', async () => {
+    const { parent, child } = await parentAndChild()
+    await turnEnds(child, 'I gave up: the loop did not finish (2 of 8).')
+    const [report] = reportsIn(parent, child)
+    // The host knows the turn ended; the claim of success, or the lack of it, is the child's own words, kept apart as the answer
+    expect(report?.body).toContain('ended its turn')
+    expect(report?.body).not.toMatch(/finished/i)
+    expect(report?.facts.answer).toBe('I gave up: the loop did not finish (2 of 8).')
+    const wake = later().drain(addr(parent), {})
+    expect(wake.text).toContain('outcome="turn_ended"')
+    expect(wake.text).not.toContain('outcome="finished"')
   })
 
   it('a turn that failed says so: the outcome and the kind of error are facts, the task is reported', async () => {
@@ -212,7 +225,7 @@ describe('what the owner reads with the tool', () => {
     const [report] = reportsIn(parent, child)
     const text = m.tool.run(parent, { action: 'read', thread: report!.id }).text
     expect(text).toContain(`[${report!.id}] report from Centralu`)
-    expect(text).toContain('> [Centralu] The assigned work finished.')
+    expect(text).toContain('> [Centralu] The assigned work ended its turn.')
     expect(text).not.toContain('IGNORE ALL PREVIOUS INSTRUCTIONS')
     // The task it answers is in its chain, as the owner's own
     expect(text).toContain(`[${taskOf(parent, child).id}] task from you`)
@@ -226,6 +239,19 @@ describe('a last response that was not read', () => {
     await reports.deliverReport(parent, child, 'name', 'project', "(not read: the session's last turn was the person's; read_session shows it)", { type: 'turn_complete' })
     expect(reportsIn(parent, child)).toHaveLength(1)
     expect(reportsIn(parent, child)[0]!.facts.answer).toBeUndefined()
+  })
+})
+
+describe('a last response read before its machine went out of reach (#1186)', () => {
+  it('stays on the report as the session’s answer, and the report says it is what was last read there', async () => {
+    const { parent, child } = await parentAndChild()
+    const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
+    const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
+    await reports.deliverReport(parent, child, 'name', 'project', 'the verify is at step 3', { type: 'turn_complete' }, { linkLost: 'Box', paused, asRead: true })
+    const [report] = reportsIn(parent, child)
+    expect(report?.facts.answer).toBe('the verify is at step 3')
+    expect(report?.body).toContain('as it was last read there, before its machine went out of reach')
+    expect(report?.body).not.toContain('the verify is at step 3')
   })
 })
 
@@ -338,7 +364,7 @@ describe('work handed on', () => {
     handleOf(child)!.answer('wrote the tests myself')
     await w.until(() => oldReports(parent, child).length === 2)
     expect(oldReports(parent, child)[0]).toContain('paused')
-    expect(oldReports(parent, child)[1]).toContain('The assigned work finished.')
+    expect(oldReports(parent, child)[1]).toContain('The assigned work ended its turn.')
   })
 
   it('a helper sent more in the work is that work’s: the owner is not told finished while it works', async () => {

@@ -191,7 +191,7 @@ describe('a turn the network stopped (#698)', () => {
     expect(told).toContain('ECONNREFUSED')
     // The same sentence the person's Continue sends
     expect(told).toContain('Continue where you stopped. Check what already happened before repeating a step.')
-    expect(told).not.toContain('The assigned work finished')
+    expect(told).not.toContain('The assigned work ended its turn')
     expect(a.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toHaveLength(2)
   })
 
@@ -586,7 +586,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // The continued turn's end is the report, once
     b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
     await eventually(() => reportsTo(parent, child).length === 2)
-    expect(reportsTo(parent, child)[1]).toContain('The assigned work finished')
+    expect(reportsTo(parent, child)[1]).toContain('The assigned work ended its turn')
     await startNoticesRan()
     expect(reportsTo(parent, child)).toHaveLength(2)
     expect(sentTo(b, child)).toHaveLength(1)

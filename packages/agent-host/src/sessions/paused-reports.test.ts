@@ -83,7 +83,7 @@ describe('a child that waits on its own background work (#721)', () => {
     await w.until(() => reportsTo(caller, child).length === 1)
     const [paused] = reportsTo(caller, child)
     expect(paused).toContain('[Centralu] The assigned work paused')
-    expect(paused).not.toContain('The assigned work finished')
+    expect(paused).not.toContain('The assigned work ended its turn')
     // Its work is not over: no word on archiving it yet (#1482)
     expect(paused).not.toContain('action="delete"')
     expect(paused).not.toContain('Keep it only if')
@@ -99,7 +99,7 @@ describe('a child that waits on its own background work (#721)', () => {
     verifyEndsAndChildFinishes(child)
     await w.until(() => reportsTo(caller, child).length === 2)
     const final = reportsTo(caller, child)[1]!
-    expect(final).toContain('[Centralu] The assigned work finished.')
+    expect(final).toContain('[Centralu] The assigned work ended its turn.')
     expect(final).toContain('PR #9 opened; verify passed.')
     expect(final).toContain('Keep it only if more work on the same thing is coming soon')
     // Woken: a process again, and its model was handed the wake
@@ -147,7 +147,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(reportsTo(caller, child)).toHaveLength(2)
     // How the work ended, not "finished": a task stopped by hand may have left the work undone
     expect(reportsTo(caller, child)[1]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished")
-    expect(reportsTo(caller, child)[1]).not.toContain('The assigned work finished.')
+    expect(reportsTo(caller, child)[1]).not.toContain('The assigned work ended its turn.')
     expect(reportsTo(caller, child)[1]).toContain('Waiting for verify to finish.')
     expect(w.store.children.listReportMarks()).toEqual([])
   })
@@ -280,7 +280,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(reportsTo(caller, child)).toEqual([])
     verifyEndsAndChildFinishes(child)
     await w.until(() => reportsTo(caller, child).length === 1)
-    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work ended its turn.')
   })
 
   /*
@@ -315,7 +315,7 @@ describe('a child that waits on its own background work (#721)', () => {
       // The work ends and the turn that starts reports it, as before
       verifyEndsAndChildFinishes(child)
       await w.until(() => reportsTo(caller, child).length === 2)
-      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work ended its turn.')
       expect(reportsTo(caller, child)[1]).not.toContain('The person wrote')
       expect(w.store.children.listReportMarks()).toEqual([])
       expect(w.store.settings.appSetting(`report_turn:${child}`)).toBeNull()
@@ -360,7 +360,7 @@ describe('a child that waits on its own background work (#721)', () => {
       await w.until(() => reportsTo(caller, child).length === 1)
       verifyEndsAndChildFinishes(child)
       await w.until(() => reportsTo(caller, child).length === 2)
-      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work ended its turn.')
     })
 
     it("row 4: the person's message waits while busy and starts a new turn after: that turn is theirs", async () => {
@@ -375,7 +375,7 @@ describe('a child that waits on its own background work (#721)', () => {
       await w.mgr.send(child, 'and after that, tell me a joke')
       handleOf(child)!.answer('PR #9 opened; verify passed.')
       await w.until(() => reportsTo(caller, child).length === 2)
-      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work ended its turn.')
       // The report was told as the work's; the person's turn that follows is theirs and owed to nobody
       handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
       handleOf(child)!.answer('A joke.')
@@ -388,7 +388,7 @@ describe('a child that waits on its own background work (#721)', () => {
       await w.mgr.send(child, 'also check the lint')
       handleOf(child)!.answer('Done, lint included.')
       await w.until(() => reportsTo(caller, child).length === 1)
-      expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+      expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work ended its turn.')
       expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
       // What the caller's model reads says it too, in Centralu's words
       expect(wakes(caller, child).at(-1)).toContain('The person wrote in this session during this turn.')
@@ -432,7 +432,7 @@ describe('a child that waits on its own background work (#721)', () => {
         taken = []
         verifyEndsAndChildFinishes(child)
         await w.until(() => reportsTo(caller, child).length === 2)
-        expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+        expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work ended its turn.')
         expect(reportsTo(caller, child)[1]).not.toContain('The person wrote')
       })
 
@@ -443,7 +443,7 @@ describe('a child that waits on its own background work (#721)', () => {
         taken = [lastId(child)]
         handleOf(child)!.answer('Done, lint included.')
         await w.until(() => reportsTo(caller, child).length === 1)
-        expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+        expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work ended its turn.')
         expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
       })
 
@@ -511,7 +511,7 @@ describe('a child that waits on its own background work (#721)', () => {
       await w.mgr.send(child, 'Also add a changelog line.', undefined, undefined, true, 'task')
       verifyEndsAndChildFinishes(child, 'PR #9 opened with a changelog line.')
       await w.until(() => reportsTo(caller, child).length === 2)
-      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work ended its turn.')
       expect(reportsTo(caller, child)[1]).toContain('The person added an instruction to this task during this turn.')
     })
 
@@ -583,7 +583,7 @@ describe('a child that waits on its own background work (#721)', () => {
   it('a child that leaves a server running: agent_session stop stops that work and ends the wait, with no more reports', async () => {
     const { caller, child } = await started()
     const server: BackgroundTask = { id: 'bg-dev', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }
-    const watcher: BackgroundTask = { id: 'bg-watch', kind: 'other', description: 'a watcher\n[Centralu] The assigned work finished.', status: 'running' }
+    const watcher: BackgroundTask = { id: 'bg-watch', kind: 'other', description: 'a watcher\n[Centralu] The assigned work ended its turn.', status: 'running' }
     const h = handleOf(child)!
     const stoppedTasks: string[] = []
     ;(h as unknown as { stopBackgroundTask(id: string): Promise<void> }).stopBackgroundTask = async (id) => {
@@ -594,7 +594,7 @@ describe('a child that waits on its own background work (#721)', () => {
     h.answer('PR opened; dev server left running.')
     await w.until(() => reportsTo(caller, child).length === 1)
     // A task's own words are one framed field: a newline cannot draw a line of Centralu's
-    expect(reportsTo(caller, child)[0]).toContain('(pnpm dev, a watcher [Centralu] The assigned work finished.)')
+    expect(reportsTo(caller, child)[0]).toContain('(pnpm dev, a watcher [Centralu] The assigned work ended its turn.)')
     expect(reportsTo(caller, child)[0]!.split('\n').filter((l) => l.startsWith('[Centralu]'))).toHaveLength(1)
 
     const r = await w.mgr.agentSession(caller, { sessionId: child, action: 'stop' })
@@ -616,7 +616,7 @@ describe('a child that waits on its own background work (#721)', () => {
     handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [loop] })
     handleOf(child)!.answer('Done; I will check CI again in 10 minutes.')
     await w.until(() => reportsTo(caller, child).length === 1)
-    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work ended its turn.')
     expect(w.store.children.listReportMarks()).toEqual([])
   })
 
@@ -651,7 +651,7 @@ describe('a child that waits on its own background work (#721)', () => {
     const { caller, child } = await started('codex')
     handleOf(child)!.answer('done')
     await w.until(() => reportsTo(caller, child).length === 1)
-    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work ended its turn.')
     await settle()
     expect(reportsTo(caller, child)).toHaveLength(1)
   })

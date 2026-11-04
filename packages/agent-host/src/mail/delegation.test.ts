@@ -30,7 +30,7 @@ function turnWorld() {
   const end = (sessionId: string) => t.observe({ type: 'turn_complete', sessionId } as never, true)
   return { ...w, mail, turns: t, end }
 }
-const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review', delivery: 'wake', ...over })
+const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'finished', body: '[Centralu] The assigned work ended its turn.', then: 'review', delivery: 'wake', ...over })
 
 describe('a delegation written down (§9.1)', () => {
   it('is a task from the caller to the child, delivered and read (the old path gave it the words), and the turn it started is that task’s', () => {
@@ -234,6 +234,9 @@ describe('a call that returned the answer (§9.6)', () => {
     answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'all done' })
     const [r] = w.store.mailbox.reportsOn(task.id)
     expect(r!.facts).toMatchObject({ outcome: 'finished', answer: 'all done' })
+    // All the host knows is that the turn ended: whether the work is done is the child's own word (#1902)
+    expect(r!.body).toContain('ended its turn')
+    expect(r!.body).not.toMatch(/finished/i)
     expect(w.rowOf(r!.id, A)).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
     expect(w.rowOf(task.id, W).settled).toBe('reported')
   })

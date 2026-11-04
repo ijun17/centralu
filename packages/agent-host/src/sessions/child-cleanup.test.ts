@@ -45,7 +45,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     handleOf(one)!.answer('first done')
     await w.until(() => reportOf(s, one).length === 1)
     const first = reportOf(s, one)[0]!
-    expect(first).toContain('[Centralu] The assigned work finished.')
+    expect(first).toContain('[Centralu] The assigned work ended its turn.')
     expect(first).toContain(`agent_session(sessionId="${one}", action="delete")`)
     // And when to keep it instead (#1482)
     expect(first).toContain('Keep it only if more work on the same thing is coming soon')
@@ -116,7 +116,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     handleOf(c)!.answer('one more thing done')
     await w.until(() => reportOf(directing.id, c).length === 1)
     const told = reportOf(directing.id, c)[0]!
-    expect(told).toContain('[Centralu] The assigned work finished.')
+    expect(told).toContain('[Centralu] The assigned work ended its turn.')
     expect(told).not.toContain('action="delete"')
   })
 

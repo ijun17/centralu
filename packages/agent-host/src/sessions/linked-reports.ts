@@ -5,14 +5,15 @@ import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { NO_WORDS } from './ask-project.js'
+import { clipPreview } from './turn-answer.js'
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
   | { paused: readonly BackgroundTask[]; stoppable: boolean }
   | { settled: readonly BackgroundTask[] }
-  | { linkLost: string; paused: readonly BackgroundTask[] }
+  | { linkLost: string; paused: readonly BackgroundTask[]; asRead?: true }
   /** The machine was removed from Centralu: `paused`, the work its turn ended with; absent, a turn still running */
-  | { machineRemoved: string; paused?: readonly BackgroundTask[] }
+  | { machineRemoved: string; paused?: readonly BackgroundTask[]; asRead?: true }
   /** Its turn ended while the host was handed over (#1186): whether that turn was the work given is not known */
   | { swapped: true }
   /** The person wrote to the session on its machine while the report was paused (#1342): its later turns are theirs */
@@ -59,6 +60,9 @@ export type LinkedReportsHost = {
    */
   keepsOverLoss?(sessionId: string): boolean
 }
+
+/** The most sessions whose last read response is kept for a report after their machine went out of reach */
+const LAST_READ_MAX = 50
 
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
 const ADD_NEXT_MS = 15_000
@@ -135,6 +139,11 @@ export class LinkedReports {
   private readonly machineNames = new Map<string, string>()
   /** What a waited-on session is called, kept while it can be read: a removed machine's mirror is gone */
   private readonly about = new Map<string, { name: string; project: string }>()
+  /**
+   * The last response of a waited-on session as it was last read there (#1186): a report written after its machine went out of reach carries it
+   * (`asRead`), where it used to point at an earlier report or say nothing. Bounded; the oldest goes first
+   */
+  private readonly lastRead = new Map<string, { preview: string; seq: number | undefined }>()
 
   constructor(private readonly host: LinkedReportsHost) {}
 
@@ -410,6 +419,13 @@ export class LinkedReports {
     this.changedAt.delete(sessionId)
   }
 
+  private keepRead(sessionId: string, read: { preview: string; seq: number | undefined }): void {
+    this.lastRead.delete(sessionId)
+    this.lastRead.set(sessionId, read)
+    const oldest = this.lastRead.size > LAST_READ_MAX ? this.lastRead.keys().next() : undefined
+    if (oldest && !oldest.done) this.lastRead.delete(oldest.value)
+  }
+
   private remember(sessionId: string): void {
     const about = this.host.linkedReader?.describe(sessionId)
     if (about) this.about.set(sessionId, about)
@@ -501,6 +517,9 @@ export class LinkedReports {
     const about = reader.describe(sessionId) ?? known ?? this.about.get(sessionId) ?? { name: sessionId, project: '(unknown)' }
     // A machine that cannot be reached cannot be read: its last answer went with the paused report, which says so
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
+    // What it said when it was last read stands in for the words that cannot be read now, marked as read then
+    const kept = unreachable ? this.lastRead.get(sessionId) : undefined
+    if (unreachable) this.lastRead.delete(sessionId)
     // Words of the turn go only through the gate (#1038 review); a report that the link or the machine went says no words
     if (!unreachable && this.gate(sessionId) !== 'deliver') return
     /*
@@ -514,11 +533,12 @@ export class LinkedReports {
     const preview =
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
       : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
-      : !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
+      : !words ? (kept ? clipPreview(kept.preview, 600) : work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
       // A turn that ended with nothing to say says so, rather than a preview that reads as an unread one (#1604)
       : words.ok ? (words.text === '' ? NO_WORDS : words.text)
       : `(its last response could not be read there: ${words.error})`
-    const seq = words?.ok && words.seq !== null ? words.seq : undefined
-    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work, seq, part)
+    if (words?.ok && words.text !== '') this.keepRead(sessionId, { preview: words.text, seq: words.seq ?? undefined })
+    const seq = words?.ok ? (words.seq ?? undefined) : kept?.seq
+    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, kept && unreachable ? { ...work, asRead: true } : work, seq, part)
   }
 }
