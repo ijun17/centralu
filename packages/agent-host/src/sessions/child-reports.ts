@@ -626,7 +626,7 @@ export class ChildReports {
     const others = ownAgents(this.host, parentId).filter((s) => s.id !== childId && agentState(this.host, s) === 'finished').length
     return (
       `\n${cleanUpLine(childId, this.agentCall(parentId, { sessionId: childId, action: 'delete' }))}` +
-      (others ? `\n${others} other session${others === 1 ? '' : 's'} you started ${others === 1 ? 'has' : 'have'} ended ${others === 1 ? 'its' : 'their'} turn and remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
+      (others ? `\n${others} other session${others === 1 ? '' : 's'} you started ${others === 1 ? 'has' : 'have'} ended ${others === 1 ? 'its turn' : 'their turns'} and remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
     )
   }
 

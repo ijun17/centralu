@@ -415,7 +415,7 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
 Every answer that hands a child's result to the session that started it now ends with one line naming the delete:
 `done` and `at_rest` (`cleanUpLine`, `sessions/tool-answers.ts`), and the report of a finished turn
-(`ChildReports.cleanUpWords`), which also says how many of its other children are finished and that `list` shows them.
+(`ChildReports.cleanUpWords`), which also says how many of its other children have ended their turns and remain, and that `list` shows them.
 The line says to archive the child once its answer is used and to keep it only if more work on the same thing is coming soon (#1482).
 The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
 and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over

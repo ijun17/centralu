@@ -59,6 +59,16 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(second).toContain('1 other session you started has ended its turn and remains: agent_session(action="list") shows them.')
   })
 
+  it("names several other children at rest in the plural", async () => {
+    const s = await session()
+    const [a, b, c] = [await startRunning(s, 'job a'), await startRunning(s, 'job b'), await startRunning(s, 'job c')]
+    for (const [child, text] of [[a, 'a done'], [b, 'b done'], [c, 'c done']] as const) {
+      handleOf(child)?.answer(text)
+      await w.until(() => reportOf(s, child).length === 1)
+    }
+    expect(reportOf(s, c)[0]).toContain('2 other sessions you started have ended their turns and remain: agent_session(action="list") shows them.')
+  })
+
   it("an orchestrator's report names the delete and the list as it calls them: through centralu_run (#850)", async () => {
     const orch = (await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })).id
     const one = await startRunning(orch, 'first job')
