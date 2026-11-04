@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
@@ -85,6 +85,7 @@ import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 import { pwsh7ModulePath } from '../packages/agent-host/src/links/windows-remote.test-helpers.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -104,12 +105,12 @@ const tempDir = () => {
   dirs.push(d)
   return d
 }
-afterEach(() => {
+afterEach(async () => {
   // Only processes this file started; anything left after a failed test is ended here
   for (const c of started.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
   // Windows can hold a node.exe the test copied and ran for a moment after the process ended (the image lock, or a
   // scanner on a new executable): retry EBUSY rather than fail the cleanup
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 describe('serve arguments', () => {
@@ -2052,6 +2053,9 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         expect(again.line).toMatchObject({ hostRunning: true })
         expect(again.line).not.toHaveProperty('stopped')
         expect(existsSync(join(d, SERVE_STOPPED_FILE))).toBe(false)
+        // The window's "Quit completely" (#1466): the mark says the person quit Centralu there, which the hub words that way
+        expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'quit' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
+        expect(await connection(d)).toMatchObject({ hostRunning: false, stopped: { by: 'quit', at: expect.any(Number) } })
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true })
       } finally {
         cleanup(d)
@@ -2203,7 +2207,7 @@ describe('asking the host on the port without handing the token to anyone else (
         ensureServeState(d)
         recordServePort(d, s.port)
         const stopped = (await cli(d, ['--stop'])).line.stop
-        expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+        expect(stopped).toMatchObject({ ok: true, wasRunning: false, heldByOther: true })
         expect(stopped.message).toContain(`belongs to another Centralu host (pid ${holder.pid})`)
         expect(holder.alive()).toBe(true)
         expect(s.got.map((g) => JSON.parse(g).kind)).not.toContain('hello')

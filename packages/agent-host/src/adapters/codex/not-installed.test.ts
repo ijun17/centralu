@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -12,9 +12,8 @@ import { CodexAdapter } from './index.js'
  */
 describe.skipIf(process.platform !== 'win32')('codex that is not installed', () => {
   let root = ''
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
   })
 
   it('fails to start, and the codex.exe in the project never runs', async () => {

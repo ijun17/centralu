@@ -62,8 +62,9 @@ async function main(): Promise<number> {
       failed++
       console.error(`[record] ${tool} ${scenario.name}: ${(e as Error).message}`)
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
-      rmSync(raw, { recursive: true, force: true })
+      // A killed tool may still hold its folder for a moment (Windows)
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+      rmSync(raw, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
     }
   }
   return failed ? 1 : 0
@@ -73,9 +74,14 @@ function adapterFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
   return new RecordingAdapter(tool === 'cursor-agent' ? cursorProfile() : openCodeProfile(), spawn)
 }
 
-/** OpenCode asks for every command under Safe only (its preset config, `opencode/config.ts`); Cursor asks under Normal */
+/**
+ * OpenCode asks for every command under Safe only (its preset config, `opencode/config.ts`), and before every write under
+ * Normal, which a scenario that answers no card (`basic`) would wait on for ever; Cursor asks under Normal
+ */
 function runAs(tool: string, scenario: Scenario): Scenario {
-  return tool === 'opencode' && scenario.asksForCommands ? { ...scenario, preset: 'safe' } : scenario
+  if (tool !== 'opencode') return scenario
+  if (scenario.asksForCommands) return { ...scenario, preset: 'safe' }
+  return scenario.name === 'basic' ? { ...scenario, preset: 'auto' } : scenario
 }
 
 process.exit(await main())

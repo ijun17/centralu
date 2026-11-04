@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentAdapter } from '../adapters/contract.js'
@@ -22,9 +22,8 @@ function git(cwd: string, ...args: string[]): string {
 describe('git.cancel (#1007)', () => {
   let root: string
   let store: Store
-  afterEach(() => {
+  afterEach(async () => {
     store.close()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   it('ends the commit running for the project, which answers cancelled', { timeout: 30_000 * SLOW }, async () => {

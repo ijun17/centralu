@@ -160,7 +160,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
-  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
 /** The start's quit notices are taken on its first timer tick; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
@@ -191,7 +191,7 @@ describe('a turn the network stopped (#698)', () => {
     expect(told).toContain('ECONNREFUSED')
     // The same sentence the person's Continue sends
     expect(told).toContain('Continue where you stopped. Check what already happened before repeating a step.')
-    expect(told).not.toContain('The assigned work finished')
+    expect(told).not.toContain('The session ended its turn')
     expect(a.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toHaveLength(2)
   })
 
@@ -586,7 +586,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // The continued turn's end is the report, once
     b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
     await eventually(() => reportsTo(parent, child).length === 2)
-    expect(reportsTo(parent, child)[1]).toContain('The assigned work finished')
+    expect(reportsTo(parent, child)[1]).toContain('The session ended its turn')
     await startNoticesRan()
     expect(reportsTo(parent, child)).toHaveLength(2)
     expect(sentTo(b, child)).toHaveLength(1)

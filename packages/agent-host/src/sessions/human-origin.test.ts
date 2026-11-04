@@ -85,7 +85,7 @@ describe('nothing else is stamped', () => {
     const app = { appId: 'project-board', projectId: null, name: 'Project board' }
     await mgr.appNotice(s.id, 'merged #77', app)
     await mgr.sendFromApp(s.id, 'from the view', app)
-    await (mgr as unknown as { reports: ChildReports }).reports.tellSession(s.id, '[Centralu] The assigned work finished.', { sessionId: 'child', name: 'Child' }, true)
+    await (mgr as unknown as { reports: ChildReports }).reports.tellSession(s.id, '[Centralu] The session ended its turn.', { sessionId: 'child', name: 'Child' }, true)
     expect(adapter.last!.sent).toHaveLength(3)
     expect(adapter.last!.origins).toEqual([undefined, undefined, undefined])
     expect(events.some((e) => e.type === 'user_message')).toBe(true)

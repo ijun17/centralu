@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync, existsSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -44,16 +44,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLI = join(ROOT, 'packaging/npm/centralu/bin/centralu.mjs')
 const SOURCE_HOST = join(ROOT, 'packages/agent-host/src/main.ts')
 
-const dirs: string[] = []
 const closers: (() => Promise<unknown>)[] = []
-const tempDir = () => {
-  const d = realpathSync(mkdtempSync(join(tmpdir(), 'cc-keys-')))
-  dirs.push(d)
-  return d
-}
+const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), 'cc-keys-')))
 afterEach(async () => {
   for (const c of closers.splice(0)) await c()
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 /** A hub's public key, as slice 4's key file will hold one */

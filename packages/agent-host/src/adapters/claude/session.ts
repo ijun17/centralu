@@ -215,7 +215,7 @@ export class ClaudeSession implements SessionHandle {
      * found on PATH, as before.
      */
     const exe = this.launch.executable()
-    const run = exe ? this.launch.links.prepare(exe) : null
+    const run = exe ? await this.launch.links.ensure(exe) : null
 
     this.servers.load()
     const servers = this.servers.mcpServers()

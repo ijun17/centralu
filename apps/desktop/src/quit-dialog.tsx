@@ -4,7 +4,7 @@ import { useOpenLayer } from '@cc/ui'
 import { Button } from '../../../packages/ui/src/components/Button.jsx'
 import { Switch } from '../../../packages/ui/src/components/Switch.jsx'
 // By path, like build-bar.tsx: the browser harness that drives this dialog in e2e has no Tauri
-import { COMPLETELY_STOPS } from '../../../packages/platform/src/tauri/switch-plan.js'
+import { COMPLETELY_STOPS, SERVE_COMPLETELY_STOPS } from '../../../packages/platform/src/tauri/switch-plan.js'
 
 export type Stray = { pid: number; command: string; cwd: string }
 
@@ -16,6 +16,10 @@ export type Stray = { pid: number; command: string; cwd: string }
  *   they hold, so there is one way out and it says so: **Quit completely** (Enter).
  * - **On**: **Quit** (Enter) closes the window and leaves everything running in the background;
  *   **Quit completely** stops it all anyway.
+ *
+ * - **On the computer's `centralu serve` host** (Windows, #1466; `serve`): the host outlives the window whatever the
+ *   keeper would say, so it reads as **On**: **Quit** keeps everything running, and **Quit completely** stops that host
+ *   (`serve --stop`), saying that it also ends the link a hub has to this computer.
  *
  * - **Off, with turns running**: **Quit and keep running** is offered beside it (#1512). It turns background mode on and
  *   then quits, so the turns go on; the dialog says it turns the setting on, since nothing else asks. Without a turn
@@ -32,6 +36,7 @@ export type Stray = { pid: number; command: string; cwd: string }
  */
 export function QuitDialog({
   background,
+  serve = false,
   strays,
   straysError = null,
   alsoStop,
@@ -46,6 +51,8 @@ export function QuitDialog({
 }: {
   /** Background mode: true on, false off, null unknown or not offered (no keeper) */
   background: boolean | null
+  /** The window runs on the computer's `centralu serve` host, which keeps running when the window closes (#1466) */
+  serve?: boolean
   strays: Stray[]
   /**
    * Why the leftover processes could not be listed (#841 item 7, #990 review): the host refuses while the keeper cannot
@@ -67,7 +74,7 @@ export function QuitDialog({
   onQuit: (completely: boolean) => void
 }) {
   useOpenLayer()
-  const keepsRunning = background === true
+  const keepsRunning = background === true || serve
   const offersKeep = background === false && running > 0 && onKeepRunning !== undefined
   /*
    * Drawn in the app's current dialog style (owner, 2026-10-20): a title and one muted line, what is left running as a
@@ -88,7 +95,7 @@ export function QuitDialog({
         {keepsRunning ? (
           <p className="mt-1.5 text-sm leading-body text-ink-muted" data-testid="confirm-quit-background">
             Quit closes the window and agents keep running in the background. Open Centralu again to come back to
-            them, waiting approvals included.
+            them, waiting approvals included.{serve && ` ${SERVE_COMPLETELY_STOPS}`}
           </p>
         ) : (
           <p className="mt-1.5 text-sm leading-body text-ink-muted" data-testid="confirm-quit-stops">
@@ -138,7 +145,7 @@ export function QuitDialog({
             </Button>
           )}
           {keepsRunning && (
-            <Button variant="quiet" onClick={() => onQuit(true)} disabled={busy} title={COMPLETELY_STOPS} data-testid="confirm-quit-stop">
+            <Button variant="quiet" onClick={() => onQuit(true)} disabled={busy} title={serve ? SERVE_COMPLETELY_STOPS : COMPLETELY_STOPS} data-testid="confirm-quit-stop">
               Quit completely
             </Button>
           )}

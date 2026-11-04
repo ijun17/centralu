@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -69,10 +68,7 @@ function follow(p: Pty) {
 describe('a pty through the broker', () => {
   let dir = ''
   let broker: PtyBroker | undefined
-  afterEach(() => {
-    broker?.close()
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  })
+  afterEach(() => broker?.close())
 
   function fake(): PtyModule {
     dir = mkdtempSync(join(tmpdir(), 'cc-broker-'))
@@ -230,8 +226,6 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     onTestFinished(async (test) => {
       broker.close()
       await cleanUp(pids, test)
-      // Async: the synchronous `rmSync` does not retry, whatever `maxRetries` says
-      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
     })
     const exits: (number | null)[] = []
     const svc = new TerminalService((e) => {

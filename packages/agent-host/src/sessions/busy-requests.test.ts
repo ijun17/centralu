@@ -70,7 +70,7 @@ describe('requests to a busy session (#677)', () => {
     return release
   }
   const reportsTo = (b: string, a: string) =>
-    w.store.messages.loadMessages(b, 50).filter((m) => m.role === 'user' && JSON.stringify(m.payload).includes('The assigned work finished') && (m.payload as { from?: { sessionId: string } }).from?.sessionId === a)
+    w.store.messages.loadMessages(b, 50).filter((m) => m.role === 'user' && JSON.stringify(m.payload).includes('The session ended its turn') && (m.payload as { from?: { sessionId: string } }).from?.sessionId === a)
 
   it('returns the choices and sends nothing when the requester names none', async () => {
     const { a, b } = await busyChild()
@@ -487,7 +487,7 @@ describe('requests to a busy session (#677)', () => {
       handleOf(forkId).event({ type: 'question_resolved', sessionId: forkId, requestId: 'q-f' })
       // The orchestrator is told when the fork's turn ends, as for any work it does not wait on
       handleOf(forkId).answer('logs read')
-      await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The assigned work finished')))
+      await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The session ended its turn')))
       void b
     })
 
