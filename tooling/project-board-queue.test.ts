@@ -3154,6 +3154,14 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
   // #1961: the answer to POST /merges was lost after GitHub merged the member. Counted as refused, it stayed in the branch,
   // and the batch went on with a tree the member was in and CI's verdict covered, landing the rest from a tree no run saw
   describe('when the answer to a write on the batch branch is lost (#1961)', () => {
+    // A second run in one test: a new fake GitHub and a new queue file
+    const fresh = async (state: Gh) => {
+      await rt?.dispose({ awaitTree: true })
+      rt = null
+      await removeFakeDir(join(root, 'data'))
+      mkdirSync(join(root, 'data'))
+      runtime(state)
+    }
     const landsBoth = async () => {
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await call('queue_merge', { pr: 78, owner: 'tester' })
@@ -3197,10 +3205,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
       expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
       expect(gh().headReads).toBe(1)
-    })
-
-    it('does not read the branch back after a refusal GitHub answered', async () => {
-      runtime(batchState({ mergeErrors: [B] }))
+      // A refusal GitHub answered (a 404) is not read back: it said no
+      await fresh(batchState({ mergeErrors: [B] }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await call('queue_merge', { pr: 78, owner: 'tester' })
       await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
@@ -3213,11 +3219,9 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       await landsBoth()
       expect(writes().map(short2).slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
       expect(queueOnDisk().batchOff ?? null).toBeNull()
-    })
-
-    it('stops making batches for an hour when the answer to starting CI was lost and no run is there', async () => {
+      // No run on the branch: it did not start, and it is a refusal as before
       const base = batchState()
-      runtime(batchState({ dispatchLost: 'EOF', on: { ...base.on, 'dispatch:queue/batch-1': {} } }))
+      await fresh(batchState({ dispatchLost: 'EOF', on: { ...base.on, 'dispatch:queue/batch-1': {} } }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await call('queue_merge', { pr: 78, owner: 'tester' })
       await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
