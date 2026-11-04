@@ -387,9 +387,11 @@ export class ChildReports {
    * dropped twice, and children's turns their CLI had opened itself (a Monitor firing) ended in a network error. Their
    * asker had been told of the work it gave and heard nothing of these; the children sat in `error` until the person
    * sent "continue" by hand. The asker is told once per stopped turn, through the same report: a further report needs
-   * another turn, so two sessions cannot wake each other in a loop.
+   * another turn, so two sessions cannot wake each other in a loop. `turn`: whose the stopped turn was, given when no report
+   * is owed; the person's is then told to nobody (#1377), on every path that ends a turn (#1946)
    */
-  async tellAskerOfInterruption(sessionId: string, requester?: string): Promise<void> {
+  async tellAskerOfInterruption(sessionId: string, requester: string | undefined, turn: TurnStarter | undefined): Promise<void> {
+    if (turn?.by === 'person') return
     const m = this.host.meta.get(sessionId)
     const stop = m?.interruption
     // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it

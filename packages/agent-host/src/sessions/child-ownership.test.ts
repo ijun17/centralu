@@ -654,17 +654,27 @@ describe('whose a turn is', () => {
     expect(own.turnEnded('s')).toEqual({ by: 'person' })
   })
 
-  it('is kept in the store while a report is owed, read back by the next host, and dropped with the report', () => {
+  it('is kept in the store from its start, owed a report or not (#1946), read back by the next host, and dropped when the turn ends', () => {
     own.noteMessage('s', 'person', false, true)
     own.turnStarted('s')
-    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
-    // The mark is set during their turn: the turn is kept from then on
-    own.markReport('s', 'caller')
     expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'person' })
+    own.markReport('s', 'caller')
     const next = new ChildOwnership(store)
     next.adoptReport('s', 'caller', null)
     expect(next.starterOf('s')).toEqual({ by: 'person' })
+    // A report closed mid-turn leaves whose the turn is
     own.clearReport('s')
+    expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'person' })
+    own.turnEnded('s')
+    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
+  })
+
+  it("a kept session's turn is taken over from the store, owed a report or not (#1946): the person's stays theirs after a swap", () => {
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    const next = new ChildOwnership(store)
+    next.adoptStarter('s')
+    expect(next.turnEnded('s', null, true)).toEqual({ by: 'person' })
     expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
   })
 

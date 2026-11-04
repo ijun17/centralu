@@ -43,7 +43,7 @@ import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
-import { ChildOwnership, type PersonReportDraft } from './child-ownership.js'
+import { ChildOwnership, type PersonReportDraft, type QuitNotice, type TurnStarter } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
 import { sessionDemands, unfitError } from './tool-fit.js'
@@ -343,7 +343,7 @@ export class SessionManager {
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
-  private quitNotices: { sessionId: string; requester: string; swapped?: true }[] = []
+  private quitNotices: QuitNotice[] = []
   /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
   private quitPersonWork: string[] = []
   /**
@@ -528,6 +528,7 @@ export class SessionManager {
      */
     /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
     const stoppedByQuit: SessionInfo[] = []
+    const cutTurns = new Map<string, TurnStarter>()
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
     /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
@@ -561,8 +562,8 @@ export class SessionManager {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.interruptions.markStoppedByQuit(fixed, false)
         store.sessions.upsertSession(fixed)
-        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
-        this.children.processGone(s.id)
+        // The turn the last host was in never sent its end and no process holds what it was given (#1604); whose it was says who is told (#1946)
+        cutTurns.set(s.id, this.children.processGone(s.id))
         stoppedByQuit.push(fixed)
       }
       const stopped = stale ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
@@ -594,7 +595,8 @@ export class SessionManager {
     const requesterOf = (s: SessionInfo) => [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
     for (const s of stoppedByQuit) {
       const requester = requesterOf(s)
-      if (requester) this.quitNotices.push({ sessionId: s.id, requester })
+      // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
+      if (requester) this.quitNotices.push({ sessionId: s.id, requester, turn: marks.has(s.id) ? undefined : cutTurns.get(s.id) })
     }
     // Who is told that the update cut the turn and it goes on (#1618): the same one a quit's notice would go to
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
@@ -607,6 +609,8 @@ export class SessionManager {
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     // A turn that ended while the old host let go is told as such (#1186), once the start is done, as a quit's is
     for (const m of this.children.restoreReports(this.meta, goingOn)) this.quitNotices.push({ sessionId: m.sessionId, requester: m.callerSessionId, swapped: true })
+    // Whose the turn of each kept session still in one is, owed a report or not (#1946)
+    for (const id of keeperOpts.keptSessions ?? []) if (inTurn(this.meta.get(id)?.state ?? 'idle') && !this.children.awaitingReport.has(id)) this.children.adoptStarter(id)
     this.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()
@@ -1133,7 +1137,7 @@ export class SessionManager {
     const turnBy = this.children.turnEnded(m.id, null, true)
     if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
     else {
-      if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+      void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId, turnBy)
       // The work the person owns: the same end, in their Inbox (§8.1)
       void this.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
     }
@@ -1285,7 +1289,7 @@ export class SessionManager {
     for (const id of person) if (this.meta.has(id)) void this.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
-    for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester))
+    for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester, n.turn))
   }
 
   /**
