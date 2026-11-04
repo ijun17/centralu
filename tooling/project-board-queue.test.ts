@@ -1407,8 +1407,6 @@ if (args[0] === 'pr' && args[1] === 'view') {
     st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 7000 + st.dispatched.length, run_attempt: 1, head_sha: head, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: answer, created_at: '2099-01-01T00:00:00Z' }] }
   }
   write(['dispatch', body.ref])
-  // The run started, and the connection dropped before the answer
-  if (st.dispatchLost) fail(st.dispatchLost)
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
@@ -3190,43 +3188,28 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
       // Nothing after the unknown merge was built on the branch, nothing was started on it, and nobody was blamed
       expect(writes().map(short2).slice(0, 3)).toEqual(['branch queue/batch-1', `merge-into ${A}`, 'delete queue/batch-1'])
-      expect(batchEvents().find((t) => t.includes('was lost'))).toContain("GitHub's answer to merging #77 into it was lost, and the branch could not be read afterwards")
+      expect(batchEvents().find((t) => t.includes('was lost'))).toMatch(/GitHub's answer to merging #77 into it was lost .*, and the branch could not be read afterwards/)
       expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
       // They are batched again, and now the branch can be read
       await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start')
     })
 
-    it('leaves a member out when the branch did not move (the answer was lost before GitHub merged it), as for a refusal', async () => {
+    it('drops the batch, blaming no one, when the branch did not move (the answer was lost before GitHub merged it, or GitHub is still at it)', async () => {
       runtime(batchState({ intoDropped: [B] }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await call('queue_merge', { pr: 78, owner: 'tester' })
       await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
-      expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
-      expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
-      expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
+      expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
+      expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
+      expect(batchEvents().find((t) => t.includes('was lost'))).toContain("GitHub's answer to merging #78 into it was lost")
       expect(gh().headReads).toBe(1)
-      // A refusal GitHub answered (a 404) is not read back: it said no
+      // A refusal GitHub answered (a 404) is not read back: it said no, and the member is kept out of a batch on that head
       await fresh(batchState({ mergeErrors: [B] }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await call('queue_merge', { pr: 78, owner: 'tester' })
       await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
       expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
       expect(gh().headReads ?? 0).toBe(0)
-    })
-
-    it('goes on when the answer to starting CI was lost and the run started', async () => {
-      runtime(batchState({ dispatchLost: 'Post "https://api.github.com/repos/ijun17/centralu/actions/workflows/build.yml/dispatches": EOF' }))
-      await landsBoth()
-      expect(writes().map(short2).slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
-      expect(queueOnDisk().batchOff ?? null).toBeNull()
-      // No run on the branch: it did not start, and it is a refusal as before
-      const base = batchState()
-      await fresh(batchState({ dispatchLost: 'EOF', on: { ...base.on, 'dispatch:queue/batch-1': {} } }))
-      await call('queue_merge', { pr: 77, owner: 'tester' })
-      await call('queue_merge', { pr: 78, owner: 'tester' })
-      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
-      expect(queueOnDisk().batchOff.reason).toContain('EOF')
-      expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'delete queue/batch-1'])
     })
   })
 

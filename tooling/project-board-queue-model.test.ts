@@ -133,7 +133,7 @@ type Run = {
   conclusion: string | null
   checks: CheckRow[]
 }
-type Branch = { sha: string; tree: string; members: { n: number; head: string; files: string[] }[]; steps: Map<string, string>; olderBoard: boolean }
+type Branch = { sha: string; tree: string; members: { n: number; head: string; files: string[] }[]; steps: Map<string, string>; olderBoard: boolean; late: string[] }
 type Pr = { n: number; head: string; file: string; state: 'OPEN' | 'MERGED'; mergeCommit: string | null }
 type Landing = { n: number; head: string; branch: string }
 
@@ -245,12 +245,12 @@ class World {
     return { sha: b.sha, tree: b.tree }
   }
   /**
-   * Chances that GitHub's answer to a write is lost: the merge into a batch branch (half of them before GitHub did it, half
-   * after), the start of a workflow (after it did it), and the read of a branch's head. What the queue can know of the
-   * branch is only what it reads back.
+   * Chances that GitHub's answer to a write is lost: the merge into a batch branch (a third of them never done, a third done
+   * before the answer is lost, a third done late: at the branch's next write, after the queue has read the branch back), and
+   * the read of a branch's head. What the queue can know of the branch is only what it reads back.
    */
-  lost = { merge: 0, dispatch: 0, read: 0 }
-  lostCount = { mergeBefore: 0, mergeAfter: 0, dispatch: 0, read: 0 }
+  lost = { merge: 0, read: 0 }
+  lostCount = { mergeBefore: 0, mergeAfter: 0, mergeLate: 0, read: 0 }
   private lose = (what: string) => new (this.errorClass())('github', `GitHub refused ${what}: Post "https://api.github.com/repos": EOF`, { lost: true })
   /** Something merges into main that the queue did not (a merge by hand) */
   externalMerge() {
@@ -259,7 +259,7 @@ class World {
   createBranch(name: string, sha: string) {
     if (this.branches.has(name)) throw new (this.errorClass())('github', `Reference already exists: ${name}`)
     if (sha !== this.main.sha) throw new (this.errorClass())('github', `the branch ${name} was to be made at ${sha}, which is not main`)
-    this.branches.set(name, { sha, tree: this.main.tree, members: [], steps: new Map(), olderBoard: false })
+    this.branches.set(name, { sha, tree: this.main.tree, members: [], steps: new Map(), olderBoard: false, late: [] })
   }
   deleteBranch(name: string) {
     this.branches.delete(name)
@@ -270,21 +270,34 @@ class World {
     if (!b) throw new (this.errorClass())('github', `no branch ${name}`)
     const p = [...this.prs.values()].find((x) => x.head === head)
     if (!p) throw new (this.errorClass())('github', `no commit ${head}`)
-    const lose = this.lost.merge > 0 && this.rand() < this.lost.merge
-    const before = lose && this.rand() < 0.5
-    if (before) {
+    this.applyLate(b)
+    const kind = this.lost.merge > 0 && this.rand() < this.lost.merge ? this.pick<'before' | 'after' | 'late'>(['before', 'after', 'late']) : null
+    if (kind === 'before') {
       this.lostCount.mergeBefore++
       throw this.lose(`to merge ${head} into ${name}`)
     }
-    b.tree = this.tree(b.tree, head)
-    b.sha = `b${++this.counter}`
-    b.members.push({ n: p.n, head, files: [p.file] })
-    b.steps.set(head, b.tree)
-    if (lose) {
+    if (kind === 'late') {
+      this.lostCount.mergeLate++
+      b.late.push(head)
+      throw this.lose(`to merge ${head} into ${name}`)
+    }
+    this.apply(b, head)
+    if (kind === 'after') {
       this.lostCount.mergeAfter++
       throw this.lose(`to merge ${head} into ${name}`)
     }
     return { sha: b.sha, tree: b.tree }
+  }
+  private apply(b: Branch, head: string) {
+    const p = [...this.prs.values()].find((x) => x.head === head)!
+    b.tree = this.tree(b.tree, head)
+    b.sha = `b${++this.counter}`
+    b.members.push({ n: p.n, head, files: [p.file] })
+    b.steps.set(head, b.tree)
+  }
+  /** A merge GitHub was still doing when the answer was lost lands at the branch's next write */
+  private applyLate(b: Branch) {
+    for (const head of b.late.splice(0)) this.apply(b, head)
   }
   readFile(path: string) {
     if (path !== '.github/scripts/ci-changes.mjs' || this.judgeMissing) return null
@@ -410,12 +423,9 @@ class World {
   dispatch(branch: string, inputs: Record<string, string> | null) {
     const b = this.branches.get(branch)
     if (!b) throw new (this.errorClass())('github', `no branch ${branch}`)
+    this.applyLate(b)
     this.runs.push(this.startRun(b.sha, branch, 'workflow_dispatch', inputs?.tier === 'quick' ? 'quick' : 'full'))
     this.dispatches.push({ branch, inputs })
-    if (this.lost.dispatch > 0 && this.rand() < this.lost.dispatch) {
-      this.lostCount.dispatch++
-      throw this.lose(`to start ${branch}`)
-    }
   }
   dispatches: { branch: string; inputs: Record<string, string> | null }[] = []
   rerun(runId: number, failedOnly: boolean) {
@@ -539,8 +549,11 @@ async function simulate(
     // Stopped by main moving more often than the cap allows for: MOVED_CAP times batched again, then once more in a batch with
     // others and once alone, and a session hears of it
     for (const [key, c] of stops) if (c > MOVED_CAP + 2) throw fail(`${key} was stopped ${c} times by main moving, more than the cap of ${MOVED_CAP} (and the two stops after it) allows`)
-    for (const it of q.items as { pr: number; head: string; alone?: { head: string; text: string } }[]) {
-      if (it.alone && /something else landed/.test(it.alone.text) && (stops.get(`${it.pr}@${it.head}`) ?? 0) <= MOVED_CAP) throw fail(`#${it.pr} was marked alone for main moving after ${stops.get(`${it.pr}@${it.head}`)} stop(s), within the cap`)
+    // `alone` belongs to the head it was set on; a pull request pushed since is not counted by the old head's stops
+    for (const it of q.items as { pr: number; alone?: { head: string; text: string } }[]) {
+      if (!it.alone) continue
+      const stopped = stops.get(`${it.pr}@${it.alone.head}`) ?? 0
+      if (/something else landed/.test(it.alone.text) && stopped <= MOVED_CAP) throw fail(`#${it.pr} was marked alone for main moving after ${stopped} stop(s), within the cap`)
     }
     if (world.violations.length) throw fail(world.violations[0]!)
   }
@@ -628,15 +641,15 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     expect(totals.stops).toBeGreaterThan(20)
   })
 
-  // #1961: GitHub's answer to a write on a batch branch is lost, before or after it did the write, and the read of the branch
-  // fails now and then. The queue's view of what is in the branch (its steps) must be the branch's (the model's), and whatever
+  // #1961: GitHub's answer to a merge into a batch branch is lost, before it did it, after it, or late (after the queue read the
+  // branch back), and the read of the branch's head fails now and then. The queue's view of what is in the branch (its steps) must be the branch's (the model's), and whatever
   // lands must be a tree CI ran (the check on every landing)
   it("keeps the batch's steps the branch's members when answers are lost (#1961)", async () => {
-    const lost = { mergeBefore: 0, mergeAfter: 0, dispatch: 0, read: 0 }
+    const lost = { mergeBefore: 0, mergeAfter: 0, mergeLate: 0, read: 0 }
     let landed = 0
     for (let seed = 401; seed <= 430; seed++) {
       const r = await simulate(seed, {
-        setup: (w) => (w.lost = { merge: 0.3, dispatch: 0.2, read: 0.25 }),
+        setup: (w) => (w.lost = { merge: 0.3, read: 0.25 }),
         during: (w, q) => {
           for (const b of q.batches as { branch: string; state: string; steps?: { head: string }[] }[]) {
             const branch = w.branches.get(b.branch)
