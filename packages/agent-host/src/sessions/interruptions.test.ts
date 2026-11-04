@@ -816,6 +816,29 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(c, cut)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
   })
 
+  // #1966 review: a turn that ends before the Continue's send has returned still carries the cut line, and the mark does not outlive it
+  it('a continued turn that ends at once carries the cut line on that turn, not on a later one', async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      const h = await create(opts, emit)
+      const send = h.send.bind(h)
+      h.send = (text: string) => {
+        send(text)
+        h.answer('done at once')
+      }
+      return h
+    }
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    const held = (b.mgr as unknown as { children: { continuedCuts: Set<string> } }).children.continuedCuts
+    expect(held.has(child)).toBe(false)
+  })
+
   it('a wake before the Continue went in (a window that sees the machine back) keeps the turn, and the Continue goes in once (#1618 review D4)', async () => {
     const f = folder()
     const a = host({ updateResume: f })

@@ -778,6 +778,15 @@ describe('a paused report whose turn end was deferred', () => {
     ra.observe({ type: 'machine_resync', machineId: 'm1' })
     await eventually(() => settled.includes(child.sessionId))
   })
+
+  it('is read after the gate deferred its turn end, and reported if the child is at rest', async () => {
+    const ra = agents()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    // Whose the turn is cannot be told yet: the turn's end is deferred and read from the machine
+    expect(ra.reportGate(child.sessionId)).toBe('defer')
+    state = 'idle'
+    await eventually(() => settled.includes(child.sessionId))
+  })
 })
 
 describe('a child whose turn an update of its machine cut (#1618)', () => {
