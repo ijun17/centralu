@@ -220,7 +220,10 @@ describe('an address opened for the person through the broker', () => {
  */
 describe.runIf(process.platform === 'win32')('a terminal through the real broker (Windows)', () => {
   it('runs input, output, resize, exit and close end to end', async () => {
+    // Holds the files the test plants. No shell runs in it: a process that has ended still holds its working folder for a while
+    // (seconds under load, measured) before Windows lets go of it, and removing the folder then fails with EBUSY
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-broker-term-')))
+    const shellsIn = process.cwd()
     const broker = PtyBroker.start(brokerPath())
     let pids: number[] = []
     onTestFinished(async (test) => {
@@ -235,7 +238,7 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     const prompt = (h: string) => /PS .*>/.test(h)
 
     // Input and output
-    const t = svc.create(dir, 100, 30)
+    const t = svc.create(shellsIn, 100, 30)
     await settle(() => t.history(), prompt, 60_000 * SLOW)
     svc.input(t.id, 'Write-Output ("mark" + "er-" + $PID)\r')
     const marked = await settle(() => /marker-(\d+)/.exec(t.history()), Boolean, 30_000 * SLOW)
@@ -256,7 +259,7 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     expect(await settle(() => exits, (e) => e.length > 0, 30_000 * SLOW)).toEqual([7])
 
     // Closing a tab ends its shell and what it started, as without the broker
-    const t2 = svc.create(dir, 100, 30)
+    const t2 = svc.create(shellsIn, 100, 30)
     await settle(() => t2.history(), prompt, 60_000 * SLOW)
     const pidFile = join(dir, 'pids')
     svc.input(t2.id, `& '${process.execPath}' '${plantTreeScript(dir)}' '${pidFile}' 2\r`)
