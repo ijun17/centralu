@@ -347,6 +347,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.stop': HUB,
   // A sign-in's serve on this machine telling its own host about the hand-over (#1224); never through a link
   'host.handover': HUB,
+  // The window of this machine telling its own host the system is ending (#1970); never through a link
+  'host.systemEnding': HUB,
   'machines.acceptVersions': HUB,
   'machines.install': HUB,
   'machines.update': HUB,

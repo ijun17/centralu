@@ -333,6 +333,12 @@ export const hostParams = {
    */
   'host.handover': z.object({ handover: HostHandover.nullable() }),
   /**
+   * The system is ending (a shutdown, restart or sign-out), told by the window on a machine where the host has no window of its
+   * own to hear it: Windows, whose desktop window runs `centralu serve --window` and cannot write to a host it did not start
+   * (#1970, #1397). `cancelled`: the end announced before was called off. Additive
+   */
+  'host.systemEnding': z.object({ cancelled: z.boolean().optional() }),
+  /**
    * A hub linked to this host says who it is and whether this host's sessions may ask its projects (#550, the reverse
    * direction, docs/plans/remote-hub.md §12.7). Sent by the hub at every connect and when its switch for this machine
    * changes. This host calls that hub back (`hub.projects`, `hub.askProject`) on the connection the offer came in on

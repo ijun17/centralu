@@ -10,6 +10,66 @@ use super::children::{set_cloexec, ExitStatus, Seen, Watch};
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = true;
 
+/// The write end of the pipe that takes the news of launchd's SIGTERM out of the handler (-1 until `on_system_stop`)
+static STOP_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// Ends the process by the signal's default action, as it would have without a handler
+fn die_by_term() {
+    // SAFETY: both calls are async-signal-safe
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
+        libc::raise(libc::SIGTERM);
+    }
+}
+
+extern "C" fn on_term(_sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
+    // SAFETY: errno is this thread's; a handler leaves it as it found it
+    let errno = unsafe { *libc::__error() };
+    // SAFETY: the kernel gives a valid siginfo to a SA_SIGINFO handler; read and write are async-signal-safe
+    let (from, fd) = unsafe { ((*info).si_pid, STOP_PIPE.load(std::sync::atomic::Ordering::Relaxed)) };
+    if super::is_system_stop(from) && fd >= 0 {
+        // A thread takes it from here: nothing that locks or allocates runs in a handler
+        unsafe { libc::write(fd, b"1".as_ptr().cast(), 1) };
+    } else {
+        die_by_term()
+    }
+    // SAFETY: as above
+    unsafe { *libc::__error() = errno };
+}
+
+/// Runs `told` when launchd stops this process (SIGTERM from pid 1, `is_system_stop`), and then ends the process as the signal
+/// would have: the keeper and its host are stopped by the system together, and the host cannot tell that SIGTERM from the keeper's
+/// own (#1970). A SIGTERM from any other process ends it at once, as before. Called once, with the keeper still single-threaded
+pub fn on_system_stop(told: impl Fn() + Send + 'static) {
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: fds holds the two descriptors pipe writes
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return;
+    }
+    let (read, write) = (fds[0], fds[1]);
+    for fd in [read, write] {
+        let _ = set_cloexec(fd);
+    }
+    // SAFETY: fcntl on a descriptor just made; a full pipe must not block the handler
+    unsafe { libc::fcntl(write, libc::F_SETFL, libc::fcntl(write, libc::F_GETFL) | libc::O_NONBLOCK) };
+    STOP_PIPE.store(write, std::sync::atomic::Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let mut byte = [0u8; 1];
+        // SAFETY: byte is valid for one byte
+        while unsafe { libc::read(read, byte.as_mut_ptr().cast(), 1) } < 0 {}
+        told();
+        die_by_term()
+    });
+    // SAFETY: a zeroed sigaction with a handler and an empty mask is valid
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = on_term as *const () as usize;
+        action.sa_flags = libc::SA_SIGINFO;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
+    }
+}
+
 /// No flag makes `recvmsg` set close-on-exec here; `handles::recv_fds` sets it on each descriptor.
 pub const RECV_FLAGS: libc::c_int = 0;
 

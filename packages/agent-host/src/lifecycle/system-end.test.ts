@@ -129,6 +129,17 @@ describe('asking whether the system is ending', () => {
     expect(r.killed).toEqual(['is-system-running', '--user is-system-running'])
   })
 
+  it('ends the queries and leaves no unhandled rejection when a query throws as it is made (#1970)', async () => {
+    const asked = askSystemStopping({
+      queries,
+      run: () => {
+        throw new Error('spawn failed')
+      },
+    })
+    await expect(asked.stopping).rejects.toThrow(/spawn failed/)
+    await new Promise((r) => setTimeout(r, 10))
+  })
+
   it('is no, in time, when systemd cannot be asked or does not answer; `end` ends what still runs', async () => {
     expect(await askSystemStopping({ queries, run: () => Promise.reject(new Error('ENOENT')) }).stopping).toBe(false)
     const hung = runs({ 'is-system-running': null, '--user is-system-running': null })

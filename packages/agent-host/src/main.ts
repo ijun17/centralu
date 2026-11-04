@@ -626,18 +626,20 @@ const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop'
 if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromRequest({ forUpdate: m.forUpdate === true }, 'the window'))
 /*
  * The system is ending (a shutdown, restart or sign-out), told by the parent that hears it: the window's Windows end-session
- * question, or the keeper (#1397). Said before the parent goes, so the cut turns this host's leave leaves are the system's.
+ * question, or the keeper (#1397). Said before the parent goes, so the cut turns this host's leave leaves are the system's. A serve
+ * host has no such parent: the window tells it by `host.systemEnding` (#1970).
  * `cancelled`: the end was called off
  */
-control?.on('system-ending', (m) => {
-  if (m.cancelled === true) {
+const systemEndingTold = (cancelled: boolean): void => {
+  if (cancelled) {
     console.error('[agent-host] the system is no longer ending')
     systemEnding.cancel()
   } else {
     console.error('[agent-host] the system is ending')
     systemEnding.notice()
   }
-})
+}
+control?.on('system-ending', (m) => systemEndingTold(m.cancelled === true))
 /*
  * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
  * the hosts of other machines the person linked, each over the person's own ssh. The router stands
@@ -761,6 +763,7 @@ const router: Router = new Router({
     // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
     stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
     // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
+    systemEnding: systemEndingTold,
     handover: (h) => {
       handover = h
       server.broadcast({ type: 'host_handover', handover: h })

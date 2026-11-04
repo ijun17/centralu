@@ -215,6 +215,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `apps.viewFrame`
 - `apps.viewMessage`
 - `grid.set`
+- `host.systemEnding`
 - `mail.close`
 - `mail.held`
 - `mail.list`

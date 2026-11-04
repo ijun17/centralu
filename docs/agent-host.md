@@ -2410,6 +2410,7 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 |---|---|
 | `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and a credential (§4.2: the token for a Centralu window, the limited credential for any other process, and `view.rights` says which, #1405), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4; a window counts a keeper without one as another build, which only "Restart completely" moves, #461) |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
+| `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970): `{"ok":true}` once the host has been written the `system-ending` line (`cancelled`: that it is not after all); `{"ok":false}` when no host is up |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
 | `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a window's only (#1405; anything else gets `window_only`): a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
@@ -3392,13 +3393,22 @@ host that crashed or is missing, not one the person stopped:
   it holds the lock (read and removed, before `stopped.json` is cleared); with it, the turns the last host lost are the
   system's (§4.6.2, `shutdown`). A host killed with no notice writes nothing, so the next start knows nothing and guesses
   nothing. Separate from `stopped.json`, which keeps its meaning for a hub.
-  **Not sent yet** (#1970): no window or keeper writes the `system-ending` line. Measured on Windows 11 (a host log over a
-  month of restarts started by `shutdown.exe`, the Windows Update notifier and TrustedInstaller): a `centralu serve` host
-  wrote no line at a restart, so it was ended with no notice. It has no console or window, and Node does not map
-  `CTRL_LOGOFF_EVENT` or `CTRL_SHUTDOWN_EVENT` (libuv `src/win/signal.c`; Windows sends them only to services), so on
-  Windows only a process with a window hears the end (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), which is the window's to
-  send. On macOS the window hears `NSWorkspaceWillPowerOffNotification`; the keeper and the host get launchd's SIGTERM,
-  which the host cannot tell from the keeper's own.
+  **Who says it** (#1970). Measured on Windows 11 (a host log over a month of restarts started by `shutdown.exe`, the Windows Update
+  notifier and TrustedInstaller): a `centralu serve` host wrote no line at a restart, so it was ended with no notice. It has no console or
+  window, and Node does not map `CTRL_LOGOFF_EVENT` or `CTRL_SHUTDOWN_EVENT` (libuv `src/win/signal.c`; Windows sends them only to
+  services), so only a process with a window hears the end, and the window says it:
+  - **Windows**: the main window is subclassed (`SetWindowSubclass`, `sidecar/ending.rs`) and passes every message on unchanged. `WM_QUERYENDSESSION`
+    (the question) becomes the line, `WM_ENDSESSION` with `wParam` FALSE (another program refused) the `cancelled` one; a Restart Manager's
+    request to close (`ENDSESSION_CLOSEAPP`) is neither. In direct mode the line goes on the host's stdin. With `serve --window` the host is
+    no child of the window, so the line goes to the launcher, which passes it on over the host's socket as `host.systemEnding { cancelled? }`
+    (`serve-window.mjs`, with the window's full credential: a limited one is refused, since a false end would relabel a real crash as the system's; never through a link). A launcher older than the host sends it with the limited credential and is refused (the host logs why), so while versions are mixed the notice is lost. A sign-out (`ENDSESSION_LOGOFF`) is not passed on to a serve host in a network logon, which a sign-out does not end.
+  - **macOS**: the window observes `NSWorkspaceWillPowerOffNotification` (a shutdown, a restart and a log out; there is no notice for one
+    being called off, so the host's 2 minutes do that) and writes the line itself in direct mode or sends the keeper `system_ending` (a
+    window's only) under one. The keeper, which launchd stops with the host and the agents, handles SIGTERM itself (`os::on_system_stop`):
+    from pid 1 (`si_pid`, `os::is_system_stop`) it writes the line to the host and then dies by the signal as before; from any other
+    process (its own restart, a person's `kill`) it dies at once, as before, with no line. The host may be told after its own SIGTERM began its leave; it still
+    writes until it exits.
+  - **Linux**: the host asks systemd itself, above.
 - **The link starts at most three hosts there within 10 minutes** (`RESTARTS`), and then none until the person's Start,
   however long it waits: the limit is kept, not read off the starts again as they age out. A start at the person's
   Start counts too, so a Start whose hosts stop before they answer is not repeated for good, and so does a host that
