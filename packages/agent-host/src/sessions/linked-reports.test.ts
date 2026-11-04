@@ -30,6 +30,8 @@ let reports: LinkedReports
 /** What the machine says the last turn said, and what the hub asked for of it (#1604) */
 let said: (id: string) => string
 let wordsAsked: unknown[]
+/** Holds every read of the session's words until it is released, to have the link drop while one is out */
+let readGate: Promise<void>
 
 beforeEach(() => {
   store = new Store()
@@ -47,11 +49,13 @@ beforeEach(() => {
   gateAnswer = 'deliver'
   said = (id) => `last words of ${id}`
   wordsAsked = []
+  readGate = Promise.resolve()
   /** The hub's reader over its links, as far as the reports read it: the mirror, the last words, and the machine's list */
   const reader = {
     describe: (id: string) => mirror.get(id) ?? null,
     lastWords: async (id: string, _max: number, opts?: unknown) => {
       wordsAsked.push(opts)
+      await readGate
       return { ok: true as const, text: said(id), length: 0, seq: null }
     },
     machineLinked: (id: string) => linked.has(id),
@@ -544,6 +548,63 @@ describe('a machine whose link drops or comes back', () => {
     await flush()
     const lost = delivered.at(-1)
     expect(lost).toMatchObject({ orchestratorId: 'o2', preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a later pause of the same session, for the same asker, does not report the words of the pause before it', async () => {
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered[0]).toMatchObject({ preview: 'last words of m1.w1' })
+    // The asker sends again: the first pause is over, and the second turn pauses on other work and is not read
+    expect(reports.releaseAsker('m1.w1', 'o1')).toBeTypeOf('function')
+    reports.observe(tasks('m1.w1', [verify, build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(2)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('words a read returns after the link dropped belong to no report: the next pause of the session does not report them', async () => {
+    let release!: () => void
+    readGate = new Promise<void>((resolve) => (release = resolve))
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    status('m1', 'unreachable')
+    await flush()
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]).toMatchObject({ work: { linkLost: 'Box' } })
+    release()
+    await flush()
+    // The machine is back, the session pauses again for the same asker, and the link drops once more
+    status('m1', 'connected')
+    readGate = Promise.resolve()
+    reports.observe(tasks('m1.w1', [verify, build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(2)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a session deleted there takes the words its pause read with it: the same id on the machine later reports none of them', async () => {
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    reports.observe({ type: 'session_deleted', sessionId: 'm1.w1' })
+    // A session with the same id on the machine (it was added again), paused for the same asker, whose link then drops
+    reports.observe(tasks('m1.w1', [build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(1)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
     expect(lost?.work).not.toHaveProperty('asRead')
   })
 

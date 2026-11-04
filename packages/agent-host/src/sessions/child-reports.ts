@@ -14,6 +14,7 @@ import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportWork } from './linked-reports.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
+import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE } from './ask-project.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
@@ -545,7 +546,8 @@ export class ChildReports {
     const read = `read_session(sessionId="${sessionId}"${answerSeq !== undefined ? `, around=${answerSeq}` : ''})`
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
-    const answered = preview !== '' && preview !== NOT_READ
+    // Centralu's placeholders for words that were not read are not the session's answer, and are not kept as one
+    const answered = preview !== '' && preview !== NOT_READ && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
     // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
     const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
     const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''
@@ -563,6 +565,8 @@ export class ChildReports {
       resume +
       (inThread && answered
         ? `Its last response${asReadWords} is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        : preview === MACHINE_UNREACHABLE
+          ? `Its last response could not be read: its machine could not be reached. ${read} reads it once that machine is back.`
         : `Its last response${asReadWords} is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
       cleanUp
     const stored =
@@ -622,7 +626,7 @@ export class ChildReports {
     const others = ownAgents(this.host, parentId).filter((s) => s.id !== childId && agentState(this.host, s) === 'finished').length
     return (
       `\n${cleanUpLine(childId, this.agentCall(parentId, { sessionId: childId, action: 'delete' }))}` +
-      (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
+      (others ? `\n${others} other session${others === 1 ? '' : 's'} you started ${others === 1 ? 'has' : 'have'} ended ${others === 1 ? 'its' : 'their'} turn and remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
     )
   }
 

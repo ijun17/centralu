@@ -242,6 +242,20 @@ describe('a last response that was not read', () => {
   })
 })
 
+describe('a last response that could not be read because its machine is out of reach (#1186)', () => {
+  it('is not kept as the session’s answer, and the report says it could not be read and how to read it', async () => {
+    const { parent, child } = await parentAndChild()
+    const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
+    const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
+    await reports.deliverReport(parent, child, 'name', 'project', '(not read: its machine could not be reached)', { type: 'turn_complete' }, { linkLost: 'Box', paused })
+    const [report] = reportsIn(parent, child)
+    expect(report?.facts.answer).toBeUndefined()
+    expect(report?.body).toContain('Its last response could not be read: its machine could not be reached.')
+    expect(report?.body).toContain(`read_session(sessionId="${child}") reads it once that machine is back.`)
+    expect(report?.body).not.toContain('is the message above in this thread')
+  })
+})
+
 describe('a last response read before its machine went out of reach (#1186)', () => {
   it('stays on the report as the session’s answer, and the report says it is what was last read there', async () => {
     const { parent, child } = await parentAndChild()

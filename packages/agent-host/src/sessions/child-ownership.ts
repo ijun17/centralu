@@ -218,6 +218,8 @@ export type LinkedReport = {
   lastBy?: 'person' | 'work'
   /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
   addNext?: number
+  /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
+  read?: { preview: string; seq: number | undefined }
 }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */

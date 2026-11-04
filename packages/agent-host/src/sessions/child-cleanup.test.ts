@@ -50,13 +50,13 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     // And when to keep it instead (#1482)
     expect(first).toContain('Keep it only if more work on the same thing is coming soon')
     // The other child still works: nothing else is at rest
-    expect(first).not.toContain('other finished session')
+    expect(first).not.toContain('other session you started')
 
     handleOf(two)!.answer('second done')
     await w.until(() => reportOf(s, two).length === 1)
     const second = reportOf(s, two)[0]!
     expect(second).toContain(`agent_session(sessionId="${two}", action="delete")`)
-    expect(second).toContain('1 other finished session you started remains: agent_session(action="list") shows them.')
+    expect(second).toContain('1 other session you started has ended its turn and remains: agent_session(action="list") shows them.')
   })
 
   it("an orchestrator's report names the delete and the list as it calls them: through centralu_run (#850)", async () => {
