@@ -357,18 +357,28 @@ export async function land(item, pr, ref, renew, defaultBranch, { provedAt = nul
   return out
 }
 
+/**
+ * What GitHub shows of a pull request after a write whose answer may have been lost (gh failing on the connection
+ * with "EOF" says nothing about whether GitHub carried it out). Null when it cannot be read now: a failure that
+ * would repeat for every call (rate limit, no network, no login) still throws.
+ */
+async function readBack(repo, number) {
+  try {
+    return await readPr(repo, number)
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    return null
+  }
+}
+
 /** The squash itself, on the head that was read, and GitHub's word that it merged. */
 async function squash(item, pr, n, msg, defaultBranch) {
   const repo = item.repo
   const why = await mergePr(repo, pr.number, pr.headRefOid, msg.subject, msg.body)
-  if (why) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
-  // gh can exit 0 without a merge (GitHub's own merge queue, auto-merge): only GitHub's word counts
-  let merged = null
-  try {
-    merged = await readPr(repo, pr.number)
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-  }
+  // Read back whether gh said yes or no: gh can exit 0 without a merge (GitHub's own merge queue, auto-merge), and
+  // it can fail (EOF) after GitHub merged. Only GitHub's word counts
+  const merged = await readBack(repo, pr.number)
+  if (why && !(merged?.state === 'MERGED' && merged.headRefOid === pr.headRefOid)) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
   if (merged?.state !== 'MERGED')
     return {
       state: 'attention',
@@ -417,7 +427,9 @@ export async function afterMerge(item, pr, ref, subject, { landed, defaultBranch
       notes.push(`left ${ref(repo, l)} open: ${n} does not contain its head ${short(lp.headRefOid)}`)
       continue
     }
-    const e = await closePr(repo, l, `Landed in #${pr.number}, which merged this stack as one commit.`)
+    let e = await closePr(repo, l, `Landed in #${pr.number}, which merged this stack as one commit.`)
+    // Closed though gh lost the answer: it counts as closed as landed, and its branch goes with the rest
+    if (e && (await readBack(repo, l))?.state === 'CLOSED') e = null
     if (e) notes.push(`could not close ${ref(repo, l)}: ${e}`)
     else (closed.push(ref(repo, l)), lowers.push(lp))
   }
