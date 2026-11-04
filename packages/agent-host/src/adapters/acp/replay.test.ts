@@ -98,8 +98,7 @@ for (const dir of readdirSync(RECORDINGS)) {
       })
     }
 
-    // OpenCode 1.19.4 has no tool that deletes a file (its model says so and stops, measured in `files`), so asks about none
-    if (names.includes('files') && !dir.startsWith('opencode-')) {
+    if (names.includes('files')) {
       it('files: a request about a delete reads as a delete, whatever kind the request itself says', () => {
         // The card as the session makes it: the call's frames so far, then the request (`AcpSession.onRequest`)
         const recording = loadRecording(join(RECORDINGS, dir, 'files.jsonl'))
@@ -116,6 +115,13 @@ for (const dir of readdirSync(RECORDINGS)) {
             const req = RequestPermission.parse(msg.params)
             asked.push({ title: req.toolCall.title ?? '', detail: detailOf(normalizer.call(req.toolCall, true), '/work') })
           }
+        }
+        if (asked.length === 0) {
+          // `files` runs under auto, where a tool may ask nothing (OpenCode 1.19.4: its model found no delete tool and stopped, measured):
+          // no card to read, but a delete call must not go by unnoticed when a later version adds one
+          const kinds = recording.frames.map((f) => (f.msg as { params?: { update?: { kind?: string } } } | undefined)?.params?.update?.kind)
+          expect(kinds).not.toContain('delete')
+          return
         }
         const deletes = asked.filter((a) => a.detail.kind === 'file_edit' && a.detail.change === 'delete')
         expect(deletes.length).toBeGreaterThan(0)
