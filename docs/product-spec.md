@@ -252,7 +252,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
   app re-attaches to them with nothing to restore — a waiting approval is still waiting. The quit dialog follows
   the setting: off, its main button is **Quit completely**, and while a turn is running **Quit and keep running** turns the setting on and quits; on, **Quit** closes the window and leaves everything
-  running, and **Quit completely** stops the keeper, the host and every agent, terminal and running command anyway. A Windows window on the computer's `centralu serve` host (#1466) has no setting and reads as on: **Quit** leaves the host running, and **Quit completely** runs `serve --stop`, saying it also ends the link a hub has to this computer. An unwatched host stops by itself after 30 minutes with no window open and
+  running, and **Quit completely** stops the keeper, the host and every agent, terminal and running command anyway. A Windows window on the computer's `centralu serve` host (#1466) has no setting and reads as on: **Quit** leaves the host running, and **Quit completely** runs `serve --stop`, saying it also ends the link a hub has to this computer; Settings shows a line in place of the switch. An unwatched host stops by itself after 30 minutes with no window open and
   nothing running. A reopened app of a different build says so and offers to switch the host to its own build.
   Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to
   10 seconds to finish the calls it serves itself, and the window reconnects in a moment. The bar shows each step

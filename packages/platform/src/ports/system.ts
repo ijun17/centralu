@@ -126,7 +126,7 @@ export type PlatformCapabilities = {
   /**
    * Whether this window runs on the computer's `centralu serve` host (desktop, Windows), which keeps running when the
    * window closes, for a hub linked to this computer (#1223). Closing the window then leaves agents running with no
-   * background mode to switch: the quit question says so, and "Quit completely" stops that host (#1466).
+   * background mode to switch: the quit question and Settings say so, and "Quit completely" stops that host (#1466).
    */
   servesHost: boolean
   /**
