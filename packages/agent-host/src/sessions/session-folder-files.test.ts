@@ -8,7 +8,6 @@
  */
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'

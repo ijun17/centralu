@@ -22,7 +22,6 @@ import {
   writeFileSync,
   renameSync,
 } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { NormalizedEvent, SessionInfo, ToolName, TrashedSession, Attachment } from '@cc/protocol'
