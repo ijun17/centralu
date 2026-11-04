@@ -46,6 +46,7 @@ length). Those are plain, non-secret values; change them there, not in code.
   instead (`system.mjs`, below): the same script, without a process start per call. A test that ends the app's tree while it is starting a `gh` leaves that fake suspended for ever on Windows (the parent was
   gone before it was resumed); each of these files ends with `endLeftoverFakes()` (`tooling/fake-gh.test-helpers.ts`), which ends
   any process still running a script of its fakes and nothing else.
+  The merge queue's tests are split by what they cover so no one file is the tail of a run: `project-board-queue.test.ts` (the decisions as pure functions, then the app's queue), `-conflicts`, `-integrate`, `-batches` (batches, tiers, messages kept until acknowledged, what the queue does by itself) and `-guard` (the watch command and the main guard). They share `project-board-queue.test-helpers.ts` (the fake `gh`'s fixtures and the app harness). Each test starts its own app: the app keeps state in memory that only a restart clears (the permission cache, tries to tell a session, the driver's pause and failure count, the clock's steps, the board and thread caches), so a running app is not shared between tests.
 
 ## Reading and answering in the view
 
