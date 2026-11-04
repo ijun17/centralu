@@ -1330,6 +1330,7 @@ const fail = (msg) => { process.stderr.write('gh: ' + msg + '\n'); process.exit(
 const R = 'repos/ijun17/centralu'
 const path = args[0] === 'api' ? args.filter((a) => a.startsWith('repos/'))[0] : null
 const write = (w) => { st.writes = [...(st.writes ?? []), w]; const patch = st.on && st.on[w[0] + ':' + w[1]]; if (patch) for (const [k, v] of Object.entries(patch)) st[k] = { ...st[k], ...v }; save() }
+if (st.viewLost && st.viewLost.n > 0 && args[0] === 'pr' && args[1] === 'view') { st.viewLost.n--; save(); fail('Post "https://api.github.com/graphql": EOF') }
 if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
 if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
@@ -1351,13 +1352,17 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (st.mergeNoop) process.exit(0)
   const pr = st.prs[args[2]]
   pr.state = 'MERGED'; pr.mergeCommit = { oid: 'abcdef1234567890abcdef1234567890abcdef12' }
+  if (st.mergedAt) pr.headRefOid = st.mergedAt
   // main moves to the squash: its tree is the head merged onto main (the batch's tree for it), unless drifted
   st.main = { sha: 'main-' + args[2], tree: (st.mainDrift === true || (Array.isArray(st.mainDrift) && st.mainDrift.includes(Number(args[2])))) ? 'tree-drift' : 'tree-' + pr.headRefOid }
   save()
+  // The connection dropped after GitHub did it: gh fails, the merge happened
+  if (st.mergeLost) fail(st.mergeLost)
 } else if (args[0] === 'pr' && args[1] === 'close') {
   write(['close', args[2], args[args.indexOf('--comment') + 1]])
   st.prs[args[2]].state = 'CLOSED'
   save()
+  if (st.closeLost) fail(st.closeLost)
 } else if (args[0] === 'pr' && args[1] === 'list') {
   if (args.includes('--head')) out(Object.values(st.prs ?? {}).filter((p) => p.headRefName === args[args.indexOf('--head') + 1]))
   else out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
@@ -2217,6 +2222,63 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     patchGh((s) => Object.assign(s.prs['77'], { state: 'MERGED', mergeCommit: { oid: 'abcdef1234567890abcdef1234567890abcdef12' } }))
     await until((x) => stateOf(x) === 'merged', 'the merge GitHub made')
     expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+  })
+
+  it('reads the pull request back when gh pr merge fails on the connection: merged at the head it read is a landing, not a refusal (#1958)', async () => {
+    const EOF = 'Post "https://api.github.com/graphql": EOF'
+    const fresh = async (state: Gh) => {
+      await rt?.dispose({ awaitTree: true })
+      rt = null
+      await removeFakeDir(join(root, 'data'))
+      mkdirSync(join(root, 'data'))
+      runtime(state)
+    }
+    runtime(ghState({ prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77) }, mergeLost: EOF }))
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge GitHub made')
+    expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+    // Never a refusal, not even for one poll: the owner is told it landed, not that GitHub refused it
+    expect(notices().map((e) => e.text).join(' ')).not.toContain('refused')
+    expect(notices().at(-1)!.text).toContain('merged #77')
+    expect(notices().at(-1)!.text).not.toContain('merged before this poll')
+    // Nothing merged: still a refusal, with what gh said
+    await fresh(ghState({ mergeError: EOF }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason).toMatchObject({ kind: 'refused' })
+    expect(q.queue[0].reason.text).toContain('EOF')
+    expect(writes()).toEqual([])
+    // Merged at a head the queue did not read (a push and a merge by hand in between): not the squash it asked for
+    await fresh(ghState({ mergeLost: EOF, mergedAt: SHA2 }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention for a merge at another head')
+    expect(itemsOnDisk()[0]!.reason).toMatchObject({ kind: 'refused' })
+    // The read-back is lost too: nobody knows whether it merged, so no refusal; the next poll reads it and finds it merged
+    await fresh(ghState({ mergeLost: EOF, on: { 'merge:77': { viewLost: { n: 1 } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge found on the next poll')
+    expect(notices().map((e) => e.text).join(' ')).not.toContain('refused')
+    // gh said yes and the read-back is lost: GitHub was never asked, so it is not 'not-merged' either (a batch would drop, a record be re-drafted)
+    await fresh(ghState({ on: { 'merge:77': { viewLost: { n: 1 } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge found on the next poll')
+    expect(notices().map((e) => e.text).join(' ')).not.toContain('does not show it merged')
+    expect(writes().map((w) => w[0])).toEqual(['merge', 'delete'])
+  })
+
+  it('counts a lower closed when gh lost the answer to the close, and deletes its branch', async () => {
+    runtime(
+      ghState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77, { baseRefName: 'feat/low' }) },
+        compare: { [`${SHA2}...${SHA}`]: 'ahead' },
+        closeLost: 'Post "https://api.github.com/graphql": EOF',
+      }),
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the stack to land')
+    expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['base 77', 'merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+    expect(notices().at(-1)!.text).toContain('Closed #76 as landed in it.')
+    expect(notices().at(-1)!.text).not.toContain('could not close')
   })
 
   it("keeps the top's branch when another open pull request is based on it", async () => {
