@@ -331,7 +331,11 @@ export function linkedSessions(
     },
 
     updateSettings(sessionId, s) {
-      return viaSession(sessionId, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
+      return viaSession(sessionId, async (m) => {
+        // Not a session the machine hides from the hub (its orchestrator, a coordinator): a machine from before it refuses one too would change it
+        if (m.hides(await rowOf(m, m.q.strip(sessionId, 'The session')))) throw new Error(`Not a session ${m.name} shares: ${sessionId}`)
+        return { info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }
+      })
     },
 
     projects: everyProject,
@@ -571,14 +575,12 @@ export function linkedSessions(
       const at = qualifiedMachine(machines(), sessionId)
       if (!at) return null
       const m = at.machine
-      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id)
-      if (!isObj(s) || m.hides(s)) return null
-      const p = typeof s.projectId === 'string' ? (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId) : undefined
-      return {
-        // An app's session, its builder or an agent it asked for, as projectSessions leaves them out
-        app: s.kind !== 'worker' || (typeof s.appId === 'string' && s.appId !== '') || typeof s.projectId !== 'string',
-        trusted: isObj(p) && p.trusted === true,
-      }
+      // A coordinator is read too, though the window does not show it (#1941); an orchestrator never
+      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id) ?? m.unshown?.(at.id)
+      if (!isObj(s) || s.kind === 'orchestrator') return null
+      if (typeof s.projectId !== 'string') return { trusted: true }
+      const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
+      return { trusted: isObj(p) && p.trusted === true }
     },
 
     describe(sessionId) {

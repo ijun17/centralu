@@ -80,6 +80,17 @@ export class LinkedHost {
   }
 
   /**
+   * Refuses a session a hub's orchestrator may not direct (`sendFromHub`, a settings change `by: 'orchestrator'`): this
+   * host's orchestrator or a coordinator, which a hub is not shown (remote-hub.md §3.4), or none at all
+   */
+  directedFromHub(sessionId: string): void {
+    const target = this.host.meta.get(sessionId)
+    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
+      throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+    }
+  }
+
+  /**
    * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
    * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
    *
@@ -87,10 +98,7 @@ export class LinkedHost {
    * same text as the person; marking it as a relay would only hide the words from a manager it was meant for.
    */
   async sendFromHub(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<void> {
-    const target = this.host.meta.get(sessionId)
-    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
-      throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
-    }
+    this.directedFromHub(sessionId)
     const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
     /*
      * An ask_project task from the hub (#838 item 12): the session works on it at the depth the hub counts, until the
@@ -125,8 +133,8 @@ export class LinkedHost {
   /**
    * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
    * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
-   * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
-   * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
+   * host: no calling session, and this host's orchestrator left out (§3.4, #1941): its coordinators are read, though the
+   * hub's window does not show them. Bounded per call, since the caller is another machine.
    */
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
@@ -149,7 +157,7 @@ export class LinkedHost {
        */
       lastAnswer: async (sessionId, maxChars, turn, since) => {
         const m = this.host.meta.get(sessionId)
-        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        if (!m || m.kind === 'orchestrator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
         const span = turn ? this.host.children.turnRows(sessionId, since) : undefined
         const text = lastResponse(rows, span)

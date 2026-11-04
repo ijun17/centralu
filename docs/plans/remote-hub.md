@@ -1244,8 +1244,10 @@ takes them across the links.
 
 ### 12.1 What holds throughout
 
-- **One orchestrator** (§3.4, decision 2): a linked machine's orchestrator and coordinators stay hidden, from the hub's
-  window and from the hub's orchestrator alike. A machine never shows another its orchestrator's conversation.
+- **One orchestrator** (§3.4, decision 2): a linked machine's orchestrator and coordinators stay hidden from the hub's
+  window. Its orchestrator is hidden from the hub's orchestrator and readers too; its coordinators are read (#1941: the
+  hub keeps their rows without showing them, `LinkedMachineConnection.unshown`). A machine never shows another its
+  orchestrator's conversation.
 - **The hub asks, the machine answers** (§3.2, decision 3). The hub's orchestrator acting on a linked machine is the
   connecting side controlling the other, consented to when the link was added. Nothing in steps 1 to 3 lets a machine
   call the hub; step 4 lets it ask the hub's projects, and nothing else (§12.7).
@@ -1263,7 +1265,7 @@ takes them across the links.
 
 | Step | What | Needs from the owner |
 |---|---|---|
-| 1 | **Read.** The hub's orchestrator's `list_sessions`, `read_session` and `recall` include every linked machine. Each machine answers for its own sessions through three host-to-host calls (additive): `host.sessions`, `host.readSession`, `host.recall`, made by the orchestrator's own code there, over the same view the hub's window has (everything but its orchestrator and coordinators). The hub qualifies the ids, names the machine on each row and hit, lists an unreachable machine's sessions from the headers mirror marked as not reachable, and says which machines it could not search (decided on #82, 2026-10-03: a host that is off says so instead of returning nothing). `send_to_session` and the other acting tools refuse a linked machine's session with a reason, until step 2. **Built** (§12.3) | Nothing |
+| 1 | **Read.** The hub's orchestrator's `list_sessions`, `read_session` and `recall` include every linked machine. Each machine answers for its own sessions through three host-to-host calls (additive): `host.sessions`, `host.readSession`, `host.recall`, made by the orchestrator's own code there, over the hub's view of it (everything but its orchestrator; its coordinators read since #1941, though the window does not show them). The hub qualifies the ids, names the machine on each row and hit, lists an unreachable machine's sessions from the headers mirror marked as not reachable, and says which machines it could not search (decided on #82, 2026-10-03: a host that is off says so instead of returning nothing). `send_to_session` and the other acting tools refuse a linked machine's session with a reason, until step 2. **Built** (§12.3) | Nothing |
 | 2 | **Direct.** `send_to_session`, `update_session_settings` and `create_session` reach a linked machine's sessions and projects through the router, and `create_project` takes a machine. `reportBack` across machines: the hub already relays the machine's events into its own log, qualified; the manager watches those for the end of the turn it waits on. The instruction is recorded on the machine as sent by the hub's orchestrator (`agents.send` gains an optional `from`, additive), so the machine's conversation says who sent it. The machine's session keeps its own approval settings, and its cards reach the hub's window as every remote card does. **Built** (§12.4) | Nothing (decision 3) |
 | 3 | **`ask_project` to a linked machine's project.** An ordinary session on the hub asks a project on another machine: the consent card for the pair names the machine; the delegated session runs on that machine, its own logins and folder, under `normal`, as an ordinary visible session there; the answer comes back fenced as today. Paths in the answer name that machine's files, so none is opened to the asking session: they are listed as the machine's, and the person reaches them through the file tree or "Open in VS Code" (phase 2). A session on a machine asking a project on that same machine already works there, its card routed to the hub's window. **Built** (§12.6) | Nothing new, unless the owner wants a cross-machine ask to need more than the pair's card (§12.5, question 4) |
 | 4 | **The reverse direction** (decision 3: off by default, only the connecting side turns it on). A machine's sessions reach the hub: what they may do is §12.5. Mechanically: a per-link switch on the hub (Settings → Machines, stored in the hub's registry, additive), the hub's end of the link answering an allowlist of requests from the machine (until then `RemoteClient` never answered one), and the machine naming the hub to its sessions. **Built** (§12.7) | Decided (§12.5, 2026-10-18) |
@@ -1284,9 +1286,9 @@ and its tools stay there).
   #984) and treats one past it as away. A machine that is away contributes its mirrored sessions with
   "not reachable right now" (list) or its name under "Not searched" (recall), and is not asked; one that predates step
   1 answers "Unknown method" and is named as needing Centralu updated there. The central orchestrator reads through
-  it, and since #984 so does an ordinary session of a trusted project, which sees only a machine's ordinary sessions
-  that the headers mirror holds (not an app's; a project there nobody trusted is marked) (`readerFacts`); a lead keeps
-  its members.
+  it, and since #984 so does an ordinary session of a trusted project, which sees every session of a machine but its
+  orchestrator (#1941): those the headers mirror holds, and a coordinator the window does not show as the link last
+  heard it (`readerFacts`, `unshown`); a project there nobody trusted is marked. A lead keeps its members.
 - **Hits from several machines** are taken in turns, one from each machine's own ranked list (`takeInTurns`): ranks
   from two stores do not compare, and appending would let the first list fill the limit before the others are heard.
 - **Text.** A row is `- <name> [m1.<id>] · project <project> on <machine> · <tool> · <state>`, with `· <why>` when the

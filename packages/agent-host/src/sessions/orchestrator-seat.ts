@@ -1,5 +1,5 @@
 import { stamped } from '../log-file.js'
-import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
+import { blockedOnQuestion, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
@@ -156,19 +156,17 @@ export function orchestratorToolsFor(
     // Coordinator session (#80, #81): the allow list is its entire view
     scopeIds !== undefined ? scopeIds.includes(s.id)
     : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
-    // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
-    : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
+    // What a hub reads of this host: every session but its orchestrator (remote-hub.md §3.4, #1941); it acts on none through this view
+    : hubView ? s.kind !== 'orchestrator'
     : true
   /*
-   * What a seat may read (#984, owner decision 2026-10-17). An ordinary session of a **trusted** project reads every
-   * project's sessions, on this computer and on the linked machines, so it can find the session to talk to later. From
-   * an untrusted project it reads its own project only, as before: text planted in a clone nobody trusted could
-   * otherwise search every conversation (the reason #382 keeps ask_project and attach_app from there).
-   *
-   * Outside its own project it reads ordinary sessions only: never an orchestrator or a coordinator, whose
-   * conversations direct others, and never an app's (its builder, or an agent an app asked for), whose conversations
-   * carry what an app was given and nobody else was (`readsOwnProject`, `projectSessions` on a machine). Acting stays
-   * inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
+   * What a seat may read (#984, owner decision 2026-10-17; #1941, 2026-11-04). An ordinary session of a **trusted** project
+   * reads every session but an orchestrator's, on this computer and on the linked machines: a coordinator's, an app's (its
+   * builder, an agent an app asked for) and one with no project included, so it can find the session to talk to later and
+   * reads what the orchestrator answering its request could pass back. No session reads an orchestrator's conversation:
+   * it is the person's own talk with it. From an untrusted project it reads its own project only, as before: text planted
+   * in a clone nobody trusted could otherwise search every conversation (the reason #382 keeps ask_project and attach_app
+   * from there). Acting stays inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
    */
   const trustedIds = () => new Set(host.store.projects.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
   /** This reader's view reaches past its own project: only from a trusted one */
@@ -176,15 +174,15 @@ export function orchestratorToolsFor(
     const own = ownProjectId()
     return !!ownProject && own !== null && trustedIds().has(own)
   }
-  const ordinary = (s: SessionInfo) => s.kind === 'worker' && s.projectId !== null && !(s.appId && !RESERVED_APP_IDS.includes(s.appId))
-  const readable = (s: SessionInfo) => inScope(s) || (wide() && ordinary(s))
+  /** An orchestrator's row is never read, even one with a project (a project orchestrator restored from before #1941) */
+  const readable = (s: SessionInfo) => s.kind !== 'orchestrator' && (inScope(s) || wide())
   /** The links a read reaches: the central orchestrator's, and a trusted reader's (#984); acting reaches them from the centre only */
   const readLinks = () => (central || wide() ? host.linkedReader() : null)
   /** A machine's session as a reader may see it: null when it may not, else whether to mark it untrusted */
   const remoteReadable = (reader: LinkedSessions, id: string): { untrusted: boolean } | null => {
     if (central) return { untrusted: false }
     const facts = reader.readerFacts(id)
-    return facts && !facts.app ? { untrusted: !facts.trusted } : null
+    return facts && { untrusted: !facts.trusted }
   }
   /** Said on every row a trusted reader sees of a project nobody trusted (#984): its text may be planted */
   const NOT_TRUSTED = ' (not trusted)'

@@ -75,10 +75,10 @@ A session whose preset this host does not know (one on a linked machine, a name 
 `answer_question` and `agent_session` `stop`, `delete` and `answer` always ask: they cannot be undone, or answer for the person.
 
 **Reads.** The reads of a request's turn are free, and the answer goes back to the asker, so the orchestrator can pass on what it read. What
-that adds is narrow. Under #984 a trusted project's ordinary session already reads every project's ordinary sessions, on this computer and the linked
-machines, and under a bypass or `auto` preset it reads files with its own shell. What the orchestrator reads that such an asker cannot: the
-orchestrator's own conversation, coordinators' and app sessions' conversations, sessions with no project, and files the asker's stricter
-preset would ask about. For an asker in an untrusted project, anything outside its own project; but its requests are held until the person
+that adds is narrow. A trusted project's ordinary session already reads every session but an orchestrator's, on this computer and the linked
+machines (#984, #1941), and under a bypass or `auto` preset it reads files with its own shell. What the orchestrator reads that such an asker
+cannot: the orchestrator's own conversation (a brief, message or mail it sent another session is not part of it: that lands in the
+receiving session's conversation and is read with it, its own agents' included), and files the asker's stricter preset would ask about. For an asker in an untrusted project, anything outside its own project; but its requests are held until the person
 trusts the project, so its request turn comes only once it is trusted.
 
 That is the residual risk, named: a session that read hostile content can talk the orchestrator into reversible steps, or into reading

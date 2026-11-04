@@ -22,9 +22,14 @@ holding the read-only `reader` set (#320) is still a worker here: the gate asks 
 source directs sessions, not whether it has tools. Worker-originated records are excluded from
 privileged conversation memory. Read-session, preview and recall text is framed as structured
 untrusted data, not human authorization — that now includes what one ordinary session reads of
-another. The reader set cannot send. From a trusted project it reads other projects' and linked machines' ordinary
-sessions (#984), each row of a project nobody trusted marked "(not trusted)"; from an untrusted project it reads its
-own project only, so text planted there cannot search every conversation (the #382 rule).
+another. The reader set cannot send. From a trusted project it reads every session but an orchestrator's, here and on
+the linked machines (#984, #1941): coordinators', app sessions' (a builder, an agent an app asked for) and those with no
+project included, each row of a project nobody trusted marked "(not trusted)". No session reads an orchestrator's
+conversation, the person's own talk with it. What the orchestrator says to another session is that session's: the
+orchestrator's own agents (no project; their first message is its brief) are read like any session, and a brief, a
+message or mail from the orchestrator lands in the receiving session's conversation and is read with it (#1941
+review: intended, since a trusted project is the person's own). From an untrusted project it reads its own project only, so text planted
+there cannot search every conversation (the #382 rule).
 
 Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
 sent `fromApp`, and the first message a script started a session with `fromScript` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
@@ -359,7 +364,7 @@ front door" below).
 | `orchestrator` | The central orchestrator | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project (always: "Let sessions look at other sessions" is no longer a setting, owner decision 2026-10-20, and a stored "off" is not read) | From a trusted project, reads every project's ordinary sessions on this computer and the linked machines (not an orchestrator's, a coordinator's or an app's); from an untrusted one, its own project only (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
+| `reader` | Every other session in a project (always: "Let sessions look at other sessions" is no longer a setting, owner decision 2026-10-20, and a stored "off" is not read) | From a trusted project, reads every session on this computer and the linked machines but an orchestrator's (#984, #1941); from an untrusted one, its own project only; acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
 | none | A session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
@@ -524,9 +529,9 @@ is not yet measured here), a session cannot ask the orchestrator at all, in a th
 **Not covered, and named:** the orchestrator's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read
 hostile content can talk it into either. The floor covers the orchestrator's own steps; a worker it starts runs under its own preset, as one the asker started itself would,
 which is why work handed on without the request's card goes only to a session no looser than the asker; where it goes, another project or a linked machine, is
-the orchestrator's judgement. What it can pass back that the asker could not read itself is narrow, since under #984 a trusted asker reads every project's
-ordinary sessions, here and on the linked machines, and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own conversation,
-coordinators' and app sessions' conversations, sessions with no project, and files the asker's stricter preset would ask about; for an asker in an untrusted project,
+the orchestrator's judgement. What it can pass back that the asker could not read itself is narrow, since a trusted asker reads every session but an
+orchestrator's, here and on the linked machines (#984, #1941), and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own
+conversation (not a brief, message or mail it sent another session: that is in the receiving session's conversation, read with it), and files the asker's stricter preset would ask about; for an asker in an untrusted project,
 anything outside its own project, though its requests are held until the person trusts the project. A hub's orchestrator, which holds this host's token, could send
 text through the composer's call and so as the person; a request held for an untrusted project keeps its citation until the person trusts the project, since the
 window is checked at send;

@@ -330,11 +330,11 @@ export type LinkedSessions = {
   /** Registers an existing folder there as a project: that machine's `projects.add`, as its group's Add project calls it (#1220) */
   addProject(machineId: string, path: string): Promise<Outcome<{ projectId: string; name: string; path: string }>>
   /**
-   * What an ordinary session's reader view needs of a machine's session (#984), from the headers mirror: whether it is
-   * an app's (its builder or an agent an app asked for, never shown to a reader) and whether its project is trusted
-   * there. Null when the mirror does not hold it, which the reader treats as not readable.
+   * What an ordinary session's reader view needs of a machine's session (#984, #1941), from the headers mirror and the
+   * coordinators the hub keeps without showing them: whether its project is trusted there (one with no project is). Null
+   * for the machine's orchestrator, and when the hub holds no row of it, which the reader treats as not readable.
    */
-  readerFacts(sessionId: string): { app: boolean; trusted: boolean } | null
+  readerFacts(sessionId: string): { trusted: boolean } | null
   /** A machine's session as the hub last knew it (the headers mirror): its name and its project's */
   describe(sessionId: string): { name: string; project: string } | null
   /**

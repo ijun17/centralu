@@ -102,10 +102,10 @@ describe('the scope of a seat', () => {
     meta.set('builder', session('builder', { projectId: null, appId: 'notes' }))
     const read = vi.fn(async () => ({ ok: true as const, state: 'idle' as const, lines: ['{"role":"user","text":"over there"}'] }))
     const remote = (sessionId: string, project: string) => ({ sessionId, name: sessionId, project, machine: 'Far', state: 'idle', tool: 'claude' })
-    const facts: Record<string, { app: boolean; trusted: boolean }> = {
-      'm1.x': { app: false, trusted: true },
-      'm1.u': { app: false, trusted: false },
-      'm1.app': { app: true, trusted: true },
+    const facts: Record<string, { trusted: boolean }> = {
+      'm1.x': { trusted: true },
+      'm1.u': { trusted: false },
+      'm1.app': { trusted: true },
     }
     linked = {
       machineOf: (id: string) => (id.startsWith('m1.') ? 'Far' : null),
@@ -120,30 +120,36 @@ describe('the scope of a seat', () => {
     return { read }
   }
 
-  it("a reader of a trusted project reads every project's ordinary sessions, here and on the linked machines, marking the untrusted (#984)", async () => {
+  it("a reader of a trusted project reads every session but an orchestrator's, here and on the linked machines, marking the untrusted (#984, #1941)", async () => {
     const { read } = wideWorld()
     const reader = orchestratorToolsFor(host, 'a', undefined, true)
-    // Its own project's sessions first, then the other projects', then the machines'. Never an orchestrator, a
-    // coordinator or an app's session (its agent, its builder), nor a machine's session the hub's mirror does not hold
+    // Its own project's sessions first, then the other projects' and those with none, then the machines'. A coordinator, an
+    // app's agent and its builder included; never an orchestrator, nor a machine's session the hub holds no row of
     expect((await reader.listSessions()).map((s) => [s.sessionId, s.project])).toEqual([
       ['a2', 'shop'],
       ['b', 'clone (not trusted)'],
+      ['coord', 'clone (not trusted)'],
+      ['agent', 'clone (not trusted)'],
+      ['builder', '(none)'],
       ['m1.x', 'site'],
       ['m1.u', 'fork (not trusted)'],
+      ['m1.app', 'site'],
     ])
-    expect((await reader.listSessions({ project: 'CLONE' })).map((s) => s.sessionId)).toEqual(['b'])
+    expect((await reader.listSessions({ project: 'CLONE' })).map((s) => s.sessionId)).toEqual(['b', 'coord', 'agent'])
     expect(await reader.readSession('m1.x', 40, { around: 3 })).toMatchObject({ ok: true, lines: ['{"role":"user","text":"over there"}'] })
     expect(read).toHaveBeenCalledWith('m1.x', 40, { around: 3 })
     expect(await reader.readSession('m1.u')).toMatchObject({ ok: true, untrusted: true })
     expect(await reader.readSession('b')).toMatchObject({ ok: true, untrusted: true })
     expect(await reader.readSession('a2')).not.toHaveProperty('untrusted')
-    for (const id of ['orch', 'coord', 'agent', 'builder', 'm1.app', 'm1.new']) {
+    for (const id of ['coord', 'agent', 'builder', 'm1.app']) expect((await reader.readSession(id)).ok, id).toBe(true)
+    for (const id of ['orch', 'm1.new']) {
       expect(await reader.readSession(id)).toEqual({ ok: false, error: `Not a session you can read: ${id}` })
     }
-    expect(read).toHaveBeenCalledTimes(2)
+    expect(read).toHaveBeenCalledTimes(3)
     expect((await reader.recall('plan')).hits.map((h) => [h.sessionId, h.project])).toEqual([
       ['m1.x', 'site'],
       ['m1.u', 'site (not trusted)'],
+      ['m1.app', 'site'],
     ])
     // Acting stays inside its own project: another project's session, or a machine's, is out of reach
     expect(await reader.sendToSession('b', 'do it')).toEqual({ ok: false, error: 'Not a session in this project: b' })
@@ -166,6 +172,21 @@ describe('the scope of a seat', () => {
     expect(await reader.readSession('b')).not.toHaveProperty('untrusted')
     expect((await reader.recall('plan')).hits).toEqual([])
     expect(read).not.toHaveBeenCalled()
+  })
+
+  it("an orchestrator's row with a project is read by none of that project's sessions, trusted or not (#1941)", async () => {
+    wideWorld()
+    // A project orchestrator restored from before the central one: still marked an orchestrator, in a project
+    meta.set('old1', session('old1', { kind: 'orchestrator', projectId: 'p1' }))
+    meta.set('old2', session('old2', { kind: 'orchestrator', projectId: 'p2' }))
+    meta.set('c2', session('c2', { projectId: 'p2' }))
+    for (const [readerId, own] of [['a', 'old1'], ['c2', 'old2']] as const) {
+      const reader = orchestratorToolsFor(host, readerId, undefined, true)
+      const listed = (await reader.listSessions()).map((s) => s.sessionId)
+      expect(listed, readerId).not.toContain('old1')
+      expect(listed, readerId).not.toContain('old2')
+      expect((await reader.readSession(own)).ok, `${readerId} reads ${own}`).toBe(false)
+    }
   })
 
   it('a coordinator reads its members only, and never a linked machine', async () => {

@@ -314,8 +314,9 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   its own project; from a **trusted** project it now covers every project on this computer and on the linked
   machines, so a session can find the one to talk to later. From an untrusted project it stays inside its own
   project, as `ask_project` and `attach_app` refuse there (#382): text planted in an untrusted clone must not search
-  every conversation. Outside its own project it reads ordinary sessions only: never the orchestrator's or a
-  coordinator's, and never an app's (its builder, or an agent an app asked for). Each row names its project and
+  every conversation. It reads every session but an orchestrator's (#1941): a coordinator's, an app's (its
+  builder, or an agent an app asked for) and one with no project too; an orchestrator's conversation is the
+  person's own talk with it. Each row names its project and
   machine, a project nobody trusted is marked "(not trusted)", and the text stays framed as someone else's. The list
   shows 40 rows and counts the rest; `project` narrows it, and the own project's sessions and hits come first. A
   linked machine that does not answer within 4 s is listed from what the hub last knew, or named under "Not

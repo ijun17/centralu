@@ -2088,7 +2088,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
   }
 
   /** A remote with a worker, its orchestrator and a coordinator, each with something said; a hub with its own orchestrator and worker */
-  async function rig(o: { worktreeChild?: boolean } = {}) {
+  async function rig(o: { worktreeChild?: boolean; wide?: boolean } = {}) {
     const { store: remoteStore } = seeded([
       ['w1', 'worker', true],
       ['orch', 'orchestrator', false],
@@ -2105,6 +2105,13 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     // A child under w1 makes it a worktree manager there: a seat that directs, whose input the injection gate guards (#120)
     if (o.worktreeChild) seedSession(remoteStore, 'p-remote', 'kid', 'worker')
     if (o.worktreeChild) remoteStore.sessions.upsertSession({ ...remoteStore.sessions.listSessions().find((s) => s.id === 'kid')!, parentSessionId: 'w1' })
+    // An app's agent and a session with no project there, each with something said (#1941)
+    if (o.wide) {
+      seedSession(remoteStore, 'p-remote', 'app1', 'worker', null, { appId: 'notes' })
+      seedSession(remoteStore, null, 'loose', 'worker')
+      talk(remoteStore, 'app1', [['notes', 'zebracrossing in an app agent']])
+      talk(remoteStore, 'loose', [['scratch', 'zebracrossing with no project']])
+    }
     const remote = await remoteHost(0, remoteStore)
 
     const hubStore = new Store()
@@ -2113,6 +2120,16 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     seedSession(hubStore, null, 'hub-orch', 'orchestrator', 'ext-hub-orch')
     seedSession(hubStore, hubProject, 'h1', 'worker')
     talk(hubStore, 'h1', [['where is the backup', 'zebracrossing lives on the server']])
+    // A trusted project's reader, and this computer's coordinator, app builder and session with no project (#1941)
+    if (o.wide) {
+      hubStore.projects.addProject({ id: 'p-trusted', path: folder(), name: 'trusted-project', trusted: true })
+      seedSession(hubStore, 'p-trusted', 'h2', 'worker')
+      seedSession(hubStore, hubProject, 'hcoord', 'coordinator')
+      seedSession(hubStore, null, 'happ', 'worker', null, { appId: 'notes' })
+      seedSession(hubStore, null, 'hloose', 'worker')
+      talk(hubStore, 'hub-orch', [['mine', 'zebracrossing in the talk with the orchestrator']])
+      talk(hubStore, 'hcoord', [['lead', 'zebracrossing from the local coordinator']])
+    }
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     await eventually(() => status(hub) === 'connected')
     const tool = async (name: string, args: Record<string, unknown> = {}) =>
@@ -2120,12 +2137,13 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     return { remote, hub, tool }
   }
 
-  it('lists a linked machine’s sessions beside this computer’s, named by the machine, without its orchestrator or coordinators', async () => {
+  it('lists a linked machine’s sessions beside this computer’s, named by the machine, with its coordinators but never its orchestrator (#1941)', async () => {
     const { tool } = await rig()
     const lines = (await tool('list_sessions')).text.split('\n').filter((l) => l.startsWith('- '))
     expect(lines).toEqual([
       expect.stringMatching(/^- h1 \[h1\] · project hub-project · claude · idle/),
       expect.stringMatching(/^- w1 \[m1\.w1\] · project remote-project on Remote box · claude · idle/),
+      expect.stringMatching(/^- coord \[m1\.coord\] · project remote-project on Remote box · claude · idle/),
     ])
   })
 
@@ -2137,14 +2155,33 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(end.text).not.toContain('zebracrossing')
 
     const found = await tool('recall', { query: 'zebracrossing' })
-    // This computer's hit and the machine's, taken in turns; never the machine's orchestrator or coordinator
+    // This computer's hit and the machine's, taken in turns; its coordinator's too, never its orchestrator's (#1941)
     expect(found.text).toContain('[hub-project] h1')
     expect(found.text).toContain('[remote-project on Remote box] w1')
-    expect(found.text).not.toMatch(/remote orchestrator|coordinator/)
+    expect(found.text).toContain('m1.coord')
+    expect(found.text).not.toMatch(/remote orchestrator/)
     const around = /read_session\(sessionId="m1\.w1", around=(\d+)\)/.exec(found.text)
     expect(around).not.toBeNull()
     const there = await tool('read_session', { sessionId: 'm1.w1', around: Number(around![1]), limit: 4 })
     expect(there.text).toContain('The zebracrossing job now runs at 02:00.')
+  })
+
+  it("a trusted project's session reads every session but an orchestrator's, here and on the machine; an untrusted project's reads its own project only (#1941)", async () => {
+    const { hub } = await rig({ wide: true })
+    const as = (sessionId: string, name: string, args: Record<string, unknown> = {}) => hub.mgr.runOrchestratorTool(sessionId, name, args)
+    const readable = ['hcoord', 'happ', 'hloose', 'm1.coord', 'm1.app1', 'm1.loose']
+    for (const id of readable) expect((await as('h2', 'read_session', { sessionId: id })).isError, id).toBeFalsy()
+    for (const id of ['hub-orch', 'm1.orch']) expect(await as('h2', 'read_session', { sessionId: id }), id).toMatchObject({ isError: true })
+    const listed = (await as('h2', 'read_session')).text
+    for (const id of readable) expect(listed, id).toContain(`[${id}]`)
+    expect(listed).not.toMatch(/\[(hub-orch|m1\.orch)\]/)
+    const found = (await as('h2', 'recall', { query: 'zebracrossing' })).text
+    for (const id of ['hcoord', 'm1.coord', 'm1.app1', 'm1.loose']) expect(found, id).toContain(`sessionId="${id}"`)
+    expect(found).not.toMatch(/remote orchestrator|talk with the orchestrator/)
+    // From the untrusted project: its own project's sessions only, here or there
+    expect((await as('h1', 'read_session', { sessionId: 'hcoord' })).isError).toBeFalsy()
+    for (const id of ['happ', 'hloose', 'h2', 'm1.coord', 'm1.w1', 'hub-orch']) expect(await as('h1', 'read_session', { sessionId: id }), id).toMatchObject({ isError: true })
+    expect((await as('h1', 'recall', { query: 'zebracrossing' })).text).not.toMatch(/m1\.|orchestrator/)
   })
 
   it('neither reads nor directs the machine’s orchestrator', async () => {
@@ -2154,6 +2191,19 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const sent = await tool('send_to_session', { sessionId: 'm1.orch', text: 'do it' })
     expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
     expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
+  })
+
+  it("changes no setting of the machine's orchestrator nor its coordinator, on the hub nor there (#1941 review)", async () => {
+    const { tool, remote } = await rig()
+    for (const id of ['orch', 'coord']) {
+      expect(await tool('update_session_settings', { sessionId: `m1.${id}`, model: 'scripted-1' })).toMatchObject({ isError: true, text: expect.stringContaining('shares') })
+    }
+    // The machine refuses one too, as a hub from before the hub's own check asks it
+    const asHub = await ui(remote.port)
+    for (const id of ['orch', 'coord']) {
+      await expect(asHub.call('agents.updateSettings', { sessionId: id, model: 'scripted-1', by: 'orchestrator' })).rejects.toThrow(`Not a session this machine shares: ${id}`)
+    }
+    expect(remote.mgr.listSessions().filter((s) => s.model === 'scripted-1')).toEqual([])
   })
 
   /** What the hub's orchestrator was told: the text of each message in its own session */
