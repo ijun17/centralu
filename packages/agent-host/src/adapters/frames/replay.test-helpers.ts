@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
@@ -22,6 +24,21 @@ export function loadRecording(path: string): Recording {
   return { header: (head?.header ?? {}) as Record<string, unknown>, frames: frames as Rec[] }
 }
 
+/** The recordings under `root`: one folder per tool version, with the scenarios recorded in it and each one's file */
+export function recordedFolders(root: string): { dir: string; names: string[]; file(name: string): string }[] {
+  return readdirSync(root).map((dir) => ({
+    dir,
+    names: readdirSync(join(root, dir)).map((f) => f.replace(/\.jsonl$/, '')),
+    file: (name) => join(root, dir, `${name}.jsonl`),
+  }))
+}
+
+/** A new folder for a replay to run in, and the way to take it away */
+export function temporaryFolder(prefix: string): { path: string; remove(): void } {
+  const path = mkdtempSync(join(tmpdir(), prefix))
+  return { path, remove: () => rmSync(path, { recursive: true, force: true }) }
+}
+
 /** What went wrong in a replay; a test asserts it stays empty and that every frame was used */
 export type ReplayState = { problems: string[]; left(): number; spawned: number }
 
@@ -33,6 +50,25 @@ export type FrameCodec = {
   match(sent: Record<string, unknown>, recorded: Record<string, unknown>, ids: Map<string, string | number>): string | null
   /** A recorded incoming frame as it is written to the adapter */
   rewrite(incoming: Record<string, unknown>, ids: Map<string, string | number>): Record<string, unknown>
+  /**
+   * Whether the lines the adapter sends with nothing from the tool between them may come in another order than recorded.
+   * They are sent from separate asynchronous paths (an answer to the tool's request, a context query, a Stop), so their
+   * order differs between runs; what a line is answered with does not depend on it
+   */
+  readonly unordered?: boolean
+  /**
+   * A query the adapter makes when it likes, not because the tool said something (Claude: a context reading, sent when
+   * the previous one has been answered, so how many go out and where depends on timing). Neither it nor its answer is
+   * played from the recording: the adapter is answered with the recording's first answer to one
+   */
+  readonly probe?: {
+    is(line: Record<string, unknown>): boolean
+    /** Whether `line` answers one of the recorded probes `asked` (by their ids) */
+    answers(line: Record<string, unknown>, asked: Set<string>): boolean
+    requestId(line: Record<string, unknown>): string
+    /** The answer to `asked`, made from a recorded one */
+    answer(asked: Record<string, unknown>, recorded: Record<string, unknown>): Record<string, unknown>
+  }
 }
 
 /** JSON-RPC 2.0 (ACP): a request or notification by its method, an answer to the tool's request by its id and result */
@@ -55,22 +91,76 @@ export const jsonRpcCodec: FrameCodec = {
   },
 }
 
+const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
+
+/**
+ * Claude Code's stream-json (what the SDK speaks to the CLI): a line matches by its `type`, and further by what it asks or
+ * answers: a control request by its `subtype`, the answer to the CLI's request (an approval, a hook) by its request id and
+ * its verdict, a user message by its content. The ids the SDK and the adapter make up for themselves (a request id, an
+ * input's uuid) differ per run, so each is mapped to the recorded one and the CLI's later references to it are rewritten.
+ * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for.
+ */
+export const streamJsonCodec = (cwd: string): FrameCodec => ({
+  unordered: true,
+  probe: {
+    is: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_context_usage',
+    answers: (line, asked) => line.type === 'control_response' && asked.has(String(record(line.response).request_id)),
+    requestId: (line) => String(line.request_id),
+    answer: (asked, recorded) => ({ ...recorded, response: { ...record(recorded.response), request_id: asked.request_id } }),
+  },
+  match(sent, want, ids) {
+    if (sent.type !== want.type) return `the adapter sent ${describeLine(sent)} where the recording sends ${describeLine(want)}`
+    if (want.type === 'control_request') {
+      const [asked, wanted] = [record(sent.request), record(want.request)]
+      if (asked.subtype !== wanted.subtype) return `the adapter sent ${describeLine(sent)} where the recording sends ${describeLine(want)}`
+      if (typeof want.request_id === 'string' && typeof sent.request_id === 'string') ids.set(want.request_id, sent.request_id)
+    } else if (want.type === 'control_response') {
+      const [answered, wanted] = [record(sent.response), record(want.response)]
+      const [verdict, wantedVerdict] = [record(answered.response), record(wanted.response)]
+      if (answered.request_id !== wanted.request_id || answered.subtype !== wanted.subtype || verdict.behavior !== wantedVerdict.behavior) {
+        return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
+      }
+    } else if (want.type === 'user') {
+      if (!isDeepStrictEqual(sent.message, want.message)) return `the adapter sent the message ${JSON.stringify(sent.message)} where the recording sends ${JSON.stringify(want.message)}`
+      if (typeof want.uuid === 'string' && typeof sent.uuid === 'string') ids.set(want.uuid, sent.uuid)
+    }
+    return null
+  },
+  rewrite(incoming, ids) {
+    const swap = (v: unknown): unknown => {
+      if (typeof v === 'string') return ids.get(v) ?? v.split('<cwd>').join(cwd)
+      if (Array.isArray(v)) return v.map(swap)
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)]))
+      return v
+    }
+    return swap(incoming) as Record<string, unknown>
+  },
+})
+
+const describeLine = (m: Record<string, unknown>): string => {
+  const subtype = record(m.request).subtype ?? m.subtype
+  return typeof subtype === 'string' ? `${String(m.type)} ${subtype}` : String(m.type)
+}
+
 export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
   let cursor = 0
   const frames = recording.frames
   const peers: ReplayPeer[] = []
   const state: ReplayState = { problems: [], left: () => frames.length - cursor, spawned: 0 }
+  const probe = codec.probe
+  const asked = new Set(probe ? frames.flatMap((f) => (f.dir === 'out' && f.msg && probe.is(f.msg) ? [probe.requestId(f.msg)] : [])) : [])
+  const answer = probe ? frames.find((f) => f.dir === 'in' && f.msg && probe.answers(f.msg, asked))?.msg : undefined
   const take = (): Rec[] => {
     const end = frames.findIndex((f, i) => i >= cursor && f.dir === 'exit')
     const stop = end < 0 ? frames.length : end + 1
     const segment = frames.slice(cursor, stop)
     cursor = stop
-    return segment
+    return probe ? segment.filter((f) => !f.msg || (f.dir === 'out' ? !probe.is(f.msg) : !probe.answers(f.msg, asked))) : segment
   }
   return {
     spawn: () => {
       state.spawned++
-      const peer = new ReplayPeer(take(), state.problems, codec)
+      const peer = new ReplayPeer(take(), state.problems, codec, answer)
       peers.push(peer)
       return peer
     },
@@ -104,6 +194,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     private readonly frames: Rec[],
     private readonly problems: string[],
     private readonly codec: FrameCodec = jsonRpcCodec,
+    /** A recorded answer to a probe, for the ones the adapter makes (`FrameCodec.probe`) */
+    private readonly probeAnswer?: Record<string, unknown>,
   ) {
     super()
     this.stdin.on('data', (d: Buffer) => {
@@ -123,13 +215,31 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     return this.frames.length - this.i
   }
 
+  /** What the replay waits for next, for a failure message */
+  waitingFor(): string {
+    const next = this.frames[this.i]
+    return next ? describeRec(next) : 'nothing more'
+  }
+
   private received(msg: Record<string, unknown>): void {
+    if (this.codec.probe?.is(msg)) {
+      // A recording that holds no answer to one (the tool ended first) leaves the adapter's query unanswered, as the tool did
+      if (this.probeAnswer) this.stdout.write(`${JSON.stringify(this.codec.probe.answer(msg, this.probeAnswer))}
+`)
+      return
+    }
     const expected = this.frames[this.i]
     if (!expected || expected.dir !== 'out' || !expected.msg) {
       this.problems.push(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)
       return
     }
-    const problem = this.codec.match(msg, expected.msg, this.ids)
+    let problem = this.codec.match(msg, expected.msg, this.ids)
+    // The run of lines recorded with nothing from the tool between them: the line may be any of them
+    for (let j = this.i + 1; problem && this.codec.unordered && this.frames[j]?.dir === 'out' && this.frames[j]!.msg; j++) {
+      if (this.codec.match(msg, this.frames[j]!.msg!, this.ids)) continue
+      this.frames.splice(this.i, 0, ...this.frames.splice(j, 1))
+      problem = null
+    }
     if (problem) {
       this.problems.push(problem)
       return
@@ -170,5 +280,5 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   }
 }
 
-const describe = (m: Record<string, unknown>) => (typeof m.method === 'string' ? `${m.method}` : `an answer to ${String(m.id)}`)
+const describe = (m: Record<string, unknown>) => (typeof m.method === 'string' ? `${m.method}` : typeof m.type === 'string' ? describeLine(m) : `an answer to ${String(m.id)}`)
 const describeRec = (r: Rec) => (r.dir === 'exit' ? 'the process ending' : r.msg ? `${r.dir === 'in' ? 'incoming' : 'outgoing'} ${describe(r.msg)}` : r.dir)

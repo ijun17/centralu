@@ -11,11 +11,11 @@ import { detailOf } from './session.js'
 import { readUpdate, RequestPermission } from './wire.js'
 import type { AcpProfile } from './profile.js'
 import { loadRecording, replaySpawner } from '../frames/replay.test-helpers.js'
-import { drive, SCENARIOS } from '../frames/scenarios.test-helpers.js'
+import { drive, SCENARIOS, scenariosFor } from '../frames/scenarios.test-helpers.js'
 
 /**
  * The adapter against recordings of the real tools (docs/plans/acp-adapter.md §10, #1498). Each recording was made by
- * `scripts/acp-record.mts` driving this adapter through the same scenario, so the replay checks every frame the adapter
+ * `scripts/frames-record.mts` driving this adapter through the same scenario, so the replay checks every frame the adapter
  * sends against what it sent to the real agent, and what it makes of what the agent answered.
  */
 
@@ -37,7 +37,7 @@ const profile = (dir: string, version: string): AcpProfile => {
 async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number }> {
   const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
   const named = SCENARIOS.find((s) => s.name === name)!
-  // Driven under the preset it was recorded with (`acp-record.mts` writes it; older recordings ran under Normal)
+  // Driven under the preset it was recorded with (`frames-record.mts` writes it; older recordings ran under Normal)
   const preset = PermissionPreset.safeParse(recording.header.preset)
   const scenario = preset.success ? { ...named, preset: preset.data } : named
   const { spawn, state, peers } = replaySpawner(recording)
@@ -66,7 +66,7 @@ const of = <T extends NormalizedEvent['type']>(events: NormalizedEvent[], type: 
 for (const dir of readdirSync(RECORDINGS)) {
   const names = readdirSync(join(RECORDINGS, dir))
     .map((f) => f.replace(/\.jsonl$/, ''))
-    .filter((n) => SCENARIOS.some((s) => s.name === n))
+    .filter((n) => scenariosFor(dir.replace(/-[^-]*$/, '')).some((s) => s.name === n))
   describe(`replaying ${dir}`, () => {
     for (const name of names) {
       it(`${name}: sends what it sent to the real agent, and uses every recorded frame`, async () => {

@@ -16,6 +16,9 @@ function commandRunOf(name: string, input: Json): { name: string; input: Json } 
   return run ? { name: name.slice(0, -'centralu_run'.length) + run.command, input: run.args } : null
 }
 
+/** The tools that run a command: Claude Code offers PowerShell beside Bash on Windows (measured, CLI 2.1.296, recordings/claude-code-2.1.296) */
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+
 export function toolSummary(name: string, input: Json): ToolSummary {
   /*
    * A command run through centralu_run is summarized as the command (#512): the screen reacts to a call by
@@ -26,7 +29,7 @@ export function toolSummary(name: string, input: Json): ToolSummary {
   if (run) return toolSummary(run.name, run.input)
   const paths: string[] = []
   let title = name
-  if (name === 'Bash') title = str(input.command, name)
+  if (SHELL_TOOLS.has(name)) title = str(input.command, name)
   else if (FILE_EDIT_TOOLS.has(name) || name === 'Read') {
     const p = str(input.file_path ?? input.notebook_path)
     if (p) paths.push(p)
@@ -138,7 +141,7 @@ export function claudeFileChange(name: string, input: Json, isNew?: boolean): Fi
  */
 export function approvalDetail(name: string, input: Json, cwd: string, isNew?: boolean): ApprovalDetail {
   // Running outside the sandbox is part of what is asked (#683 review): the card says so, and no list row answers it
-  if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
+  if (SHELL_TOOLS.has(name)) return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
   if (FILE_EDIT_TOOLS.has(name)) {
     const change = claudeFileChange(name, input, isNew)
     // A call that carries none of the fields read is shown as it came, rather than as an empty card

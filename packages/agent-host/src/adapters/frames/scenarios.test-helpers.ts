@@ -1,15 +1,21 @@
 import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
-import type { AgentAdapter, SessionHandle } from '../contract.js'
+import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 
 /**
  * The scenarios a recording is made of, at the level of the adapter contract (`SessionHandle`), so any adapter (ACP or a
  * stream-json CLI's) can be recorded and replayed with them (docs/plans/acp-adapter.md §10.4). The same code drives the adapter against
- * the real CLI (`scripts/acp-record.mts`, which writes the recording) and against the recording (`replay.test.ts`), so a
+ * the real CLI (`scripts/frames-record.mts`, which writes the recording) and against the recording (`replay.test.ts`), so a
  * replay sends exactly what the recorded run sent. Prompts are short: a recording spends the person's model calls.
  */
 
 export type Driver = {
   readonly events: NormalizedEvent[]
+  /** The tool being driven */
+  readonly tool: string
+  /** The session's working folder */
+  readonly cwd: string
+  /** Files the real tool is to find in its working folder; a replay has nothing to write them with */
+  seed(files: Record<string, string>): void
   session(): SessionHandle
   /** The next event after the ones already waited for that `pick` accepts: resolved when it is emitted, never polled */
   waitFor(label: string, pick: (e: NormalizedEvent) => boolean): Promise<NormalizedEvent>
@@ -19,8 +25,18 @@ export type Driver = {
   kill(): void
 }
 
+/** The tools whose recordings come from the scenarios that name no tool of their own */
+const ACP_TOOLS: readonly string[] = ['cursor-agent', 'opencode']
+const ANY_TOOL: readonly string[] = [...ACP_TOOLS, 'claude']
+
 export type Scenario = {
   name: string
+  /** The tools this scenario is recorded for; the ACP ones when absent */
+  tools?: readonly string[]
+  /** The preset a tool is recorded under when it is not the scenario's own */
+  presetFor?: Partial<Record<string, PermissionPreset>>
+  /** A model the scenario asks for in place of the run's (a failed turn names one that does not exist) */
+  model?: string
   preset?: PermissionPreset
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
@@ -32,10 +48,80 @@ const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
   d.session().send(text, opts)
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
+/** A command the tool asks about: Claude Code runs a read-only one such as echo without asking, so it is given one that writes */
+const asked = (d: Driver, n: number | string) => (d.tool === 'claude' ? `touch probe-${n}.txt` : `echo probe-${n}`)
+/** A turn in which every card asked is answered `decide` until the turn ends; the kinds of card asked, in order */
+const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): Promise<string[]> => {
+  d.session().send(text)
+  const asked: string[] = []
+  for (;;) {
+    const e = await d.waitFor(`a card or the end of the turn "${text.slice(0, 30)}"`, (x) => x.type === 'approval_request' || ended(x))
+    if (e.type !== 'approval_request') return asked
+    asked.push(e.detail.kind)
+    d.session().respondApproval(e.requestId, decide)
+  }
+}
 
 export const SCENARIOS: readonly Scenario[] = [
   {
+    // Read and Edit inside the folder, then a command: `edits` grants the edit, so the command is asked about once
+    name: 'tools',
+    tools: ['claude'],
+    preset: 'edits',
+    async run(d) {
+      d.seed({ 'note.txt': 'The sky is red.\n' })
+      const asked = await answeredTurn(d, 'Use the Read tool on note.txt, then the Edit tool to change the word red to blue in it, then run the shell command: touch tools-done.txt . Then say done.', 'allow')
+      if (asked.length === 0) throw new Error('tools: the command was not asked about')
+    },
+  },
+  {
+    name: 'background',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send('Start this in the background with the Bash tool (run_in_background): sleep 4 && echo bg-done . Then say started and end your turn.')
+      await d.waitFor('the background task', (e) => e.type === 'background_tasks' && e.live.length > 0)
+      await d.waitFor('the end of the first turn', ended)
+      // The task ends on its own, and the CLI wakes the model with its result
+      await d.waitFor('the task ended', (e) => e.type === 'background_tasks' && (e.ended?.length ?? 0) > 0)
+      await d.waitFor('the end of the turn that reports it', ended)
+    },
+  },
+  {
+    // A model the API does not have: the turn fails at once
+    name: 'failed',
+    tools: ['claude'],
+    model: 'no-such-model-xyz',
+    async run(d) {
+      d.session().send('Reply with exactly: hello')
+      await d.waitFor('the failure', (e) => e.type === 'error')
+    },
+  },
+  {
+    name: 'interrupt-tool',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      // Not `sleep 120`: Claude Code refuses a long sleep before it runs (measured), and nothing would be interrupted
+      d.session().send('Run this shell command and wait for it: node -e "setTimeout(() => {}, 120000)"')
+      await d.waitFor('the command call', (e) => e.type === 'tool_call' && (e.summary.tool === 'Bash' || e.summary.tool === 'PowerShell'))
+      d.session().interrupt()
+      await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
+      await turn(d, 'Say ok.')
+    },
+  },
+  {
+    name: 'big-output',
+    tools: ['claude'],
+    async run(d) {
+      await turn(d, 'Count from 1 to 150, one number per line, and nothing else.')
+    },
+  },
+  {
     name: 'basic',
+    tools: ANY_TOOL,
+    // Claude Code asks before it writes a file unless the preset grants edits in the folder
+    presetFor: { claude: 'edits' },
     async run(d) {
       await turn(d, 'Reply with exactly: hello')
       await turn(d, 'Create a file named probe.txt containing the word hi, using your tools. Then say done.')
@@ -43,6 +129,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'approval',
+    tools: ANY_TOOL,
     asksForCommands: true,
     async run(d) {
       const answer = async (text: string, decide: 'allow' | 'deny' | 'always') => {
@@ -53,14 +140,15 @@ export const SCENARIOS: readonly Scenario[] = [
         d.session().respondApproval(card.requestId, decide, undefined, matcher)
         await d.waitFor('the end of the turn', ended)
       }
-      await answer('Run the shell command: echo probe-1 . Then say done.', 'allow')
-      await answer('Run the shell command: echo probe-2 . Then say done.', 'deny')
-      await answer('Run exactly this shell command: echo probe-3 . Then say done.', 'always')
-      await turn(d, 'Run exactly this shell command again: echo probe-3 . Then say done.')
+      await answer(`Run the shell command: ${asked(d, 1)} . Then say done.`, 'allow')
+      await answer(`Run the shell command: ${asked(d, 2)} . Then say done.`, 'deny')
+      await answer(`Run exactly this shell command: ${asked(d, 3)} . Then say done.`, 'always')
+      await turn(d, `Run exactly this shell command again: ${asked(d, 3)} . Then say done.`)
     },
   },
   {
     name: 'interrupt',
+    tools: ANY_TOOL,
     async run(d) {
       d.session().send('Count from 1 to 300, one number per line.')
       await d.waitFor('the first output', (e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
@@ -71,9 +159,10 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'interrupt-approval',
+    tools: ANY_TOOL,
     asksForCommands: true,
     async run(d) {
-      d.session().send('Run the shell command: echo probe-x . Then say done.')
+      d.session().send(`Run the shell command: ${asked(d, 'x')} . Then say done.`)
       await d.waitFor('an approval card', (e) => e.type === 'approval_request')
       d.session().interrupt()
       await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
@@ -81,10 +170,18 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'queued',
+    tools: ANY_TOOL,
     async run(d) {
-      const first = d.session().sendTracked!('Write a two-sentence story about a lighthouse.')
-      const second = d.session().sendTracked!('What is 2+2? Answer in one word.')
-      await Promise.all([first, second])
+      const session = d.session()
+      if (session.sendTracked) {
+        await Promise.all([session.sendTracked('Write a two-sentence story about a lighthouse.'), session.sendTracked('What is 2+2? Answer in one word.')])
+        return
+      }
+      // A tool that names no receipt takes the second line while the first turn runs: both turns end
+      session.send('Write a two-sentence story about a lighthouse.')
+      session.send('What is 2+2? Answer in one word.')
+      await d.waitFor('the end of the first turn', (e) => e.type === 'turn_complete')
+      await d.waitFor('the end of the second turn', (e) => e.type === 'turn_complete')
     },
   },
   {
@@ -98,6 +195,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'resume',
+    tools: ANY_TOOL,
     async run(d) {
       await turn(d, 'Remember the code word: pelican. Reply with exactly: noted')
       await d.reopen()
@@ -114,6 +212,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'compact',
+    tools: ANY_TOOL,
     async run(d) {
       await turn(d, 'Reply with exactly: one')
       // As Centralu sends its own compact (`SessionEvents.sendCompact`)
@@ -123,8 +222,23 @@ export const SCENARIOS: readonly Scenario[] = [
   },
 ]
 
-/** Drives `adapter` through one scenario; `bound` is how long a step may wait for a real CLI (0: no bound, for replays) */
-export async function drive(adapter: AgentAdapter, scenario: Scenario, cwd: string, sessionId: string, bound: number, killer: () => void): Promise<NormalizedEvent[]> {
+/** The scenarios recorded for `tool` */
+export const scenariosFor = (tool: string): Scenario[] => SCENARIOS.filter((s) => (s.tools ?? ACP_TOOLS).includes(tool))
+
+/**
+ * Drives `adapter` through one scenario; `bound` is how long a step may wait for a real CLI (0: no bound, for replays).
+ * `how.session`: what the run adds to every session it opens (a model, no settings files); `how.seed`: puts the
+ * scenario's files in the real working folder of a recording run
+ */
+export async function drive(
+  adapter: AgentAdapter,
+  scenario: Scenario,
+  cwd: string,
+  sessionId: string,
+  bound: number,
+  killer: () => void,
+  how: { tool?: string; session?: Partial<CreateSessionOpts>; seed?: (files: Record<string, string>) => void } = {},
+): Promise<NormalizedEvent[]> {
   const events: NormalizedEvent[] = []
   let seen = 0
   let waiter: { pick(e: NormalizedEvent): boolean; resolve(e: NormalizedEvent): void } | null = null
@@ -139,10 +253,13 @@ export async function drive(adapter: AgentAdapter, scenario: Scenario, cwd: stri
       }
     }
   }
-  const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true }
+  const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
   let handle = await adapter.createSession(opts, emit)
   const driver: Driver = {
     events,
+    tool: how.tool ?? '',
+    cwd,
+    seed: (files) => how.seed?.(files),
     session: () => handle,
     waitFor: (label, pick) =>
       new Promise((resolve, reject) => {
@@ -167,7 +284,11 @@ export async function drive(adapter: AgentAdapter, scenario: Scenario, cwd: stri
     },
     kill: killer,
   }
-  await scenario.run(driver)
-  await handle.dispose()
+  try {
+    await scenario.run(driver)
+  } finally {
+    // A scenario that failed leaves no process behind
+    await handle.dispose()
+  }
   return events
 }

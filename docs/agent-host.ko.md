@@ -986,7 +986,7 @@ interface AdapterCapabilities {
 3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증. 새 도구는 `adapters/frames/`의
    도구 중립 프레임 도구로 녹화한다 (#1498): 녹화기(`CC_RECORD_FRAMES`), 스크러버(`scripts/frames-scrub.mts`), 프로토콜의
    `FrameCodec`을 쓰는 재생기, `SessionHandle` 수준에서 도는 시나리오. 그래서 픽스처는 어댑터 자신이 보내고 받은 그대로다
-   (ACP 어댑터의 것은 `scripts/acp-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).
+   (ACP 어댑터의 것은 `scripts/frames-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).
 4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1). 계약의 `surface`(#270)도 채운다 —
    측정으로 얻은 프로토콜 지식은 그냥 두면 조용히 썩는다.
 5. 끝. **ui, core, platform은 변경되지 않고**, protocol은 2번의 두 항목만큼만 바뀐다.
