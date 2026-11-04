@@ -825,6 +825,11 @@ export class ChildOwnership {
     if (span.latest && span.previous) return { after: span.previous.since, through: span.latest.since }
     return span.latest ? { after: span.latest.since } : undefined
   }
+  /** The rows of the turn that began last, ended or not (#1946): the turn a stop cut, though an update's continue runs on in it */
+  latestTurnRows(sessionId: string): { after: number } | undefined {
+    const since = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId))).latest?.since
+    return since === undefined ? undefined : { after: since }
+  }
   /** The mailbox's way of hearing that a turn started (§6), set by the host when it has one */
   private turnStartedHook: ((sessionId: string, turn: TurnStart) => void) | undefined
   onTurnStarted(hook: ChildOwnership['turnStartedHook']): void {

@@ -528,6 +528,23 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await h.mgr.disposeAll()
   }
 
+  it("its parent's notice quotes that turn's words, none here, never the turn before's answer (#1946)", async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('indent fixed in the sidebar')
+    await eventually(() => reportsTo(parent, child).length === 1)
+    await eventually(() => info(a, parent).state === 'working')
+    a.claude.handles.get(parent)!.answer('noted')
+    // The child's CLI opens a turn of its own and says nothing before the update cuts it
+    a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'working' })
+    await stopForUpdate(a)
+    host({ updateResume: f })
+    const goesOn = () => reportsTo(parent, child).find((t) => t.includes('cut short by an update'))
+    await eventually(() => goesOn() !== undefined)
+    expect(goesOn()).not.toContain('indent fixed in the sidebar')
+  })
+
   it("is listed by the stop, continued once with Centralu's note; its parent hears it goes on, and the report is the continued turn's end", async () => {
     const f = folder()
     const a = host({ updateResume: f })
