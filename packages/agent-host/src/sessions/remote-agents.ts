@@ -13,7 +13,6 @@ import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } fr
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
-import type { LinkedReport } from './child-ownership.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
@@ -212,8 +211,6 @@ export class RemoteAgents {
   private readonly toldDown = new Map<string, boolean>()
   /** The machines whose link this hub's own update or rollback holds, until it is back (#1618, `linkChanged`) */
   private readonly updateHolds = new Set<string>()
-  /** The turns an update of their machine cut that a report already carries (#1966), by session and when the machine took it up: once each */
-  private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
@@ -370,7 +367,8 @@ export class RemoteAgents {
     if (!reader || this.pending.has(rec.sessionId)) return
     await this.verify(rec, reader)
     const report = this.host.children.linkedReports.get(rec.sessionId)
-    if (!report || report.orchestratorId !== rec.callerId || report.paused || !this.gateNow(rec).owned) return
+    // A paused report whose turn was seen is read too: the turn's end was deferred, and nothing else would report it (#1966 review)
+    if (!report || report.orchestratorId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) return
     const now = await reader.read(rec.sessionId, 1)
     if (!now.ok || this.host.children.linkedReports.get(rec.sessionId) !== report || !this.gateNow(rec).owned) return
     this.deferred.delete(rec.sessionId)
@@ -1419,29 +1417,15 @@ export class RemoteAgents {
       const held = this.deferred.delete(rec.sessionId)
       if (this.whoseOf(rec) === 'unknown' && !this.pending.has(rec.sessionId)) await this.verify(rec, reader)
       const report = this.host.children.linkedReports.get(rec.sessionId)
-      if (!report || report.orchestratorId !== rec.callerId || report.paused || !this.gateNow(rec).owned) continue
+      if (!report || report.orchestratorId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) continue
       if (!report.busy && !missed && !held) continue
       const now = await reader.read(rec.sessionId, 1)
       // Read again: the turn's own end, or another's message, may have come in while the machine was asked
       if (!now.ok || this.host.children.linkedReports.get(rec.sessionId) !== report || !this.gateNow(rec).owned) continue
       if (inTurn((now.state ?? 'idle') as SessionState)) {
         report.busy = true
-        this.noteCut(rec, report)
       } else this.host.settleLinkedTurn(rec.sessionId)
     }
-  }
-
-  /**
-   * A child found in a turn again once the link is back, whose turn an update of its machine cut: the host that update started continued
-   * it (#1618). Its caller is told nothing now (#1966): the report it is owed is that turn's end, and says in one line that the turn was
-   * cut and continued. Whatever the order of the Continue and the reconnect (#1626 review): the machine's host names each turn it
-   * continues from its start on, before it answers any hello (`SessionManager.updateContinued`)
-   */
-  private noteCut(rec: RemoteAgent, report: LinkedReport): void {
-    const at = this.host.linkedReader?.continuedAfterUpdate?.(rec.sessionId)
-    if (at == null || this.toldCut.has(`${rec.sessionId}@${at}`)) return
-    this.toldCut.add(`${rec.sessionId}@${at}`)
-    report.cut = true
   }
 
   /**

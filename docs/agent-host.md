@@ -3678,11 +3678,13 @@ the person's Continue would.
   not be re-attached; ACP, which reopens the conversation in a new process and so marks `takesOverTurn = false`) gets the same Continue
   through the same door (`SessionManager.sendUpdateNote`, `continueLostTurn` from `adoptKept`), the state kept `working` while the new
   process comes up (`continuingTurns`). Only when that send fails does it end as above. A turn cut by the person's own quit (`markQuit`,
-  no list, no swap) is not continued, as before (#1947).
+  no list, no swap) is not continued, as before (#1947). A kept process that could not be re-attached is stopped first and waited for (up to 5 s, then killed)
+  before its conversation is resumed, so two CLIs do not write one transcript.
 - **Its caller hears nothing of the cut** (#1966). The update used to send one notice per cut child, each waking the parent's turn
   for no decision. Now the parent is told nothing until the continued turn ends; that report carries one line, "An update of
-  Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set when the Continue went in, `ChildOwnership.noteContinuedCut`;
-  for a child on a linked machine the hub's report sets `LinkedReport.cut` when the hello names the turn). A turn that cannot be
+  Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set before the Continue goes in and dropped if it fails, `ChildOwnership.noteContinuedCut`; the machine's host
+  says it on the ending event, `TurnWho.cut`, so a hub carries it on that one turn's report whether or not its link caught the turn mid-way).
+  Every session whose turn Centralu cut is continued, the person's own sessions too, not only children: Centralu cut it, the person did not stop it (owner, #1966). A turn that cannot be
   continued ends as a stopped turn and is told as such (above): one report for that child, which the parent is owed anyway. A caller on the hub (a child start_agent made there) is not told that the link
   dropped while the hub's own update or rollback holds the link, from its first step until the link is back
   (`RemoteAgents.updateHolds`), when the machine's host is one that continues cut turns. The new host's `hello_ok`

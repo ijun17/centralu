@@ -1936,11 +1936,11 @@ Windows 패키지를 실패시킨다.
 - **스왑이 끊은 턴도 같은 방식으로 잇는다**(#1966). 호스트 스왑이 끊은 턴 중 도구가 다시 이어 받지 못하는 것(다시 붙이지 못한 유지된 프로세스, 대화를
   새 프로세스로 다시 여는 ACP는 `takesOverTurn = false`)은 같은 문(`SessionManager.sendUpdateNote`, `adoptKept`의 `continueLostTurn`)으로 같은
   Continue를 받고, 새 프로세스가 뜨는 동안 상태는 `working`으로 유지된다(`continuingTurns`). 그 전송이 실패할 때만 위처럼 끝난다. 사람 자신의 종료(`markQuit`,
-  목록도 스왑도 없음)가 끊은 턴은 예전처럼 잇지 않는다(#1947).
+  목록도 스왑도 없음)가 끊은 턴은 예전처럼 잇지 않는다(#1947). 다시 붙이지 못한 유지된 프로세스는 먼저 멈추고 끝나기를(최대 5초, 이후 kill) 기다린 뒤 대화를 이어 두 CLI가 한 기록에 쓰지 않게 한다.
 - **호출자는 끊긴 것을 듣지 않는다**(#1966). 업데이트는 끊긴 자식마다 알림 하나를 보내 부모의 턴을 매번 깨웠다. 이제 부모는 이어 간 턴이 끝날 때까지
   아무것도 듣지 않고, 그 보고에 한 줄이 실린다: "An update of Centralu cut this turn and Centralu continued it."(`TurnStarter.cut`,
-  Continue가 들어갔을 때 정해지고 `ChildOwnership.noteContinuedCut`이 한다. 연결된 기기의 자식은 hello가 그 턴을 이름 댈 때 허브의 보고가
-  `LinkedReport.cut`을 정한다). 잇지 못한 턴은 멈춘 턴으로 끝나 위처럼 알린다: 부모가 어차피 빚진 그 자식의 보고 하나다. 허브의 호출자(그 기기에 start_agent로 만든 자식)는 기기의 호스트가 끊긴 턴을
+  Continue가 들어가기 전에 정해지고 실패하면 지워진다, `ChildOwnership.noteContinuedCut`. 기기의 호스트가 끝내는 이벤트에 `TurnWho.cut`으로 싣기에
+  허브는 링크가 턴 중간에 붙었든 아니든 그 한 턴의 보고에만 싣는다). 끊긴 턴은 자식만이 아니라 사람의 세션도 모두 잇는다: 끊은 것은 Centralu이고 사람이 멈춘 것이 아니다(소유자 결정, #1966). 잇지 못한 턴은 멈춘 턴으로 끝나 위처럼 알린다: 부모가 어차피 빚진 그 자식의 보고 하나다. 허브의 호출자(그 기기에 start_agent로 만든 자식)는 기기의 호스트가 끊긴 턴을
   잇는 호스트라면, 허브 자신의 업데이트나 롤백이 첫 단계부터 링크가 돌아올 때까지 링크를 잡는 동안 링크가 끊겼다는 말을 듣지 않는다
   (`RemoteAgents.updateHolds`). 새 호스트의 `hello_ok`는 시작부터, 어떤 hello에 답하기도 전에, Continue가 들어갔든 아니든 자기가 이어 가는 턴을 이름 댄다
   (`updateContinued`, 시작이 각 턴을 맡은 시각, 그 호스트의 시계. 잃은 것으로 드러난 턴은 더는 이름 대지 않는다). 그래서 Continue와 다시 연결의 순서는

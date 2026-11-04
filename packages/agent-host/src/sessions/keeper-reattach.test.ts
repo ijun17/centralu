@@ -93,7 +93,7 @@ beforeEach(() => {
 function host(kept: ReadonlySet<string> = new Set()) {
   const claude = new Adapter('claude')
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept, exitWaitMs: 200 })
   return { mgr, claude, rpc: createRpcHandler(mgr, adapters) }
 }
 
@@ -280,6 +280,47 @@ describe('a host restart under the keeper', () => {
     expect(s.state).toBe('working')
     expect(s.interruption ?? null).toBeNull()
     expect(store.messages.loadMessages(id, 50).map((r) => JSON.stringify(r.payload)).some((t) => t.includes('Centralu quit or restarted'))).toBe(false)
+  })
+
+  it('waits for the old process to exit before it resumes the conversation, then kills it after a bound (#1966 review)', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const old = new FakeProcess()
+    const create = b.claude.createSession.bind(b.claude)
+    let resumedBeforeExit = false
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.processSource?.adopt) throw new Error('the process is gone')
+      resumedBeforeExit = old.exitCode === null && !old.kills.includes('SIGKILL') && !old.exited
+      return create(opts, emit)
+    }
+    // It exits late, after SIGTERM and before the bound
+    old.kill = (signal = 'SIGTERM') => {
+      old.kills.push(signal)
+      if (signal === 'SIGTERM') setTimeout(() => { old.exited = true; old.emit('exit', 0, null) }, 50)
+      return true
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old as unknown as AgentProcess }])
+    expect(resumedBeforeExit).toBe(false)
+    expect(old.kills).toEqual(['SIGTERM'])
+    expect(b.claude.last.sent).toHaveLength(1)
+  })
+
+  it('kills an old process that does not exit within the bound, and resumes', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const old = new FakeProcess()
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.processSource?.adopt) throw new Error('the process is gone')
+      return create(opts, emit)
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old as unknown as AgentProcess }])
+    expect(old.kills).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(b.claude.last.sent).toHaveLength(1)
   })
 
   it('a tool that reopens the conversation instead of taking the turn over is continued too (#1966)', async () => {

@@ -83,6 +83,7 @@ import {
   oneLineText,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import { raceTimeout } from '../timing.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -395,6 +396,8 @@ export class SessionManager {
       processes?: AgentProcessHost
       /** Sessions whose tool process a previous host left running — their live state is not reset (see below) */
       keptSessions?: ReadonlySet<string>
+      /** How long a kept process that could not be re-attached is waited for after SIGTERM before it is killed and its session resumed; default 5 s */
+      exitWaitMs?: number
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
@@ -1192,7 +1195,8 @@ export class SessionManager {
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
         // Any start that did not take the process (no adapter, no resume, a project gone, a failed re-attach) left it with
         // nobody to address it: stopped here, once, whatever the refusal (#1720). A host that is leaving hands it on instead
-        if (!r.resumed && !this.lettingGo()) k.process.kill('SIGTERM')
+        let gone: Promise<void> = Promise.resolve()
+        if (!r.resumed && !this.lettingGo()) gone = this.endKept(k.process)
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
         // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached. Centralu cut it, so it continues it (#1966)
         if (adopted?.takesOverTurn === false && inTurn(m.state)) await this.continueLostTurn(m)
@@ -1201,6 +1205,8 @@ export class SessionManager {
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
           if (inTurn(m.state)) {
+            // The old CLI may still be writing its transcript: the conversation is resumed once it has exited (#1966 review)
+            await gone
             await this.continueLostTurn(m)
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
@@ -1245,9 +1251,12 @@ export class SessionManager {
           this.updateLists?.done(sessionId)
           return
         }
+        // Marked before it goes in: a turn that ends at once (a tool that refuses) is still the continued one's end
+        if (turn) this.children.noteContinuedCut(sessionId)
         try {
           await this.sendUpdateNote(sessionId, turn, stopped)
         } catch (e) {
+          this.children.dropContinuedCut(sessionId)
           if (this.disposing || this.handingOver || this.meta.get(sessionId) !== m) return
           this.restartPolicy.continuingTurns.delete(sessionId)
           if (!turn) {
@@ -1271,7 +1280,6 @@ export class SessionManager {
         // Sent: a host that starts after this one does not send it again
         this.updateLists?.done(sessionId)
         // Its parent is told nothing now: the report of the continued turn's end says the turn was cut and continued (#1966)
-        if (turn) this.children.noteContinuedCut(sessionId)
       }),
     )
     this.tellQuitNotices(() => true)
@@ -1298,16 +1306,27 @@ export class SessionManager {
   private async continueLostTurn(m: SessionInfo): Promise<void> {
     // A new process keeps the turn's state as it comes up, as an update's continue does: a reader never sees the turn at rest in between
     this.restartPolicy.continuingTurns.add(m.id)
+    this.children.noteContinuedCut(m.id)
     try {
       await this.sendUpdateNote(m.id, true, null)
-      this.children.noteContinuedCut(m.id)
     } catch (e) {
+      this.children.dropContinuedCut(m.id)
       if (this.disposing || this.handingOver || this.meta.get(m.id) !== m) return
       console.error(`[agent-host] ${m.id.slice(0, 8)}: the turn a swap ended could not be continued (${errorMessage(e)})`)
       this.turnLostInSwap(m)
     } finally {
       this.restartPolicy.continuingTurns.delete(m.id)
     }
+  }
+
+  /** Stops a kept process nobody can address; resolves when it has exited, or after a bound (then it is killed) */
+  private endKept(p: AgentProcess): Promise<void> {
+    if (p.exitCode !== null || p.signalCode) return Promise.resolve()
+    const exited = new Promise<boolean>((r) => p.once('exit', () => r(true)))
+    p.kill('SIGTERM')
+    return raceTimeout(exited, this.keeperOpts.exitWaitMs ?? 5_000, false).then((done) => {
+      if (!done) p.kill('SIGKILL')
+    })
   }
 
   /** A turn the start took up that is not continued after all: the hello stops naming it (#1618) */

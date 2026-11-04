@@ -10,6 +10,8 @@ export class FakeProcess extends EventEmitter {
   stdin = new PassThrough()
   stdout = new PassThrough()
   exitCode = null
+  /** Set by a test that makes the process exit late */
+  exited = false
   killed = false
   kills: string[] = []
   kill(signal: NodeJS.Signals = 'SIGTERM') {

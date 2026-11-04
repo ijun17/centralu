@@ -502,11 +502,6 @@ export function linkedSessions(
       return machineById(machineId)?.continuesCutTurns?.() === true
     },
 
-    continuedAfterUpdate(sessionId) {
-      const at = qualifiedMachine(machines(), sessionId)
-      return at?.machine.continuedAfterUpdate?.(at.id) ?? null
-    },
-
     async backgroundTasks(machineId) {
       const m = machineById(machineId)
       if (!m || !m.reachable) return null

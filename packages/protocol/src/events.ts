@@ -45,6 +45,8 @@ export const TurnWho = z.object({
   by: z.enum(['person', 'work']),
   wrote: z.literal(true).optional(),
   added: z.literal(true).optional(),
+  /** An update of Centralu cut this turn and Centralu continued it (#1966): the report of its end says so */
+  cut: z.literal(true).optional(),
   compaction: z.literal(true).optional(),
   since: z.number().int().optional(),
 })

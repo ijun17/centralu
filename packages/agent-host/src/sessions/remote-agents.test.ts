@@ -25,8 +25,6 @@ let lastAtRest: boolean | undefined
 let lastUserReads = 0
 /** Whether the child's machine's host continues the turns an update cuts, as its hello says (#1618) */
 let continues: boolean
-/** When that host continued the child's turn after an update cut it, as its hello says (#1618); null when it did not */
-let continuedAt: number | null
 /** This hub's sender as the machine records it, qualified with the machine's id */
 const HUB = { sessionId: 'm1._hub-orchestrator' }
 const PERSON = { sessionId: 'm1.person' }
@@ -45,7 +43,6 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
     lastUserMessage: async () => ({ ok: true, message: lastUser }),
     continuesCutTurns: () => continues,
-    continuedAfterUpdate: (id: string) => (id === child.sessionId ? continuedAt : null),
   } as unknown as LinkedSessions
   const host = {
     children,
@@ -72,7 +69,6 @@ beforeEach(() => {
   lastUserReads = 0
   lastAtRest = undefined
   continues = true
-  continuedAt = null
 })
 afterEach(() => store.close())
 
@@ -770,6 +766,18 @@ describe('a child on a linked machine, as the hub follows it (#1038 review)', ()
  * of a child whose turn that was hears nothing until that turn ends (#1966), and its report says the turn was cut and continued. It
  * used to hear that the link dropped, then the child's stop read as the work's end ("finished"), later one notice per child
  */
+// #1966 review: a paused report whose next turn ended while the link was still coming up was never reported
+describe('a paused report whose turn end was deferred', () => {
+  it('is read when the link is back, and reported if the child is at rest', async () => {
+    const ra = agents()
+    ra.restore()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    state = 'idle'
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await eventually(() => settled.includes(child.sessionId))
+  })
+})
+
 describe('a child whose turn an update of its machine cut (#1618)', () => {
   /** This hub's update of the machine holds the link: its stop ends the child's turn */
   const update = (ra: RemoteAgents) => {
@@ -786,9 +794,8 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(dropped()).toEqual([])
     // The host the update started continued it: working again there, and its hello says so
-    continuedAt = 5_000
     ra.observe({ type: 'machine_resync', machineId: 'm1' })
-    await eventually(() => children.linkedReports.get(child.sessionId)?.cut === true)
+    await new Promise((r) => setTimeout(r, 20))
     expect(settled).toEqual([])
     expect(children.linkedReports.get(child.sessionId)?.busy).toBe(true)
     // Another catch-up of the same host changes nothing

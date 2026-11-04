@@ -59,17 +59,17 @@ export type LinkedReportsHost = {
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
 const ADD_NEXT_MS = 15_000
 
-/** What a report says of a turn besides its words (#1377, #1966): nothing, unless the person wrote into it or added to the task, or an update cut it and it was continued */
-function partOf(turn: { wrote?: true; added?: true }, cut?: true): { wrote?: true; added?: true; cut?: true } | undefined {
-  return turn.wrote || turn.added || cut
-    ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}), ...(cut ? { cut } : {}) }
+/** What a report says of a turn besides its words (#1377, #1966): nothing, unless the person wrote into it or added to the task, or an update cut it and it was continued (said by the machine's host) */
+function partOf(turn: TurnStarter): { wrote?: true; added?: true; cut?: true } | undefined {
+  return turn.wrote || turn.added || turn.cut
+    ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}), ...(turn.cut ? { cut: true as const } : {}) }
     : undefined
 }
 
 /** Whose the turn was, as the machine's host said it on the event that ended it (#1377); undefined from a host that does not say */
 function saidTurn(raw: unknown): TurnStarter | undefined {
   if (typeof raw !== 'object' || raw === null || !('by' in raw) || (raw.by !== 'person' && raw.by !== 'work')) return undefined
-  return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}) }
+  return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}), ...('cut' in raw && raw.cut === true ? { cut: true as const } : {}) }
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -224,11 +224,11 @@ export class LinkedReports {
       wait.busy = false
       // Changed in place: set again, so what keeps it stored reads the pause (#1038)
       this.host.children.setLinkedReport(sessionId, wait)
-      if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false }, undefined, partOf(turn, wait.cut), false, wait)
+      if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false }, undefined, partOf(turn), false, wait)
       return
     }
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, e, undefined, undefined, partOf(turn, wait.cut))
+    void this.report(sessionId, wait.orchestratorId, e, undefined, undefined, partOf(turn))
   }
 
   /**

@@ -216,8 +216,6 @@ export type LinkedReport = {
   next?: TurnStarter
   /** Whose the last turn there was: its last response is the person's answer when it was theirs */
   lastBy?: 'person' | 'work'
-  /** An update of its machine cut the turn running there and the machine's host continued it (#1966): the report of its end says so. Memory only */
-  cut?: true
   /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
   addNext?: number
   /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
@@ -993,6 +991,10 @@ export class ChildOwnership {
   /** The turn running was cut by an update and continued (#1966): its report says so in one line */
   noteContinuedCut(sessionId: string): void {
     this.continuedCuts.add(sessionId)
+  }
+  /** The Continue did not go in after all: the turn's end is a stopped turn's, not a continued one's */
+  dropContinuedCut(sessionId: string): void {
+    this.continuedCuts.delete(sessionId)
   }
   /** Whose the running turn is, when one is recorded */
   starterOf(sessionId: string): TurnStarter | undefined {
