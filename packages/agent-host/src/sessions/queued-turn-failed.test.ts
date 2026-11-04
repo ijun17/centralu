@@ -35,7 +35,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   }
   /** The reports of A's work that B was given */
   const told = (b: string, a: string) =>
-    w.store.messages.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(a))
+    w.store.messages.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(a))
   /** The tool answers an input that names `marker` with `refusal` instead of starting a turn */
   const refuses = (a: string, marker: string, refusal: NormalizedEvent) => {
     const h = handleOf(a)

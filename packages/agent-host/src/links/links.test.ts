@@ -2643,7 +2643,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
     const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
-    const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
+    const reports = () => told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t)).length
     const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
     /*
      * The clock for "no report comes" (#845): another child is given a task, and its report awaited. It travels the same
@@ -2657,7 +2657,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const r = await call
       if (!r.ok) throw new Error(r.error)
       // Its own report, not any: a wrongful one coming in meanwhile must not end the wait
-      await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work') && t.includes(`id: ${r.sessionId}`)))
+      await eventually(() => told().some((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(`id: ${r.sessionId}`)))
     }
     return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf, control }
   }
@@ -3213,7 +3213,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // Back on the same port: its process went with the host, so the turn is over, and its report comes now
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work')), 10_000)
+    await eventually(() => told().some((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t)), 10_000)
   })
 
   // #1038 review: deleted there, or its machine removed, while the hub could not see it
@@ -3655,13 +3655,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const continued = () => told().filter((t) => t.includes('cut the turn') && t.includes('Centralu continued it there on the new version'))
     await eventually(() => continued().length === 1)
     expect(told().filter((t) => t.includes('dropped'))).toEqual([])
-    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toEqual([])
+    expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
 
     // The continued turn's end is the one report
     const handle = (running.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!
     handle.finish('Tests migrated.')
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
-    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toHaveLength(1)
+    expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toHaveLength(1)
     expect(continued()).toHaveLength(1)
     expect(continuedThere()).toHaveLength(1)
   })

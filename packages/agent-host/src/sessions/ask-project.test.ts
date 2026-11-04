@@ -722,7 +722,7 @@ describe('asking another project', () => {
     // Put back after this test, or every later test in the file writes its errors nowhere (#845)
     onTestFinished(() => quiet.mockRestore())
     handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
-    const told = () => w.store.messages.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(d))
+    const told = () => w.store.messages.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(d))
     await w.until(() => told().length === 1)
     expect(told()[0]).toContain('stopped before finishing: a network error ended its turn')
   })

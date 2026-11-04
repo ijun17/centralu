@@ -160,7 +160,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
-  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
 /** The start's quit notices are taken on its first timer tick; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */

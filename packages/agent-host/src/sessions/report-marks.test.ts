@@ -72,7 +72,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     await a.mgr.detachAll()
     // Letting go is not the end of the child's turn: no failure report, and the mark stays for the next host
-    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work'))).toEqual([])
+    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
 
     const b = host(new Set([child]))
