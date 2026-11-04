@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /*
@@ -68,7 +68,7 @@ describe('the temporary folder of a test file', () => {
       // node's own compile cache goes to the temporary folder the process started with; it is not a test's
       expect(readdirSync(probe).filter((n) => n !== 'node-compile-cache')).toEqual([])
     } finally {
-      await rm(probe, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      await removeTree(probe)
     }
   }, 120_000 * SLOW)
 })
