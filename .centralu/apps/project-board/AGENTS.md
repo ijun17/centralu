@@ -525,7 +525,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
   with it and landed from a tree no run saw without it. The branch's head is read back (`readBack`, the one
   helper the squash uses too): moved, the merge is done and the member is a step; unmoved or unreadable, the
   batch is dropped (not `batchless`: nobody is blamed for a dropped connection), since GitHub may still be doing
-  it and the branch is unknown. A rate limit, no network or no login still pauses and builds the batch again from
+  it and the branch is unknown, and no batch is made for 5 minutes (`LOST_OFF_MS`, in `batchOff`), so a GitHub that keeps failing
+  is not built against in a loop. A rate limit, no network or no login still pauses and builds the batch again from
   the start.
   With two or more merged, the CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no

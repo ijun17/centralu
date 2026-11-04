@@ -54,6 +54,8 @@ import { systemNow } from './clock.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
+/** A merge into the batch branch whose answer was lost and which the branch does not show: no new batch for this long, so a GitHub that keeps failing is not built against in a loop. */
+export const LOST_OFF_MS = 5 * 60_000
 const RED = new Set(['failed', 'failing'])
 const TIERS = CI.fullTier !== null
 /**
@@ -207,12 +209,15 @@ async function build(b, ctx) {
       // member left in the branch unseen has the later ones tested with it and landed from a tree no run saw (#1961). So no
       // batch goes on with this branch, and nobody is blamed for a dropped connection
       if (e.lost) {
-        const now = await readBack(() => readCommit(repo, b.branch))
-        if (now && now.sha !== (steps.at(-1)?.sha ?? main.sha)) {
-          steps.push({ pr: m.pr, head: m.head, sha: now.sha, tree: now.tree })
+        const seen = await readBack(() => readCommit(repo, b.branch))
+        if (seen && seen.sha !== (steps.at(-1)?.sha ?? main.sha)) {
+          steps.push({ pr: m.pr, head: m.head, sha: seen.sha, tree: seen.tree })
           continue
         }
-        return drop(b, ctx, `GitHub's answer to merging #${m.pr} into it was lost (${e.message}), and ${now ? 'the branch did not show it afterwards' : 'the branch could not be read afterwards'}; its pull requests go back to their own CI.`, { batchless: false })
+        return drop(b, ctx, `GitHub's answer to merging #${m.pr} into it was lost (${e.message}), and ${seen ? 'the branch did not show it afterwards' : 'the branch could not be read afterwards'}; its pull requests go back to their own CI, and no batch is made for ${Math.round(LOST_OFF_MS / 60_000)} minutes.`, {
+          batchless: false,
+          then: (fq) => (fq.batchOff = { until: new Date(now + LOST_OFF_MS).toISOString(), reason: e.message }),
+        })
       }
       // Not a conflict, but GitHub would not merge it (a head gone, a 404 or 422): as a conflict, it is left out
       refused.push(m.pr)

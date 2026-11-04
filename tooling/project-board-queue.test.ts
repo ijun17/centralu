@@ -3190,8 +3190,10 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       expect(writes().map(short2).slice(0, 3)).toEqual(['branch queue/batch-1', `merge-into ${A}`, 'delete queue/batch-1'])
       expect(batchEvents().find((t) => t.includes('was lost'))).toMatch(/GitHub's answer to merging #77 into it was lost .*, and the branch could not be read afterwards/)
       expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
-      // They are batched again, and now the branch can be read
-      await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start')
+      // No new batch for a few minutes, so a GitHub that keeps failing is not built against in a loop
+      expect(queueOnDisk().batchOff.reason).toContain('EOF')
+      await morePolls(6)
+      expect(batchesOnDisk()).toHaveLength(1)
     })
 
     it('drops the batch, blaming no one, when the branch did not move (the answer was lost before GitHub merged it, or GitHub is still at it)', async () => {
@@ -3203,6 +3205,11 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
       expect(batchEvents().find((t) => t.includes('was lost'))).toContain("GitHub's answer to merging #78 into it was lost")
       expect(gh().headReads).toBe(1)
+      // The same failure again does not rebuild the batch within that time: one branch made, one merge tried, no more
+      await morePolls(6)
+      expect(batchesOnDisk()).toHaveLength(1)
+      expect(writes().filter((w) => w[0] === 'branch')).toHaveLength(1)
+      expect(queueOnDisk().batchOff.until > new Date().toISOString()).toBe(true)
       // A refusal GitHub answered (a 404) is not read back: it said no, and the member is kept out of a batch on that head
       await fresh(batchState({ mergeErrors: [B] }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
