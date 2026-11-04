@@ -144,7 +144,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     // Nowhere else is the selection used: the Linux jobs run every test
     const verify = job('verify').body
     expect(verify).not.toMatch(/CC_TEST_FILES|os-tests/)
-    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(1)
+    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(2)
   })
 
   // #1704: no CI job ran a unit test on a Mac, so macOS-only differences failed the release rehearsal instead of the pull request
@@ -168,6 +168,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(quick).toContain("if: needs.changes.outputs.host_tests == 'off'")
     expect(full).toContain("if: needs.changes.outputs.host_tests == 'true'")
     expect(full).toContain('packages/agent-host packages/protocol packages/common tooling/\n')
+    // Only the tests that reach the OS, picked as Windows picks them (plus the temp-folder tests): the pure ones run on Linux
+    expect(full).toContain('CC_TEST_FILES: ${{ runner.temp }}/os-tests.txt\n')
+    expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"\n')
+    expect(mac.indexOf('os-tests.ts --macos')).toBeLessThan(mac.indexOf('id: full'))
     // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
     expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none

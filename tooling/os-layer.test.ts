@@ -351,6 +351,24 @@ describe('the tests that run on every OS', () => {
     expect(pick({ ...helper, 'tooling/x.test.ts': "import { run } from './x-helper.js'\nexport const a = run\n" }, 'tooling/x.test.ts')).toBeNull()
   })
 
+  it("adds to the macOS job's full run the tests that make folders in the OS temp folder, and only those", async () => {
+    const T = 'tooling/x.test.ts'
+    const select = (files: Record<string, string>) => osSelector(new Map(Object.entries(files)))
+    const code = (...body: string[]) => ({ [T]: body.join('\n') + '\n' })
+    expect(await select(code("import { it } from 'vitest'", "it('x', () => {})")).selectMacTests([T])).toEqual([])
+    for (const files of [
+      code("import { mkdtempSync } from 'node:fs'", "mkdtempSync('x')"),
+      code("import os from 'node:os'", 'os.tmpdir()'),
+      code("import { realpathSync } from 'node:fs'", "realpathSync('.')"),
+    ]) {
+      // Tooling tests do not count their own OS imports, so the Windows rule leaves them to Linux
+      expect(await select(files).selectTests([T]), files[T]).toEqual([])
+      expect(await select(files).selectMacTests([T]), files[T]).toEqual([T])
+    }
+    // Reading a file of the repository is not it
+    expect(await select(code("import { readFileSync } from 'node:fs'", "readFileSync('x')")).selectMacTests([T])).toEqual([])
+  })
+
   it('refuses to guess past an import it cannot follow', () => {
     expect(() => pick({ 'packages/ui/src/x/a.test.ts': "import { b } from './gone.js'\nexport const a = b\n" }, 'packages/ui/src/x/a.test.ts')).toThrow(/names no file/)
   })

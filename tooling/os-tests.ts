@@ -19,6 +19,8 @@
  *   tsx tooling/os-tests.ts --out <file> [--shard i/n]   the selected tests, one path per line (vitest.config.ts
  *                                                        `CC_TEST_FILES` reads it); with --shard, shard i of n,
  *                                                        balanced by the measured times (`balance`)
+ *   tsx tooling/os-tests.ts --macos --out <file>         the same for the macOS job's full run: those, and the tests that
+ *                                                        make folders in the OS temp folder (`selectMacTests`)
  *   tsx tooling/os-tests.ts --offenders                  the checked files that touch the OS outside the layer
  *   tsx tooling/os-tests.ts --tighten                    takes off the allowlist every line the code no longer needs
  *                                                        (`pnpm os:tighten`); never adds one
@@ -45,6 +47,8 @@ export type Scan = {
   touchesOs: boolean
   /** It asks which OS this is (`local/platform-checks`) */
   asksOs: boolean
+  /** It makes or resolves a folder in the OS temp folder (`mkdtemp`, `tmpdir()`, `realpath`): what macOS answers differently (`/var` is a link, #1695) */
+  usesTempFolder: boolean
 }
 
 let collected: string[] = []
@@ -74,13 +78,25 @@ const collect: Rule.RuleModule = {
   },
 }
 
+/** `mkdtemp`, `realpath` and `tmpdir`, called by name or as a member (`fs.mkdtempSync`, `os.tmpdir()`) */
+const TEMP_FOLDER_CALLS = /^(mkdtemp|mkdtempSync|realpath|realpathSync|tmpdir)$/
+const tempFolder: Rule.RuleModule = {
+  create: (context) => ({
+    CallExpression: (n) => {
+      const c = n.callee
+      const name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : ''
+      if (TEMP_FOLDER_CALLS.test(name)) context.report({ node: n, message: 'temp folder' })
+    },
+  }),
+}
+
 const linter = new Linter({ cwd: ROOT, configType: 'flat' })
 const CONFIG: Linter.Config[] = [
   {
     files: ['**/*.{ts,tsx,mts,cts,mjs,cjs,js,jsx}'],
     languageOptions: { parser: tseslint.parser, ecmaVersion: 'latest', sourceType: 'module' },
-    plugins: { local: plugin, scan: { rules: { imports: collect } } },
-    rules: { 'local/os-imports': ['error', { everywhere: true }], 'local/platform-checks': 'error', 'scan/imports': 'error' },
+    plugins: { local: plugin, scan: { rules: { imports: collect, 'temp-folder': tempFolder } } },
+    rules: { 'local/os-imports': ['error', { everywhere: true }], 'local/platform-checks': 'error', 'scan/imports': 'error', 'scan/temp-folder': 'error' },
   },
 ]
 
@@ -104,6 +120,7 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
       imports: collected,
       touchesOs: messages.some((m) => m.ruleId === 'local/os-imports'),
       asksOs: messages.some((m) => m.ruleId === 'local/platform-checks'),
+      usesTempFolder: messages.some((m) => m.ruleId === 'scan/temp-folder'),
     }
     scans.set(file, scan)
     return scan
@@ -183,11 +200,17 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
   /** The tests that run on every OS, of `tests` */
   const selectTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null)
 
+  /**
+   * The tests the macOS job runs on a full run: those that run on every OS, and the tests that make or resolve folders in
+   * the OS temp folder, whose answers differ on a Mac (`/var` is a link to `/private/var`, #1695) wherever they sit.
+   */
+  const selectMacTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null || scanFile(t).usesTempFolder)
+
   /** The checked files that import an OS module outside the layer: what the allowlist holds */
   const offenders = async (files: readonly string[]): Promise<string[]> =>
     (await filterYielding(files, (f) => isChecked(f) && CODE.test(f) && !inOsLayer(f) && scanFile(f).touchesOs)).sort()
 
-  return { scanFile, resolveImport, whyEveryOs, selectTests, offenders, isFile }
+  return { scanFile, resolveImport, whyEveryOs, selectTests, selectMacTests, offenders, isFile }
 }
 
 const repo = osSelector()
@@ -353,7 +376,7 @@ async function main(argv: string[]) {
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
   const all = await vitestFiles()
-  const picked = await repo.selectTests(all)
+  const picked = await (argv.includes('--macos') ? repo.selectMacTests(all) : repo.selectTests(all))
   const why = argv.includes('--why')
   if (shard) {
     const durations = readDurations()
