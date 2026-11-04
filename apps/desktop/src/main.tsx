@@ -8,6 +8,7 @@ import {
   buildBar,
   createTauriPlatform,
   focusWindow,
+  hostBuild,
   keepRunningThenQuit,
   listenForQuit,
   onHostStatus,
@@ -109,7 +110,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    */
   const [background, setBackground] = useState<boolean | null>(null)
   // The window runs on the computer's `centralu serve` host, which stays running when it closes (#1466)
-  const servesHost = platform.capabilities.servesHost
+  const [servesHost, setServesHost] = useState(platform.capabilities.servesHost)
   const [quitError, setQuitError] = useState<string | null>(null)
   /*
    * Work on this computer that a plain quit ends: a session in a turn, or one with a background job running. A session on a
@@ -198,7 +199,13 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     () =>
       onHostStatus((p) => {
         if (p.state === 'failed') setHostFailure(p.message)
-        else if (p.state === 'ready') setHostFailure(null)
+        else if (p.state === 'ready') {
+          setHostFailure(null)
+          // A later attempt can fall back to the bundled host, which quitting stops by itself (#1466): the dialog follows the host now running
+          void hostBuild()
+            .then((b) => setServesHost(b.mode === 'serve'))
+            .catch(() => {})
+        }
       }),
     [],
   )

@@ -2052,6 +2052,9 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         expect(again.line).toMatchObject({ hostRunning: true })
         expect(again.line).not.toHaveProperty('stopped')
         expect(existsSync(join(d, SERVE_STOPPED_FILE))).toBe(false)
+        // The window's "Quit completely" (#1466): the mark says the person quit Centralu there, which the hub words that way
+        expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'quit' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
+        expect(await connection(d)).toMatchObject({ hostRunning: false, stopped: { by: 'quit', at: expect.any(Number) } })
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true })
       } finally {
         cleanup(d)
@@ -2203,7 +2206,7 @@ describe('asking the host on the port without handing the token to anyone else (
         ensureServeState(d)
         recordServePort(d, s.port)
         const stopped = (await cli(d, ['--stop'])).line.stop
-        expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+        expect(stopped).toMatchObject({ ok: true, wasRunning: false, heldByOther: true })
         expect(stopped.message).toContain(`belongs to another Centralu host (pid ${holder.pid})`)
         expect(holder.alive()).toBe(true)
         expect(s.got.map((g) => JSON.parse(g).kind)).not.toContain('hello')

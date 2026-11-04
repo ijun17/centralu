@@ -66,6 +66,8 @@ test('on the serve host: "Quit" keeps agents running, and "Quit completely" says
 
 test('on the serve host: the primary "Quit" is the plain quit, which leaves the host running', async ({ page }) => {
   await open(page, 'serve')
+  // Not the one "Quit completely" of background mode off, whose plain quit stops everything: the label says which this is
+  await expect(page.getByTestId('confirm-quit-yes')).toHaveText(/^Quit\s*⏎$/)
   await page.getByTestId('confirm-quit-yes').click()
   expect(await calls(page)).toEqual(['quit_app'])
 })

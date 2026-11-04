@@ -100,23 +100,38 @@ pub const ASK_TIMEOUT: Duration = Duration::from_secs(15);
 /// What `<launcher> serve --connection` printed, or None when it could not run or did not end within `timeout` (then
 /// its tree is ended).
 pub fn ask_connection(launcher: &Path, timeout: Duration) -> Option<String> {
-    run_launcher(launcher, "--connection", timeout)
+    run_launcher(launcher, "--connection", &[], timeout).ok()
 }
 
 /// How long "Quit completely" waits for `serve --stop`: the host is asked and waited for up to 30 s, then ended after a
 /// grace of 15 s (`runStop`).
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long "Quit completely" waits for the host this window is starting (`serve --detach` waits for its host up to 30 s)
+pub const START_WAIT: Duration = Duration::from_secs(45);
+
+/// What `serve --stop` said of the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopAnswer {
+    /// It was running and is gone.
+    Stopped,
+    /// None was running when it looked: nothing to stop, unless one is starting.
+    NotRunning,
+}
+
 /// "Quit completely" on the serve host: `<launcher> serve --stop`, the stop a person types and a hub's update uses (the
-/// host's own `host.stop`, waited for). `Err` carries the words for the dialog.
-pub fn stop_serve(launcher: &Path, timeout: Duration) -> Result<(), String> {
-    let out = run_launcher(launcher, "--stop", timeout).ok_or("centralu serve --stop gave no answer in time")?;
+/// host's own `host.stop`, waited for). `CENTRALU_STOP_BY=quit` has it leave the mark of a quit ("by quitting Centralu
+/// there" to a linked hub) rather than of a typed `--stop`; a launcher from before that writes the typed one. `Err`
+/// carries the words for the dialog.
+pub fn stop_serve(launcher: &Path, timeout: Duration) -> Result<StopAnswer, String> {
+    let out = run_launcher(launcher, "--stop", &[("CENTRALU_STOP_BY", "quit")], timeout).map_err(|e| format!("centralu serve --stop {e}"))?;
     parse_stop_line(&out)
 }
 
-/// `{ v: 1, stop: { ok, wasRunning, message? } }`, the last such line of what `serve --stop` printed. A host that was not
-/// running counts as stopped; `ok: false` is a host that is still there (busy, or another Centralu's), said as it said it.
-pub fn parse_stop_line(stdout: &str) -> Result<(), String> {
+/// `{ v: 1, stop: { ok, wasRunning, heldByOther?, message? } }`, the last such line of what `serve --stop` printed. `ok: false`
+/// is a host that is still there (busy), and `heldByOther` a folder held by another Centralu host that serve left alone:
+/// both are `Err` with the words they came with, since nothing was stopped.
+pub fn parse_stop_line(stdout: &str) -> Result<StopAnswer, String> {
     let stop = stdout
         .lines()
         .rev()
@@ -128,19 +143,22 @@ pub fn parse_stop_line(stdout: &str) -> Result<(), String> {
             v.get("stop").cloned()
         })
         .ok_or("centralu serve --stop gave no answer")?;
-    if stop.get("ok").and_then(|o| o.as_bool()) == Some(true) {
-        return Ok(());
+    let held_by_other = stop.get("heldByOther").and_then(|h| h.as_bool()) == Some(true);
+    if stop.get("ok").and_then(|o| o.as_bool()) == Some(true) && !held_by_other {
+        let was_running = stop.get("wasRunning").and_then(|w| w.as_bool()) == Some(true);
+        return Ok(if was_running { StopAnswer::Stopped } else { StopAnswer::NotRunning });
     }
     Err(stop.get("message").and_then(|m| m.as_str()).unwrap_or("centralu serve --stop did not stop the host").to_string())
 }
 
-/// What `<launcher> serve <flag>` printed, or None when it could not run or did not end within `timeout` (then its tree
-/// is ended).
-fn run_launcher(launcher: &Path, flag: &str, timeout: Duration) -> Option<String> {
+/// What `<launcher> serve <flag>` printed, with `env` added to the launcher's. `Err` says how it failed, to follow
+/// "centralu serve <flag> ": it could not be started, did not end within `timeout` (then its tree is ended), or its
+/// answer could not be read.
+fn run_launcher(launcher: &Path, flag: &str, env: &[(&str, &str)], timeout: Duration) -> Result<String, String> {
     let mut cmd = Command::new(launcher);
-    cmd.args(["serve", flag]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["serve", flag]).envs(env.iter().copied()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     crate::os::hide_console(&mut cmd);
-    let mut child = cmd.spawn().ok()?;
+    let mut child = cmd.spawn().map_err(|e| format!("could not be started: {e}"))?;
     let end = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -150,13 +168,13 @@ fn run_launcher(launcher: &Path, flag: &str, timeout: Duration) -> Option<String
                 crate::os::kill_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Err("gave no answer in time".into());
             }
         }
     }
     let mut out = String::new();
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    Some(out)
+    child.stdout.take().ok_or("gave no answer")?.read_to_string(&mut out).map_err(|e| format!("answer could not be read: {e}"))?;
+    Ok(out)
 }
 
 /// Which host the next attempt runs, once the plan chose the serve host.
@@ -196,6 +214,11 @@ impl ServeFallback {
     pub fn fell_back(&self) -> bool {
         self.fell_back.load(Ordering::SeqCst)
     }
+
+    /// A `serve --window` attempt has begun and not said it is ready: it may be starting the folder's host now.
+    pub fn starting(&self) -> bool {
+        self.trying_serve.load(Ordering::SeqCst) && !self.ready.load(Ordering::SeqCst)
+    }
 }
 
 /// The serve host a window runs on: the data folder's `centralu` launcher, and the fallback that says whether the window
@@ -218,11 +241,58 @@ impl ServeHost {
 
     /// Stops the serve host with `serve --stop`, waited for. The bundled host a fallen-back window runs is its own child:
     /// quitting already stops it.
+    ///
+    /// While an attempt of this window is starting the host (`starting`), a stop would find none running and the host would
+    /// come up behind it, so it waits for the attempt to be ready (bounded by `START_WAIT`) and stops then. A "not running"
+    /// answer given while one began in the meantime is asked again.
     pub fn stop(&self) -> Result<(), String> {
-        if !self.active() {
-            return Ok(());
+        self.stop_with(|| stop_serve(&self.launcher, STOP_TIMEOUT), START_WAIT)
+    }
+
+    fn stop_with(&self, ask: impl Fn() -> Result<StopAnswer, String>, start_wait: Duration) -> Result<(), String> {
+        let end = Instant::now() + start_wait;
+        loop {
+            while self.fallback.starting() && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            if !self.active() {
+                return Ok(());
+            }
+            match ask()? {
+                StopAnswer::Stopped => return Ok(()),
+                StopAnswer::NotRunning if !self.fallback.starting() => return Ok(()),
+                StopAnswer::NotRunning if Instant::now() >= end => return Err("the host is still starting; try again in a moment".into()),
+                StopAnswer::NotRunning => {}
+            }
         }
-        stop_serve(&self.launcher, STOP_TIMEOUT)
+    }
+}
+
+/// The serve host the window runs on, if it does: what the shell's supervisor asks to stop and to report its mode
+/// (`Supervisor::stop_agents`, `build`), kept here so what they do is tested without a window.
+#[derive(Debug, Clone, Default)]
+pub struct ServeSlot(Arc<std::sync::Mutex<Option<ServeHost>>>);
+
+impl ServeSlot {
+    /// What the window's start plan chose: the serve host, or none.
+    pub fn remember(&self, host: Option<ServeHost>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = host;
+        }
+    }
+
+    fn current(&self) -> Option<ServeHost> {
+        self.0.lock().ok()?.clone().filter(ServeHost::active)
+    }
+
+    /// The window runs on the serve host now (not on the bundled one it fell back to).
+    pub fn serving(&self) -> bool {
+        self.current().is_some()
+    }
+
+    /// "Quit completely": stops the serve host; nothing to do where the window runs a host of its own.
+    pub fn stop(&self) -> Result<(), String> {
+        self.current().map_or(Ok(()), |host| host.stop())
     }
 }
 
