@@ -143,7 +143,6 @@ async function signingHostKey({ dataDir, state, entry, keyId, hubKey, probeKey }
 export async function runServe({ env, home, entry, version, cliPath, port: askedPort, from = null, platform = process.platform, execPath = process.execPath, logFd = null, handOver = moveIntoSignIn }) {
   const { dataDir, state } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry)
-
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT

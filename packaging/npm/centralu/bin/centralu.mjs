@@ -45,6 +45,7 @@ import {
 } from './platform.mjs'
 import {
   decodeChildSpec,
+  gateHostStart,
   parseServeArgs,
   printConnection,
   rotateToken,
@@ -54,6 +55,9 @@ import {
   runDetachedChild,
   runServe,
   runStop,
+  runSwitch,
+  runSwitchRun,
+  runSwitchStatus,
   runWindow,
   SERVE_HELP,
 } from './serve.mjs'
@@ -631,6 +635,19 @@ switch (cmd) {
         process.exitCode = rotateToken({ env: process.env, home: HOME })
         break
       }
+      // The hub's switch of the install it manages (serve-switch.mjs): it starts and checks hosts only through serve's CLI
+      if (args.mode === 'switch') {
+        process.exitCode = await runSwitch({ env: process.env, home: HOME, raw: args.switchArg, cliPath: realpathSync(process.argv[1]) })
+        break
+      }
+      if (args.mode === 'switch-run') {
+        process.exitCode = await runSwitchRun({ env: process.env, home: HOME, raw: args.switchArg, dataDir: args.dataDir })
+        break
+      }
+      if (args.mode === 'switch-status') {
+        process.exitCode = await runSwitchStatus({ env: process.env, home: HOME, seen: args.seen })
+        break
+      }
       /*
        * Before anything spawns a host: under a Node below the floor the host crashes on its first
        * database call, with nothing in its log (issue #699). `--detach` also answers in the line the
@@ -640,6 +657,19 @@ switch (cmd) {
        * machine what Node it has.
        */
       const startsHost = args.mode === 'serve' || args.mode === 'detach' || args.mode === 'window' || (args.mode === 'autostart' && args.autostart === 'on')
+      /*
+       * A switch of the managed install under way there (§10.5a): no host starts between its stop and its start, and one
+       * whose switcher died is finished first, before this version refuses for a reason of its own (a host already
+       * answering, a missing host entry, a Node below the floor), so a reboot or a sign-in finishes it with no hub (#1907).
+       * Not for the launcher `--detach` started: that one asked already
+       */
+      if ((args.mode === 'serve' || args.mode === 'detach' || args.mode === 'window') && args.child === undefined) {
+        const refused = await gateHostStart({ env: process.env, home: HOME, version: pkg.version, detach: args.mode === 'detach' })
+        if (refused !== null) {
+          process.exitCode = refused
+          break
+        }
+      }
       if (startsHost && belowFloor(process.versions.node, NODE_FLOOR)) {
         const message = oldNodeSentence(process.versions.node, NODE_FLOOR)
         console.error(`centralu serve: ${message}`)

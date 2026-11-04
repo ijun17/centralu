@@ -15,7 +15,7 @@ import { findMachine, remoteDev, resolveCommit } from './remote-dev.js'
 import { storeRegistry } from './stored.js'
 import { connectionCommand, parseConnectionLine, SshTunnel, type RemoteSpec } from './tunnel.js'
 import { rollbackRemote, type HostControl } from './update.js'
-import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime } from './windows-remote.test-helpers.js'
+import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, nodeWithoutEnv, SWITCH_MARK } from './windows-remote.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -30,6 +30,8 @@ const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../
 const SERVE_SHIM = `export { managedLauncherScript } from ${JSON.stringify(pathToFileURL(SERVE_MJS).href)}\n`
 /** The real `installInfo`, so the connection line's `install` (and a dev build's `source` in it) is the launcher's own */
 const INSTALL_INFO = pathToFileURL(resolve(dirname(SERVE_MJS), 'serve-install.mjs')).href
+/** Every version here runs its switch through the real launcher's `serve --switch` (fakeServe's `realServe`, plan §10.5a) */
+const REAL = pathToFileURL(SERVE_MJS).href
 const BASE = '9.9.1-beta.1'
 
 const BUNDLER = `import { mkdirSync, writeFileSync } from 'node:fs'
@@ -56,8 +58,9 @@ function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: st
     'packages/agent-host/scripts/bundle.mjs': BUNDLER,
     'packages/protocol/src/envelope.ts': `export const PROTOCOL_VERSION = ${o.protocol ?? 1}\n`,
     'packaging/npm/centralu/package.json': JSON.stringify({ name: 'centralu', version: o.base ?? BASE, type: 'module', engines: { node: `>=${o.floor ?? '20.0.0'}` }, optionalDependencies: { '@centralu/linux-x64': o.base ?? BASE } }),
-    'packaging/npm/centralu/bin/centralu.mjs': fakeServe('', { fromPackage: true, installInfo: INSTALL_INFO }),
+    'packaging/npm/centralu/bin/centralu.mjs': fakeServe('', { fromPackage: true, installInfo: INSTALL_INFO, realServe: REAL }),
     'packaging/npm/centralu/bin/serve.mjs': SERVE_SHIM,
+    'packaging/npm/centralu/bin/serve-switch.mjs': SWITCH_MARK,
     // Installed dependencies, which git ignores
     'packages/agent-host/node_modules/esbuild/package.json': '{"main":"index.js"}',
     'packages/agent-host/node_modules/esbuild/index.js': '',
@@ -279,6 +282,7 @@ function wholeCommand(o: {
   const releaseRunning = async () => {
     const t = tunnel()
     await installRemote({ exec: (c) => t.exec(c), spec, target: 'box', version: BASE, runtime: ctx.runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
+    if (process.platform === 'win32') nodeWithoutEnv(data())
     await t.startHost()
     expect(running()).toBe(BASE)
     writeFileSync(data('store.db'), 'the release’s store')
@@ -286,7 +290,10 @@ function wholeCommand(o: {
   }
   const dev = (repo: string, over: { allowDirty?: boolean; env?: Record<string, string> } = {}) => {
     const said: string[] = []
-    return { said, done: remoteDev({ machine: 'Box', ref: 'HEAD', repo, cwd: repo, dataDir: join(root, 'hub'), allowDirty: over.allowDirty, log: (l) => said.push(l), ssh: { ssh: ctx.ssh, env: ctx.env(over.env) }, checkMs: 30_000 * SLOW }) }
+    // A switcher started through WMI reads what the fake versions are told from the data folder, not this environment
+    mkdirSync(data(), { recursive: true })
+    writeFileSync(data('fake-env.json'), JSON.stringify(over.env ?? {}))
+    return { said, done: remoteDev({ machine: 'Box', ref: 'HEAD', repo, cwd: repo, dataDir: join(root, 'hub'), allowDirty: over.allowDirty, log: (l) => said.push(l), ssh: { ssh: ctx.ssh, env: ctx.env(over.env) } }) }
   }
   const lineNow = async () => {
     const t = tunnel()
@@ -300,13 +307,14 @@ function wholeCommand(o: {
     const r = await done
     const version = `${BASE}.local.1`
     expect(r).toMatchObject({ machine: 'Box', current: { version, node: node(), source: { kind: 'dev', commit, dirty: false } }, previous: { version: BASE, node: node() } })
-    // The release stopped itself through its own launcher while the hold kept the hub's links from starting one, then
-    // the dev build started and answered as itself; the hold is gone afterwards
-    // Through the update's steps, so the stop is for an update (#1618): the dev build's host continues the turns it cut
-    expect(events()).toEqual([`stop ${BASE} (held) (for update)`, `start ${version}`])
+    // The release stopped itself through its own launcher, run by the dev build's switch there, then the dev build
+    // started and answered as itself. The switch's stop is for an update (#1618): the dev build's host continues the turns it cut
+    expect(events()).toEqual([`stop ${BASE} (for update)`, `start ${version}`])
     expect(running()).toBe(version)
-    expect(existsSync(remote('hold.json'))).toBe(false)
-    expect(said.filter((l) => /^Box: [a-z_]+$/.test(l))).toEqual(['Box: build', 'Box: stop', 'Box: backup', 'Box: switch', 'Box: start', 'Box: check', 'Box: prune'])
+    // The handover, then the switch's steps as the command read them, the last of them the prune
+    const steps = said.filter((l) => /^Box: [a-z_]+$/.test(l))
+    expect(steps.slice(0, 2)).toEqual(['Box: build', 'Box: stop'])
+    expect(steps.at(-1)).toBe('Box: prune')
     // The store as the release left it, copied before the dev build first opened it
     expect(readFileSync(remote('store-backup', BASE, 'store.db'), 'utf8')).toBe('the release’s store')
     expect(readFileSync(remote('current'), 'utf8')).toBe(`${version} ${node()}\n`)
@@ -330,9 +338,8 @@ function wholeCommand(o: {
       target: 'box',
       script: installScript(),
       hold: () => {},
-      start: async () => void (await t.startHost()),
-      answers: async (v) => running() === v,
       step: () => {},
+      pollMs: 100,
     }
     // The release reads the store as the dev builds left it: it is kept, nothing put back
     writeFileSync(data('store.db'), 'written on the dev build')
@@ -345,7 +352,7 @@ function wholeCommand(o: {
   /** A HostControl for `machines.rollback` and `update`, as LinkedMachine gives one */
   const control = (): HostControl => {
     const t = tunnel()
-    return { exec: (cmd) => t.exec(cmd), spec, target: 'box', script: installScript(), hold: () => {}, start: async () => void (await t.startHost()), answers: async (v) => running() === v, step: () => {} }
+    return { exec: (cmd) => t.exec(cmd), spec, target: 'box', script: installScript(), hold: () => {}, step: () => {}, pollMs: 100 }
   }
 
   it('a dev build that migrated the store and then did not start leaves the release running on the store it had', async () => {
@@ -358,7 +365,6 @@ function wholeCommand(o: {
     )
     expect(running()).toBe(BASE)
     expect(readFileSync(data('store.db'), 'utf8')).toBe('the release’s store')
-    expect(existsSync(remote('hold.json'))).toBe(false)
   }, 180_000 * SLOW)
 
   it('rolls back after a dev build migrated the store past the release: the store as it was is put back, and the note says so', async () => {
@@ -406,7 +412,7 @@ function wholeCommand(o: {
     const { repo } = fakeRepo(root)
     const version = `${BASE}.local.1`
     await expect(dev(repo, { env: { FAKE_BROKEN: version } }).done).rejects.toThrow(
-      new RegExp(`Centralu ${version.replaceAll('.', '\\.')} did not start on box .*; it runs Centralu ${BASE.replaceAll('.', '\\.')} again`),
+      new RegExp(`Centralu ${version.replaceAll('.', '\\.')} did not start on Box .*; it runs Centralu ${BASE.replaceAll('.', '\\.')} again`),
     )
     expect(running()).toBe(BASE)
     expect(readFileSync(remote('current'), 'utf8')).toBe(`${BASE} ${node()}\n`)
@@ -425,7 +431,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('pnpm rem
         env: (over = {}) => windowsRemoteEnv(home, over),
         runtime: windowsRuntime(zip),
         archive: { version: WIN_NODE_V, file: WIN_NODE_FILE, bytes: zip },
-        packages: (v) => windowsPackages(v, { mjs: fakeServe(v, { installInfo: INSTALL_INFO }), serve: SERVE_SHIM }, true),
+        packages: (v) => windowsPackages(v, { mjs: fakeServe(v, { installInfo: INSTALL_INFO, realServe: REAL }), serve: SERVE_SHIM, switcher: true }, true),
       }
     },
   })
@@ -448,7 +454,7 @@ describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux m
       tool('getconf', 'echo "glibc 2.39"')
       writeFileSync(
         join(root, 'ssh'),
-        `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit' })\nprocess.exit(r.status ?? 1)\n`,
+        `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
       )
       chmodSync(join(root, 'ssh'), 0o755)
       const archive = tarGz(`node-v${NODE_V}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT' })
@@ -460,7 +466,7 @@ describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux m
         runtime: { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: sha256(archive) } } } },
         archive: { version: NODE_V, file: NODE_FILE, bytes: archive },
         packages: (v): FakePackage[] => [
-          { name: 'centralu', version: v, files: { 'package.json': JSON.stringify({ name: 'centralu', version: v }), 'bin/centralu.mjs': fakeServe(v, { installInfo: INSTALL_INFO }), 'bin/serve.mjs': SERVE_SHIM } },
+          { name: 'centralu', version: v, files: { 'package.json': JSON.stringify({ name: 'centralu', version: v }), 'bin/centralu.mjs': fakeServe(v, { installInfo: INSTALL_INFO, realServe: REAL }), 'bin/serve.mjs': SERVE_SHIM, 'bin/serve-switch.mjs': SWITCH_MARK } },
           { name: '@centralu/host-linux-x64', version: v, files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } },
         ],
       }

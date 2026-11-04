@@ -9,7 +9,7 @@ import { installVersion, type InstallVersion } from './registry.js'
 import { mailSwitchRollbackText, rollbackCrossesMailSwitch } from './mail-switch.js'
 import { RemoteClient } from './remote-client.js'
 import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, type RemoteRun } from './tunnel.js'
-import { answersAs, rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
 import { sleep } from '../timing.js'
@@ -572,6 +572,8 @@ export class LinkedMachine extends LinkedMachineConnection {
     if (refused) throw linkError(refused)
     const installer = this.deps.installer!
     const tunnelExec = this.tunnel.exec!.bind(this.tunnel)
+    // What the row said of a switch this hub did not follow is old news once the person starts another operation
+    this.switchNote = null
     const done = this.begin(kind, null, target)
     const at = Date.now()
     const step = (s: UpdateStep, count?: number) => {
@@ -584,6 +586,8 @@ export class LinkedMachine extends LinkedMachineConnection {
       result = await fn(this.control(tunnelExec, installer.script(), step), installer)
     } catch (err) {
       this.deps.log?.(`[links] ${this.name}: ${kind} failed: ${(err as Error).message}`)
+      // A switch it handed over may still end there, unfollowed: the next open reads how (#1907)
+      this.switchUnread = true
       throw linkError((err as Error).message)
     } finally {
       const wasHeld = this.held
@@ -612,31 +616,12 @@ export class LinkedMachine extends LinkedMachineConnection {
       exec,
       spec: this.record.remote,
       target: this.record.sshTarget,
+      machine: this.name,
       script,
       hold,
       step,
-      start: async () => {
-        if (!this.tunnel.startHost) throw new Error(`This computer cannot start Centralu on ${this.name}`)
-        const started = await this.tunnel.startHost()
-        this.hostStarted = { ...started, at: Date.now() }
-      },
-      answers: (version, ms) =>
-        new Promise<boolean>((resolve) => {
-          const waiter = (v: string | null) => {
-            if (!answersAs(version, v)) return
-            clearTimeout(timer)
-            this.helloWaiters.delete(waiter)
-            resolve(true)
-          }
-          // No hello from that version in time: the link is held again before the version is put back
-          const timer = setTimeout(() => {
-            this.helloWaiters.delete(waiter)
-            void hold().then(() => resolve(false))
-          }, this.deps.checkMs ?? ms)
-          this.helloWaiters.add(waiter)
-          this.held = false
-          this.reconnect()
-        }),
+      ...(this.deps.switchPollMs === undefined ? {} : { pollMs: this.deps.switchPollMs }),
+      ...(this.deps.switchFollowMs === undefined ? {} : { followMs: this.deps.switchFollowMs }),
     }
   }
 

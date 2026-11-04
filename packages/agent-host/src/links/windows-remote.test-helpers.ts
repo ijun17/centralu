@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fakeExe, fakeNodeExe } from '../fake-exe.test-helpers.js'
@@ -22,8 +22,8 @@ export const WIN_NODE_FILE = `node-v${WIN_NODE_V}-win-x64.zip`
 /** What the fake ssh prints when it could not run the command or the command was ended: no status, and not a bare exit 1 (#1244) */
 export const FAKE_SSH_MARK = 'fake ssh: '
 
-/** Windows OpenSSH runs the command line it is given through cmd.exe; so does `shell: true` */
-const SSH = `const r = require('node:child_process').spawnSync(process.argv.at(-1), { shell: true, stdio: 'inherit' })
+/** Windows OpenSSH runs the command line it is given through cmd.exe, in the account's home; so does this (in the checkout, PowerShell left its module cache there) */
+const SSH = `const r = require('node:child_process').spawnSync(process.argv.at(-1), { shell: true, stdio: 'inherit', cwd: process.env.USERPROFILE })
 if (r.error || r.status === null) console.error(${JSON.stringify(FAKE_SSH_MARK)} + (r.error ? r.error.message : 'the command was ended by ' + r.signal))
 process.exit(r.status ?? 1)
 `
@@ -56,6 +56,18 @@ export function windowsRuntime(zip: Buffer): RemoteRuntime {
   return { node: { version: WIN_NODE_V, archives: { 'win32-x64': { file: WIN_NODE_FILE, sha256: sha256(zip) } } } }
 }
 
+/** A fake version's `serve-switch.mjs`: there to be found; its `--switch` is the real launcher's (`fakeServe`) */
+export const SWITCH_MARK = "// serve --switch is the real launcher's here (fake-registry.test-helpers.ts fakeServe)\n"
+
+/**
+ * The fake `node.exe` of an installed Node runs this Node without `CC_FAKE_NODE` too (`<exe>.target`, fake-exe.test-helpers.ts):
+ * a switcher started through WMI gets the account's environment, not the test's
+ */
+export function nodeWithoutEnv(dataDir: string): void {
+  const nodes = join(dataDir, 'remote', 'node')
+  for (const v of existsSync(nodes) ? readdirSync(nodes) : []) writeFileSync(join(nodes, v, 'node.exe.target'), `${process.execPath}\n`)
+}
+
 /**
  * What the remote's shell sees: this machine's environment with the profile and data folder moved into
  * `home`, so nothing is written to the person's own. `CC_FAKE_NODE` is the Node its `node.exe` runs.
@@ -73,9 +85,11 @@ export function windowsRemoteEnv(home: string, over: Record<string, string> = {}
  * The packages of one version for a Windows remote: the shim (`centralu`, with `centralu.mjs` and
  * `serve.mjs`), the platform package with the window in it, and optionally the host-only package
  */
-export function windowsPackages(version: string, centralu: { mjs: string; serve: string }, hostOnly: boolean): FakePackage[] {
+export function windowsPackages(version: string, centralu: { mjs: string; serve: string; switcher?: boolean }, hostOnly: boolean): FakePackage[] {
+  // `serve-switch.mjs` is how the hub tells a version that runs its own switch (update.ts `switchCommand`)
+  const switcher: Record<string, string> = centralu.switcher ? { 'bin/serve-switch.mjs': SWITCH_MARK } : {}
   return [
-    { name: 'centralu', version, files: { 'package.json': JSON.stringify({ name: 'centralu', version }), 'bin/centralu.mjs': centralu.mjs, 'bin/serve.mjs': centralu.serve } },
+    { name: 'centralu', version, files: { 'package.json': JSON.stringify({ name: 'centralu', version }), 'bin/centralu.mjs': centralu.mjs, 'bin/serve.mjs': centralu.serve, ...switcher } },
     {
       name: '@centralu/win32-x64',
       version,

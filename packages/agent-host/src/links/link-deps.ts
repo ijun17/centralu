@@ -121,8 +121,10 @@ export type LinkDeps = {
   restarts?: { max: number; windowMs: number }
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
   installer?: LinkInstaller
-  /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */
-  checkMs?: number
+  /** For tests: how often an update's switch there is read (update.ts `HostControl.pollMs`; 2 s) */
+  switchPollMs?: number
+  /** For tests: how long it is followed before the update says it could not be (`HostControl.followMs`; 15 minutes) */
+  switchFollowMs?: number
   /**
    * For tests: the ssh binary, config file and home folder `machines.sshHosts` and `machines.probe` use
    * in place of the person's own (ssh-config.ts, probe.ts)

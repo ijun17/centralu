@@ -292,7 +292,6 @@ packages/agent-host/src/links/ssh-config.ts @typescript-eslint/no-unsafe-assignm
 packages/agent-host/src/links/ssh-config.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/links/ssh-run.ts @typescript-eslint/no-non-null-assertion 6
 packages/agent-host/src/links/stored.ts @typescript-eslint/no-unsafe-type-assertion 1
-packages/agent-host/src/links/swap-hold.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/links/tunnel.test.ts @typescript-eslint/no-misused-promises 1
 packages/agent-host/src/links/tunnel.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/links/tunnel.ts @typescript-eslint/no-non-null-assertion 9

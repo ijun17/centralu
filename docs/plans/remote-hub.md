@@ -502,17 +502,17 @@ and takes no lock, is put back. Two gaps were closed in the steps above:
 - Step 5 counted the old version back once its start went through. It now counts it back only after its hello (30 s);
   otherwise the update fails saying the put-back failed too.
 
-Two cases stay open while the hub drives the steps one ssh command at a time: **the link dropping between the stop and
+Two cases stayed open while the hub drove the steps one ssh command at a time: **the link dropping between the stop and
 the start** (no host until ssh returns and the link's reconnect starts one), and **the hub dying mid-update** (no host
 until a hub returns; one that dies between the start and the check leaves an unchecked version with no put-back, since the
-hub keeps no update state across its restart). Closing them means the machine runs the whole switch itself, a design of
-its own (#1903).
+hub keeps no update state across its restart). Steps 2 to 6 are now the machine's own: §10.5a.
 
 **Trying it on a temporary folder.** A link can name the data folder on its machine (`RemoteSpec.dataDir`, `machines.add`'s
 `dataDir`, kept as the `links.dataDir.<id>` setting): every command and script the hub sends sets `CC_DATA_DIR` to it
 first, so the scripts' `$d`, `serve`, and the host it starts all use it, and the machine's own installation is left alone.
-It goes on the shell's line, so one rule per shell: a POSIX or WSL link takes an absolute `/` path, a Windows link a drive
-path, each of letters, digits, spaces and `. _ -` with no trailing separator. A machine with a command of its own is
+It goes on the shell's line, so one rule per shell, with no trailing separator: a POSIX or WSL link takes an absolute `/`
+path of letters, digits, spaces and `. _ -`; a Windows link a drive path of any names a Windows folder may have except a
+quote, a backquote and brackets (an 8.3 short name's `~`, `$` and letters of any language are taken). A machine with a command of its own is
 refused one, since that command sets its own folder. A stored folder this build does not take is said once on the row,
 with no ssh and no retry. A hub build from before it ignores the setting and links the machine's own data folder.
 
@@ -534,6 +534,235 @@ on the same machine is not touched. The machine stays linked until the person re
 ignores fields it does not know), and when nothing is found, the preflight of §10.2 says what could be installed. The
 hub keeps the last answer with the machine for Settings → Machines, and asks again at every link start, which it does
 anyway.
+
+### 10.5a The machine runs its own switch (#1903)
+
+**Problem.** §10.5's steps 2 to 5 were separate ssh commands from the hub: stop, switch, start, wait for hello, put back.
+Anything that ended the hub's part between them stranded the machine. If the link dropped between the stop and the start,
+no host ran until ssh returned and the link's reconnect started one. After a hub stop the exit is clean, so systemd's
+`Restart=on-failure` does not fire. If the hub died mid-update, no host ran until a hub returned, and that hub started
+whatever `current` named. If it died after the start and before the check, an unchecked version stayed with no put-back,
+because the hub keeps no update state across a restart. Both were reproduced on Windows through a real PowerShell: after
+the stop, a hub that fails every later command, or sends none, leaves `serve --stop` as the only thing that happened.
+
+**Rule.** The machine owns the transaction. The hub hands it one command and then only reads the outcome. Nothing the
+hub or the link does after that command can leave the machine without a host for longer than the switch itself takes.
+The exceptions are a switcher that cannot detach (WMI blocked, WSL) and a switcher that dies. In both, a host comes back
+at the next `serve` there (below).
+
+**Prior art** (read only). Three self-updating tools were read.
+
+- One agent updater writes an atomic state file before the switch (active and backup version, last target, success).
+  It watches the new process for a stable pid and a ready signal from that pid within a minute. On failure it restores
+  the links and the database backup, and any later run repairs a half-done switch from that file.
+- One desktop client copies its own binary to a temporary file, starts the copy detached and exits, so the installer can
+  replace the original. It keeps a log but no status file, and the parent never learns the outcome.
+- One CI runner writes a script, starts it without waiting, and passes its pid so the script waits for it to exit. It
+  leaves a "finished" flag and a log, and has no rollback.
+
+Taken from them: state written before the switch and reconciled at every start; health as a hello from the new
+version's own host within a bound; a lock against a second run; the outcome in a file the caller reads.
+
+**Shape.** The switcher is a mode of `serve`, `centralu serve --switch` (`serve-switch.mjs`), run by the launcher of one
+of the two versions. It drives the other one only through the CLI every managed version already has, run on that
+version's own Node from its folder, as the managed launcher runs it: `serve --stop` (with `CENTRALU_STOP_BY=hub` and
+`CENTRALU_STOP_FOR=update`), `serve --detach`, and `serve --connection`, whose `hostRunning` and `version` come from the
+running host's own hello on the folder's credential. Nothing is imported across versions and no script is copied.
+
+1. **Place** (unchanged, §10.2): the new version beside `current`, over the link. The installer no longer prunes, even
+   when it activates a first install: pruning is the switch's.
+2. **Check, then wait for turns**: the hub first reads the switch there (`--switch-status`). One under way refuses the
+   update at once with the busy text, before the hub waits for turns, holds its link or shows a step (#1907). Then the
+   hub's `beforeStop` runs (unchanged, #1399/#1618), since only the hub can show the person the wait.
+3. **Hand over**: one ssh command runs `serve --switch` with `{ id, by, to, keep, was, saveStore }`, base64url on the line,
+   through the first of the versions it names whose package has `serve-switch.mjs`: for an update `to`, then `from` (a
+   dev build that goes back to a release from before this); for a rollback `current`, then `previous`. The command names
+   that version in `CENTRALU_SWITCH_RUNNER`, and `--switch` writes it to `<data>/remote/switch.runner` once no live switch
+   refuses it, so a refused handover changes nothing there. Its `serve` detaches the switcher the way `--detach` starts a
+   host (`detachHow`, `startDetached`) as `--switch-run <the hub's argument, unchanged> [<data folder>]`: the data folder,
+   base64url, is the one thing a process WMI creates does not inherit. It waits until the switcher wrote `switch.json`
+   with its pid (at most 10 s), prints `{ v: 1, switch: { ok: true, id, pid } }` and exits. The switcher, not the
+   handover, takes the lock and writes the file, so a handover that dies early leaves nothing behind; one that dies after
+   it leaves a switcher that runs on.
+4. **The switcher** runs §10.5 steps 2 to 6 and writes each step to `switch.json` before taking it: `stop` (`--stop` of
+   `from`, or of `to` over an npm install), `backup` (the store copy of a dev build, §10.11), `switch` (both pointers, and
+   the managed launcher if there is none yet), `start` (`--detach` of `to`), `check` (`to`'s `--connection` says a host
+   answers as `to`, within 30 s). A host that answers as another version there was started meanwhile by something that
+   does not ask the switch: a version from before this (through the sign-in task, the person, or a hub still on it) while
+   `current` still named it. It is stopped and `to` started again, twice at most (`startedMeanwhile` in the file), then
+   the update fails naming that version (#1907). Leaving a dev build for a release that does not start on its store, it takes
+   `restore_store` (the copy taken for the release, and one more start). On success it takes `prune`: every version but
+   `current`, `previous` and the runner (which reads the outcome), every Node none of them uses, and the store copies of
+   versions that are gone. On failure it takes `roll_back`: the end of `host.log`, `--stop` of the new version (which ends
+   a lock holder nothing listens for, #1903), the pointers as they were, the store as it was before a dev build, then
+   `restart` (`--detach` of `from`, and its hello). The store copy and the pruning moved from `remote-install.mjs` into
+   the launcher.
+5. **The hub reads the outcome** with `serve --switch-status` of the version in `switch.runner`, whatever `current` is by
+   then, every 2 s. It shows the step on the row as `UpdateStep`s (the switcher's `restart` as `roll_back`). A read that
+   fails (the link down) is tried again, the wait doubling to 30 s, and does not fail the update. It ends on `outcome`, or
+   after 15 minutes with "could not be followed to its end; how it ended is shown once the machine is reached again". It
+   then reads once more with `--seen <id>`, which marks the outcome reported. At a link start where the hub manages an
+   install it reads the switch too: always when no host runs, and when one does while the connection line's
+   `install.lastSwitch` (`{ id, ended, seen }`, from `switch.json`) says the last switch is under way or ended
+   unreported. That covers a hub that was away for the whole switch, or restarted since, with no extra ssh at an open
+   with nothing to say (#1907). A launcher from before that says nothing of it; there the hub reads while the switch may
+   have ended unread by it (the first open, a switch last seen under way, or an operation of its own that failed). A
+   switch under way is waited for, and an outcome not yet `seen` is said once on the row
+   (`switchNote`), then marked. A switch of another hub's that this hub showed `updating` for and that went through is no
+   news, so it says nothing then; a failed one it says.
+
+**`switch.json`** (`v: 1`, written by rename): `{ id, by, from, to, keep, was: { current, previous }, saveStore, step,
+startedAt, at, pid, started, wasRunning?, outcome?: 'done' | 'put_back' | 'failed', stage?, why?, putBackWhy?, stopFailed?,
+log?, restored?, interrupted?, startedMeanwhile?, kept?, removed?, left?, seen? }`. `why` is written when the put-back begins, so
+a reader that finishes it can still say it. The sentences are the hub's, from these fields.
+
+**Is the switcher alive?** Every reader asks this before it believes a `switch.json` with no `outcome`: `--switch-status`,
+`serve` and `--detach` before they start a host, and `--switch` before it hands over. The switcher is alive when the pid in
+`switch.lock` lives and is the process that wrote it: its start time where `ps` tells one, otherwise created by the lock's
+`at` (`isWriter`, the rule of `host.lock`, #1888).
+
+- On Windows, a live pid whose creation time cannot be read (another logon: `processCreatedAt` is null) counts as alive.
+  That can be a reused pid, so it counts only while the lock's `at` is under 10 minutes old. That is past the longest
+  switch: stop 30 s, start and check 60 s, put-back 60 s, with slack.
+- A dead switcher with no outcome is finished by whoever read it (below), so "no outcome" lasts only as long as a live
+  switcher.
+
+**Concurrent updates.** `<data>/remote/switch.lock`, taken by the switcher with an exclusive create naming its pid, start
+time and `at`. A second `--switch` while a live switcher holds it is refused (`reason: 'busy'`, with who started it and
+when). A lock whose switcher is not alive is stale and is taken over, moved aside first so that of two takers only one
+removes it. `operate`'s one-at-a-time on the hub stays, and the lock covers two hubs.
+
+**No host starts beside a switch.** `serve`, `serve --detach` and `--window` ask the switch first, before anything else
+they check (a host already answering, the host entry, the Node floor), and refuse to start a host while a live switcher
+is between a stop and the start that follows it (steps `stop`, `backup`, `switch`, `restore_store`, `roll_back`); the boot
+entry runs `serve`, so it refuses too. `--detach` answers `{ ok: false, reason: 'switching', by, startedAt }`. The switcher's own
+starts come in its `start` and `restart` steps, where nothing is refused, so no variable has to reach a host started
+through the Windows sign-in task. The hub treats `switching` as "an update is under way there": the row says `updating`
+and the link asks again on its first backoff step instead of reporting a failed start. The link also reads the switch
+before it starts a host where it manages an install, which a version from before this cannot refuse on its own. A
+version from before this started by anything else (the sign-in task, the person, a second hub still on it) is not
+refused; the switcher stops it when it finds it answering at its check (step 4). This replaces the hold `pnpm remote-dev` wrote (`swap-hold.ts`, removed): a dev build is a switch like any other.
+
+**The switcher's own crash** (OOM, a logout that ends the user's processes without linger, a killed process). Its
+lock and `switch.json` stay with no outcome. The next reader that finds the switcher dead takes the lock and finishes the
+switch before anything else, by the last step written:
+
+- `stop` or `backup`: nothing changed. Outcome `failed`, stage `interrupted`. `--switch-status` then starts the version
+  `current` names; `serve` and `--detach` start it themselves.
+- `switch`, `start` or `check`, with `current` naming the new version and a host answering as it: the switch went
+  through, it was only not marked. Outcome `done`, `interrupted`, pruned as after a check; nothing is stopped (#1907). A
+  reader asks within what the switcher had left of its bound (30 s from `check`, 60 s from `start`), and once when that
+  is past, so a reader hours later never stops a host that has served all along.
+- `roll_back` or `restart`, with `current` back on the old version and a host answering as it: outcome `put_back`,
+  `interrupted`, with the `why` the put-back began with.
+- From `switch` to `restart`, a host answering as a version this part of the switch did not start (the old one from
+  `switch` to `check`; anything but the new one, which the put-back is ending, in the put-back) was started by someone
+  else meanwhile, with a CLI that asks no switch. A reader never stops it (#1907): the old version keeps serving with
+  the pointers back as they were (`put_back`, `kept`); another version keeps serving with nothing changed (`failed`,
+  stage `kept`).
+- Otherwise from `switch` to `restart`: the new host is stopped, the pointers in `was` go back, the store copy goes back
+  for a dev build, and the old version is started and waited for. Outcome `put_back`, `interrupted`. When the reader is a
+  `serve` or `--detach` of the new version, it then runs the same command of the version `current` names now, which
+  serves.
+- `prune` (the check passed): outcome `done`.
+
+Each step is safe to do twice: pointers by rename, a stop of a host already stopped, a prune of what is gone.
+
+**What brings a host back** after a switcher died between the stop and the start: the next `serve` there. That is the hub's
+`--detach` once its link reconnects (the link's backoff, from 2 s up to 5 minutes), the hub's next `--switch-status`, or
+the boot entry's start at the next boot or sign-in. A machine whose switcher dies while no hub is linked and that does not
+reboot has no host until one of those happens. The `serve` of whichever version `current` names finishes the switch
+before it refuses for a reason of its own, so a new version that is broken (no host entry, a Node below its floor)
+still hands over to the old one (#1907). Two cases need a hub's `--switch-status` (which runs the runner, not
+`current`):
+
+- `current` names a version from before this switch, which does not ask (the switcher died at `stop` or `backup`, or in
+  the put-back after the pointers went back). That version served before the update, so the boot entry starts it and a
+  host runs; the switch stays without an outcome until a hub reads it, which then finishes it without a second start.
+- `current` names a version whose launcher cannot run at all (its Node binary or its files missing). Nothing on the
+  machine can run that version's `serve`, and the managed launcher, which never changes, knows nothing of a switch. Today the same holds after any hub-stopped host, and the boot entry's
+`Restart=on-failure` does not cover a clean stop. Making the switcher a supervised unit (a transient systemd unit, a
+scheduled task) would close that, at the cost of a second start path per system; not proposed now.
+
+**Detaching, per system.** The switcher must outlive the ssh session that started it, as the host must. It is detached
+exactly as `serve --detach` detaches the host (`detachHow`, `startDetached`):
+
+- **Linux and macOS:** `setsid`. A distro whose logind ends a user's processes at logout without linger ends the host too;
+  §10.4's linger note covers both.
+- **Windows:** WMI `Win32_Process.Create` leaves the ssh session's job object (measured for the host, §10.4, and now for
+  the switcher). The switcher runs in the network logon ssh has, which is fine for it. The host it starts goes through
+  `serve --detach`, which still prefers the sign-in task when someone is signed in (#1224).
+- **WMI blocked, and WSL:** when nothing can be started outside the session (`wmi_blocked`), or what was started never
+  wrote its pid within the 10 s (the WMI-created `wsl.exe` that hangs, §10.4, which is then ended), the switcher runs in
+  the ssh session itself. A link drop then ends it mid-switch, which is the switcher crash above: the reconnect's
+  `--detach` finishes it, so a host comes back on the reconnect. A host start that the switcher's `--detach` answers with
+  `wmi_blocked` is left to the hub's link, which starts a link-bound host; that start is not checked by the switcher
+  (outcome `done`, `unchecked`).
+
+**The update-resume list (#1618).** Unchanged in meaning. The switcher's stop is still `CENTRALU_STOP_FOR=update`, so the
+stopping host writes its `update-resume.<uuid>.json`, and the next host, new or put back, continues the listed turns once.
+A put-back after a crashed switcher starts the old version, which reads the same lists. A list naming turns the new
+version already continued names a conversation past its mark and continues nothing.
+
+**One switch implementation.** The hub's steps are gone: `switchRemote`, `startOrRestore`, `putBack`, the sequencing of
+`rollbackRemote`, `backupStore`, `restoreStore` and `hostLogTail` in `update.ts`, and `remote-install.mjs`'s `pointers`,
+`prune`, `store-backup` and `store-restore` actions with their functions. `HostControl` lost `start` and `answers`. A
+machine where neither version has `serve --switch` (a rollback between two versions from before it, or a development hub
+installing a release from before it over one) is refused with "Update <machine> first", touching nothing.
+
+**What stays on the hub:** `installRemote` (placing), the turns wait, the handover, the status reads and the report. The
+dev build (§10.11) places its build the same way and hands over with `saveStore`.
+
+**Tests.** A fake ssh into a real PowerShell (install-windows.test.ts, and dev-build.test.ts for a dev build) and into a
+real sh (update.test.ts, run on Linux), with fake versions whose `--switch` is the real launcher's, whose `--stop`,
+`--detach` and `--connection` play the version, and that read what they are told from the data folder as well, since a
+switcher WMI starts gets the account's environment. Each case below is new code; the first two were reproduced on main
+with main's steps (no host after the stop):
+
+- every command after the stop fails (the link down for good): the machine ends on the new version;
+- the hub sends nothing after the handover: the machine ends on the new version, and a later hub reads the outcome once;
+- the switcher is killed while it holds its stop, and while it holds the new version's start, with no hub asking: the
+  next `--detach` finishes it, with nothing switched or with the old version put back and serving;
+- the switcher is killed at its check while the new version answers: the next `--detach`, or a status read, finishes it
+  as `done`, and the new host keeps serving (#1907);
+- the switcher is killed at its start, then the old version's host is started by hand: the next status read leaves it
+  serving and puts the pointers back, stopping and starting nothing (#1907);
+- a version that asks no switch (`FAKE_NO_GATE`, as a release from before it) is started between the stop and the new
+  start: the switcher stops it and the update goes through (#1907). Run too with the published 0.1.0-beta.45 as the old
+  version and its real launcher starting the host mid-switch;
+- a second update, and a `--detach`, while a live switcher is in its stop, are refused (`busy`, `SwitchUnderWay`); the
+  refused update holds no link, shows no step, and leaves `switch.runner` as it was;
+- nothing starts outside the session: the switch runs in it, is killed in its start, and the reconnect brings a host back;
+- neither version has `serve --switch`: refused, nothing touched;
+- the hung new version (#1906), the put-back that gets no hello, the new version that does not start, prune of a folder a
+  program holds, the data folder a link names, rollback, and the dev build cases, all through the switcher.
+
+Launcher-level tests (tooling/launcher-switch.test.ts) cover the arguments, the switch's encoding, the Windows liveness
+rule, the steps a start is refused in, a dead switcher finished before and after the switch, a busy second switch that
+writes nothing, and what a prune keeps, and a dead switcher finished by a launcher that then exits on a missing host
+entry. The hub's link (links.test.ts) waits for a switch under way, says nothing of one it watched go through, and says
+once how an update it could not follow ended, and how a switch it missed altogether ended, on the next reach.
+
+The ssh stand-ins run each command in the account's home, as sshd does. Run in the checkout, PowerShell wrote its module
+cache there (`Microsoft/Windows/PowerShell/ModuleAnalysisCache`), which a commit then picked up.
+
+**Visible wording** (the owner approved the first four, 2026-11-03; the rest are new and proposed):
+
+| Text | Where |
+|---|---|
+| `An update of <machine> started from <hub> at <time> is still running; try again when it ends` | The update's refusal |
+| `<machine> was updated to Centralu <version> while this computer was away` | Machine row note, once |
+| `The update of <machine> to Centralu <to> was interrupted; it runs Centralu <from> again` | Machine row note or the update's error |
+| `Update <machine> first: both versions there predate updates the machine runs itself` | Rollback (or dev hub update) refusal |
+| `The update of <machine> could not be followed to its end from this computer; how it ended is shown once <machine> is reached again` | The update's error, after 15 minutes of failed reads |
+| `The update of <machine> to Centralu <to> was interrupted before the switch; nothing was switched` | The update's error or row note |
+| `<hub> is switching the Centralu version on <machine>; press Connect to try again` | Machine row, Auto reconnect off |
+| `an update from <hub> started at <time> is switching versions here; no host starts until it ends` | `serve` / `--detach` on the machine (stderr) |
+| `Centralu <version> did not start on <machine> (Centralu <other> answered there instead; something started it again during the switch); it runs Centralu <from> again` | The update's error, when an old host came back twice (#1907) |
+| `The update of <machine> to Centralu <to> was interrupted; Centralu <other> was started there meanwhile and runs` | Row note or the update's error, when a reader left a host of a third version serving (#1907) |
+
+`<time>` is HH:MM in local time in every one, the machine's own texts included, each side in its own zone (#1907).
+`<machine>` is the machine's name on its row, in every sentence of the switch's outcome and of the handover.
 
 ### 10.6 Probe 4: where the hub's ssh lives across a hub swap
 
@@ -731,13 +960,14 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
 - **The update's install does not switch** (`activate: false`), and writes no launcher when there is none yet: until
   the running host is stopped, the lookup must still find the Centralu that runs, so `serve --stop` is that version's
   own. Step 3's `machines.install` keeps switching at once, for a machine where nothing runs.
-- **The later steps reuse `remote-install.mjs`** (`action: 'pointers'` and `'prune'`), run on the Node of a version that
-  is there, so the pointer rules (rename over, `previous` before `current`, `install.lock`) live in one file.
-  Uninstall is a shell script instead: on Windows the Node that would run the `.mjs` is one of the files to remove.
-- **The link is held from the stop to the check**: no reconnect, no start of a host of its own, Reconnect included.
-  Without it the link's automatic start (decision 7) could start the old version between the stop and the switch.
-- **The check is the link's own hello**: the link opens again, and only a hello whose `build.version` is the target ends
-  it; a host of another version answering in time counts as a failure.
+- **The later steps are the machine's own** (`serve --switch`, §10.5a): the pointers, the prune and the store copy
+  live in the launcher's `serve-switch.mjs`, run on the Node of a version that is there. Uninstall is a shell script
+  instead: on Windows the Node that would run the `.mjs` is one of the files to remove.
+- **The link is held from the handover to the outcome**: no reconnect, no start of a host of its own, Reconnect
+  included. Without it the link's automatic start (decision 7) could start the old version between the stop and the
+  switch; the machine's own refusal (`reason: 'switching'`) covers other hubs and the boot entry.
+- **The check is the new version's own `--connection`** there: only a host answering as the target ends it, within 30 s;
+  a host of another version answering in time counts as a failure.
 - **Rollback clears `previous`** rather than swapping the two: the version it left stays on disk (nothing is pruned), so
   the next update finds it and downloads nothing, and "Roll back" is never offered towards the newer version or two
   steps back.
@@ -806,13 +1036,14 @@ issue, the smallest, puts a dev build on the machine from one git commit, with n
 - **Marked as dev**: `install.json` gains `source: { kind: 'dev', commit, dirty }`; the connection line's `install`
   carries it (`installInfo` in serve-install.mjs), `InstalledVersion.source` (additive) brings it to `machine_status`,
   and the row says "a dev build of <commit>".
-- **Swapped by the update's own steps** (`switchRemote` in update.ts): stop, switch, start, a hello from
-  `<base>.local.N` within 30 s, or the old pointers back and the old version started again with the end of its log.
+- **Swapped by the update's own switch** (`handOver` in update.ts, the dev build's `serve --switch` there, §10.5a):
+  stop, switch, start, a hello from `<base>.local.N` within 30 s, or the old pointers back and the old version started
+  again with the end of its log.
 - **The store is copied before the dev build first opens it.** A dev build runs on the machine's real data folder, and
   its migrations may raise the store's `min_reader_version` past what the release reads (a `breaksOlderReaders` step);
   the release would then refuse to start (`StoreTooNewError`) and the machine would have no host. So once the old host
   is stopped, before the switch, `store.db` and its `-wal`/`-shm` are copied to `<data>/remote/store-backup/<version
-  that left it>/` (`storeBackup` in remote-install.mjs). A dev build that does not answer (it died, or a heavy
+  that left it>/` (`storeBackup` in serve-switch.mjs). A dev build that does not answer (it died, or a heavy
   migration took longer than 30 s) is stopped and the copy is put back before the old version starts again. Leaving a
   dev build later (`machines.rollback`, or `machines.update` to its release), the release is started on the store as
   the dev build left it first; only if it does not answer is the copy put back and the release started once more, and
@@ -824,14 +1055,11 @@ issue, the smallest, puts a dev build on the machine from one git commit, with n
   now takes `<base>.local.N` to `<base>` (it refused it as a downgrade); a remote on `<base>.local.N` is ranked as
   `<base>`, so the hub on `<base>` is not offered an update (§4). Going back is safe only as far as the copy reaches:
   what the dev build did to the store is kept when the release reads it, and dropped when it does not.
-- **The hub's links are held** (`swap-hold.ts`): a link that finds no host running starts one itself (decision 7),
-  which mid-swap would be the old version. Before stopping anything the command writes `<data>/remote/hold.json` there
-  (`{ until, by }`, ten minutes on the hub's clock); a link asks for it before it starts a host and, while it holds,
-  says `updating` and asks again every few seconds. The command lifts it when it is done, whatever happened; one it
-  could not lift lapses. Not an RPC: the command cannot reach the hub's host. A hub from before the hold does not ask,
-  and may still start the old version mid-swap, which the swap then answers by putting the old version back. A
-  machine where WMI is blocked (link-bound hosts, decision 3) cannot be checked from the command and is refused at the
-  start step.
+- **The hub's links wait for the switch** (§10.5a): a link that finds no host running starts one itself (decision
+  7), which mid-swap would be the old version. A link reads the machine's switch before it starts a host and, while one
+  runs, says `updating` and asks again every few seconds; the machine's `serve --detach` refuses too. The hold file the
+  command wrote before (`swap-hold.ts`, `<data>/remote/hold.json`) is gone. A machine where WMI is blocked runs the
+  switch in the command's ssh session (§10.5a), and its host is left to the link to start.
 - **Limits**: the machine needs the repository and its build tools (pnpm install done there); a stable base
   (`x.y.z` with no prerelease) is refused, since `<base>.local.N` is SemVer only on a prerelease. The Mac stays on
   `pnpm local-update` (its keeper runs signed content only). Design 2 (a CI artifact per commit, streamed and hashed by

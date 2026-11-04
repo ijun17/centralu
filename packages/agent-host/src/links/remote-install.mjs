@@ -1,10 +1,9 @@
 // Centralu's remote installer, step 2 (docs/plans/remote-hub.md §10.2). The hub sends this file over
 // ssh and runs it on the pinned Node that step 1 placed; it never runs on the hub. It imports Node's
 // own modules only, and reads one argument: the base64 of a JSON object the hub wrote
-// ({ version, node, platform, hub, packages: [{ name, tarball, integrity }], activate? }), or for the
-// update's later steps ({ action: 'pointers', current, previous } and { action: 'prune' }; plan §10.5), or a dev
-// build of the host from a git commit in a working copy there ({ action: 'dev', repo, commit, … }; `pnpm remote-dev`, #1036)
-// and the copy of the store taken before it first runs ({ action: 'store-backup' | 'store-restore' }).
+// ({ version, node, platform, hub, packages: [{ name, tarball, integrity }], activate? }), or a dev build of the host
+// from a git commit in a working copy there ({ action: 'dev', repo, commit, … }; `pnpm remote-dev`, #1036). What an
+// update does after placing (stop, switch, start, check, put back, prune) is the new version's own `serve --switch`.
 //
 // It prints one line for the hub to read, `CENTRALU-INSTALL done <json>` or
 // `CENTRALU-INSTALL fail <code> <detail>`, and nothing that matters on its exit code (exit codes do
@@ -38,7 +37,6 @@ export function remoteLayout(dataDir) {
     node: join(root, 'node'),
     bin: join(root, 'bin'),
     lock: join(root, 'install.lock'),
-    storeBackup: join(root, 'store-backup'),
   }
 }
 
@@ -70,53 +68,6 @@ export function switchTo(l, next) {
   if (cur) writeAtomic(l.previous, `${cur.version} ${cur.node}\n`)
   writeAtomic(l.current, `${next.version} ${next.node}\n`)
   return { current: next, previous: cur ?? readPointer(l.previous) }
-}
-
-/**
- * Removes every version that is neither `current` nor `previous`, and every Node neither uses. A
- * folder that cannot go (a Windows program still running from it) stays and is named, never fatal
- */
-export function prune(l) {
-  const keep = [readPointer(l.current), readPointer(l.previous)].filter(Boolean)
-  const removed = []
-  const left = []
-  const sweep = (dir, kept) => {
-    let names = []
-    try {
-      names = readdirSync(dir)
-    } catch {
-      return
-    }
-    for (const name of names) {
-      if (kept.has(name) || name.startsWith('.')) continue
-      try {
-        rmSync(join(dir, name), { recursive: true, force: true })
-        removed.push(name)
-      } catch {
-        left.push(name)
-      }
-    }
-  }
-  sweep(l.versions, new Set(keep.map((p) => p.version)))
-  // What `placeVersion` moved aside and could not remove then
-  try {
-    for (const name of readdirSync(l.root).filter((n) => n.startsWith('.replaced-'))) {
-      try {
-        rmSync(join(l.root, name), { recursive: true, force: true })
-      } catch {
-        left.push(name)
-      }
-    }
-  } catch {}
-  sweep(l.node, new Set(keep.map((p) => `v${p.node}`)))
-  // The store copies of versions that are gone (#1036): nothing can start them to need the copy any more. Not reported:
-  // `removed` names versions and Nodes
-  try {
-    for (const name of readdirSync(l.storeBackup).filter((n) => !keep.some((p) => p.version === n))) rmSync(join(l.storeBackup, name), { recursive: true, force: true })
-  } catch {
-    // none, or one still open; the next prune tries again
-  }
-  return { removed, left }
 }
 
 /** A lock folder with no pid in it, younger than this, is held: its installer has made it and not yet written the pid */
@@ -313,8 +264,8 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
       return { installed: { version: p.version, node: p.node }, current: readPointer(l.current), previous: readPointer(l.previous), removed: [], left: [] }
     }
     const launcher = await ensureManagedLauncher(l, dir, p.version, platform)
-    const pointers = switchTo(l, { version: p.version, node: p.node })
-    return { ...pointers, ...prune(l), launcher }
+    // Nothing is pruned here: the switch that replaces a version prunes (the launcher's serve --switch, plan §10.5a)
+    return { ...switchTo(l, { version: p.version, node: p.node }), removed: [], left: [], launcher }
   } finally {
     unlock()
   }
@@ -335,121 +286,6 @@ async function ensureManagedLauncher(l, dir, version, platform) {
     if (platform !== 'win32') chmodSync(launcher, 0o755)
   }
   return launcher
-}
-
-const pointerOf = (v) => (v && WORD.test(v.version) && WORD.test(v.node) ? { version: v.version, node: v.node } : null)
-
-/**
- * Writes both pointers as given (plan §10.5 steps 3 and 5, and rollback): `previous` first, then
- * `current`, each by rename; a null `previous` removes that file. `current` must name a version and a
- * Node that are both there. A null `current` puts the machine back to having no managed version: the
- * pointers and the launcher go, so the lookup finds the Centralu it ran before (an npm install).
- * Nothing is removed from `versions/` or `node/`
- */
-export async function setPointers(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu'), platform = process.platform } = {}) {
-  const l = remoteLayout(dataDir)
-  mkdirSync(l.root, { recursive: true })
-  const unlock = lock(l)
-  try {
-    const current = pointerOf(p.current)
-    const previous = pointerOf(p.previous)
-    if (!current) {
-      for (const f of [l.previous, l.current, launcherPath(l, platform)]) rmSync(f, { force: true })
-      return { current: null, previous: null }
-    }
-    const dir = join(l.versions, current.version)
-    // Both must be there: a `previous` naming nothing would offer a rollback to a version that is gone
-    for (const v of [current, previous].filter(Boolean)) {
-      if (!existsSync(join(l.versions, v.version, 'install.json')) || !existsSync(join(l.node, `v${v.node}`))) throw new Refusal('missing', `${v.version} ${v.node}`)
-    }
-    await ensureManagedLauncher(l, dir, current.version, platform)
-    if (previous) writeAtomic(l.previous, `${previous.version} ${previous.node}\n`)
-    else rmSync(l.previous, { force: true })
-    writeAtomic(l.current, `${current.version} ${current.node}\n`)
-    return { current, previous }
-  } finally {
-    unlock()
-  }
-}
-
-/** Plan §10.5 step 6, on its own: what is neither `current` nor `previous` goes */
-export function pruneNow({ dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu') } = {}) {
-  const l = remoteLayout(dataDir)
-  mkdirSync(l.root, { recursive: true })
-  const unlock = lock(l)
-  try {
-    return { current: readPointer(l.current), previous: readPointer(l.previous), ...prune(l) }
-  } finally {
-    unlock()
-  }
-}
-
-/** The files of the host's store in the data folder: the database and SQLite's write-ahead log beside it */
-const STORE_FILES = ['store.db', 'store.db-wal', 'store.db-shm']
-
-/**
- * A copy of the store taken while no host runs, before a dev build first opens it (#1036): a dev build may migrate the
- * store past what the version before it reads (a step that raises `min_reader_version`), and that version would then
- * refuse to start (`StoreTooNewError`), leaving the machine with no host. The copy is kept per `owner`, the version
- * that left the store so (`store-backup/<owner>/`), replaced whole, and `before` names the build it was taken before.
- * A copy goes with its version (`prune`)
- */
-export function storeBackup(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu') } = {}) {
-  if (!WORD.test(String(p.owner)) || !WORD.test(String(p.before))) throw new Refusal('params', 'store backup')
-  const l = remoteLayout(dataDir)
-  mkdirSync(l.storeBackup, { recursive: true })
-  const unlock = lock(l)
-  try {
-    const partial = join(l.storeBackup, `.partial-${process.pid}`)
-    rmSync(partial, { recursive: true, force: true })
-    try {
-      mkdirSync(partial, { recursive: true })
-      const files = STORE_FILES.filter((f) => existsSync(join(dataDir, f)))
-      for (const f of files) cpSync(join(dataDir, f), join(partial, f))
-      writeFileSync(join(partial, 'backup.json'), JSON.stringify({ owner: p.owner, before: p.before, files, at: new Date().toISOString() }, null, 2) + '\n')
-      rmSync(join(l.storeBackup, p.owner), { recursive: true, force: true })
-      renameSync(partial, join(l.storeBackup, p.owner))
-      return { saved: files }
-    } catch (err) {
-      throw err instanceof Refusal ? err : new Refusal('store_backup', err.message)
-    } finally {
-      rmSync(partial, { recursive: true, force: true })
-    }
-  } finally {
-    unlock()
-  }
-}
-
-/**
- * Puts back the copy `storeBackup` took for `owner` (the version about to start), with no host running; without one,
- * touches nothing and says so. A write-ahead log the copy did not have is removed, so SQLite does not replay the dev
- * build's changes onto the restored database. What the dev build wrote to the store since is gone; nothing else in the
- * data folder is touched. The copy stays, so a second attempt finds it again
- */
-export function storeRestore(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu') } = {}) {
-  if (!WORD.test(String(p.owner))) throw new Refusal('params', 'store restore')
-  const l = remoteLayout(dataDir)
-  mkdirSync(l.root, { recursive: true })
-  const unlock = lock(l)
-  try {
-    const dir = join(l.storeBackup, p.owner)
-    let meta
-    try {
-      meta = JSON.parse(readFileSync(join(dir, 'backup.json'), 'utf8'))
-    } catch {
-      return { restored: false }
-    }
-    if (meta.owner !== p.owner || !Array.isArray(meta.files)) return { restored: false }
-    try {
-      for (const f of STORE_FILES) rmSync(join(dataDir, f), { force: true })
-      for (const f of meta.files.filter((f) => STORE_FILES.includes(f))) cpSync(join(dir, f), join(dataDir, f))
-    } catch (err) {
-      throw new Refusal('store_restore', err.message)
-    }
-    return { restored: true, before: meta.before ?? null, at: meta.at ?? null }
-  } finally {
-    unlock()
-  }
 }
 
 /** `a` at least `b`, both plain `x.y.z` (a prerelease or build suffix is ignored) */
@@ -500,8 +336,8 @@ function lastSaid(...texts) {
 
 /**
  * A dev build of the host from a git commit (`pnpm remote-dev`, #1036; docs/plans/remote-hub.md §10.11), placed beside
- * what is there as `<base>.local.N` with nothing switched: the hub's update steps stop, switch, start and check it
- * (update.ts `switchRemote`).
+ * what is there as `<base>.local.N` with nothing switched: the dev build's own `serve --switch` stops, switches, starts
+ * and checks it (update.ts `handOver`).
  *
  * Checked before anything is built: the working copy's HEAD is exactly `p.commit`, it has no changes unless
  * `p.allowDirty`, it speaks `p.protocol` (the protocol the hub links on), and this Node (the pinned one `current` runs
@@ -590,18 +426,7 @@ export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(
 async function main() {
   try {
     const p = JSON.parse(Buffer.from(process.argv[2] ?? '', 'base64').toString('utf8'))
-    const r =
-      p.action === 'pointers'
-        ? await setPointers(p)
-        : p.action === 'prune'
-          ? pruneNow()
-          : p.action === 'dev'
-            ? devBuild(p)
-            : p.action === 'store-backup'
-              ? storeBackup(p)
-              : p.action === 'store-restore'
-                ? storeRestore(p)
-                : await install(p)
+    const r = p.action === 'dev' ? devBuild(p) : await install(p)
     process.stdout.write(`CENTRALU-INSTALL done ${JSON.stringify(r)}\n`)
   } catch (err) {
     const code = err instanceof Refusal ? err.code : 'error'

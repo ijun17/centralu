@@ -602,12 +602,20 @@ export function foreignHolder(dataDir) {
  * future (a clock set back since) proves nothing.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
-  const holder = lockHolder(dataDir)
+  return isWriter(lockHolder(dataDir), startOf, createdAt) === true
+}
+
+/**
+ * Whether `{ pid, started, at }` names the live process that wrote it, by `lockHolderIsAlive`'s rule: true, false, or
+ * null when it lives and Windows cannot say when it was created (another logon's process); each caller decides what
+ * that counts as
+ */
+export function isWriter(holder, startOf = processStartTime, createdAt = processCreatedAt) {
   if (!holder || !isAlive(holder.pid)) return false
   if (holder.started) return startOf(holder.pid) === holder.started
   if (holder.at === undefined || holder.at > Date.now()) return false
   const created = createdAt(holder.pid)
-  return created !== null && created <= holder.at + CLOCK_TICK_MS
+  return created === null ? null : created <= holder.at + CLOCK_TICK_MS
 }
 
 /** One tick of the Windows clock */

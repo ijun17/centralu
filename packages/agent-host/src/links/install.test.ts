@@ -9,9 +9,12 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
+import { VERSION_WORD } from './registry.js'
 import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.mjs'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { POINTER_WORD } from '../../../../packaging/npm/centralu/bin/serve-install.mjs'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -23,6 +26,18 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 
 const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
 const NODE_V = '24.21.0'
+
+/*
+ * A version word is written into commands and pointer lines by three programs that cannot import each other: the hub,
+ * the launcher there, and the script the hub sends (which runs alone). One rule, held in each
+ */
+describe('the word a version is written as', () => {
+  it('is the same rule in the hub, the launcher and the script the hub sends', () => {
+    const sent = /^const WORD = (\/.+\/)$/m.exec(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs'), 'utf8'))?.[1]
+    expect(sent).toBe(String(VERSION_WORD))
+    expect(String(POINTER_WORD)).toBe(String(VERSION_WORD))
+  })
+})
 const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
 
 const linux: PreflightFacts = { os: 'Linux', arch: 'x86_64', glibc: '2.39', musl: false, freeKb: 50_000_000, tar: true, gzip: true, fetch: 'curl', sha: 'sha256sum' }
@@ -210,7 +225,6 @@ type InstallModule = {
   switchTo(l: unknown, next: { version: string; node: string }): unknown
   lock(l: Layout): () => void
   placeVersion(l: Layout, partial: string, dir: string): void
-  setPointers(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
   tarProgram(platform: string, env: Record<string, string | undefined>): string
   install(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
 }
@@ -389,18 +403,22 @@ describe('remote-install.mjs: replacing a version folder and naming pointers', (
     expect(readdirSync(l.root).sort()).toEqual(['versions'])
   })
 
+  // The switcher writes the pointers of a switch (serve-switch.mjs, plan §10.5a), in the layout this installer places
   it('refuses a previous that names a version that is not there, and writes neither pointer', async () => {
+    const { setPointers } = (await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')).href)) as {
+      setPointers(dataDir: string, current: { version: string; node: string }, previous: { version: string; node: string } | null, platform: string): void
+    }
     fresh()
     mkdirSync(join(l.node, `v${NODE_V}`), { recursive: true })
     mkdirSync(l.bin, { recursive: true })
     writeFileSync(join(l.bin, 'centralu'), '#!/bin/sh\n')
     writeFileSync(l.current, `0.9.0 ${NODE_V}\n`)
-    const p = { action: 'pointers', version: '1.0.0', node: NODE_V, current: { version: '1.0.0', node: NODE_V }, previous: { version: '0.5.0', node: NODE_V } }
-    await expect(mod.setPointers(p, { dataDir: dir, platform: 'linux' })).rejects.toMatchObject({ code: 'missing', detail: `0.5.0 ${NODE_V}` })
+    const current = { version: '1.0.0', node: NODE_V }
+    expect(() => setPointers(dir, current, { version: '0.5.0', node: NODE_V }, 'linux')).toThrow(`Centralu 0.5.0 on Node ${NODE_V} is not there`)
     expect(readFileSync(l.current, 'utf8')).toBe(`0.9.0 ${NODE_V}\n`)
     expect(existsSync(l.previous)).toBe(false)
     // With a previous that is there, both are written
-    await mod.setPointers({ ...p, previous: null }, { dataDir: dir, platform: 'linux' })
+    setPointers(dir, current, null, 'linux')
     expect(readFileSync(l.current, 'utf8')).toBe(`1.0.0 ${NODE_V}\n`)
   })
 })
@@ -453,7 +471,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     // ssh hands its last argument to the remote's shell, as sshd does
     writeFileSync(
       join(root, 'ssh'),
-      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit' })\nprocess.exit(r.status ?? 1)\n`,
+      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
     )
     chmodSync(join(root, 'ssh'), 0o755)
     archive = tarGz(`node-v${NODE_V}-linux-x64`, {
@@ -542,15 +560,16 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(existsSync(remote('current'))).toBe(false)
   }, 60_000 * SLOW)
 
-  it('keeps current and previous only: a third version removes the first', async () => {
+  // Pruning is the switch's (serve --switch, plan §10.5a): an install that activates keeps every version it finds
+  it('moves the old current to previous at each install and removes nothing: a third version keeps the first', async () => {
     await install('9.9.1')
     const launcher = readFileSync(remote('bin', 'centralu'))
     const second = await install('9.9.2')
     expect(second.previous).toEqual({ version: '9.9.1', node: NODE_V })
     expect(readFileSync(remote('previous'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     const third = await install('9.9.3')
-    expect(third).toMatchObject({ current: { version: '9.9.3' }, previous: { version: '9.9.2' }, removed: ['9.9.1'] })
-    expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.2', '9.9.3'])
+    expect(third).toMatchObject({ current: { version: '9.9.3' }, previous: { version: '9.9.2' }, removed: [] })
+    expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.1', '9.9.2', '9.9.3'])
     // The launcher was written once and never again (S8)
     expect(readFileSync(remote('bin', 'centralu'))).toEqual(launcher)
   }, 90_000 * SLOW)

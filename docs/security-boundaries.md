@@ -1659,8 +1659,9 @@ A host started with `centralu serve` on another machine is reached by the app th
   checked there first (HEAD must equal it, no uncommitted changes unless the maintainer allows them, the hub's
   protocol), and the git on that machine's PATH to check it (the installer runs on its own Node and cannot use the
   host's `runGit`, so a repository's own git configuration applies there as when the maintainer runs git in it). It
-  is a command on the hub over the link's own ssh, never an RPC, so an agent or a linked machine cannot start one; the
-  hold it writes (`<data>/remote/hold.json`) only makes links wait, and lapses. The build is marked (`install.json`
+  is a command on the hub over the link's own ssh, never an RPC, so an agent or a linked machine cannot start one; it
+  hands the swap to the machine as an update does (`serve --switch`, remote-hub.md §10.5a), whose lock only makes
+  starts wait while a live switcher holds it. The build is marked (`install.json`
   `source: { kind: 'dev' }`, shown on the machine's row), so it is never taken for a release. Going back is not free:
   the dev build runs on the machine's real store and may migrate it past what the release reads; the store is copied
   before the dev build first opens it and put back when the dev build does not answer, or when the release will not
