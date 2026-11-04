@@ -25,8 +25,6 @@ let lastAtRest: boolean | undefined
 let lastUserReads = 0
 /** Whether the child's machine's host continues the turns an update cuts, as its hello says (#1618) */
 let continues: boolean
-/** When that host continued the child's turn after an update cut it, as its hello says (#1618); null when it did not */
-let continuedAt: number | null
 /** This hub's sender as the machine records it, qualified with the machine's id */
 const HUB = { sessionId: 'm1._hub-orchestrator' }
 const PERSON = { sessionId: 'm1.person' }
@@ -45,7 +43,8 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
     lastUserMessage: async () => ({ ok: true, message: lastUser }),
     continuesCutTurns: () => continues,
-    continuedAfterUpdate: (id: string) => (id === child.sessionId ? continuedAt : null),
+    // An older machine host and hello still name the continued turns; a hub must tell nobody of them (#1966)
+    continuedAfterUpdate: () => 5_000,
   } as unknown as LinkedSessions
   const host = {
     children,
@@ -72,7 +71,6 @@ beforeEach(() => {
   lastUserReads = 0
   lastAtRest = undefined
   continues = true
-  continuedAt = null
 })
 afterEach(() => store.close())
 
@@ -767,9 +765,30 @@ describe('a child on a linked machine, as the hub follows it (#1038 review)', ()
 
 /*
  * #1618: the hub's update of a machine goes at once, and the host it starts there continues the turns the stop cut. The caller
- * of a child whose turn that was hears it once the link is back: the turn was cut and goes on, its report still to come. It
- * used to hear that the link dropped, then the child's stop read as the work's end ("finished")
+ * of a child whose turn that was hears nothing until that turn ends (#1966), and its report says the turn was cut and continued. It
+ * used to hear that the link dropped, then the child's stop read as the work's end ("finished"), later one notice per child
  */
+// #1966 review: a paused report whose next turn ended while the link was still coming up was never reported
+describe('a paused report whose turn end was deferred', () => {
+  it('is read when the link is back, and reported if the child is at rest', async () => {
+    const ra = agents()
+    ra.restore()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    state = 'idle'
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await eventually(() => settled.includes(child.sessionId))
+  })
+
+  it('is read after the gate deferred its turn end, and reported if the child is at rest', async () => {
+    const ra = agents()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    // Whose the turn is cannot be told yet: the turn's end is deferred and read from the machine
+    expect(ra.reportGate(child.sessionId)).toBe('defer')
+    state = 'idle'
+    await eventually(() => settled.includes(child.sessionId))
+  })
+})
+
 describe('a child whose turn an update of its machine cut (#1618)', () => {
   /** This hub's update of the machine holds the link: its stop ends the child's turn */
   const update = (ra: RemoteAgents) => {
@@ -777,25 +796,24 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
     children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'updating', operation: { kind: 'update', step: 'stop', target: null, at: 1 } } })
   }
-  const continued = () => told.filter((t) => t.includes('cut the turn') && t.includes('Centralu continued it there on the new version'))
+  const continued = () => told.filter((t) => t.includes('cut the turn') || t.includes('continued it there'))
   const dropped = () => told.filter((t) => t.includes('The link to Box dropped'))
 
-  it('is not told the link dropped; once the link is back and the turn runs there again, it hears once that it was continued', async () => {
+  it('is not told the link dropped; once the link is back and the turn runs there again, it is told nothing and its report will say so (#1966)', async () => {
     const ra = agents()
     update(ra)
     await new Promise((r) => setTimeout(r, 20))
     expect(dropped()).toEqual([])
     // The host the update started continued it: working again there, and its hello says so
-    continuedAt = 5_000
-    ra.observe({ type: 'machine_resync', machineId: 'm1' })
-    await eventually(() => continued().length === 1)
-    expect(continued()[0]).toContain('Its report comes when that turn ends')
-    expect(settled).toEqual([])
-    expect(children.linkedReports.get(child.sessionId)?.busy).toBe(true)
-    // Another catch-up of the same host tells nothing more
     ra.observe({ type: 'machine_resync', machineId: 'm1' })
     await new Promise((r) => setTimeout(r, 20))
-    expect(continued()).toHaveLength(1)
+    expect(settled).toEqual([])
+    expect(children.linkedReports.get(child.sessionId)?.busy).toBe(true)
+    // Another catch-up of the same host changes nothing
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(continued()).toEqual([])
+    expect(told).toEqual([])
   })
 
   it('is told the link dropped once the update ends with the machine not back, and at once where the host predates continuing turns', async () => {

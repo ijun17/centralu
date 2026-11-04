@@ -9,8 +9,9 @@ import { FakeProcess } from './kept-host.test-helpers.js'
 
 /**
  * A swap while a session's turn runs, on a tool whose adapter cannot take a running turn over (ACP: it ends the kept
- * process and opens the conversation again in a new one, #1562 review). The turn is over, and the session must say so
- * as a quit does: idle, with the quit mark and its line, not `working` forever with a Stop that does nothing.
+ * process and opens the conversation again in a new one, #1562 review). The turn is over, and Centralu itself cut it, so it
+ * continues it as an update's cut is (#1966). When that Continue cannot be sent, the session says so as a quit does: idle,
+ * with the quit mark and its line, not `working` forever with a Stop that does nothing.
  */
 
 class Handle implements SessionHandle {
@@ -20,8 +21,16 @@ class Handle implements SessionHandle {
     readonly opts: CreateSessionOpts,
     readonly emit: EventSink,
     readonly takesOverTurn: boolean | undefined,
+    private readonly failSend = false,
   ) {}
-  send() {}
+  readonly sent: string[] = []
+  /** How many times Centralu tried to send something in, taken or not */
+  attempts = 0
+  send(text: string) {
+    this.attempts++
+    if (this.failSend) throw new Error('the tool takes no input')
+    this.sent.push(text)
+  }
   respondApproval() {
     return true
   }
@@ -37,7 +46,7 @@ class Adapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true, sleep: true,
   }
   created: Handle[] = []
-  constructor(private readonly takesOverTurn: boolean | undefined) {}
+  constructor(private readonly takesOverTurn: boolean | undefined, private readonly failSend = false) {}
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
@@ -48,7 +57,7 @@ class Adapter implements AgentAdapter {
     return 'v1'
   }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    const h = new Handle(opts.sessionId, opts, emit, this.takesOverTurn)
+    const h = new Handle(opts.sessionId, opts, emit, this.takesOverTurn, this.failSend)
     this.created.push(h)
     return h
   }
@@ -67,8 +76,8 @@ beforeEach(() => {
   events = []
 })
 
-function host(takesOverTurn: boolean | undefined, kept: ReadonlySet<string> = new Set()) {
-  const adapter = new Adapter(takesOverTurn)
+function host(takesOverTurn: boolean | undefined, kept: ReadonlySet<string> = new Set(), failSend = false) {
+  const adapter = new Adapter(takesOverTurn, failSend)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept })
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
@@ -76,7 +85,7 @@ function host(takesOverTurn: boolean | undefined, kept: ReadonlySet<string> = ne
 }
 
 /** A session mid-turn on the first host, which then leaves for a swap; the next host adopts its process */
-async function swapMidTurn(takesOverTurn: boolean | undefined, hubGave = false) {
+async function swapMidTurn(takesOverTurn: boolean | undefined, hubGave = false, failSend = false) {
   const a = host(takesOverTurn)
   const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
@@ -87,20 +96,32 @@ async function swapMidTurn(takesOverTurn: boolean | undefined, hubGave = false) 
     store.settings.setAppSetting(`turn_span:${s.id}`, JSON.stringify({ latest: { since: 1 } }))
   }
   await a.mgr.detachAll()
-  const b = host(takesOverTurn, new Set([s.id]))
+  const b = host(takesOverTurn, new Set([s.id]), failSend)
   await b.mgr.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() }])
   return { b, id: s.id }
 }
 
 describe('a swap mid-turn (#1562 review)', () => {
-  it('ends the turn as a quit does when the adapter reopened the conversation instead of taking the turn over', async () => {
+  it('continues the turn when the adapter reopened the conversation instead of taking the turn over (#1966)', async () => {
     const { b, id } = await swapMidTurn(false)
+    expect(b.adapter.last.sent).toHaveLength(1)
+    expect(b.adapter.last.sent[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
+    expect(b.session(id)).toMatchObject({ state: 'working', live: true })
+    expect(b.session(id).interruption ?? null).toBeNull()
+    expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /Centralu quit or restarted/.test(e.text))).toBe(false)
+  })
+
+  it('ends the turn as a quit does when that Continue cannot be sent', async () => {
+    const { b, id } = await swapMidTurn(false, false, true)
+    // It was tried before the turn was given up
+    expect(b.adapter.last.attempts).toBe(1)
     expect(b.session(id)).toMatchObject({ state: 'idle', live: true, interruption: { reason: 'quit' } })
     expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /Centralu quit or restarted/.test(e.text))).toBe(true)
   })
 
-  it('closes the turn a hub follows and takes off what it was given: the process that held them is gone', async () => {
-    const { id } = await swapMidTurn(false, true)
+  it('closes the turn a hub follows and takes off what it was given when the Continue cannot be sent: the process that held them is gone', async () => {
+    const { b, id } = await swapMidTurn(false, true, true)
+    expect(b.adapter.last.attempts).toBe(1)
     expect(store.settings.appSetting(`input_origins:${id}`)).toBeNull()
     expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1, ended: true } })
   })

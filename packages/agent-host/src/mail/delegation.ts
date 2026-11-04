@@ -148,7 +148,7 @@ export function turnRecorder(mail: MessageService, records: MailboxRecords, turn
  * A turn's end as the mailbox is told it (docs/plans/mailbox.md §9.3): Centralu's own words for the task's sender, with the facts a wake carries
  */
 export type ReportDraft = {
-  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over, resumed */
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
   outcome: string
   /** The report in Centralu's words alone: how it ended, the id, the kind of error, how to go on, and where the session's words are read (#1186) */
   body: string
@@ -160,7 +160,7 @@ export type ReportDraft = {
   paused?: number
   /** The person wrote into the turn, or added to the task */
   personNote?: boolean
-  /** What the work is now: reported (`review`), still going (`running`: paused over its own work or work it handed on, or an update's cut that goes on), or taken over (`dropped`) */
+  /** What the work is now: reported (`review`), still going (`running`: paused over its own work or work it handed on), or taken over (`dropped`) */
   then: 'review' | 'running' | 'dropped'
   /** The session is being archived, and archiving stopped the turn this reports: that end is not the work's, and the task is left to `partyGone` */
   archiving?: boolean
@@ -245,8 +245,6 @@ export function reportRecorder(
     if (!found) return 'none'
     // Archiving stopped the turn: the task is `partyGone`'s, which settles it and tells its sender
     if (draft.archiving) return 'closed'
-    // An update cut the turn and it goes on (#1618): not the work's end, and the old way says so
-    if (draft.outcome === 'resumed') return 'none'
     const { work, request } = found
     let written
     try {

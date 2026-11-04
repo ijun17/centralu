@@ -21,6 +21,10 @@ class Handle implements SessionHandle {
   disposed = false
   detached = false
   pendingOutputOnDetach = true
+  /** What was sent into it (Centralu's Continue after a swap cut its turn, #1966) */
+  readonly sent: string[] = []
+  /** Set by a test for a tool that reopens the conversation in a new process instead of taking the turn over (ACP) */
+  takesOverTurn?: boolean
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
@@ -28,7 +32,9 @@ class Handle implements SessionHandle {
   ) {
     if (opts.resumeExternalId) this.externalId = opts.resumeExternalId
   }
-  send() {}
+  send(text: string) {
+    this.sent.push(text)
+  }
   respondApproval() {
     return true
   }
@@ -87,7 +93,7 @@ beforeEach(() => {
 function host(kept: ReadonlySet<string> = new Set()) {
   const claude = new Adapter('claude')
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept, exitWaitMs: 200 })
   return { mgr, claude, rpc: createRpcHandler(mgr, adapters) }
 }
 
@@ -250,6 +256,90 @@ describe('a host restart under the keeper', () => {
     expect(reports[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'quit' })
     expect(read.row(reports[0]!.id, PERSON)).toBeDefined()
     expect(read.taskRow(task.id, id)).toMatchObject({ settled: 'reported' })
+  })
+
+  /*
+   * #1966: a swap Centralu made cut the turn of a session its tool cannot take up again (a process that could not be re-attached; ACP,
+   * which reopens the conversation in a new process). Centralu continues it with the person's Continue sentence, as an update's cut is,
+   * and tells nobody it stopped. Only when the continue itself fails does the turn end as a quit's does (the test above).
+   */
+  it('a kept process that cannot be re-attached is continued like a turn an update cut, not marked stopped (#1966)', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.processSource?.adopt) throw new Error('the process is gone')
+      return create(opts, emit)
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    expect(b.claude.last.sent).toHaveLength(1)
+    expect(b.claude.last.sent[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
+    const s = b.mgr.listSessions().find((x) => x.id === id)!
+    expect(s.state).toBe('working')
+    expect(s.interruption ?? null).toBeNull()
+    expect(store.messages.loadMessages(id, 50).map((r) => JSON.stringify(r.payload)).some((t) => t.includes('Centralu quit or restarted'))).toBe(false)
+  })
+
+  it('waits for the old process to exit before it resumes the conversation, then kills it after a bound (#1966 review)', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const old = new FakeProcess()
+    const create = b.claude.createSession.bind(b.claude)
+    let resumedBeforeExit = false
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.processSource?.adopt) throw new Error('the process is gone')
+      resumedBeforeExit = old.exitCode === null && !old.kills.includes('SIGKILL') && !old.exited
+      return create(opts, emit)
+    }
+    // It exits late, after SIGTERM and before the bound
+    old.kill = (signal = 'SIGTERM') => {
+      old.kills.push(signal)
+      if (signal === 'SIGTERM') setTimeout(() => { old.exited = true; old.emit('exit', 0, null) }, 50)
+      return true
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
+    expect(resumedBeforeExit).toBe(false)
+    expect(old.kills).toEqual(['SIGTERM'])
+    expect(b.claude.last.sent).toHaveLength(1)
+  })
+
+  it('kills an old process that does not exit within the bound, and resumes', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const old = new FakeProcess()
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      if (opts.processSource?.adopt) throw new Error('the process is gone')
+      return create(opts, emit)
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
+    expect(old.kills).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(b.claude.last.sent).toHaveLength(1)
+  })
+
+  it('a tool that reopens the conversation instead of taking the turn over is continued too (#1966)', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    await a.mgr.detachAll()
+    const b = host(new Set([id]))
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      const h = await create(opts, emit)
+      h.takesOverTurn = false
+      return h
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    expect(b.claude.last.sent).toHaveLength(1)
+    expect(b.claude.last.sent[0]).toContain('Continue where you stopped.')
+    const s = b.mgr.listSessions().find((x) => x.id === id)!
+    expect(s.state).toBe('working')
+    expect(s.interruption ?? null).toBeNull()
   })
 
   /** Without the keeper's list the startup reset turns the running session idle — today's rule for a host with no keeper */

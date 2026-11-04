@@ -59,8 +59,6 @@ export interface RoutedMachine {
   readonly callWindowMs?: number
   /** Whether the machine's host continues the turns an update's stop cuts (#1618, its hello's `updateContinued`) */
   continuesCutTurns?(): boolean
-  /** When the machine's host continued this session's turn (its own id) after an update cut it (#1618); null when it did not */
-  continuedAfterUpdate?(sessionId: string): number | null
   /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
 }

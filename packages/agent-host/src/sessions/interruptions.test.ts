@@ -528,24 +528,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await h.mgr.disposeAll()
   }
 
-  it("its parent's notice quotes that turn's words, none here, never the turn before's answer (#1946)", async () => {
-    const f = folder()
-    const a = host({ updateResume: f })
-    const { parent, child } = await parentAndChild(a)
-    a.claude.handles.get(child)!.answer('indent fixed in the sidebar')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    await eventually(() => info(a, parent).state === 'working')
-    a.claude.handles.get(parent)!.answer('noted')
-    // The child's CLI opens a turn of its own and says nothing before the update cuts it
-    a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'working' })
-    await stopForUpdate(a)
-    host({ updateResume: f })
-    const goesOn = () => reportsTo(parent, child).find((t) => t.includes('cut short by an update'))
-    await eventually(() => goesOn() !== undefined)
-    expect(goesOn()).not.toContain('indent fixed in the sidebar')
-  })
-
-  it("is listed by the stop, continued once with Centralu's note; its parent hears it goes on, and the report is the continued turn's end", async () => {
+  it("is listed by the stop, continued once with Centralu's note; its parent hears nothing until the continued turn's end, which says so (#1966)", async () => {
     const f = folder()
     const a = host({ updateResume: f })
     const { parent, child } = await parentAndChild(a)
@@ -577,18 +560,17 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(lines(child).some((l) => l.includes('Centralu was updated during this turn, which stopped it; Centralu continued it'))).toBe(true)
     expect(lines(child).some((l) => l.includes('Centralu quit or restarted while this turn was running'))).toBe(false)
 
-    // The parent is told once that the turn goes on, not that it stopped
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('cut short by an update of Centralu on its machine, and Centralu continued it there')
-    expect(reportsTo(parent, child)[0]).toContain('Its report follows when that turn ends')
-    expect(reportsTo(parent, child)[0]).not.toContain('stopped before finishing')
-
-    // The continued turn's end is the report, once
-    b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
-    await eventually(() => reportsTo(parent, child).length === 2)
-    expect(reportsTo(parent, child)[1]).toContain('The session ended its turn')
+    // The parent is told nothing of the cut, neither that it stopped nor that it goes on (#1966)
     await startNoticesRan()
-    expect(reportsTo(parent, child)).toHaveLength(2)
+    expect(reportsTo(parent, child)).toHaveLength(0)
+
+    // The continued turn's end is the report, once, and says in one line that an update cut the turn and Centralu continued it
+    b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('The session ended its turn')
+    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    await startNoticesRan()
+    expect(reportsTo(parent, child)).toHaveLength(1)
     expect(sentTo(b, child)).toHaveLength(1)
   })
 
@@ -733,14 +715,15 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(reportsTo(parent, child)).toHaveLength(0)
     expect(f.files.size).toBe(2)
     expect(f.ids()).toEqual([child])
-    // The next host continues it, and its parent hears it once
+    // The next host continues it, and its parent hears of it once, at the continued turn's end
     const c = host({ updateResume: f })
     await eventually(() => sentTo(c, child).length === 1)
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('Centralu continued it there')
     await eventually(() => f.ids() === null)
     await startNoticesRan()
-    expect(reportsTo(parent, child)).toHaveLength(1)
+    expect(reportsTo(parent, child)).toHaveLength(0)
+    c.claude.handles.get(child)!.answer('done')
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
     // The conversation shows one Continue: the leaving host wrote no line of its own for the note it handed over late
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
   })
@@ -786,7 +769,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it('a host that starts to leave while the session wakes sends it no note, and the next host sends the one (#1626 review)', async () => {
     const f = folder()
     const a = host({ updateResume: f })
-    const { parent, child } = await parentAndChild(a)
+    const { child } = await parentAndChild(a)
     await stopForUpdate(a)
     const b = host({ updateResume: f })
     // The tool is slow to start the process: a second update's stop begins meanwhile
@@ -804,8 +787,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(0)
     const c = host({ updateResume: f })
     await eventually(() => sentTo(c, child).length === 1)
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
+    await eventually(() => lines(child).filter((l) => l.includes('Centralu continued it')).length === 1)
   })
 
   it('lists only what is in a turn when the host stops: not a session the person stopped, nor one at rest; a stop not for an update lists nothing', async () => {
@@ -834,6 +816,29 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(c, cut)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
   })
 
+  // #1966 review: a turn that ends before the Continue's send has returned still carries the cut line, and the mark does not outlive it
+  it('a continued turn that ends at once carries the cut line on that turn, not on a later one', async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      const h = await create(opts, emit)
+      const send = h.send.bind(h)
+      h.send = (text: string) => {
+        send(text)
+        h.answer('done at once')
+      }
+      return h
+    }
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    const held = (b.mgr as unknown as { children: { continuedCuts: Set<string> } }).children.continuedCuts
+    expect(held.has(child)).toBe(false)
+  })
+
   it('a wake before the Continue went in (a window that sees the machine back) keeps the turn, and the Continue goes in once (#1618 review D4)', async () => {
     const f = folder()
     const a = host({ updateResume: f })
@@ -851,8 +856,9 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // Never at rest in between, which a hub would read as the turn's end
     const states = events.slice(from).flatMap((e) => (e.type === 'state_change' && e.sessionId === child ? [e.state] : []))
     expect(states.every((s) => s === 'working')).toBe(true)
+    b.claude.handles.get(child)!.answer('done')
     await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('Centralu continued it there')
+    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
   })
 
   it("work the person owns is not reported to their Inbox as stopped: its one report is the continued turn's end (#1618 review D3)", async () => {
@@ -898,7 +904,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
     await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
-    expect(reportsTo(parent, child)[0]).not.toContain('continued it there')
+    expect(reportsTo(parent, child)[0]).not.toContain('cut this turn')
     expect(f.ids()).toBeNull()
     // The stopped mark is a row too: past the listed one (#1626 review 1b)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)

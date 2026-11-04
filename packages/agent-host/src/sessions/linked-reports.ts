@@ -20,11 +20,6 @@ export type ReportWork =
   | { tookOver: true; paused: readonly BackgroundTask[] }
   /** Its turn ended while threads it handed on are still going (§6): the work is paused on them, and the report stays owed */
   | { waitingOn: number }
-  /**
-   * An update of Centralu on its machine cut its turn, and the next host continued it (#1618): not its end. `owed`: the report
-   * is still owed, and the continued turn's end is it
-   */
-  | { resumed: true; owed: boolean }
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so
@@ -46,7 +41,7 @@ export type LinkedReportsHost = {
     ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
     work?: ReportWork,
     answerSeq?: number,
-    part?: { wrote?: true; added?: true },
+    part?: { wrote?: true; added?: true; cut?: true },
   ): Promise<void>
   /**
    * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine
@@ -64,15 +59,17 @@ export type LinkedReportsHost = {
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
 const ADD_NEXT_MS = 15_000
 
-/** What a report says of the person's part in a turn (#1377): nothing, unless they wrote into it or added to the task */
-function partOf(turn: { wrote?: true; added?: true }): { wrote?: true; added?: true } | undefined {
-  return turn.wrote || turn.added ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}) } : undefined
+/** What a report says of a turn besides its words (#1377, #1966): nothing, unless the person wrote into it or added to the task, or an update cut it and it was continued (said by the machine's host) */
+function partOf(turn: TurnStarter): { wrote?: true; added?: true; cut?: true } | undefined {
+  return turn.wrote || turn.added || turn.cut
+    ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}), ...(turn.cut ? { cut: true as const } : {}) }
+    : undefined
 }
 
 /** Whose the turn was, as the machine's host said it on the event that ended it (#1377); undefined from a host that does not say */
 function saidTurn(raw: unknown): TurnStarter | undefined {
   if (typeof raw !== 'object' || raw === null || !('by' in raw) || (raw.by !== 'person' && raw.by !== 'work')) return undefined
-  return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}) }
+  return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}), ...('cut' in raw && raw.cut === true ? { cut: true as const } : {}) }
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -493,7 +490,7 @@ export class LinkedReports {
     work?: ReportWork,
     known?: { name: string; project: string },
     /** The person's part in the turn reported (#1377) */
-    part?: { wrote?: true; added?: true },
+    part?: { wrote?: true; added?: true; cut?: true },
     /** The session's last turn was the person's (#1377): its last response is not the work's to report */
     theirs = false,
     /**

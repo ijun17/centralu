@@ -445,11 +445,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.updateContinued !== null
   }
 
-  /** When the remote host took up this session's turn (its own id) after an update cut it (#1618); null when it did not */
-  continuedAfterUpdate(sessionId: string): number | null {
-    return this.updateContinued?.get(sessionId) ?? null
-  }
-
   info(): MachineInfo {
     return {
       id: this.record.id,

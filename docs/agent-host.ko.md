@@ -1594,7 +1594,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 | 이유 | 정해지는 때 | 지워지는 때 |
 |---|---|---|
 | `network` | 돌던 턴이 네트워크 때문에 오류로 끝날 때(`endedTurn`과 함께 `interruptionAfter`. 충돌 `adapter_crashed`와 쉬는 동안의 오류는 해당하지 않는다): 오류 코드(`ECONNREFUSED`, `ENOTFOUND` 등), Claude의 "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed"(CLI가 연결 실패를 말로 옮기는 함수에서 읽은 문구. "Unable to connect to API: SSL …"은 네트워크가 아니라 설정 문제다), 컴퓨터 잠자기, Codex의 "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network"(`isNetworkFailure`. 실제 저장소와 host.log에서 측정한 문장들). 도구의 문장만 보고 충돌에 붙는 stderr 끝부분은 보지 않는다(`failureSentence`). "connection closed", "network error" 같은 일반적인 말은 그 문장들 안에서만 센다. MCP 서버나 개발 서버도 그런 말을 할 수 있기 때문이다 | 세션이 다시 일할 때(`working`, 출력), 또는 턴이 다른 식으로 끝날 때 |
-| `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …"). 연결된 허브의 업데이트가 끊은 턴은 이어 가며 표시하지 않고, 잇지 못했을 때만 표시한다(#1618) | 같음 |
+| `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했고 그 턴도 잇지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …"). 업데이트나 스왑이 끊은 턴은 이어 가며 표시하지 않고, 잇지 못했을 때만 표시한다(#1618, #1966) | 같음 |
 | `interrupted` | 턴이 `interrupted_by_tool` 이유(`INTERRUPTED_BY_TOOL`)로 `waiting_input`에서 끝날 때: 우리가 `turn/interrupt`를 보내지 않은 턴에 온 Codex의 `turn/completed {status: "interrupted"}` | 같음 |
 | `reconnecting` | 도구가 `RECONNECTING_FLAG_MS`(5분) 동안 `retrying`에 머물 때: Codex는 네트워크를 끝없이 기다린다. 살아 있는 동안만이며 저장하지 않는다 | 활동이 `retrying`에서 벗어나거나 턴이 끝날 때 |
 
@@ -1933,14 +1933,19 @@ Windows 패키지를 실패시킨다.
   받지 못한다: 그 세션은 목록에 들어가 이어진다. 턴은 끝났지만 백그라운드 작업(개발 서버, 감시)이 돌던 세션은 프로세스와 함께 그 작업을 잃고 이어지지
   않는다: 이어 갈 턴이 없었다. 도구가 다시 이어 받지 못한 세션은 유지된 프로세스를 다시 붙이지 못했을 때처럼 끝난다(`turnLostInSwap`): `quit`, 보고나
   요청자에게 멈췄다고 알린다.
-- **호출자.** 같은 기기의 요청자는 한 번 "The assigned work's turn was cut short by an update of Centralu on its machine, and Centralu continued it
-  there on the new version"과 보고가 아직 오는지를 듣는다(`ChildReports.tellCutByUpdate`, outcome `resumed`, 스레드는 진행 중으로 남는다). 스스로도
-  이어 가는 요청자에게는 알리지 않는다(자기 메모가 자식들을 덮는다). 허브의 호출자(그 기기에 start_agent로 만든 자식)는 기기의 호스트가 끊긴 턴을
+- **스왑이 끊은 턴도 같은 방식으로 잇는다**(#1966). 호스트 스왑이 끊은 턴 중 도구가 다시 이어 받지 못하는 것(다시 붙이지 못한 유지된 프로세스, 대화를
+  새 프로세스로 다시 여는 ACP는 `takesOverTurn = false`)은 같은 문(`SessionManager.sendUpdateNote`, `adoptKept`의 `continueLostTurn`)으로 같은
+  Continue를 받고, 새 프로세스가 뜨는 동안 상태는 `working`으로 유지된다(`continuingTurns`). 그 전송이 실패할 때만 위처럼 끝난다. 사람 자신의 종료(`markQuit`,
+  목록도 스왑도 없음)가 끊은 턴은 예전처럼 잇지 않는다(#1947). 다시 붙이지 못한 유지된 프로세스는 먼저 멈추고 끝나기를(최대 5초, 이후 kill) 기다린 뒤 대화를 이어 두 CLI가 한 기록에 쓰지 않게 한다.
+- **호출자는 끊긴 것을 듣지 않는다**(#1966). 업데이트는 끊긴 자식마다 알림 하나를 보내 부모의 턴을 매번 깨웠다. 이제 부모는 이어 간 턴이 끝날 때까지
+  아무것도 듣지 않고, 그 보고에 한 줄이 실린다: "An update of Centralu cut this turn and Centralu continued it."(`TurnStarter.cut`,
+  Continue가 들어가기 전에 정해지고 실패하면 지워진다, `ChildOwnership.noteContinuedCut`. 기기의 호스트가 끝내는 이벤트에 `TurnWho.cut`으로 싣기에
+  허브는 링크가 턴 중간에 붙었든 아니든 그 한 턴의 보고에만 싣는다). 끊긴 턴은 자식만이 아니라 사람의 세션도 모두 잇는다: 끊은 것은 Centralu이고 사람이 멈춘 것이 아니다(소유자 결정, #1966). 잇지 못한 턴은 멈춘 턴으로 끝나 위처럼 알린다: 부모가 어차피 빚진 그 자식의 보고 하나다. 허브의 호출자(그 기기에 start_agent로 만든 자식)는 기기의 호스트가 끊긴 턴을
   잇는 호스트라면, 허브 자신의 업데이트나 롤백이 첫 단계부터 링크가 돌아올 때까지 링크를 잡는 동안 링크가 끊겼다는 말을 듣지 않는다
   (`RemoteAgents.updateHolds`). 새 호스트의 `hello_ok`는 시작부터, 어떤 hello에 답하기도 전에, Continue가 들어갔든 아니든 자기가 이어 가는 턴을 이름 댄다
   (`updateContinued`, 시작이 각 턴을 맡은 시각, 그 호스트의 시계. 잃은 것으로 드러난 턴은 더는 이름 대지 않는다). 그래서 Continue와 다시 연결의 순서는
   상관없다. 링크가 돌아와
-  자식이 다시 턴 중이고 거기 이름이 있으면, 업데이트가 턴을 끊고 Centralu가 이어 갔다는 말을 한 번 듣는다. 기기가 돌아오지 않은 채 끝난 업데이트는
+  자식이 다시 턴 중이고 거기 이름이 있으면, 그 보고에 이어 갔다는 표시가 붙는다(위). 기기가 돌아오지 않은 채 끝난 업데이트는
   링크를 놓고, 그때 끊겼다고 알린다. 어느 쪽이든 빚진 보고는 이어 간 턴의 끝이다: 보고는 하나이고, 끊긴 턴을 "finished"라고 하지 않는다.
 - **다루지 않는 것.** 잇지 못한 뒤 링크가 돌아왔을 때 쉬고 있는 기기의 자식은 예전처럼 쉬는 것으로 보고된다: `host.sessions`도 hello도 그 손실을 싣지
   않는다(이어 간 턴이 그사이 끝난 자식은 턴이 끝났다고 보고되며, 실제로 끝났다). #1618 이전 호스트를 돌리는 기기는 멈출 때 아무것도 적지 않는다: 허브의

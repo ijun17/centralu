@@ -14,7 +14,7 @@ import { HUB_SENDER } from './hub-sender.js'
  * no store side to check here.
  */
 
-type Delivered = { orchestratorId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: { wrote?: true; added?: true } }
+type Delivered = { orchestratorId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: { wrote?: true; added?: true; cut?: true } }
 
 let store: Store
 let children: ChildOwnership
@@ -112,6 +112,19 @@ describe('whom a turn end is reported to', () => {
       { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete' },
     ])
     expect(children.linkedReports.size).toBe(0)
+  })
+
+  // #1966: the machine's host says on the ending event that an update cut the turn and it continued it; only that turn's report carries it
+  it('carries the cut the machine says of the turn that ended, once, and no later turn', async () => {
+    ask('m1.w1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
+    await flush()
+    expect(delivered.map((d) => d.part)).toEqual([{ cut: true }])
+    ask('m1.w1')
+    turn('m1.w1')
+    await flush()
+    expect(delivered[1]!.part).toBeUndefined()
   })
 
   // #1604: the words of the turn that ended, not the child's last response; a turn with nothing to say says so

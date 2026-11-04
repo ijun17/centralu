@@ -3037,7 +3037,7 @@ tool-neutral (`sessions/interruptions.ts`):
 | Reason | Set when | Cleared when |
 |---|---|---|
 | `network` | a running turn ends in an error the network caused (`interruptionAfter` with `endedTurn`; a crash, `adapter_crashed`, and an error at rest are not): the error codes (`ECONNREFUSED`, `ENOTFOUND`, ...), Claude's "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed" (the wordings read in the CLI's own connection-failure function; "Unable to connect to API: SSL …" is a setting, not the network), the computer sleeping, Codex's "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network" (`isNetworkFailure`; the sentences measured in the real store and host.log). Only the tool's sentence counts, not the stderr tail a crash carries (`failureSentence`); generic words ("connection closed", "network error") count only inside those sentences, since an MCP server or a dev server can say them | the session works again (`working`, output), or a turn ends otherwise |
-| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached, or a turn a linked hub's update cut could not be continued (§4.8, #1618; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
+| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached and its turn cannot be continued, or a turn an update or a swap cut could not be continued (§4.8, #1618, #1966; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
 | `shutdown` | the last host was told the system was ending (a shutdown, restart or sign-out, #1397; `system-end.json`, below). Then a session that was `working` or `waiting_approval` with no process gets this reason instead of `quit` (unless it has rows from more than 2 minutes after that end, `SYSTEM_END_TAIL_MS`: a later host's, of a build that reads no notice), and so does a session in `error` whose newest error, past the `internal` one closing the handle writes for follow-ups still queued, is an `adapter_crashed` stamped from 30 s before the notice (`SYSTEM_END_LEAD_MS`: where the system ends every process at once, the agent may exit before the host asks) to 2 minutes after it. Both are reset to `idle` and get a warning line ("This turn stopped before it finished: the computer shut down, restarted or signed out while it was running …"; the words are `SHUTDOWN_WORDS` in the protocol, the same in the label, the note, the list and the report); a session at rest or one that crashed outside that span is left as it is. With no notice (a quit, any other stop, a host killed with no notice) nothing is guessed: a cut turn stays `quit` and a crash an error. Known: the caller of a delegated turn whose agent crashed in that span keeps the old host's "failed" report, sent before the host went, while the child then reads `shutdown`; it is reported once. `lifecycle/system-end.ts` | the same |
 | `interrupted` | a turn ends `waiting_input` with the reason `interrupted_by_tool` (`INTERRUPTED_BY_TOOL`): Codex's `turn/completed {status: "interrupted"}` for a turn no `turn/interrupt` of ours preceded | the same |
 | `reconnecting` | the tool has stayed `retrying` for `RECONNECTING_FLAG_MS` (5 minutes): Codex waits for the network without end. Live only, never stored | the activity moves off `retrying` or the turn ends |
@@ -3712,16 +3712,24 @@ the person's Continue would.
   work with its process and is not continued as a turn, but its agent is told (above). One whose tool cannot take it up again
   ends as a kept process that could not be re-attached does (`turnLostInSwap`): `quit`, and its report or its requester
   told it stopped.
-- **Its caller.** A requester on the same machine hears once "The assigned work's turn was cut short by an update of
-  Centralu on its machine, and Centralu continued it there on the new version", with whether its report still follows
-  (`ChildReports.tellCutByUpdate`, outcome `resumed`, the thread kept running); a requester continued itself is not
-  told, its own note covers its children. A caller on the hub (a child start_agent made there) is not told that the link
+- **A swap's cut is continued the same way** (#1966). A turn a host swap cut that its tool cannot take over (a kept process that could
+  not be re-attached; ACP, which reopens the conversation in a new process and so marks `takesOverTurn = false`) gets the same Continue
+  through the same door (`SessionManager.sendUpdateNote`, `continueLostTurn` from `adoptKept`), the state kept `working` while the new
+  process comes up (`continuingTurns`). Only when that send fails does it end as above. A turn cut by the person's own quit (`markQuit`,
+  no list, no swap) is not continued, as before (#1947). A kept process that could not be re-attached is stopped first and waited for (up to 5 s, then killed)
+  before its conversation is resumed, so two CLIs do not write one transcript.
+- **Its caller hears nothing of the cut** (#1966). The update used to send one notice per cut child, each waking the parent's turn
+  for no decision. Now the parent is told nothing until the continued turn ends; that report carries one line, "An update of
+  Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set before the Continue goes in and dropped if it fails, `ChildOwnership.noteContinuedCut`; the machine's host
+  says it on the ending event, `TurnWho.cut`, so a hub carries it on that one turn's report whether or not its link caught the turn mid-way).
+  Every session whose turn Centralu cut is continued, the person's own sessions too, not only children: Centralu cut it, the person did not stop it (owner, #1966). A turn that cannot be
+  continued ends as a stopped turn and is told as such (above): one report for that child, which the parent is owed anyway. A caller on the hub (a child start_agent made there) is not told that the link
   dropped while the hub's own update or rollback holds the link, from its first step until the link is back
   (`RemoteAgents.updateHolds`), when the machine's host is one that continues cut turns. The new host's `hello_ok`
   names the turns it continues from its start on, before it answers any hello, whether or not the Continue is in yet
   (`updateContinued`, with when its start took each up, on its clock; one that turns out lost is no longer named), so
   the order of the Continue and the reconnect does not matter; once the link is back and the child is in
-  its turn again and named there, the caller hears once that the update cut the turn and Centralu continued it. An
+  its turn again and named there, its report is marked as continued (above). An
   update that ends with the machine not back lets the link go, and the drop is told then. Either way the report it is
   owed is the continued turn's end: one report, never "finished" for the cut.
 - **What it does not cover.** A child on the machine found at rest when the link is back after it could not be
