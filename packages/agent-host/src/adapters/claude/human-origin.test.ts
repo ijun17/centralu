@@ -33,7 +33,7 @@ describe('the origin on a user message written to the CLI', () => {
   it('is absent for any other input, as before', async () => {
     wire.messages.length = 0
     const handle = await start('o2')
-    handle.send('[Centralu] The assigned work ended its turn.')
+    handle.send('[Centralu] The session ended its turn.')
     await tick()
     expect(wire.messages).toHaveLength(1)
     expect('origin' in wire.messages[0]!).toBe(false)

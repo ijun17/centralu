@@ -134,7 +134,7 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     h.turn()
     await h.settle(1)
     expect(h.reports()).toHaveLength(1)
-    expect(h.reports()[0]).toMatch(/^\[Centralu\] The assigned work ended its turn\./)
+    expect(h.reports()[0]).toMatch(/^\[Centralu\] The session ended its turn\./)
     expect(h.reports()[0]).toContain('8 pass / 2 fail')
     expect(h.reports()[0]).toContain('id: m1.w1')
 

@@ -164,7 +164,7 @@ describe('new work sent by mail after the first was reported', () => {
     await w.until(() => outcomes(forA.id).includes('paused'))
     expect(w.mgr.pausedFor(helper, a)).toBe(true)
     const earlier = m.service.task(addr(b), addr(helper), { text: 'write the docs', origin: 'send_to_session', delivered: true })
-    m.service.report(earlier.id, { outcome: 'finished', body: '[Centralu] The assigned work ended its turn.' })
+    m.service.report(earlier.id, { outcome: 'finished', body: '[Centralu] The session ended its turn.' })
     return { a, b, helper, forA }
   }
 

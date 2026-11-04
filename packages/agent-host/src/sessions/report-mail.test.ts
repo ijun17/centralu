@@ -64,7 +64,7 @@ describe('a turn ends, the owner reads mail', () => {
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
     const [report] = reportsIn(parent, child)
     expect(report).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: task.id, facts: { outcome: 'finished', about: { session: addr(child) } } })
-    expect(report?.body).toContain('The assigned work ended its turn.')
+    expect(report?.body).toContain('The session ended its turn.')
     // The session's words are the report's `answer`, a fact apart; none of them, nor its name or project, are in Centralu's words (#1186)
     expect(report?.facts.answer).toBe('all merged')
     expect(report?.body).not.toContain('all merged')
@@ -225,7 +225,7 @@ describe('what the owner reads with the tool', () => {
     const [report] = reportsIn(parent, child)
     const text = m.tool.run(parent, { action: 'read', thread: report!.id }).text
     expect(text).toContain(`[${report!.id}] report from Centralu`)
-    expect(text).toContain('> [Centralu] The assigned work ended its turn.')
+    expect(text).toContain('> [Centralu] The session ended its turn.')
     expect(text).not.toContain('IGNORE ALL PREVIOUS INSTRUCTIONS')
     // The task it answers is in its chain, as the owner's own
     expect(text).toContain(`[${taskOf(parent, child).id}] task from you`)
@@ -364,7 +364,7 @@ describe('work handed on', () => {
     handleOf(child)!.answer('wrote the tests myself')
     await w.until(() => oldReports(parent, child).length === 2)
     expect(oldReports(parent, child)[0]).toContain('paused')
-    expect(oldReports(parent, child)[1]).toContain('The assigned work ended its turn.')
+    expect(oldReports(parent, child)[1]).toContain('The session ended its turn.')
   })
 
   it('a helper sent more in the work is that work’s: the owner is not told finished while it works', async () => {

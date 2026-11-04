@@ -63,7 +63,7 @@ export function personReportRecorder(
  * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
  * words, and the report must not contradict them
  */
-export const TURN_ENDED = "[Centralu] The assigned work ended its turn. Whether the work is done, its last response says."
+export const TURN_ENDED = "[Centralu] The session ended its turn. Its last response says whether the work is done."
 
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }

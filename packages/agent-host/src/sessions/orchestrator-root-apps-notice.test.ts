@@ -56,7 +56,7 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
     adapter.handleOf(worker.id)!.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
     const report = adapter.handleOf(orc.id)!.sent[0]!
-    expect(report.startsWith(`${LINE}\n\n[Centralu] The assigned work ended its turn.`)).toBe(true)
+    expect(report.startsWith(`${LINE}\n\n[Centralu] The session ended its turn.`)).toBe(true)
     expect(report).toContain(`sourceSessionId: ${worker.id}`)
   })
 

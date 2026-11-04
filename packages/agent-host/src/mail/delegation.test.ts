@@ -30,7 +30,7 @@ function turnWorld() {
   const end = (sessionId: string) => t.observe({ type: 'turn_complete', sessionId } as never, true)
   return { ...w, mail, turns: t, end }
 }
-const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'finished', body: '[Centralu] The assigned work ended its turn.', then: 'review', delivery: 'wake', ...over })
+const draft = (over: Partial<ReportDraft> = {}): ReportDraft => ({ outcome: 'finished', body: '[Centralu] The session ended its turn.', then: 'review', delivery: 'wake', ...over })
 
 describe('a delegation written down (§9.1)', () => {
   it('is a task from the caller to the child, delivered and read (the old path gave it the words), and the turn it started is that task’s', () => {

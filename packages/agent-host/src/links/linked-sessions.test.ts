@@ -925,7 +925,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
     h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(1)
-    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work ended its turn.')])
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The session ended its turn.')])
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
@@ -942,7 +942,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     // A turn running when the machine took it in ends with it in it (mid-turn input), as a local session's does
     h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(1)
-    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work ended its turn.')])
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The session ended its turn.')])
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
@@ -959,7 +959,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
     h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(1)
-    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work ended its turn.')])
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The session ended its turn.')])
     expect(log.mock.calls.some((c) => String(c[0]).includes('the next turn end reports'))).toBe(true)
     log.mockRestore()
     await Promise.all(cleanup.splice(0).map((c) => c()))
@@ -974,7 +974,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
     h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(1)
-    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work ended its turn.')])
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The session ended its turn.')])
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
@@ -1056,7 +1056,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       turn(h)
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work ended its turn\./)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
       // Told once: a later turn there is not the assigned work
       turn(h)
       await h.settle(2)
@@ -1085,7 +1085,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       turn(h)
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work ended its turn\./)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
     })
 
     it("\"Take it over\" on the machine closes the report: told once, in Centralu's words, and none of their later turns is reported", async () => {
@@ -1143,7 +1143,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: 'also lint' })
       h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
       await h.settle(1)
-      expect(h.reports()[0]).toContain('[Centralu] The assigned work ended its turn.')
+      expect(h.reports()[0]).toContain('[Centralu] The session ended its turn.')
       expect(h.reports()[0]).toContain('The person wrote in this session during this turn.')
     })
 
@@ -1158,7 +1158,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       h.mgr.observeLinked(tasks([loop], [{ ...verify, status: 'completed' }]))
       turn(h)
       await h.settle(2)
-      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work ended its turn\./)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
     })
 
     it('a failed turn is reported as it ended, work running or not', async () => {
@@ -1211,7 +1211,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(1)
       h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
       await flush(2)
-      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work ended its turn\./)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
     })
 
     it('a new instruction to it ends the pause: the old work owes nothing more', async () => {
@@ -1256,7 +1256,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await h.send(true)
       turn(h)
       await h.settle(1)
-      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The assigned work ended its turn\./)])
+      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The session ended its turn\./)])
     })
 
     it('reads the machine\'s work whole when its link comes up, so a blip does not turn a paused end into "finished"', async () => {
@@ -1287,7 +1287,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await new Promise((r) => setTimeout(r, 20))
       h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
       await h.settle(1)
-      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The assigned work ended its turn\./)])
+      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The session ended its turn\./)])
     })
 
     it('a machine removed while the work is paused, or mid-turn, reports that and owes nothing more', async () => {

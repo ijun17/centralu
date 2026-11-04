@@ -157,7 +157,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     // The turn it started is the one reported
     handleOf(a).answer('index added')
     await w.until(() => told(b, a).length === before + 1)
-    expect(told(b, a).at(-1)).toContain('The assigned work ended its turn')
+    expect(told(b, a).at(-1)).toContain('The session ended its turn')
   })
 
   it('a crash during the wake is said once, as not delivered', async () => {
