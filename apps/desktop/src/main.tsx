@@ -108,6 +108,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    * unknown or where the platform has no keeper — then the dialog reads as it always did.
    */
   const [background, setBackground] = useState<boolean | null>(null)
+  // The window runs on the computer's `centralu serve` host, which stays running when it closes (#1466)
+  const servesHost = platform.capabilities.servesHost
   const [quitError, setQuitError] = useState<string | null>(null)
   /*
    * Work on this computer that a plain quit ends: a session in a turn, or one with a background job running. A session on a
@@ -410,6 +412,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       {askQuit && (
         <QuitDialog
           background={background}
+          serve={servesHost}
           strays={strays}
           straysError={straysError}
           alsoStop={alsoStop}

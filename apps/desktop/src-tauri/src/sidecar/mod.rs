@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use centralu_keeper_core::serve_window::{self, FallbackSink, ServeChoice, ServeFallback};
+use centralu_keeper_core::serve_window::{self, FallbackSink, ServeChoice, ServeFallback, ServeHost};
 use centralu_keeper_core::start_plan::{self, Env, Facts, Host, Plan};
 
 use serde::Serialize;
@@ -40,7 +40,7 @@ use launch::direct_launcher;
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostBuild {
-    /// `keeper` or `direct`.
+    /// `keeper`, `direct`, or `serve`: direct, on the data folder's `centralu serve` host, which outlives the window.
     pub mode: &'static str,
     #[cfg(unix)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,6 +113,8 @@ pub struct RelaunchInfo {
 pub struct Supervisor {
     inner: Arc<Mutex<Choice>>,
     direct: host_proc::Supervisor,
+    /// The serve host this window runs on, when it does (`Host::Serve`): what "Quit completely" stops
+    serve: Arc<Mutex<Option<ServeHost>>>,
     #[cfg(unix)]
     keeper: Arc<Mutex<Option<Arc<link::KeeperLink>>>>,
 }
@@ -202,6 +204,17 @@ impl Supervisor {
         self.inner.lock().map(|c| *c).unwrap_or(Choice::Undecided)
     }
 
+    /// Whether this window runs on the data folder's `centralu serve` host (and has not fallen back to its own)
+    fn on_serve_host(&self) -> Option<ServeHost> {
+        self.serve.lock().ok()?.clone().filter(ServeHost::active)
+    }
+
+    fn remember_serve(&self, start: &Start) {
+        if let Ok(mut s) = self.serve.lock() {
+            *s = start.serve.clone().map(|launcher| ServeHost::new(launcher, start.fallback.clone()));
+        }
+    }
+
     pub fn info(&self) -> Option<HostInfo> {
         match self.choice() {
             #[cfg(unix)]
@@ -221,6 +234,7 @@ impl Supervisor {
     /// Starts supervising. The app still comes up even if this fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
         let start = start_plan(&app);
+        self.remember_serve(&start);
         #[cfg(unix)]
         {
             // What "Apply now" compares the bundle on disk with (#1895); the bundled host only, not one `centralu serve` runs
@@ -250,6 +264,7 @@ impl Supervisor {
             Choice::Keeper => self.link().ok().map(|l| l.restart(app)).unwrap_or(false),
             _ => {
                 let start = start_plan(&app);
+                self.remember_serve(&start);
                 self.direct.restart(direct_sink(&start, app), direct_launcher(&start))
             }
         }
@@ -277,7 +292,7 @@ impl Supervisor {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => self.link().ok().map(|l| l.build()).unwrap_or_default(),
-            _ => HostBuild { mode: "direct", ..Default::default() },
+            _ => HostBuild { mode: if self.on_serve_host().is_some() { "serve" } else { "direct" }, ..Default::default() },
         }
     }
 
@@ -351,12 +366,13 @@ impl Supervisor {
 
     /// "Quit completely": tells the keeper to stop the host, everything it holds (agents,
     /// terminals, running commands) and itself, whatever background mode says. In direct mode
-    /// quitting already does that.
+    /// quitting already does that, except on the serve host, which the window leaves running for a linked hub: that one
+    /// is stopped the way a person stops it, `serve --stop` (#1466).
     pub fn stop_agents(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => self.link()?.stop(),
-            _ => Ok(()),
+            _ => self.on_serve_host().map_or(Ok(()), |serve| serve.stop()),
         }
     }
 

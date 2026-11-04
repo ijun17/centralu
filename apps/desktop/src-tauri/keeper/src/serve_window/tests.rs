@@ -159,3 +159,78 @@ fn a_serve_window_that_ends_before_its_ready_line_leaves_a_working_bundled_host(
     assert!(fallback.fell_back());
     assert!(seen.0.lock().unwrap().iter().any(|s| matches!(s, HostStatus::Ready(_))));
 }
+
+/// What `serve --stop` prints (`answerLine`), after whatever a login shell said first
+fn stop_line(ok: bool, was_running: bool, message: &str) -> String {
+    format!("some motd\r\n{{\"v\":1,\"stop\":{{\"ok\":{ok},\"wasRunning\":{was_running},\"message\":{}}}}}\r\n", serde_json::to_string(message).unwrap())
+}
+
+#[test]
+fn reads_serve_stops_answer_as_stopped_unless_it_says_the_host_is_still_there() {
+    assert_eq!(parse_stop_line(&stop_line(true, true, "")), Ok(()));
+    // Nothing ran: nothing left to stop
+    assert_eq!(parse_stop_line(&stop_line(true, false, "no centralu serve has run for C:/d")), Ok(()));
+    assert_eq!(parse_stop_line(&stop_line(false, true, "the host is busy")), Err("the host is busy".to_string()));
+    assert!(parse_stop_line(&stop_line(false, true, "")).is_err());
+    assert!(parse_stop_line("CENTRALU-NOT-FOUND\n").is_err());
+    assert!(parse_stop_line("").is_err());
+}
+
+#[test]
+fn stops_the_serve_host_through_the_launcher_and_reports_what_it_could_not_stop() {
+    let stopped = fake_launcher("stop-ok", stop_line(true, true, "").trim(), 0);
+    assert_eq!(stop_serve(&stopped, Duration::from_secs(20)), Ok(()));
+    let refused = fake_launcher("stop-refused", stop_line(false, true, "the lock names pid 7, which centralu serve did not start").trim(), 0);
+    assert_eq!(stop_serve(&refused, Duration::from_secs(20)), Err("the lock names pid 7, which centralu serve did not start".to_string()));
+    let hung = fake_launcher("stop-hung", "{}", 30);
+    assert!(stop_serve(&hung, Duration::from_millis(800)).is_err());
+}
+
+/// A launcher that records its arguments in `args.txt` beside it and answers `answer`: `.cmd` on Windows, a shell script elsewhere
+fn recording_launcher(name: &str, answer: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("cc-serve-stop-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let marker = dir.join("args.txt");
+    let _ = std::fs::remove_file(&marker);
+    let launcher = if cfg!(windows) {
+        let p = dir.join("centralu.cmd");
+        std::fs::write(&p, format!("@echo off\r\necho %* > \"{}\"\r\necho {answer}\r\n", marker.display())).unwrap();
+        p
+    } else {
+        let p = dir.join("centralu");
+        std::fs::write(&p, format!("#!/bin/sh\necho \"$@\" > '{}'\necho '{answer}'\n", marker.display())).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p
+    };
+    (launcher, marker)
+}
+
+/// #1466: "Quit completely" in a window on the serve host did nothing, and left the host running
+#[test]
+fn quit_completely_on_the_serve_host_runs_serve_stop_and_says_why_it_could_not() {
+    let (launcher, marker) = recording_launcher("ok", r#"{"v":1,"stop":{"ok":true,"wasRunning":true}}"#);
+    let host = ServeHost::new(launcher, Arc::new(ServeFallback::default()));
+    assert_eq!(host.stop(), Ok(()));
+    assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "serve --stop");
+
+    let (launcher, _) = recording_launcher("refused", r#"{"v":1,"stop":{"ok":false,"wasRunning":true,"message":"the host is busy"}}"#);
+    let host = ServeHost::new(launcher, Arc::new(ServeFallback::default()));
+    assert_eq!(host.stop(), Err("the host is busy".to_string()), "the dialog stays open and says why");
+}
+
+#[test]
+fn a_window_that_fell_back_to_its_own_host_stops_nothing_through_serve() {
+    let (launcher, marker) = recording_launcher("fallback", r#"{"v":1,"stop":{"ok":true,"wasRunning":true}}"#);
+    let fallback = Arc::new(ServeFallback::default());
+    let host = ServeHost::new(launcher, fallback.clone());
+    assert!(host.active());
+    fallback.next();
+    fallback.next(); // the serve attempt ended before its ready line
+    assert!(!host.active());
+    assert_eq!(host.stop(), Ok(()));
+    assert!(!marker.exists(), "the bundled host the window runs is stopped by quitting");
+}

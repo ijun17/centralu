@@ -100,8 +100,45 @@ pub const ASK_TIMEOUT: Duration = Duration::from_secs(15);
 /// What `<launcher> serve --connection` printed, or None when it could not run or did not end within `timeout` (then
 /// its tree is ended).
 pub fn ask_connection(launcher: &Path, timeout: Duration) -> Option<String> {
+    run_launcher(launcher, "--connection", timeout)
+}
+
+/// How long "Quit completely" waits for `serve --stop`: the host is asked and waited for up to 30 s, then ended after a
+/// grace of 15 s (`runStop`).
+pub const STOP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// "Quit completely" on the serve host: `<launcher> serve --stop`, the stop a person types and a hub's update uses (the
+/// host's own `host.stop`, waited for). `Err` carries the words for the dialog.
+pub fn stop_serve(launcher: &Path, timeout: Duration) -> Result<(), String> {
+    let out = run_launcher(launcher, "--stop", timeout).ok_or("centralu serve --stop gave no answer in time")?;
+    parse_stop_line(&out)
+}
+
+/// `{ v: 1, stop: { ok, wasRunning, message? } }`, the last such line of what `serve --stop` printed. A host that was not
+/// running counts as stopped; `ok: false` is a host that is still there (busy, or another Centralu's), said as it said it.
+pub fn parse_stop_line(stdout: &str) -> Result<(), String> {
+    let stop = stdout
+        .lines()
+        .rev()
+        .find_map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
+            if v.get("v").and_then(|v| v.as_u64()) != Some(1) {
+                return None;
+            }
+            v.get("stop").cloned()
+        })
+        .ok_or("centralu serve --stop gave no answer")?;
+    if stop.get("ok").and_then(|o| o.as_bool()) == Some(true) {
+        return Ok(());
+    }
+    Err(stop.get("message").and_then(|m| m.as_str()).unwrap_or("centralu serve --stop did not stop the host").to_string())
+}
+
+/// What `<launcher> serve <flag>` printed, or None when it could not run or did not end within `timeout` (then its tree
+/// is ended).
+fn run_launcher(launcher: &Path, flag: &str, timeout: Duration) -> Option<String> {
     let mut cmd = Command::new(launcher);
-    cmd.args(["serve", "--connection"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["serve", flag]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     crate::os::hide_console(&mut cmd);
     let mut child = cmd.spawn().ok()?;
     let end = Instant::now() + timeout;
@@ -158,6 +195,34 @@ impl ServeFallback {
 
     pub fn fell_back(&self) -> bool {
         self.fell_back.load(Ordering::SeqCst)
+    }
+}
+
+/// The serve host a window runs on: the data folder's `centralu` launcher, and the fallback that says whether the window
+/// still uses it. What "Quit completely" stops, since closing the window leaves that host running for a linked hub (#1466).
+#[derive(Debug, Clone)]
+pub struct ServeHost {
+    launcher: std::path::PathBuf,
+    fallback: Arc<ServeFallback>,
+}
+
+impl ServeHost {
+    pub fn new(launcher: std::path::PathBuf, fallback: Arc<ServeFallback>) -> Self {
+        Self { launcher, fallback }
+    }
+
+    /// The window runs on this host, not on the bundled one it fell back to.
+    pub fn active(&self) -> bool {
+        !self.fallback.fell_back()
+    }
+
+    /// Stops the serve host with `serve --stop`, waited for. The bundled host a fallen-back window runs is its own child:
+    /// quitting already stops it.
+    pub fn stop(&self) -> Result<(), String> {
+        if !self.active() {
+            return Ok(());
+        }
+        stop_serve(&self.launcher, STOP_TIMEOUT)
     }
 }
 
