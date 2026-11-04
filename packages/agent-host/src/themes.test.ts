@@ -126,3 +126,28 @@ describe('the themes folder (#312)', () => {
     expect(files.pathOf('ok-1')).toBe(join(dir, 'ok-1.json'))
   })
 })
+
+describe('writing and removing (#1981)', () => {
+  it('refuses a theme bigger than the reader accepts, and writes nothing', async () => {
+    const tokens = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => ['t' + i, 'x'.repeat(390)]))
+    await expect(files.save(null, { name: 'Huge', base: 'dark', tokens })).rejects.toThrow(/too large/)
+    expect(readdirSync(dir).filter((n) => n.endsWith('.json') && n !== THEME_SCHEMA_FILE)).toEqual([])
+  })
+
+  it('does not overwrite a hand-written file the list does not show because of its capital letters', async () => {
+    writeFileSync(join(dir, 'Paper.json'), '{"name":"Mine","base":"light"}')
+    await expect(files.save('paper', { name: 'Paper', base: 'light', tokens: {} })).rejects.toThrow(/Paper\.json/)
+    expect(readFileSync(join(dir, 'Paper.json'), 'utf8')).toContain('Mine')
+  })
+
+  it('moves a removed file to a place of its own each time, and says where', async () => {
+    await files.save('a', { name: 'A', base: 'dark', tokens: {} })
+    const first = await files.remove('a')
+    await files.save('a', { name: 'A', base: 'dark', tokens: {} })
+    const second = await files.remove('a')
+    expect(first).not.toBe(second)
+    expect(readdirSync(join(dir, '.removed'))).toHaveLength(2)
+    expect(await files.remove('a')).toBeNull()
+    expect(await files.list()).toEqual([])
+  })
+})

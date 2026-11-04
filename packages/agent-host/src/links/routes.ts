@@ -322,6 +322,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'themes.list': HUB,
   'themes.save': HUB,
   'themes.import': HUB,
+  'themes.remove': HUB,
   'themes.resolve': HUB,
   'updates.status': HUB,
   'updates.setAuto': HUB,

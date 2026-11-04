@@ -185,6 +185,60 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(r.error).toMatch(/Not a session this app manages/)
   })
 
+  describe('a stale session id names what replaced it (the caller keeps ids in memory)', () => {
+    const staleWorld = async () => {
+      const { p, a, tools } = await setup()
+      await rpc('sessions.rename', { sessionId: a.id, name: 'Fix login' })
+      await rpc('agents.deleteSession', { sessionId: a.id })
+      const b = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+      await rpc('sessions.rename', { sessionId: b.id, name: 'Fix login' })
+      const other = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+      await rpc('sessions.rename', { sessionId: other.id, name: 'Something else' })
+      return { old: a.id, now: b.id, other: other.id, tools }
+    }
+
+    it('send_to_session says it was deleted and gives the live session of the same name and project, and sends nothing', async () => {
+      const { old, now, other, tools } = await staleWorld()
+      const sentBefore = adapter.handleOf(now)?.sent.length ?? 0
+      const r = await tools.sendToSession(old, 'hi')
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain(`Not a session this app manages: ${old}`)
+      expect(r.error).toContain('deleted')
+      expect(r.error).toContain(`"Fix login" (id ${now})`)
+      expect(r.error).not.toContain(other)
+      expect(adapter.handleOf(now)?.sent.length ?? 0).toBe(sentBefore)
+      // An id nobody ever had is refused as before, with nothing added
+      expect((await tools.sendToSession('never-existed', 'hi')).error).toBe('Not a session this app manages: never-existed')
+    })
+
+    it('follows a chain of handoffs past a deleted middle session to the live one that now carries the work', async () => {
+      const { p, tools } = await setup()
+      const make = async (name: string) => {
+        const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+        await rpc('sessions.rename', { sessionId: s.id, name })
+        return s.id
+      }
+      const [a, b, c] = [await make('Step one'), await make('Step two'), await make('Step three')]
+      const handoffFrom = (id: string, from: string) =>
+        store.messages.appendMessages([{ sessionId: id, seq: 101, role: 'system', kind: 'marker', payload: { type: 'handoff', sessionId: id, seq: 101, from: 'x', note: 'n', fromSessionId: from }, ts: 1 }])
+      handoffFrom(b, a)
+      handoffFrom(c, b)
+      await rpc('agents.deleteSession', { sessionId: a })
+      await rpc('agents.deleteSession', { sessionId: b })
+      const r = await tools.sendToSession(a, 'hi')
+      expect(r.error).toContain('The live session that took over from it: "Step three" (id ' + c + ')')
+      expect(r.error).toContain('Nothing was sent; send to the one you meant, by its id.')
+      expect((await tools.readSession(a)).error).toContain('Nothing was read; read the one you meant')
+    })
+
+    it('read_session gives the same help', async () => {
+      const { old, now, tools } = await staleWorld()
+      const r = await tools.readSession(old)
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain(`"Fix login" (id ${now})`)
+    })
+  })
+
   it('cannot send to itself', async () => {
     const { orc, tools } = await setup()
     const r = await tools.sendToSession(orc.id, 'to me')

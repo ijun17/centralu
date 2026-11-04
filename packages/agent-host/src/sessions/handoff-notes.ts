@@ -1,3 +1,4 @@
+import { liveHeirOf } from './handoff-heirs.js'
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { inTurn } from '../idle.js'
@@ -29,21 +30,13 @@ export class HandoffNotes {
    * first, as its children did; the nearest generation with a live one wins.
    */
   handoffHeir(sessionId: string): string | null {
-    const seen = new Set([sessionId])
-    let generation = [sessionId]
     try {
-      while (generation.length) {
-        const heirs = generation.flatMap((at) => this.host.store.handoffs.handoffHeirs(at)).filter((h) => !seen.has(h.sessionId))
-        for (const h of heirs) seen.add(h.sessionId)
-        const live = heirs.find((h) => !h.trashed && this.host.meta.has(h.sessionId) && !this.host.trashing.has(h.sessionId))
-        if (live) return live.sessionId
-        generation = heirs.map((h) => h.sessionId)
-      }
+      return liveHeirOf(this.host.store, sessionId, (id) => this.host.meta.has(id) && !this.host.trashing.has(id))
     } catch (e) {
       // A delete never fails over this: the children stay on their own, as before #738
       console.error(`[agent-host] no handoff heir read for ${sessionId.slice(0, 8)}: ${(e as Error).message}`)
+      return null
     }
-    return null
   }
 
   /**

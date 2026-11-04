@@ -55,6 +55,12 @@ export const settingsParams = {
    */
   'themes.import': z.object({ path: z.string() }),
   /**
+   * Takes a theme file out of the folder, without losing it: the file moves to the folder's `.removed/`, where the
+   * theme list does not look (an OS trash is the shell's, `themes.resolve`; this is the host's own, for a caller with no shell, the orchestrator).
+   * A side that showed it falls back to its preset (the caller's to set, as Settings does).
+   */
+  'themes.remove': z.object({ id: ThemeId }),
+  /**
    * The absolute path of a theme file, for the shell to trash or reveal (the same two-step as
    * `fs.resolve`: the host knows the folder, the shell knows the OS).
    */

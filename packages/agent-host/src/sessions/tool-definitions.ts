@@ -238,8 +238,8 @@ export const ORCHESTRATOR_TOOLS = [
    */
   {
     name: 'get_preferences',
-    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, the notification switches, idle sleep, automatic updates.",
-    schema: z.object({}),
+    description: "Reads the person's settings: theme and the themes to choose from (theme files with their problems), text size, fonts, line height, the notification switches, idle sleep, automatic updates, the models for started agents.",
+    schema: z.object({ themeFile: z.string().optional().describe('A theme file id: shows that file in full (its tokens and problems), to edit it with set_preferences themeFile.') }).strict(),
   },
   {
     name: 'set_preferences',
@@ -265,6 +265,28 @@ export const ORCHESTRATOR_TOOLS = [
           .strict()
           .optional()
           .describe('Which sidebar groups of children are folded; the rest stay as they are.'),
+        agentModels: z
+          .record(
+            z.string(),
+            z.object({
+              light: z.object({ model: z.string().min(1), effort: z.string().optional() }).nullable().optional(),
+              standard: z.object({ model: z.string().min(1), effort: z.string().optional() }).nullable().optional(),
+              heavy: z.object({ model: z.string().min(1), effort: z.string().optional() }).nullable().optional(),
+            }).strict(),
+          )
+          .optional()
+          .describe('The model (and effort) start_agent runs when a caller names a difficulty, per tool then light, standard or heavy; null clears one. The rest stay.'),
+        themeFile: z
+          .object({
+            id: z.string().optional().describe('An existing theme file to replace; leave out to make a new file named after the theme.'),
+            name: z.string().describe('The theme name, 1 to 80 characters.'),
+            base: z.enum(['dark', 'light']),
+            tokens: z.record(z.string(), z.string()).describe('Token key to CSS value (get_preferences themeFile shows the keys); a token left out keeps its preset value.'),
+          })
+          .strict()
+          .optional()
+          .describe('Writes a theme file as Settings does; pick it afterwards with theme (its id or name).'),
+        deleteThemeFile: z.string().optional().describe('The id of a theme file to remove (kept in the themes folder under .removed); a side that showed it goes back to its preset.'),
         notifications: z
           .object({
             approval: z.boolean().optional().describe('Notify when an agent is blocked on an approval.'),
