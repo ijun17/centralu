@@ -239,7 +239,11 @@ through its `clock.mjs` (`no-restricted-properties` and `no-restricted-syntax` i
 - the list equals the checked files that touch the OS outside the layer (`tsx tooling/os-tests.ts --offenders`): a
   file that moved behind the layer, or is gone, takes its line out in the same change;
 - no line may be new against main's list where this branch left it, except a file git sees renamed
-  (`git diff -M`), whose line follows it;
+  (`git diff -M`), whose line follows it, and a file cut in pieces: a file removed in the change that was on main's list hands
+  its line to new files in the same folder whose names start with its stem (the name up to the first dot) and then `-` or
+  `.` (`install-windows.test.ts` to `install-windows-update.test.ts` and `install-windows.test-helpers.ts`), as long as
+  together they are no longer than it was, 30 lines more for each piece (the imports each repeats): the same code reaching
+  the OS, cut in pieces, not more of it. A new file of another name still fails;
 - sorted, unique, none in the layer.
 
 Today: 384 files, 123 shipped (119 host, 4 launcher) and 261 tests (258 host, 2 `platform`, 1 `protocol`). Adding

@@ -7,7 +7,7 @@
  * checked on virtual files laid over the repository (`osSelector`).
  */
 import { execFile, execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -174,7 +174,7 @@ describe('the allowlist', () => {
       const renames = renamesSince(ROOT, base)
       expect(renames, `the renames since ${base}`).not.toBeNull()
       expect(
-        grown(main, allowlist, renames ?? []),
+        grown(main, allowlist, renames ?? [], { base: (f) => gitShow(base, f), now: (f) => (existsSync(join(ROOT, f)) ? readFileSync(join(ROOT, f), 'utf8') : null) }),
         `${layer.OS_ALLOWLIST} lists more than main's: put the new code behind the OS layer instead (docs/plans/os-layer.md)`,
       ).toEqual([])
     },
@@ -232,6 +232,29 @@ describe('the allowlist', () => {
     ])
   })
 
+  it('hands the line of a removed file to the pieces it was split into, and to no other new file', () => {
+    const dir = 'packages/agent-host/src/links/'
+    const text = (n: number) => 'x\n'.repeat(n)
+    const main = [`${dir}install-windows.test.ts`, `${dir}other.test.ts`]
+    const texts: Record<string, string> = { [`${dir}install-windows.test.ts`]: text(500), [`${dir}install-windows-update.test.ts`]: text(200), [`${dir}install-windows.test-helpers.ts`]: text(150), [`${dir}install-windows-install.test.ts`]: text(200) }
+    const files = (now: Record<string, string>) => ({ base: (f: string) => texts[f] ?? null, now: (f: string) => now[f] ?? null })
+    const split = [`${dir}install-windows-install.test.ts`, `${dir}install-windows-update.test.ts`, `${dir}install-windows.test-helpers.ts`, `${dir}other.test.ts`]
+    const now = { ...texts }
+    delete now[`${dir}install-windows.test.ts`]
+    expect(grown(main, split, [], files(now))).toEqual([])
+    // A brand-new file of another name still fails, with the split beside it or without one
+    const stranger = `${dir}brand-new.test.ts`
+    expect(grown(main, [...split, stranger], [], files({ ...now, [stranger]: text(10) }))).toEqual([stranger])
+    expect(grown(main, [...main, stranger], [], files({ ...now, [main[0] as string]: text(500), [stranger]: text(10) }))).toEqual([stranger])
+    // Nor a name that only begins like the stem (`install-windowsX`), nor one in another folder
+    const near = [`${dir}install-windowsX.test.ts`, 'packages/agent-host/src/install-windows-update.test.ts']
+    expect(grown(main, [...split, ...near], [], files({ ...now, [near[0] as string]: text(10), [near[1] as string]: text(10) }))).toEqual(near)
+    // The pieces may not hold more than the file did: new code reaching the OS under the old line
+    expect(grown(main, split, [], files({ ...now, [`${dir}install-windows-update.test.ts`]: text(900) }))).toEqual(split.slice(0, 3))
+    // A file that is still there lends nothing
+    expect(grown(main, split, [], files({ ...now, [main[0] as string]: text(500) }))).toEqual(split.slice(0, 3))
+  })
+
   it('is tightened from the code (pnpm os:tighten): lines no longer needed go, comments stay, nothing is added', () => {
     const text = '# header\npackages/agent-host/src/a.ts\npackages/agent-host/src/b.ts\npackages/agent-host/src/c.ts\n'
     // Two changes took out b and c, which sit next to each other: git conflicts on them; the merged tree does not
@@ -281,12 +304,49 @@ function mainList(base: string): string[] | null {
   }
 }
 
-/** The lines `current` has that main's list, carried along this change's renames, has not */
-function grown(main: readonly string[], current: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>): string[] {
+/** A file's text at `base`, or null when it was not there */
+function gitShow(base: string, file: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${base}:${file}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return null
+  }
+}
+
+/** What a split of a file may add on top of its lines: the imports and the wrapper each new file repeats */
+const SPLIT_LINES_PER_FILE = 30
+
+/**
+ * The lines `current` has that main's list, carried along this change's renames, has not.
+ *
+ * Except a split (`files` given): a file removed in this change that was on main's list passes its line on to new files in
+ * the same folder whose names start with its stem (the name up to the first dot) and then `-` or `.`
+ * (`install-windows.test.ts` to `install-windows-update.test.ts` and `install-windows.test-helpers.ts`), as long as together they
+ * are no longer than the file was, each allowed `SPLIT_LINES_PER_FILE` lines for the imports it repeats: the same code reaching the OS,
+ * cut in pieces, not more of it. A new file of another name, or a split that grew, is refused.
+ */
+function grown(
+  main: readonly string[],
+  current: readonly string[],
+  renames: ReadonlyArray<{ from: string; to: string }>,
+  files?: { base: (file: string) => string | null; now: (file: string) => string | null },
+): string[] {
   const expected = new Set(main)
   for (const { to } of renames) expected.delete(to)
   for (const { from, to } of renames) if (main.includes(from)) expected.add(to)
-  return current.filter((f) => !expected.has(f))
+  const added = current.filter((f) => !expected.has(f))
+  if (!files) return added
+  const lines = (text: string | null) => (text === null ? 0 : text.split('\n').length)
+  const claimed = new Set<string>()
+  for (const gone of main.filter((f) => !current.includes(f) && files.now(f) === null)) {
+    const dir = gone.slice(0, gone.lastIndexOf('/') + 1)
+    const stem = gone.slice(dir.length).split('.')[0] as string
+    // The new files of this stem on the list: the ones added, and the ones a rename brought (git may pair one with the removed file)
+    const pieces = current.filter((f) => !main.includes(f) && f.startsWith(dir) && /^[^/]+$/.test(f.slice(dir.length)) && [`${stem}-`, `${stem}.`].some((p) => f.slice(dir.length).startsWith(p)))
+    const size = pieces.reduce((sum, f) => sum + lines(files.now(f)), 0)
+    if (pieces.length > 0 && size <= lines(files.base(gone)) + SPLIT_LINES_PER_FILE * pieces.length) for (const f of pieces) claimed.add(f)
+  }
+  return added.filter((f) => !claimed.has(f))
 }
 
 describe('the tests that run on every OS', () => {
