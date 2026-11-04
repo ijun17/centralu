@@ -114,6 +114,14 @@ describe('host.stop', () => {
     await expect(blind('host.stop', { ifIdle: true })).rejects.toThrow(/cannot tell whether it is idle/)
   })
 
+  it('takes the window’s notice that the system is ending, and that it is not (host.systemEnding, #1970)', async () => {
+    const said: boolean[] = []
+    const rpc = await handler({ systemEnding: (cancelled) => void said.push(cancelled) })
+    await expect(rpc('host.systemEnding', {})).resolves.toEqual({ ok: true })
+    await expect(rpc('host.systemEnding', { cancelled: true })).resolves.toEqual({ ok: true })
+    expect(said).toEqual([false, true])
+  })
+
   it('keeps what a sign-in’s serve says about taking over (host.handover)', async () => {
     const said: unknown[] = []
     const rpc = await handler({ handover: (h) => void said.push(h) })

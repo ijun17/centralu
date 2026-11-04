@@ -50,6 +50,8 @@ describe('the method classification (#1405)', () => {
   it("never lets the limited credential answer the person's cards or speak as a hub or a bridge", () => {
     for (const m of ['agents.respondApproval', 'agents.answerQuestion', 'apps.answerQuestion', 'updates.answerApply', 'updates.reportApply', 'agents.resolveMcpProposal', 'agents.resolveSkillProposal'])
       expect(limitedRight(m, {}), m).toBe('window')
+    // #1970: a program of this user must not be able to plant a system end
+    expect(limitedRight('host.systemEnding', {})).toBe('window')
     for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession']) expect(limitedRight(m, {}), m).toBe('link')
     for (const m of ['orchestrator.tool', 'orchestrator.tools', 'apps.sessionCall', 'apps.sessionTools']) expect(limitedRight(m, {}), m).toBe('bridge')
   })

@@ -39,6 +39,13 @@ mod windows;
 #[cfg(windows)]
 pub use windows::*;
 
+/// Whether a SIGTERM sent by process `sender` is the system stopping everything (a shutdown, restart or sign-out) and not a
+/// stop some program of the person's asked for: on macOS launchd, pid 1, sends it to the keeper, the host and the agents together,
+/// while the keeper's own restart and stop come from a process of the person's (#1970). Plain, so it is tested on every OS
+pub fn is_system_stop(sender: i32) -> bool {
+    sender == 1
+}
+
 /// Pulls the path out of the marked line among whatever the login shell printed (`probe_login_shell`).
 /// Plain parsing, so it is tested on every OS.
 pub fn parse_probe_output(out: &str) -> Option<String> {
@@ -47,4 +54,18 @@ pub fn parse_probe_output(out: &str) -> Option<String> {
         .map(str::trim)
         .filter(|p| !p.is_empty() && std::path::Path::new(p).exists())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1970: the keeper tells the system's stop (launchd, pid 1) from the stops of its own and the person's
+    #[test]
+    fn only_launchd_stops_for_the_system() {
+        assert!(is_system_stop(1));
+        for sender in [0, 2, 4242, std::process::id() as i32, -1] {
+            assert!(!is_system_stop(sender), "{sender}");
+        }
+    }
 }

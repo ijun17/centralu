@@ -239,7 +239,8 @@ describe('deleting a session', () => {
       search: ((await rpc('messages.search', { query: 'BLUEBIRD' })) as unknown[]).length > 0,
       listTool: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'list_sessions', {})).includes(s.id),
       recall: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),
-      read: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'read_session', { sessionId: s.id })).includes('BLUEBIRD'),
+      // The refusal for a deleted session names it (the id's help), so the body is what must not come back
+      read: !JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'read_session', { sessionId: s.id })).includes('Not a session'),
     })
     expect(await reach()).toEqual({ sessions: true, grid: true, search: true, listTool: true, recall: true, read: true })
 

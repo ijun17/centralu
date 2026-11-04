@@ -14,9 +14,11 @@ const MAX_PAGES = 20
 
 /** A failure the person can act on. `kind` says which, `message` says what to do, in plain words. */
 export class GitHubError extends Error {
-  constructor(kind, message) {
+  /** `lost`: the write was sent and GitHub's answer never came, so whether it did it is not known. */
+  constructor(kind, message, { lost = false } = {}) {
     super(message)
     this.kind = kind
+    this.lost = lost
   }
 }
 
@@ -290,13 +292,22 @@ const firstLine = (e) =>
 // Failures that say nothing about the thing asked for: gh cannot reach GitHub at all, or may not for now.
 export const FATAL = new Set(['network', 'auth', 'gh-missing', 'rate'])
 
+/**
+ * What a failed write says: GitHub's refusal when it answered with a client error (404, 409, 422), else `lost`: the
+ * connection dropped (gh's "EOF") or GitHub failed (5xx) and the write may have been done (#1958, #1961).
+ */
+function refusal(what, e) {
+  const status = httpStatus(e)
+  return new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}`, { lost: status < 400 || status >= 500 })
+}
+
 /** Runs a gh call; whatever fails but a rate limit, a login or the network is GitHub's refusal, said as `GitHub refused <what>: <its first line>`. */
 async function refusing(what, call) {
   try {
     return await call()
   } catch (e) {
     if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    throw new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}`)
+    throw refusal(what, e)
   }
 }
 
@@ -624,7 +635,7 @@ export async function createBranch(repo, branch, sha) {
 /**
  * Merges `head` (a commit) into the branch `base` on GitHub, as a merge commit there. Answers
  * `{ sha, tree }` of the merge, `{ conflict: true }` (HTTP 409) or `{ nothing: true }` (204: `base`
- * contains it already).
+ * contains it already). A refusal throws; one with `lost` set may have merged (read the branch back).
  */
 export async function mergeInto(repo, base, head, message) {
   checkRepo(repo)
@@ -634,7 +645,7 @@ export async function mergeInto(repo, base, head, message) {
   } catch (e) {
     if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
     if (httpStatus(e) === 409) return { conflict: true }
-    throw new GitHubError('github', `GitHub refused to merge ${short(head)} into ${base}: ${firstLine(e)}`)
+    throw refusal(`to merge ${short(head)} into ${base}`, e)
   }
   if (!String(out ?? '').trim()) return { nothing: true }
   const c = parseJson(out)

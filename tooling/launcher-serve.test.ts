@@ -1739,8 +1739,8 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     recordServePort(d, await freePort())
     return { d, state: readServeState(d)! }
   }
-  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive', d = '') => {
-    const server = new HostServer({ port: state.port!, ...serveHostCredentials(d), logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive', d = '', onRpc: (method: string, params: unknown, ctx?: { rights?: string }) => Promise<unknown> = async () => ({})) => {
+    const server = new HostServer({ port: state.port!, ...serveHostCredentials(d), logon: () => logon, onRpc, build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
     await server.listen()
     return server
   }
@@ -1788,6 +1788,70 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
       w.stdin.end()
       expect(await w.done).toBe(0)
       expect((await probeHost({ port: state.port!, token: state.token, proofKey: state.proofKey, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('tells the host the system is ending, and that it is not, when the window says so on its stdin (#1970)', async () => {
+    const { d, state } = await folder()
+    const calls: { method: string; params: unknown; rights?: string }[] = []
+    const server = await hostOn(state, 'interactive', d, async (method, params, ctx) => {
+      calls.push({ method, params, rights: ctx?.rights })
+      return { ok: true }
+    })
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      // One line cut across two chunks, a line that is no notice, then the call-off
+      w.stdin.write('{"op":"system-end')
+      w.stdin.write('ing"}\nnot json\n{"op":"system-ending","cancelled":true}\n')
+      await vi.waitFor(() => expect(calls).toEqual([
+        // With the window's full credential: a limited one is refused (method-rights.ts)
+        { method: 'host.systemEnding', params: {}, rights: 'full' },
+        { method: 'host.systemEnding', params: { cancelled: true }, rights: 'full' },
+      ]))
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('keeps the call-off behind a notice that waits to probe the host (#1970)', async () => {
+    const { d, state } = await folder()
+    const calls: unknown[] = []
+    const server = await hostOn(state, 'interactive', d, async (_method, params) => {
+      calls.push(params)
+      return { ok: true }
+    })
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      // A sign-out probes the host's logon first; the call-off right behind it must not be sent before it
+      w.stdin.write('{"op":"system-ending","logoff":true}\n{"op":"system-ending","cancelled":true}\n')
+      await vi.waitFor(() => expect(calls).toEqual([{}, { cancelled: true }]))
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('leaves a sign-out unsaid to a host in a network logon, which it does not end, and says a shutdown to it (#1970)', async () => {
+    const { d, state } = await folder()
+    const calls: unknown[] = []
+    const server = await hostOn(state, 'network', d, async (_method, params) => {
+      calls.push(params)
+      return { ok: true }
+    })
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      w.stdin.write('{"op":"system-ending","logoff":true}\n{"op":"system-ending"}\n')
+      await vi.waitFor(() => expect(calls).toEqual([{}]))
+      w.stdin.end()
+      expect(await w.done).toBe(0)
     } finally {
       await server.close()
     }

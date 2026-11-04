@@ -865,7 +865,7 @@ export class HostServer {
           return
         }
         if (refusal !== null) {
-          console.error(`[agent-host] refused ${JSON.stringify(method)} to a connection holding the limited credential (${refusal.rights})`)
+          console.error(`[agent-host] refused ${JSON.stringify(method)} to a connection holding the limited credential (${refusal.rights})${method === 'host.systemEnding' ? ': a launcher older than this host sends the system-ending notice with it, so that end is not noted until the launcher is updated (#1970)' : ''}`)
           /*
            * `internal` with the reason in `data`, not a new error code: a reader from before #1405 parses the code
            * against its own list, and the refusal is a fact for a program to read, as `version_mismatch`'s data is

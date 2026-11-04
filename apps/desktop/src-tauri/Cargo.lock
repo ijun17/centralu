@@ -430,6 +430,7 @@ dependencies = [
 name = "centralu"
 version = "0.0.0-dev"
 dependencies = [
+ "block2",
  "centralu-keeper-core",
  "libc",
  "objc2",
@@ -445,6 +446,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

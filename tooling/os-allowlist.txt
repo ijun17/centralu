@@ -1,5 +1,5 @@
 # Checked files that touch the OS outside the OS layer (#1599, docs/plans/os-layer.md): one path per line, sorted.
-# It may only shrink: tooling/os-layer.test.ts refuses a line main does not have, but a file git sees renamed.
+# It may only shrink: tooling/os-layer.test.ts refuses a line main does not have, but a file git sees renamed or cut in pieces.
 packages/agent-host/src/adapters/acp/replay.test.ts
 packages/agent-host/src/adapters/acp/session.test.ts
 packages/agent-host/src/adapters/acp/session.ts
@@ -223,7 +223,10 @@ packages/agent-host/src/links/autostart.test.ts
 packages/agent-host/src/links/dev-build.test.ts
 packages/agent-host/src/links/dev-build.ts
 packages/agent-host/src/links/fake-registry.test-helpers.ts
-packages/agent-host/src/links/install-windows.test.ts
+packages/agent-host/src/links/install-windows-install.test.ts
+packages/agent-host/src/links/install-windows-switch.test.ts
+packages/agent-host/src/links/install-windows-update.test.ts
+packages/agent-host/src/links/install-windows.test-helpers.ts
 packages/agent-host/src/links/install.test.ts
 packages/agent-host/src/links/install.ts
 packages/agent-host/src/links/linked-sessions.test.ts

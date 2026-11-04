@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import {
   THEME_SCHEMA_FILE,
@@ -18,6 +18,21 @@ import { rpcError } from './rpc-error.js'
 const MAX_FILE_BYTES = 256 * 1024
 /** Editors save in bursts (write, rename, chmod); one refetch per burst is enough */
 const SETTLE_MS = 100
+
+/** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
+export function themeSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'theme'
+  )
+}
+
+/** Where `remove` keeps what it took out of the folder */
+const REMOVED_DIR = '.removed'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,59}$/
 
@@ -113,10 +128,32 @@ export class ThemeFiles {
 
   /** Writes a theme. `id` null makes a new file named after the theme (`My theme` → `my-theme.json`). */
   async save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry> {
+    const text = formatThemeFile(content)
+    // The reader refuses a bigger file (read), so writing one would list a theme that never applies
+    if (Buffer.byteLength(text) > MAX_FILE_BYTES) throw rpcError('The theme is too large to be a theme file.')
     const target = id ?? (await this.freeId(content.name))
     await mkdir(this.dir, { recursive: true })
-    writeFileWhole(realOs().files, this.pathOf(target), formatThemeFile(content))
+    // On a filesystem that ignores case, `paper` would overwrite a hand-written Paper.json the list does not show
+    const names = await readdir(this.dir).catch(() => [] as string[])
+    const clash = names.find((n) => n !== `${target}.json` && n.toLowerCase() === `${target}.json`)
+    if (clash) throw rpcError(`The themes folder has ${clash}, which the list does not show (ids are lowercase); rename or remove it first.`)
+    writeFileWhole(realOs().files, this.pathOf(target), text)
     return this.read(target)
+  }
+
+  /**
+   * Takes a theme file out of the list without destroying it: it moves to `.removed/<id>-<time>-<random>.json`, a place the list
+   * does not look, so a mistaken removal is one move back. The host has no OS trash (Settings' button reaches it through the
+   * shell), so these stay until the person clears the folder. Where it went is returned; null when there was no such file.
+   */
+  async remove(id: string): Promise<string | null> {
+    const from = this.pathOf(id)
+    if (!(await stat(from).then(() => true, () => false))) return null
+    const kept = join(this.dir, REMOVED_DIR)
+    await mkdir(kept, { recursive: true })
+    const to = join(kept, `${id}-${Date.now()}-${randomBytes(3).toString('hex')}.json`)
+    await rename(from, to)
+    return to
   }
 
   /** Copies a file from elsewhere in, under a fresh id if its name is taken. Refuses what does not read as a theme. */
@@ -141,13 +178,7 @@ export class ThemeFiles {
   }
 
   private async freeId(name: string): Promise<string> {
-    const base =
-      name
-        .toLowerCase()
-        .normalize('NFKD')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 48) || 'theme'
+    const base = themeSlug(name)
     for (let n = 1; n < 1000; n++) {
       const id = n === 1 ? base : `${base}-${n}`
       const taken = await stat(this.pathOf(id)).then(

@@ -187,7 +187,12 @@ export class Shutdown {
     // A drain already stopping the services owns the ending: it exits when it has said `drained`
     if (this.stopping) return this.stopping.catch(() => {})
     this.mode = mode
-    const before = this.o.beforeLeave?.()?.catch(() => {})
+    let before: Promise<void> | undefined
+    try {
+      before = this.o.beforeLeave?.()?.catch(() => {})
+    } catch {
+      // A throw in the notice must not keep the leave from beginning
+    }
     const stopped = before ? before.then(() => this.stopServices(mode, handOver)) : this.stopServices(mode, handOver)
     const setTimer = this.o.setTimer ?? ((f, ms) => void setTimeout(f, ms).unref())
     setTimer(() => this.force(`did not finish within ${this.o.boundMs ?? SHUTDOWN_BOUND_MS}ms`), this.o.boundMs ?? SHUTDOWN_BOUND_MS)

@@ -380,12 +380,12 @@ const HANDLERS: ToolHandlers = {
   share_app: ({ app, project, shared }, call) => trustCommand({ action: 'share_app', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), shared }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
-  get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
+  get_preferences: (args, call) => preferencesCommand({ action: 'get', ...(trimmed(args.themeFile) ? { themeFile: trimmed(args.themeFile) } : {}) }, call),
   apply_agent_versions: (_args, call) => preferencesCommand({ action: 'apply_agent_versions' }, call),
   set_preferences: (changes, call) =>
     Object.values(changes).some((v) => v !== undefined && !(typeof v === 'object' && Object.values(v).every((x) => x === undefined)))
       ? preferencesCommand({ action: 'set', changes }, call)
-      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, sendWithModifierEnter, foldedGroups, notifications, autoCompact.', isError: true },
+      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, sendWithModifierEnter, foldedGroups, notifications, autoCompact, agentModels, themeFile, deleteThemeFile.', isError: true },
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
