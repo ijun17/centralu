@@ -83,6 +83,190 @@ describe("npm's placeholder", () => {
   })
 })
 
+describe("repairing npm's placeholder with the package's own setup step (#1645)", () => {
+  // What install.cjs does in the package: put the platform package's program over bin/claude.exe
+  const COPY_NATIVE = `fs.rmSync(dest, { force: true });
+fs.copyFileSync(path.join(__dirname, 'native.bin'), dest);`
+  const header = `const fs = require('fs'); const path = require('path');
+fs.appendFileSync(path.join(__dirname, 'runs.log'), 'run\\n');
+const dest = path.join(__dirname, 'bin', 'claude.exe');
+`
+  const COPIES = header + COPY_NATIVE
+  // The setup step that takes a while: the host's loop must keep turning meanwhile
+  const SLOW = header + `setTimeout(() => { ${COPY_NATIVE.replace(/\n/g, ' ')} }, 500);`
+  // What it prints when a running program holds the file (measured, Claude Code 2.1.296): the error on stderr, exit code 1
+  const HELD = `${header}console.error("[@anthropic-ai/claude-code postinstall] Failed to place binary: EBUSY: resource busy or locked, unlink '" + dest + "'");
+console.error('  Fallback: node cli-wrapper.cjs');
+process.exitCode = 1;`
+  // A copy cut short: 2 MB of a 3 MB program written, then the step fails
+  const TRUNCATED = `${header}fs.rmSync(dest, { force: true });
+fs.writeFileSync(dest, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2_000_000, 7)]));
+console.error('ENOSPC: no space left on device, write');
+process.exitCode = 1;`
+  // The same copy cut short by the time limit: half written, then the step stays busy until it is killed
+  const STUCK = `${header}fs.rmSync(dest, { force: true });
+fs.writeFileSync(dest, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2_000_000, 7)]));
+setTimeout(() => {}, 60_000);`
+  const BIG_PROGRAM = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(3_000_000, 9)])
+  const runs = () => (existsSync(join(pkg, 'runs.log')) ? readFileSync(join(pkg, 'runs.log'), 'utf8').split('\n').filter(Boolean).length : 0)
+  /** The package with its placeholder; `native` is the platform package's program, put where install.cjs finds it unless null */
+  const stub = (installer: string | null, native: Buffer | null = PROGRAM) => {
+    npmLayout('2.1.311', PLACEHOLDER)
+    writeFileSync(join(pkg, 'native.bin'), native ?? PROGRAM)
+    if (native) {
+      const dir = join(pkg, 'node_modules', '@anthropic-ai', `claude-code-win32-${process.arch}`)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@anthropic-ai/claude-code-win32-${process.arch}`, version: '2.1.311' }))
+      writeFileSync(join(dir, 'claude.exe'), native)
+    }
+    if (installer === null) rmSync(join(pkg, 'install.cjs'))
+    else writeFileSync(join(pkg, 'install.cjs'), installer)
+  }
+  const message = async (l: ClaudeLinks): Promise<string> => {
+    try {
+      await l.ensure(exe)
+    } catch (e) {
+      return (e as Error).message
+    }
+    return ''
+  }
+
+  it('runs install.cjs, checks again and starts the repaired program', async () => {
+    stub(COPIES)
+    const log: string[] = []
+    const run = await links({}, 'win32', log).ensure(exe)
+    expect(runs()).toBe(1)
+    expect(readFileSync(exe)).toEqual(PROGRAM)
+    expect(run.key).toBe(`2.1.311-${PROGRAM.length}`)
+    expect(readFileSync(run.path)).toEqual(PROGRAM)
+    expect(log.join('\n')).toContain(`running Claude Code's own setup step, ${join(pkg, 'install.cjs')}`)
+    expect(log.at(-1)).toBe(`[claude] repaired ${exe}`)
+  })
+
+  it("does not stop the host's loop while the setup step runs", async () => {
+    stub(SLOW)
+    let ticks = 0
+    const timer = setInterval(() => ticks++, 10)
+    try {
+      await links().ensure(exe)
+    } finally {
+      clearInterval(timer)
+    }
+    expect(readFileSync(exe)).toEqual(PROGRAM)
+    // The step sleeps 500 ms; a blocked loop would have counted none
+    expect(ticks).toBeGreaterThanOrEqual(5)
+  })
+
+  it('a file a running program holds stays a placeholder, and the message says so', async () => {
+    stub(HELD)
+    const log: string[] = []
+    const msg = await message(links({}, 'win32', log))
+    expect(msg).toContain('usually because a running Claude Code held it')
+    expect(msg).toContain(`node "${join(pkg, 'install.cjs')}"`)
+    expect(readFileSync(exe, 'utf8')).toBe(PLACEHOLDER)
+    expect(log.join('\n')).toContain('EBUSY')
+  })
+
+  it('runs once per host start, also for starts that arrive together: no loop', async () => {
+    stub(HELD)
+    const l = links()
+    const [a, b, c] = await Promise.all([message(l), message(l), message(l)])
+    expect(a).toContain('held it')
+    expect([b, c]).toEqual([a, a])
+    expect(await message(l)).toBe(a)
+    expect(runs()).toBe(1)
+    // A second host (a fresh ClaudeLinks) tries once again
+    await message(links())
+    expect(runs()).toBe(2)
+  })
+
+  it('once repaired, a placeholder that appears later is not repaired again by this host', async () => {
+    stub(COPIES)
+    const l = links()
+    await l.ensure(exe)
+    rmSync(exe)
+    writeFileSync(exe, PLACEHOLDER)
+    const msg = await message(l)
+    expect(msg).toContain(`Centralu already ran that setup step once since it started (\`node "${join(pkg, 'install.cjs')}"\`) and does not run it again.`)
+    expect(runs()).toBe(1)
+  })
+
+  it('without install.cjs it explains as before and runs nothing', async () => {
+    stub(null)
+    const log: string[] = []
+    const msg = await message(links({}, 'win32', log))
+    expect(msg).toContain('reinstall it with `npm i -g @anthropic-ai/claude-code`')
+    expect(msg).not.toContain('Centralu ran')
+    expect(log).toEqual([])
+  })
+
+  it('a setup step that fails for another reason, or does not finish, says what it said', async () => {
+    stub("console.error('Native package not found'); process.exitCode = 1")
+    expect(await message(links())).toContain('exit code 1: Native package not found')
+    stub('')
+    expect(await message(links())).toContain('it left the placeholder in place')
+    stub(COPIES)
+    const timedOut = await message(links({ runInstaller: async () => ({ status: null, output: 'it did not finish within 30 seconds' }) }))
+    expect(timedOut).toContain('it did not repair the file: it did not finish within 30 seconds')
+    expect(timedOut).not.toContain('held it')
+    expect(runs()).toBe(0)
+  })
+
+  it('a copy cut short by a failure is not a repaired program, however large', async () => {
+    stub(TRUNCATED, BIG_PROGRAM)
+    const l = links()
+    const msg = await message(l)
+    expect(statSync(exe).size).toBe(2_000_002)
+    expect(msg).toContain(`is 2000002 bytes and not the ${BIG_PROGRAM.length} bytes of the Claude program it was copied from`)
+    expect(msg).toContain('it did not finish the copy: exit code 1: ENOSPC')
+    expect(() => l.prepare(exe)).toThrow(ClaudePlaceholderError)
+    // Nothing was linked from it
+    expect(existsSync(join(root, 'tools'))).toBe(false)
+    // A person who put the program there by hand is believed: the file is not the one the step left
+    writeFileSync(exe, BIG_PROGRAM)
+    expect(() => l.prepare(exe)).not.toThrow()
+  })
+
+  it('a copy cut short by the time limit is not a repaired program either', async () => {
+    stub(STUCK, BIG_PROGRAM)
+    const log: string[] = []
+    const started = Date.now()
+    const msg = await message(new ClaudeLinks({ platform: 'win32', root: () => root, log: (l) => log.push(l), installerTimeoutMs: 1000 }))
+    expect(Date.now() - started).toBeLessThan(30_000)
+    expect(msg).toContain('it did not finish the copy: it did not finish within 1 seconds')
+    expect(msg).toContain('not the 3000002 bytes')
+    expect(log.join('\n')).toContain('not proven to be the program')
+    expect(existsSync(join(root, 'tools'))).toBe(false)
+  })
+
+  it('without the platform package to compare with, the program must run --version and exit 0', async () => {
+    stub(COPIES, null)
+    const asked: string[][] = []
+    const ok = await links({ runProgram: async (_p, args) => (asked.push(args), { status: 0 }) }).ensure(exe)
+    expect(asked).toEqual([['--version']])
+    expect(readFileSync(ok.path)).toEqual(PROGRAM)
+
+    stub(COPIES, null)
+    const bad = await message(links({ runProgram: async () => ({ status: 1 }) }))
+    expect(bad).toContain('it does not run (`--version` failed)')
+    expect(bad).toContain('it did not finish the copy')
+  })
+
+  it('off Windows nothing runs', async () => {
+    stub(COPIES)
+    expect(await links({}, 'darwin').ensure(exe)).toEqual({ path: exe, key: null })
+    expect(runs()).toBe(0)
+  })
+
+  it('a program that is already in place does not run it', async () => {
+    stub(COPIES)
+    rmSync(exe)
+    writeFileSync(exe, PROGRAM)
+    await links().ensure(exe)
+    expect(runs()).toBe(0)
+  })
+})
+
 describe('starting Claude from a hard link in the data folder', () => {
   it("links npm's claude.exe under tools/claude/<version>-<size> and starts it from there", () => {
     npmLayout('2.1.289', PROGRAM)

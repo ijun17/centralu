@@ -159,7 +159,7 @@ describe('cards in a delegated turn (#676)', () => {
     // Answered, the turn goes on and the parent is still told when it ends
     await w.mgr.agentSession(parent, { sessionId: child, action: 'answer', card: await handleIn(parent, child, 'q-1'), text: 'Postgres' })
     handleOf(child).answer('schema written')
-    await w.until(() => notices(parent, child).some((m) => JSON.stringify(m.payload).includes('The assigned work finished')))
+    await w.until(() => notices(parent, child).some((m) => JSON.stringify(m.payload).includes('The session ended its turn')))
   })
 
   it('tells the parent of an approval but refuses its answer unless the parent is auto when it answers', async () => {

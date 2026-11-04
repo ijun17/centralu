@@ -14,7 +14,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const calls = (page: Page) => page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)
 
-async function open(page: Page, background: 'on' | 'off') {
+async function open(page: Page, background: 'on' | 'off' | 'serve') {
   await page.goto(`/shell-banner.html?dialog=quit&background=${background}`)
   await expect(page.getByTestId('confirm-quit')).toBeVisible()
 }
@@ -47,6 +47,29 @@ test('background mode on: "Quit" keeps everything running, "Quit completely" sto
 
   await completely.click()
   expect(await calls(page)).toEqual(['quit_and_stop_agents'])
+})
+
+// #1466: a window on the computer's `centralu serve` host has no background mode, yet quitting leaves the host running
+test('on the serve host: "Quit" keeps agents running, and "Quit completely" says it stops the host and its hub link', async ({ page }) => {
+  await open(page, 'serve')
+  await expect(page.getByTestId('confirm-quit-yes')).toHaveText(/^Quit\s*⏎$/)
+  await expect(page.getByTestId('confirm-quit-background')).toContainText('agents keep running in the background')
+  await expect(page.getByTestId('confirm-quit-stops')).toHaveCount(0)
+  const completely = page.getByTestId('confirm-quit-stop')
+  await expect(completely).toHaveText('Quit completely')
+  await expect(page.getByTestId('confirm-quit-background')).toContainText('ends the link a hub has to this computer')
+  await expect(completely).toHaveAttribute('title', /ends the link a hub has to this computer/)
+
+  await completely.click()
+  expect(await calls(page)).toEqual(['quit_and_stop_agents'])
+})
+
+test('on the serve host: the primary "Quit" is the plain quit, which leaves the host running', async ({ page }) => {
+  await open(page, 'serve')
+  // Not the one "Quit completely" of background mode off, whose plain quit stops everything: the label says which this is
+  await expect(page.getByTestId('confirm-quit-yes')).toHaveText(/^Quit\s*⏎$/)
+  await page.getByTestId('confirm-quit-yes').click()
+  expect(await calls(page)).toEqual(['quit_app'])
 })
 
 test('background mode on: the primary "Quit" is the plain quit', async ({ page }) => {

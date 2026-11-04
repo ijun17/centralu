@@ -124,6 +124,12 @@ export type PlatformCapabilities = {
    */
   windowControls: boolean
   /**
+   * Whether this window runs on the computer's `centralu serve` host (desktop, Windows), which keeps running when the
+   * window closes, for a hub linked to this computer (#1223). Closing the window then leaves agents running with no
+   * background mode to switch: the quit question and Settings say so, and "Quit completely" stops that host (#1466).
+   */
+  servesHost: boolean
+  /**
    * Whether a frame's `dragend` reports where the drag ended in the top page's coordinates rather
    * than the frame's own (#308). The UI places an item dragged out of an app view by that point
    * (app-frame/dragRelay.ts), and the engines disagree: WebKit reports the frame's coordinates, as

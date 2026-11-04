@@ -74,7 +74,7 @@ describe('ask_project into a session that waits on its own background work (#146
 
     verifyEndsAndSessionFinishes()
     await w.until(() => reports().length === 1)
-    expect(reports()[0]).toContain('[Centralu] The assigned work finished.')
+    expect(reports()[0]).toContain('[Centralu] The session ended its turn.')
     expect(reports()[0]).toContain('8 pass / 2 fail')
     expect(w.store.children.listReportMarks()).toEqual([])
     // Once: a later turn of the session is not the assigned work

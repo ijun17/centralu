@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use centralu_keeper_core::serve_window::{self, FallbackSink, ServeChoice, ServeFallback};
+use centralu_keeper_core::serve_window::{self, FallbackSink, ServeChoice, ServeFallback, ServeHost, ServeSlot};
 use centralu_keeper_core::start_plan::{self, Env, Facts, Host, Plan};
 
 use serde::Serialize;
@@ -40,7 +40,7 @@ use launch::direct_launcher;
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostBuild {
-    /// `keeper` or `direct`.
+    /// `keeper`, `direct`, or `serve`: direct, on the data folder's `centralu serve` host, which outlives the window.
     pub mode: &'static str,
     #[cfg(unix)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,6 +113,8 @@ pub struct RelaunchInfo {
 pub struct Supervisor {
     inner: Arc<Mutex<Choice>>,
     direct: host_proc::Supervisor,
+    /// The serve host this window runs on, when it does (`Host::Serve`): what "Quit completely" stops
+    serve: ServeSlot,
     #[cfg(unix)]
     keeper: Arc<Mutex<Option<Arc<link::KeeperLink>>>>,
 }
@@ -202,6 +204,10 @@ impl Supervisor {
         self.inner.lock().map(|c| *c).unwrap_or(Choice::Undecided)
     }
 
+    fn remember_serve(&self, start: &Start) {
+        self.serve.remember(start.serve.clone().map(|launcher| ServeHost::new(launcher, start.fallback.clone())));
+    }
+
     pub fn info(&self) -> Option<HostInfo> {
         match self.choice() {
             #[cfg(unix)]
@@ -221,6 +227,7 @@ impl Supervisor {
     /// Starts supervising. The app still comes up even if this fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
         let start = start_plan(&app);
+        self.remember_serve(&start);
         #[cfg(unix)]
         {
             // What "Apply now" compares the bundle on disk with (#1895); the bundled host only, not one `centralu serve` runs
@@ -250,6 +257,7 @@ impl Supervisor {
             Choice::Keeper => self.link().ok().map(|l| l.restart(app)).unwrap_or(false),
             _ => {
                 let start = start_plan(&app);
+                self.remember_serve(&start);
                 self.direct.restart(direct_sink(&start, app), direct_launcher(&start))
             }
         }
@@ -277,7 +285,7 @@ impl Supervisor {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => self.link().ok().map(|l| l.build()).unwrap_or_default(),
-            _ => HostBuild { mode: "direct", ..Default::default() },
+            _ => HostBuild { mode: if self.serve.serving() { "serve" } else { "direct" }, ..Default::default() },
         }
     }
 
@@ -351,12 +359,13 @@ impl Supervisor {
 
     /// "Quit completely": tells the keeper to stop the host, everything it holds (agents,
     /// terminals, running commands) and itself, whatever background mode says. In direct mode
-    /// quitting already does that.
+    /// quitting already does that, except on the serve host, which the window leaves running for a linked hub: that one
+    /// is stopped the way a person stops it, `serve --stop` (#1466).
     pub fn stop_agents(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => self.link()?.stop(),
-            _ => Ok(()),
+            _ => self.serve.stop(),
         }
     }
 
@@ -392,6 +401,48 @@ mod tests {
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
             assert!(!start_plan::plan(&Facts::window(Env::current(), true, false)).mode.keeper());
         }
+    }
+
+    /// A launcher that records its arguments in `args.txt` beside it and answers `serve --stop` as stopped: `.cmd` on Windows, a shell script elsewhere
+    fn stopping_launcher() -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("cc-supervisor-stop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("args.txt");
+        let _ = std::fs::remove_file(&marker);
+        let answer = r#"{"v":1,"stop":{"ok":true,"wasRunning":true}}"#;
+        let launcher = if cfg!(windows) {
+            let p = dir.join("centralu.cmd");
+            std::fs::write(&p, format!("@echo off\r\necho %* > \"{}\"\r\necho {answer}\r\n", marker.display())).unwrap();
+            p
+        } else {
+            let p = dir.join("centralu");
+            std::fs::write(&p, format!("#!/bin/sh\necho \"$@\" > '{}'\necho '{answer}'\n", marker.display())).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            p
+        };
+        (launcher, marker)
+    }
+
+    /// #1466: `stop_agents` was `_ => Ok(())` and `build` said "direct" for a window on the serve host, and nothing failed
+    #[test]
+    fn a_window_on_the_serve_host_reports_it_and_quit_completely_stops_it() {
+        let (launcher, marker) = stopping_launcher();
+        let fallback = Arc::new(ServeFallback::default());
+        fallback.next();
+        fallback.ready();
+        let sup = Supervisor::new();
+        assert_eq!(sup.build().mode, "direct");
+        assert!(sup.stop_agents().is_ok());
+        assert!(!marker.exists(), "a window with a host of its own runs nothing through serve");
+
+        sup.serve.remember(Some(ServeHost::new(launcher, fallback)));
+        assert_eq!(sup.build().mode, "serve");
+        assert!(sup.stop_agents().is_ok());
+        assert!(marker.exists(), "Quit completely ran the launcher's serve --stop");
     }
 
     #[test]

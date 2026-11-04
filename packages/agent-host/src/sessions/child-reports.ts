@@ -8,12 +8,13 @@ import {
 import { inTurn } from '../idle.js'
 import { errorMessage } from '@cc/protocol'
 import { errorKind, kindWord } from './error-kind.js'
-import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
+import { TURN_ENDED, type ReportDraft, type ReportedAs } from '../mail/delegation.js'
 import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportWork } from './linked-reports.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
+import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE } from './ask-project.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
@@ -533,7 +534,7 @@ export class ChildReports {
       : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
       : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
-      : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
+      : ending.type === 'turn_complete' ? `${TURN_ENDED}\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
     const outcome = outcomeOf(STORED) + personPartLine(part)
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
@@ -545,7 +546,11 @@ export class ChildReports {
     const read = `read_session(sessionId="${sessionId}"${answerSeq !== undefined ? `, around=${answerSeq}` : ''})`
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
-    const answered = preview !== '' && preview !== NOT_READ
+    // Centralu's placeholders for words that were not read are not the session's answer, and are not kept as one
+    const answered = preview !== '' && preview !== NOT_READ && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
+    // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
+    const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
+    const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''
     /*
      * What the model reads (#1186): how the work ended, the session's id, the kind of its tool's error, how to go on, and the read that shows
      * its last response and that error. Nothing the reported session, its tool, its machine or a name could have written goes in (#120): not
@@ -559,8 +564,10 @@ export class ChildReports {
       (kind ? `Its tool's error, by kind: ${kind}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.\n\n` : '') +
       resume +
       (inThread && answered
-        ? `Its last response is that session's own words: it is the message above in this thread, and ${read} reads more.`
-        : `Its last response is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
+        ? `Its last response${asReadWords} is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        : preview === MACHINE_UNREACHABLE
+          ? `Its last response could not be read: its machine could not be reached. ${read} reads it once that machine is back.`
+        : `Its last response${asReadWords} is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
       cleanUp
     const stored =
       outcome +
@@ -569,7 +576,7 @@ export class ChildReports {
       `Project: ${frameField(project)}\n\n` +
       failure +
       resume +
-      `Last response:\n${preview || '(no content)'}\n\n` +
+      `Last response${asReadWords}:\n${preview || '(no content)'}\n\n` +
       `If you need more, you can read that session's recent conversation with read_session.` +
       cleanUp
     /*
@@ -619,7 +626,7 @@ export class ChildReports {
     const others = ownAgents(this.host, parentId).filter((s) => s.id !== childId && agentState(this.host, s) === 'finished').length
     return (
       `\n${cleanUpLine(childId, this.agentCall(parentId, { sessionId: childId, action: 'delete' }))}` +
-      (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
+      (others ? `\n${others} other session${others === 1 ? '' : 's'} you started ${others === 1 ? 'has' : 'have'} ended ${others === 1 ? 'its turn' : 'their turns'} and remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
     )
   }
 

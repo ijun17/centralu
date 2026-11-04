@@ -39,7 +39,7 @@ tool switch (`SessionStart`) leaves a refused tool out instead, as it leaves out
 
 ### 0.2 Cursor, measured logged in (agent 2026.10.22-27dcf5f, Windows 11, model Auto)
 
-Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight scenarios; they replay in
+Recorded through the adapter itself (`scripts/frames-record.mts`, §10.5) in eight scenarios; they replay in
 `adapters/acp/replay.test.ts`. What the bundle reading of §1.1 said, and what the runs showed:
 
 - **No `usage_update`, no compaction updates** in any run. `/compact` is answered with ordinary text and `end_turn`.
@@ -740,13 +740,14 @@ frames stay here and say so, as #1498 asks.
 
 | Scenario | OpenCode 1.19.4 | Cursor |
 |---|---|---|
-| a plain turn, a tool call, a file edit | recorded | after login |
-| approval: allow, deny, "always" answered once | recorded | after login |
-| input during a turn | recorded (folds) | after login |
-| interrupt; interrupt with a permission open | recorded | after login |
-| compaction (`/compact`) | recorded (text only) | after login, if it has one |
-| process dies mid-turn, then load in a new process | recorded | after login |
-| resume after a host restart (no keeper) | recorded (load, resume) | after login |
+| a plain turn, a tool call, a file edit | recorded (the write under `auto`: Normal asks before a write, and `basic` answers no card) | recorded |
+| a file written, then a delete (`files`) | recorded (its model found no delete tool and stopped; the replay checks no delete call is made) | recorded |
+| approval: allow, deny, "always" answered once | recorded | recorded |
+| input during a turn | recorded (folds) | recorded |
+| interrupt; interrupt with a permission open | recorded | recorded |
+| compaction (`/compact`) | recorded (text only) | recorded (text only) |
+| process dies mid-turn, then load in a new process | recorded | recorded |
+| resume after a host restart (no keeper) | recorded (load, resume) | recorded |
 | adoption after a host swap | fake peer | fake peer |
 | not logged in | — | recorded |
 | sub-agents | — | PR 2 |

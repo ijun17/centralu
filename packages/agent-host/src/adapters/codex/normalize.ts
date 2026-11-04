@@ -251,7 +251,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * exactly the lie we are trying to fix. The same rule the Claude adapter uses for `result`.
      *
      * An interrupted turn is not a finished one either (#698). It went out as `turn_complete`, so a turn Codex cut
-     * short told the orchestrator that gave it "The assigned work finished". It ends as the person's Stop ends a turn,
+     * short told the orchestrator that gave it that the work was done ("finished", as the report then read). It ends as the person's Stop ends a turn,
      * `waiting_input` with `interrupted`; the adapter tells a Stop of ours from an interrupt it did not ask for
      * (`INTERRUPTED_BY_TOOL`).
      */

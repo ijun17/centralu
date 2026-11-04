@@ -8,6 +8,7 @@ import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, InputOrigin, SessionHandle } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
+import { tapSessionProcess } from '../core/tool-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
@@ -215,7 +216,7 @@ export class ClaudeSession implements SessionHandle {
      * found on PATH, as before.
      */
     const exe = this.launch.executable()
-    const run = exe ? this.launch.links.prepare(exe) : null
+    const run = exe ? await this.launch.links.ensure(exe) : null
 
     this.servers.load()
     const servers = this.servers.mcpServers()
@@ -243,7 +244,7 @@ export class ClaudeSession implements SessionHandle {
         servers,
         permissionOptions,
         codeIntelligence,
-        spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = spawnLocalAgent(o))),
+        spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = tapSessionProcess(spawnLocalAgent(o), this.sessionId))),
         canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
         hooks: requestTurnHooks(this.opts, () => this.servers.orchestratorServer !== null),
       }),
@@ -493,7 +494,7 @@ export class ClaudeSession implements SessionHandle {
     const src = this.opts.processSource!
     const adopt = src.adopt && !this.adopted ? src.adopt.process : null
     this.adopted = true
-    this.proc = adopt ?? src.spawn({ command: o.command, args: o.args, cwd: o.cwd, env: o.env })
+    this.proc = tapSessionProcess(adopt ?? src.spawn({ command: o.command, args: o.args, cwd: o.cwd, env: o.env }), this.sessionId)
     return this.proc
   }
 

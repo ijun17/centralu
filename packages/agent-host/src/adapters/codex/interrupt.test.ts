@@ -254,7 +254,7 @@ describe('codex approval cards close with their request', () => {
 
 /**
  * An interrupted turn is not a finished one (#698). A turn Codex ended with `interrupted` went out as `turn_complete`,
- * and the orchestrator that gave the work was told "The assigned work finished". Which interrupt it was is told apart
+ * and the orchestrator that gave the work was told "The session ended its turn". Which interrupt it was is told apart
  * too: a Stop from Centralu, or one Codex sent by itself.
  */
 describe('codex: how an interrupted turn ends (#698)', () => {

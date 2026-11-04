@@ -44,8 +44,9 @@ length). Those are plain, non-secret values; change them there, not in code.
   data folder). `e2e/fixtures/board-reader.ts` drives the screen's reader and answer box in
   Chromium and WebKit. The merge queue and release tests answer their fake `gh` in this server's own process
   instead (`system.mjs`, below): the same script, without a process start per call. A test that ends the app's tree while it is starting a `gh` leaves that fake suspended for ever on Windows (the parent was
-  gone before it was resumed); each of these files ends with `endLeftoverFakes()` (`tooling/fake-gh.test-helpers.ts`), which ends
+  gone before it was resumed); each of these files ends with `endLeftoverFakes()` (the queue files through `project-board-queue.test-helpers.ts`; `tooling/fake-gh.test-helpers.ts`), which ends
   any process still running a script of its fakes and nothing else.
+  The merge queue's tests are split by what they cover so no one file is the tail of a run: `project-board-queue.test.ts` (the decisions as pure functions, then the app's queue), `-conflicts`, `-integrate`, `-batches` (batches, tiers, messages kept until acknowledged, what the queue does by itself) and `-guard` (the watch command, the board tool help and the main guard). They share `project-board-queue.test-helpers.ts` (the fake `gh`'s fixtures and the app harness). Each test starts its own app: the app keeps state in memory that only a restart clears (the permission cache, tries to tell a session, the driver's pause and failure count, the clock's steps, the board and thread caches), so a running app is not shared between tests.
 
 ## Reading and answering in the view
 
@@ -298,7 +299,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   `merge_queue` read, each tick `PROJECT_BOARD_QUEUE_STEP_MS` (100) later on the app's clock (`clock.mjs` `now`), so a
   test moves the queue one poll at a time and waits for no clock (#1599). The lease between drivers keeps the system's clock
   (`clock.mjs` `systemNow`): the other driver is another process, whose clock a step does not move.
-  Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
+  Tests: `tooling/project-board-queue.test.ts` (and `-guard.test.ts`) (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
 
 ### Reruns (2026-10-19)
@@ -486,7 +487,7 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   without a person.
 - `PROJECT_BOARD_QUEUE_CHECKOUT` (empty: none) and `PROJECT_BOARD_QUEUE_CONFLICTS` (the lists as JSON)
   change these only for tests, which otherwise would merge in this checkout, whose remote is GitHub.
-  Tests: `tooling/project-board-queue.test.ts` (the lists, and the app with real git and a bare
+  Tests: `tooling/project-board-queue-conflicts.test.ts` (the lists, and the app with real git and a bare
   repository standing for GitHub's: a pull request stacked on a squashed one rebased and landed, or
   handed off when even the rebase conflicts; mechanical only lands with no attention, code, the UX baseline and
   a migration step hand off; a branch that moved, an author pushing during regeneration, a branch with
@@ -591,7 +592,7 @@ default 4: the owner's, 2026-10-19, this repository's too).
   member "batch N". A batch that ended keeps why (`why`, written by `endBatch`), and its line says it
   after "ended (stopped)" (#1527). Batch events are for the screen, not a session; a member's merge is its owner's
   news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
-  Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
+  Tests: `tooling/project-board-queue-batches.test.ts` (the rules, and the app against the fake `gh`: green,
   red and split, the default branch moved, dispatch refused, a conflict, lost answers to a merge into the
   branch).
 
@@ -703,7 +704,7 @@ the required set: it judges main's runs and its probes by their conclusion, and 
 - **The release** takes a commit's own push run as evidence only when the full tier's check passed on it,
   when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
 - `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
-  without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue.test.ts`,
+  without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue-batches.test.ts`,
   `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
 
 ### The main guard (#1259)
@@ -846,7 +847,7 @@ looked into).
   (`queueBusy`), so the guard sees the full run that follows a landing.
 - `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`), `PROJECT_BOARD_QUEUE_GUARD_MS`, `PROJECT_BOARD_QUEUE_PROBE_MS`
   and `PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS` are for tests only.
-  Tests: `tooling/project-board-queue.test.ts` ("the main guard …"), with a real git checkout and a
+  Tests: `tooling/project-board-queue-guard.test.ts` ("the main guard …"), with a real git checkout and a
   fake `gh`.
 
 ### The integrator (#1259 step 3)
@@ -918,7 +919,7 @@ model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
   and at the squash (`labelReason`; the queue reads labels with each pull request, `QUEUE_PR_FIELDS`).
 - **Older drivers**: a watch command or app server started from a board older than this judges nothing, but it
   never lands a draft, and the record is one until this code squashes it (above), so it cannot land a record.
-- Tests: `tooling/project-board-queue.test.ts` ("the integrator …"), with a real git checkout whose main
+- Tests: `tooling/project-board-queue-integrate.test.ts` ("the integrator …"), with a real git checkout whose main
   carries this repository's judge and rules, and the fake `gh`.
 
 ## Which tool for which task (#957)

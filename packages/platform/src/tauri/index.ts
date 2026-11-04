@@ -188,7 +188,7 @@ export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
  * one host's record (#428).
  */
 export type ShellHostBuild = {
-  mode: 'keeper' | 'direct'
+  mode: 'keeper' | 'direct' | 'serve'
   app?: BuildSource
   host?: BuildSource
   sameBuild?: boolean
@@ -557,6 +557,7 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   const mode = await hostBuild()
     .then((b) => b.mode)
     .catch(() => 'direct' as const)
+  const servesHost = mode === 'serve'
 
   // If the supervisor revives the host, the port and token change → this has to switch to the new address.
   // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
@@ -565,7 +566,7 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
     // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
-    capabilities: { windowControlsInset, shortcutKeys, fileManagerName, windowControls },
+    capabilities: { windowControlsInset, shortcutKeys, fileManagerName, windowControls, servesHost },
     /*
       The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
       A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink

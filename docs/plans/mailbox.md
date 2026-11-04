@@ -702,7 +702,7 @@ task is never reminded: its report settles it.
 
 | Key | On | Meaning |
 |---|---|---|
-| `outcome` | report | `finished`, `failed`, `stopped`, `paused`, `waiting` (the words `outcomeOf` writes today) |
+| `outcome` | report | `finished`, `failed`, `stopped`, `paused`, `waiting` (the words `outcomeOf` writes today). `finished` is stored as it is and means the turn ended: the model reads it as `outcome="turn_ended"`, and the report's body says "ended its turn", since whether the work is done is the session's own word (#1902) |
 | `about` | report | `{ session }`: the session whose turn ended |
 | `error`, `reason` | report | one word of Centralu's, as today |
 | `paused` | report | the number of background tasks still running |
