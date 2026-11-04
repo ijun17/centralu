@@ -36,6 +36,7 @@ export const MECHANICAL_FILES = [
   'tooling/os-allowlist.txt',
 ]
 
+/** The pid of a process that has ended. */
 export function deadPid(): number {
   const r = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' })
   return Number(r.stdout)
