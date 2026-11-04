@@ -302,7 +302,7 @@ export const FAST = { PROJECT_BOARD_QUEUE_STEP: 'read', PROJECT_BOARD_QUEUE_TICK
 export const IDLE_SERVER = { PROJECT_BOARD_QUEUE_STEP: '', PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 /**
  * Without two tiers of CI unless a test asks for them (TIERS): the queue as a repository without them runs it, every
- * green run a full one. The tiers this repository has (project.json ci.fullTier) have tests of their own below.
+ * green run a full one. The tiers this repository has (project.json ci.fullTier) have tests of their own in project-board-queue-batches.test.ts.
  */
 export const NO_TIERS = { PROJECT_BOARD_CI_FULL_TIER: '' }
 /** Two tiers, landing only from a full run (`ci.landTier: full`), as before #1259 */
