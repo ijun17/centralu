@@ -436,13 +436,14 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
     expect(reports()).toEqual([])
   })
 
-  it('reports a finished turn as "finished," as before', async () => {
+  it('reports a completed turn as ended, not as a finished piece of work (#1902)', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, 'let me know when it is done', true)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toHaveLength(1)
-    expect(reports()[0]).toContain('finished')
+    expect(reports()[0]).toContain('ended its turn')
+    expect(reports()[0]).not.toContain('finished')
   })
 })
 
