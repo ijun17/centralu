@@ -9,6 +9,7 @@ import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli, ownP
 import { spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { pidIn } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * An agent CLI this host starts itself, without a keeper (Windows, dev, e2e, a debug app): stopping
@@ -203,7 +204,7 @@ describe.runIf(!unix)('an agent CLI installed as an npm .cmd shim (Windows)', ()
       expect(await ended).toBe(true)
       expect(readFileSync(out, 'utf8')).toBe('ran')
     } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      await removeTree(dir)
     }
   })
 
@@ -219,7 +220,7 @@ describe.runIf(!unix)('an agent CLI installed as an npm .cmd shim (Windows)', ()
       expect(client).toBeDefined()
       expect(await exited).toBe(false)
     } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      await removeTree(dir)
     }
   })
 })

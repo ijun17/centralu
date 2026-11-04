@@ -6,7 +6,7 @@
  * asking session. A turn that is not a session's request is as it was.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ORCHESTRATOR_CHANGE, type ApprovalDetail, type ProjectInfo, type SessionInfo } from '@cc/protocol'
@@ -24,7 +24,6 @@ let m: HostMail
 let read: ReturnType<typeof mailReader>
 /** The mail's clock, from the wall clock's now: the person's message a request cites is stamped with the wall clock */
 let clock = { t: Date.now() }
-let dirs: string[] = []
 let orc: SessionInfo
 /** The options the orchestrator was launched with */
 let orcOpts: CreateSessionOpts | null = null
@@ -33,7 +32,6 @@ beforeEach(async () => {
   w = managerWorld()
   w.mgr.useWindowRpc((method, params) => w.rpc(method, params))
   clock = { t: Date.now() }
-  dirs = []
   m = wireHostMail(w.mgr, w.store, { now: () => clock.t, orchestratorHasMailCommand: () => commandsFor('orchestrator').includes('mail') })
   read = mailReader(w.store)
   // The delivery's first sweep is awaited: nothing of it is left running when the store closes
@@ -51,12 +49,10 @@ afterEach(async () => {
   m.delivery.stop()
   await w.mgr.disposeAll()
   w.store.close()
-  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5 })
 })
 
 async function project(label: string, trusted: boolean): Promise<ProjectInfo> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), `cc-asked-${label}-`)))
-  dirs.push(dir)
   const p = (await w.rpc('projects.add', { path: dir })) as ProjectInfo
   if (trusted) await w.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
   return (await w.rpc('projects.list', {}) as ProjectInfo[]).find((x) => x.id === p.id)!
@@ -569,7 +565,6 @@ describe('a request’s citation is evidence for the orchestrator, checked by th
     await askOrchestrator(asker, 'register the app folder as a project', cite)
     await due(orc.id)
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'cc-asked-folder-')))
-    dirs.push(folder)
     const call = run('add_project', { path: folder })
     // No request card; the project's own card asks, as it does in the person's turn, and nothing is recorded before it ran
     await eventually(() => !!ownCard(), 10_000)

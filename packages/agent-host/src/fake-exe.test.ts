@@ -1,17 +1,17 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { insideOf, removeFakeDir } from './fake-exe.test-helpers.js'
 import { alive } from './process.test-helpers.js'
 import { SLOW } from '../../../tooling/test-timing.js'
+import { removeTree } from './temp-dir.test-helpers.js'
 
 /**
  * A test's cleanup of its folder (#1346): on Windows a folder a process still holds cannot be removed, and the board
  * queue tests' cleanup failed with `EBUSY ... rmdir` while something worked in it. `removeFakeDir` retries briefly
- * without blocking the event loop, then leaves such a folder to the system's temporary-folder cleanup instead of failing
+ * without blocking the event loop, then leaves such a folder to the removal of the test file's temporary folder instead of failing
  * the test, only inside the temporary folder and only on Windows.
  */
 
@@ -22,7 +22,7 @@ afterEach(async () => {
     if (alive(c.pid)) process.kill(c.pid)
     await c.exited
   }
-  for (const dir of made.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  for (const dir of made.splice(0)) await removeTree(dir)
 })
 
 /**

@@ -51,6 +51,7 @@ export default defineConfig({
      * its worker's event loop long enough to fail the run with vitest's "Timeout calling onTaskUpdate" (#368).
      */
     setupFiles: [r('./tooling/vitest-data-dir.ts'), r('./tooling/vitest-stall-setup.ts')],
+    globalSetup: [r('./tooling/vitest-tmp-root.ts')],
     /*
      * A test that points CC_DATA_DIR (or anything else) somewhere for itself does so with `vi.stubEnv`, and every stub
      * is undone before the next test. Tests used to assign and restore it by hand: one deleted it after each test, which

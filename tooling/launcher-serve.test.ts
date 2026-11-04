@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
@@ -85,6 +85,7 @@ import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 import { pwsh7ModulePath } from '../packages/agent-host/src/links/windows-remote.test-helpers.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -104,12 +105,12 @@ const tempDir = () => {
   dirs.push(d)
   return d
 }
-afterEach(() => {
+afterEach(async () => {
   // Only processes this file started; anything left after a failed test is ended here
   for (const c of started.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
   // Windows can hold a node.exe the test copied and ran for a moment after the process ended (the image lock, or a
   // scanner on a new executable): retry EBUSY rather than fail the cleanup
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 describe('serve arguments', () => {

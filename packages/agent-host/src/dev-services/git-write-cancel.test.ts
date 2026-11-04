@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,7 +18,6 @@ function git(cwd: string, ...args: string[]): string {
  */
 describe('a git write the person cancels (#1007)', () => {
   let root: string
-  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
 
   /** A repository with a staged change, whose pre-commit hook sleeps far longer than the test waits */
   function slowCommit(): string {

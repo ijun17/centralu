@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SLOW } from '../../../../tooling/test-timing.js'
@@ -43,7 +43,6 @@ function sleepingHook(repo: string, name: string): void {
  */
 describe('a write outlasts the bound of a read (#980)', () => {
   let root: string
-  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
 
   it('commits through a pre-commit hook that takes longer than a read may', { timeout: 30_000 * SLOW }, async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-git-write-'))

@@ -280,7 +280,7 @@ export class ClaudeAdapter implements AgentAdapter {
        */
       let launch: ToolLaunch
       try {
-        launch = this.statusLaunch()
+        launch = await this.statusLaunch()
       } catch (err) {
         if (!(err instanceof ClaudePlaceholderError)) throw err
         return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
@@ -418,7 +418,7 @@ export class ClaudeAdapter implements AgentAdapter {
     if (this.accountCache && Date.now() - this.accountCache.at < ACCOUNT_CACHE_MS) return this.accountCache.value
     let value: { loggedIn: boolean | null; fingerprint: string | null }
     try {
-      const status = await claudeAuthStatus(this.statusLaunch())
+      const status = await claudeAuthStatus(await this.statusLaunch())
       const flag = (status as { loggedIn?: unknown } | null)?.loggedIn
       value = { loggedIn: typeof flag === 'boolean' ? flag : null, fingerprint: accountFingerprint(status) }
     } catch {
@@ -430,9 +430,9 @@ export class ClaudeAdapter implements AgentAdapter {
   private accountCache: { value: { loggedIn: boolean | null; fingerprint: string | null }; at: number } | null = null
 
   /** The program the sign-in is asked of: what sessions start (on Windows the link), else the one on PATH */
-  private statusLaunch(): ToolLaunch {
+  private async statusLaunch(): Promise<ToolLaunch> {
     const exe = this.launch.windows ? this.launch.executable() : null
-    if (exe && /\.exe$/i.test(exe)) return { command: this.launch.links.prepare(exe).path, args: [] }
+    if (exe && /\.exe$/i.test(exe)) return { command: (await this.launch.links.ensure(exe)).path, args: [] }
     return launchFor(toolCommand('claude'))
   }
 

@@ -1,8 +1,10 @@
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process'
 import { mkdtempSync, realpathSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { removeTree } from '../../../tooling/remove-tree.js'
+
+export { removeTree }
 
 /**
  * Temporary folders and git repositories for tests, made the same way everywhere (#845, #368).
@@ -17,18 +19,6 @@ import { join } from 'node:path'
  */
 export function tempRoot(prefix: string): string {
   return realpathSync.native(mkdtempSync(join(tmpdir(), prefix)))
-}
-
-/**
- * Removes a folder and everything in it, retried, and asynchronously.
- *
- * Windows will not delete a folder a process is still working in (EBUSY), and a process a test started (an app, a
- * detached `git maintenance`, a manager's merge detection) can still be ending when the test does: `lifecycle.test.ts`
- * met it in 7 of 105 Windows CI runs. The wait is asynchronous because `rmSync`'s own retries block the event loop
- * that in-process work needs in order to finish, and failed the same way every time (`manager.test.ts`, #14).
- */
-export function removeTree(dir: string): Promise<void> {
-  return rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 }
 
 /**

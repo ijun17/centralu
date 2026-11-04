@@ -106,10 +106,9 @@ describe('one listing of the filter drivers for one operation (#368)', () => {
  */
 describe.skipIf(process.platform !== 'win32')('git that is not installed', () => {
   let root = ''
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
     __forgetPrograms()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
   })
 
   it('is reported missing, and the git.exe in the project never runs', async () => {

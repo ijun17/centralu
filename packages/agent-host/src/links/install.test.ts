@@ -16,6 +16,7 @@ import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.m
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { POINTER_WORD } from '../../../../packaging/npm/centralu/bin/serve-install.mjs'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The installer of plan §10.2 (#82, phase 3 step 3). The scripts run for real: a fake `ssh` hands
@@ -174,7 +175,7 @@ describe('the install scripts per shell (plan §10.2)', () => {
       return { out: out.trim(), placed: existsSync(join(data, 'remote', 'node', `v${NODE_V}`, 'node.exe')), held }
     } finally {
       server.close()
-      rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      await removeTree(base)
     }
   }
 
