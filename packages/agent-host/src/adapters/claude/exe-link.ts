@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -29,10 +30,19 @@ import { basename, dirname, join } from 'node:path'
  * no disk; when the data folder is on another volume (`EXDEV`) or the file system has no links
  * (`EPERM`) the program is copied instead. macOS and Linux replace a running executable without
  * complaint, so nothing here runs there.
+ *
+ * Finding the placeholder, the host runs the package's own `install.cjs` (#1645), once per package
+ * per host start, with its own Node and a time limit: it is the step npm meant to run, nothing else.
+ * Measured on Claude Code 2.1.296: on a placeholder it links the platform program over it and prints
+ * nothing; when a running program holds the file it prints `Failed to place binary: EBUSY` and exits
+ * 1 with the placeholder untouched. A held file is reported, never freed: no process is stopped.
  */
 
 /** Smaller than any real Claude Code binary (about 250 MB) and larger than any placeholder (500 bytes in 2.1.x) */
 export const PLACEHOLDER_MAX_BYTES = 1_000_000
+
+/** How long the package's own setup step may run: a link is instant, a copy of the 250 MB program is not */
+export const INSTALLER_TIMEOUT_MS = 60_000
 
 /** What `start` throws when Claude Code's program is the npm placeholder: the message says what to do */
 export class ClaudePlaceholderError extends Error {
@@ -53,6 +63,12 @@ export type ExeFs = {
   /** A folder and what is in it. Throws on Windows while a program in it runs */
   removeDir(dir: string): void
   removeFile(path: string): void
+  /**
+   * Runs the package's own `install.cjs` with this host's Node, in its folder, and waits for it.
+   * `status` is its exit code, or null when it did not run to the end; `output` is what it printed
+   * (or why it did not finish)
+   */
+  runInstaller(installer: string, timeoutMs: number): { status: number | null; output: string }
 }
 
 export const realExeFs: ExeFs = {
@@ -75,6 +91,26 @@ export const realExeFs: ExeFs = {
   mkdir: (d) => void mkdirSync(d, { recursive: true }),
   removeDir: (d) => rmSync(d, { recursive: true, force: true }),
   removeFile: (p) => rmSync(p, { force: true }),
+  runInstaller: (installer, timeoutMs) => {
+    const r = spawnSync(process.execPath, [installer], { cwd: dirname(installer), encoding: 'utf8', timeout: timeoutMs, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 20 })
+    if (r.error) {
+      const timedOut = (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+      return { status: null, output: timedOut ? `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` : r.error.message }
+    }
+    return { status: r.status, output: `${r.stdout}${r.stderr}`.trim() }
+  },
+}
+
+/** Claude Code's own setup step beside `bin/claude.exe` in npm's layout, or null when there is none */
+export function installerFor(exe: string, fs: ExeFs = realExeFs): string | null {
+  if (basename(dirname(exe)).toLowerCase() !== 'bin') return null
+  const installer = join(dirname(dirname(exe)), 'install.cjs')
+  try {
+    fs.stat(installer)
+    return installer
+  } catch {
+    return null // not npm's layout: only reinstalling is advice we can stand behind
+  }
 }
 
 /**
@@ -84,7 +120,7 @@ export const realExeFs: ExeFs = {
  * would start, as it does any non-PE file named `.exe`, as a 16-bit program and refuse. A file that
  * is large or starts with `MZ` passes: this only names the one failure we know, never guesses.
  */
-export function placeholderProblem(exe: string, size: number, fs: ExeFs = realExeFs): string | null {
+export function placeholderProblem(exe: string, size: number, fs: ExeFs = realExeFs, tried: string | null = null): string | null {
   if (size >= PLACEHOLDER_MAX_BYTES) return null
   let head: Buffer
   try {
@@ -93,21 +129,12 @@ export function placeholderProblem(exe: string, size: number, fs: ExeFs = realEx
     return null
   }
   if (head.toString('latin1') === 'MZ') return null
-  const pkg = dirname(dirname(exe))
-  const installer = basename(dirname(exe)).toLowerCase() === 'bin' ? join(pkg, 'install.cjs') : null
-  let canRerun = false
-  if (installer) {
-    try {
-      fs.stat(installer)
-      canRerun = true
-    } catch {
-      // not npm's layout: only reinstalling is advice we can stand behind
-    }
-  }
+  const installer = installerFor(exe, fs)
   return [
     `Claude Code is not installed completely: ${exe} is a ${size}-byte placeholder, not the Claude program (about 250 MB).`,
     "Claude Code's setup step puts the real program there after npm installs the package; it did not finish, usually because a running Claude Code held the file during an install or update.",
-    canRerun
+    ...(tried ? [tried] : []),
+    installer
       ? `To fix it, close every Claude Code (Centralu's Claude sessions, terminals, editors) and run \`node "${installer}"\`, or reinstall with \`npm i -g @anthropic-ai/claude-code\` while no Claude Code is running.`
       : 'To fix it, close every Claude Code (Centralu\'s Claude sessions, terminals, editors) and reinstall it with `npm i -g @anthropic-ai/claude-code`.',
   ].join(' ')
@@ -174,6 +201,8 @@ export class ClaudeLinks {
   private readonly fs: ExeFs
   private readonly log: (line: string) => void
   private readonly uses = new Map<string, number>()
+  /** Each package's setup step this host has run, with what to tell the person about it. Run once per host start, never in a loop */
+  private readonly repairs = new Map<string, string>()
   /** The key new sessions start from: the last one prepared */
   private current: string | null = null
 
@@ -205,7 +234,16 @@ export class ClaudeLinks {
     } catch {
       return direct // gone: the spawn names the missing file
     }
-    const problem = placeholderProblem(exe, stat.size, this.fs)
+    let problem = placeholderProblem(exe, stat.size, this.fs)
+    if (problem) {
+      const tried = this.repair(exe)
+      try {
+        stat = this.fs.stat(exe)
+      } catch {
+        return direct
+      }
+      problem = placeholderProblem(exe, stat.size, this.fs, tried)
+    }
     if (problem) throw new ClaudePlaceholderError(problem)
 
     const key = claudeKey(exe, stat, this.fs)
@@ -250,6 +288,44 @@ export class ClaudeLinks {
       this.log(`[claude] could not place claude.exe in ${dir} (${code(err)}); starting it from ${exe}, which an update cannot replace while it runs`)
       return direct
     }
+  }
+
+  /**
+   * Runs the package's own setup step once, when `exe` is npm's placeholder and `install.cjs` is beside it
+   * (the step that was meant to put the program there; nothing else runs and nothing is fetched). Never
+   * stops a process: a file a running Claude Code holds stays a placeholder and the message says so.
+   *
+   * @returns what the message should add about it, or null when nothing was run
+   */
+  private repair(exe: string): string | null {
+    const installer = installerFor(exe, this.fs)
+    if (!installer) return null
+    const known = this.repairs.get(installer)
+    if (known !== undefined) return known
+    this.log(`[claude] ${exe} is npm's placeholder; running Claude Code's own setup step, ${installer}`)
+    const run = this.fs.runInstaller(installer, INSTALLER_TIMEOUT_MS)
+    const done = (): boolean => {
+      try {
+        return placeholderProblem(exe, this.fs.stat(exe).size, this.fs) === null
+      } catch {
+        return false
+      }
+    }
+    const step = `Centralu ran that setup step itself (\`node "${installer}"\`)`
+    let tried: string
+    if (done()) {
+      this.log(`[claude] repaired ${exe}`)
+      tried = `${step} earlier since it started and does not run it again.`
+    } else if (/\b(EBUSY|EPERM|EACCES)\b/.test(run.output)) {
+      this.log(`[claude] the setup step could not replace ${exe}; a running program holds it: ${firstLine(run.output)}`)
+      tried = `${step} and the file is still a placeholder: a running Claude Code holds it.`
+    } else {
+      const why = run.status === null ? run.output : run.status === 0 ? firstLine(run.output) || 'it left the placeholder in place' : `exit code ${run.status}: ${firstLine(run.output)}`
+      this.log(`[claude] the setup step did not repair ${exe}: ${why}`)
+      tried = `${step} and it did not repair the file: ${why}.`
+    }
+    this.repairs.set(installer, tried)
+    return tried
   }
 
   private use(key: string, path: string): ClaudeRun {
@@ -306,6 +382,12 @@ export class ClaudeLinks {
       // not there: nothing to keep
     }
   }
+}
+
+/** The first line of what the setup step printed: the error, before its hint */
+function firstLine(text: string): string {
+  const line = text.split(/\r?\n/).find((l) => l.trim())?.trim() ?? ''
+  return line.length > 240 ? `${line.slice(0, 240)}...` : line
 }
 
 function code(err: unknown): string {
