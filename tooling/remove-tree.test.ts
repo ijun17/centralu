@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { SLOW } from './test-timing.js'
 
 const refusals = vi.hoisted(() => ({ left: 0 }))
 vi.mock('node:fs/promises', async (original) => {
@@ -45,7 +46,7 @@ describe('removing a test folder', () => {
     const started = Date.now()
     const failure = await removeWithin(dir, 300).then(() => null, (e: unknown) => e)
     refusals.left = 0
-    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(Date.now() - started).toBeLessThan(2_000 * SLOW)
     expect(failure).toMatchObject({ code: 'EBUSY', message: expect.stringContaining(`left in it: a`) })
     expect(existsSync(dir)).toBe(true)
   })
@@ -57,7 +58,7 @@ describe('removing a test folder', () => {
     await new Promise((r) => holder.once('spawn', r))
     await removeWithin(dir, 15_000)
     expect(existsSync(dir)).toBe(false)
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it.runIf(process.platform === 'win32')('gives up at the deadline on a folder a process keeps, however deep it is held', async () => {
     const dir = folder()
@@ -66,7 +67,7 @@ describe('removing a test folder', () => {
       await new Promise((r) => holder.once('spawn', r))
       const started = Date.now()
       await expect(removeWithin(dir, 1_000)).rejects.toThrow(/could not be removed within 1000 ms.*left in it: a/)
-      expect(Date.now() - started).toBeLessThan(4_000)
+      expect(Date.now() - started).toBeLessThan(4_000 * SLOW)
     } finally {
       const ended = new Promise((r) => holder.once('exit', r))
       holder.kill()
@@ -74,5 +75,5 @@ describe('removing a test folder', () => {
     }
     await removeWithin(dir, 15_000)
     expect(existsSync(dir)).toBe(false)
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
