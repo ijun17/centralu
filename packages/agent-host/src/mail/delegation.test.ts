@@ -192,12 +192,6 @@ describe('a turn’s end (§9.3): each case answers the ReportedAs the table giv
     expect(w.store.mailbox.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'waiting', waitingOn: 2 })
   })
 
-  it('an update cut the turn and it goes on (#1618): none, the old path says so, and the task stays open', () => {
-    const { w, task, report } = setup()
-    expect(report('a', 'w', draft({ outcome: 'resumed', then: 'running' }))).toBe('none')
-    expect(w.rowOf(task.id, W).settled).toBeNull()
-  })
-
   it('one report settles every open task of that owner to that child delivered before the turn began; one queued during it stays open', () => {
     const w = turnWorld()
     const t1 = w.mail.task(A, W, { text: 'one', origin: 'start_agent', delivered: true })

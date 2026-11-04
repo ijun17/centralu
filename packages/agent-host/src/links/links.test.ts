@@ -3651,10 +3651,9 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => continuedThere().length === 1 && running.mgr.listSessions().find((s) => s.id === id)?.live === true)
     expect(running.mgr.listSessions().find((s) => s.id === id)?.state).toBe('working')
 
-    // The parent hears once that the turn was cut and goes on: not that the link dropped, nor that the work ended
-    const continued = () => told().filter((t) => t.includes('cut the turn') && t.includes('Centralu continued it there on the new version'))
-    await eventually(() => continued().length === 1)
-    expect(told().filter((t) => t.includes('dropped'))).toEqual([])
+    // The parent hears nothing of the cut meanwhile (#1966): not that the turn was cut, nor that the link dropped, nor that the work ended
+    await new Promise((r) => setTimeout(r, 300))
+    expect(told().filter((t) => t.includes('dropped') || t.includes('cut the turn') || t.includes('continued it there'))).toEqual([])
     expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
 
     // The continued turn's end is the one report
@@ -3662,7 +3661,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     handle.finish('Tests migrated.')
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
     expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toHaveLength(1)
-    expect(continued()).toHaveLength(1)
+    // And its one line says an update cut the turn and Centralu continued it
+    expect(told().find((t) => t.startsWith('[Centralu] The session ended its turn'))).toContain('An update of Centralu cut this turn and Centralu continued it.')
     expect(continuedThere()).toHaveLength(1)
   })
 })

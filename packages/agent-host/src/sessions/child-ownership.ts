@@ -108,9 +108,9 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
  * Whose a turn is (#1377): the person's (the person wrote while the session was at rest, or their message waited for
  * the turn), or the delegated work's (the caller's message, an app's or Centralu's, or the CLI starting it itself when
  * the work's background tasks end). `wrote`: the person wrote into a turn of the work; `added`: the person chose to add
- * their message to the task.
+ * their message to the task. `cut`: an update of Centralu cut the turn and Centralu continued it (#1966): its end says so.
  */
-export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
+export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true; cut?: true }
 /** A turn a quit or a swap ended, and who to tell, waiting for the start to finish (#698); `turn`: whose a quit's was (#1946) */
 export type QuitNotice = { sessionId: string; requester: string; swapped?: true; turn?: TurnStarter | undefined }
 /**
@@ -216,6 +216,8 @@ export type LinkedReport = {
   next?: TurnStarter
   /** Whose the last turn there was: its last response is the person's answer when it was theirs */
   lastBy?: 'person' | 'work'
+  /** An update of its machine cut the turn running there and the machine's host continued it (#1966): the report of its end says so. Memory only */
+  cut?: true
   /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
   addNext?: number
   /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
@@ -281,6 +283,8 @@ export class ChildOwnership {
   private readonly starters = new Map<string, TurnStarter>()
   /** Turns the tool started by itself, no message behind them (`turnStarted`, #1576); memory only, a swap forgets it */
   private readonly cliTurns = new Set<string>()
+  /** Sessions whose running turn an update cut and Centralu continued (#1966): the turn's end carries it, once. Memory only */
+  private readonly continuedCuts = new Set<string>()
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** The messages given each session's tool that no turn has taken yet (#1639), oldest first; read back from the rows once per host (`held`) */
   private readonly entries = new Map<string, Entry[]>()
@@ -933,6 +937,7 @@ export class ChildOwnership {
     this.starters.delete(sessionId)
     this.cliTurns.delete(sessionId)
     this.takenOver.delete(sessionId)
+    if (this.continuedCuts.delete(sessionId)) starter.cut = true
     // The process went with the turn (`cut`): it holds none of the messages given it (#1604). Any other error or limit leaves the process, which can still run one it holds queued as the next turn
     if (cut) this.dropInputOrigins(sessionId)
     this.noteTurnEnd(sessionId)
@@ -984,6 +989,10 @@ export class ChildOwnership {
   /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
   lastTurnBy(sessionId: string): 'person' | 'work' | undefined {
     return this.lastBy.get(sessionId)
+  }
+  /** The turn running was cut by an update and continued (#1966): its report says so in one line */
+  noteContinuedCut(sessionId: string): void {
+    this.continuedCuts.add(sessionId)
   }
   /** Whose the running turn is, when one is recorded */
   starterOf(sessionId: string): TurnStarter | undefined {

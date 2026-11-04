@@ -46,7 +46,6 @@ const NOT_READ = "(not read: the session's last turn was the person's; read_sess
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
   if (work && 'tookOver' in work) return 'took_over'
   if (work && 'swapped' in work) return 'swapped'
-  if (work && 'resumed' in work) return 'resumed'
   if (work && ('machineRemoved' in work || 'linkLost' in work)) return 'stopped'
   if (work && ('paused' in work || 'waitingOn' in work)) return 'paused'
   if (work && 'settled' in work) return 'settled'
@@ -128,16 +127,6 @@ function swappedReportLine(): string {
   )
 }
 /**
- * The first line of what a caller is told when an update of Centralu on the session's machine cut its turn and the host
- * that update started continued it (#1618). Not a report: the turn goes on, and when one is owed it is that turn's end
- */
-function resumedReportLine(owed: boolean): string {
-  return (
-    "[Centralu] The assigned work's turn was cut short by an update of Centralu on its machine, and Centralu continued it there on the new version. " +
-    (owed ? 'Its report follows when that turn ends; this is not it, and nothing is needed from you now.\n' : 'Its end is not reported to you; read the session to follow it.\n')
-  )
-}
-/**
  * What a caller is told when the person chose to take a session over (#1377, "Take it over"; #1340): the person's turns in
  * it are theirs, so none is reported, and the work it was given is not followed any more
  */
@@ -150,10 +139,12 @@ function tookOverReportLine(paused: readonly BackgroundTask[], name: Naming = ST
   )
 }
 /** What a report says of the person's part in the turn it reports (#1377): Centralu's own words, never the person's */
-export function personPartLine(turn: { wrote?: true; added?: true } | undefined): string {
-  if (turn?.added) return 'The person added an instruction to this task during this turn.\n'
-  if (turn?.wrote) return 'The person wrote in this session during this turn.\n'
-  return ''
+export function personPartLine(turn: { wrote?: true; added?: true; cut?: true } | undefined): string {
+  // An update cut the turn and Centralu continued it (#1966): its parent heard nothing of the cut, so the end says so
+  const cut = turn?.cut ? 'An update of Centralu cut this turn and Centralu continued it.\n' : ''
+  if (turn?.added) return `${cut}The person added an instruction to this task during this turn.\n`
+  if (turn?.wrote) return `${cut}The person wrote in this session during this turn.\n`
+  return cut
 }
 /** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
 function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED): string {
@@ -412,21 +403,6 @@ export class ChildReports {
   }
 
   /**
-   * A turn of this session that a linked hub's update cut, and this host continued (#1618): its requester hears it once,
-   * so it does not read the session's stop as the end of the work, nor continue it a second time by hand. The report it is
-   * owed, if one is, stays owed: the continued turn's end is it, so it is neither lost nor sent twice
-   */
-  async tellCutByUpdate(sessionId: string, requester: string): Promise<void> {
-    const m = this.host.meta.get(sessionId)
-    if (!m || !this.host.meta.has(requester) || this.host.handingOver) return
-    const { name, project } = this.reportedAs(m)
-    const owed = this.host.children.awaitingReport.get(sessionId) === requester
-    console.error(`[sessions] ${sessionId.slice(0, 8)}: an update cut its turn and it was continued; telling ${requester.slice(0, 8)}`)
-    const { preview, seq } = this.stoppedTurnAnswer(sessionId)
-    await this.deliverReport(requester, sessionId, name, project, preview, { type: 'state_change' }, { resumed: true, owed }, seq)
-  }
-
-  /**
    * The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn
    * before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does
    */
@@ -507,7 +483,7 @@ export class ChildReports {
     /** Where its last response starts in its conversation, when it is read here: the read the model is pointed to (#1186) */
     answerSeq?: number,
     /** The person's part in the turn reported (#1377): they wrote into it, or added to the task */
-    part?: { wrote?: true; added?: true },
+    part?: { wrote?: true; added?: true; cut?: true },
   ): Promise<void> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
@@ -523,7 +499,6 @@ export class ChildReports {
     const outcomeOf = (name: Naming) =>
       work && 'tookOver' in work ? tookOverReportLine(work.paused, name)
       : work && 'swapped' in work ? swappedReportLine()
-      : work && 'resumed' in work ? resumedReportLine(work.owed)
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
       : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined, name)
@@ -588,8 +563,6 @@ export class ChildReports {
     const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
     // Or held over the work it handed on and waits for (§6)
     const handedOn = !!work && 'waitingOn' in work
-    // Or a turn an update cut, which goes on (#1618)
-    const goesOn = !!work && 'resumed' in work
     const reported = this.toMailbox(orchestratorId, sessionId, {
       outcome: outcomeWord(work, stop, ending),
       body: forModel(true),
@@ -597,7 +570,7 @@ export class ChildReports {
       ...(kind ? { error: kindWord(kind) } : {}),
       ...(holding ? { paused: work.paused.length } : {}),
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
-      then: holding || handedOn || goesOn ? 'running' : 'review',
+      then: holding || handedOn ? 'running' : 'review',
     })
     if (reported === 'mailed' || reported === 'closed') return
     await this.tellSession(

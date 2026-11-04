@@ -13,6 +13,7 @@ import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } fr
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
+import type { LinkedReport } from './child-ownership.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
@@ -211,7 +212,7 @@ export class RemoteAgents {
   private readonly toldDown = new Map<string, boolean>()
   /** The machines whose link this hub's own update or rollback holds, until it is back (#1618, `linkChanged`) */
   private readonly updateHolds = new Set<string>()
-  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was taken up: once each */
+  /** The turns an update of their machine cut that a report already carries (#1966), by session and when the machine took it up: once each */
   private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
@@ -1425,33 +1426,22 @@ export class RemoteAgents {
       if (!now.ok || this.host.children.linkedReports.get(rec.sessionId) !== report || !this.gateNow(rec).owned) continue
       if (inTurn((now.state ?? 'idle') as SessionState)) {
         report.busy = true
-        this.tellContinued(rec)
+        this.noteCut(rec, report)
       } else this.host.settleLinkedTurn(rec.sessionId)
     }
   }
 
   /**
-   * A child whose turn an update of its machine cut, found in a turn again once the link is back: the host that update
-   * started continued it (#1618). Its caller is told so once, and that the report it is owed is that turn's end, so it
-   * neither waits on a link that came back nor continues the child by hand a second time.
-   *
-   * Whatever the order of the Continue and the reconnect (#1626 review): the machine's host names each turn it continues
-   * from its start on, before it answers any hello, not once the Continue is in (`SessionManager.updateContinued`), so a
-   * link back while the Continue is still on its way is told it too
+   * A child found in a turn again once the link is back, whose turn an update of its machine cut: the host that update started continued
+   * it (#1618). Its caller is told nothing now (#1966): the report it is owed is that turn's end, and says in one line that the turn was
+   * cut and continued. Whatever the order of the Continue and the reconnect (#1626 review): the machine's host names each turn it
+   * continues from its start on, before it answers any hello (`SessionManager.updateContinued`)
    */
-  private tellContinued(rec: RemoteAgent): void {
+  private noteCut(rec: RemoteAgent, report: LinkedReport): void {
     const at = this.host.linkedReader?.continuedAfterUpdate?.(rec.sessionId)
     if (at == null || this.toldCut.has(`${rec.sessionId}@${at}`)) return
     this.toldCut.add(`${rec.sessionId}@${at}`)
-    const rest = 'and Centralu continued it there on the new version. Its report comes when that turn ends; nothing is needed from you now.'
-    void this.host.tellSession(
-      rec.callerId,
-      `[Centralu] An update of Centralu on its machine cut the turn "${rec.name}" [${rec.sessionId}] was running there, ${rest}`,
-      { sessionId: rec.sessionId, name: rec.name },
-      true,
-      // What the model reads (#1186): all of it but the name, which is not Centralu's words (#120)
-      `[Centralu] An update of Centralu on its machine cut the turn the session [${rec.sessionId}] was running there, ${rest}`,
-    )
+    report.cut = true
   }
 
   /**
