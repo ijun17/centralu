@@ -378,8 +378,8 @@ async function squash(item, pr, n, msg, defaultBranch) {
   // Read back whether gh said yes or no: gh can exit 0 without a merge (GitHub's own merge queue, auto-merge), and
   // it can fail (EOF) after GitHub merged. Only GitHub's word counts
   const merged = await readBack(repo, pr.number)
-  // Failed, and GitHub cannot be asked either: nobody knows if it merged, so it is neither a refusal nor a landing. A failed poll, tried again
-  if (why && !merged) throw new GitHubError('github', `gh pr merge failed for ${n} (${why}) and GitHub could not be asked afterwards whether it merged`)
+  // GitHub cannot be asked, whatever gh said: nobody knows if it merged, so it is neither a refusal, a hold nor a landing. A failed poll, tried again
+  if (!merged) throw new GitHubError('github', `gh pr merge ${why ? `failed for ${n} (${why})` : `answered for ${n}`} and GitHub could not be asked afterwards whether it merged`)
   if (why && !(merged?.state === 'MERGED' && merged.headRefOid === pr.headRefOid)) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
   if (merged?.state !== 'MERGED')
     return {

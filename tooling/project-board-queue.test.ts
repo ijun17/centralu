@@ -2257,6 +2257,12 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge found on the next poll')
     expect(notices().map((e) => e.text).join(' ')).not.toContain('refused')
+    // gh said yes and the read-back is lost: GitHub was never asked, so it is not 'not-merged' either (a batch would drop, a record be re-drafted)
+    await fresh(ghState({ on: { 'merge:77': { viewLost: { n: 1 } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge found on the next poll')
+    expect(notices().map((e) => e.text).join(' ')).not.toContain('does not show it merged')
+    expect(writes().map((w) => w[0])).toEqual(['merge', 'delete'])
   })
 
   it('counts a lower closed when gh lost the answer to the close, and deletes its branch', async () => {
