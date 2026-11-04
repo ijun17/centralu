@@ -239,3 +239,17 @@ export function logonFromGroups(stdout: string): HostLogon | null {
   if (sids.has('S-1-5-6')) return 'service'
   return null
 }
+
+/**
+ * How to ask whether the system is ending now (#1397, lifecycle/system-end.ts `askSystemStopping`): on Linux, systemd says
+ * `stopping` for the system's manager at a shutdown or restart, and for the user's at the sign-out that ends it. There is no such
+ * question elsewhere: macOS and Windows tell a process with a window (`NSWorkspaceWillPowerOffNotification`,
+ * `WM_QUERYENDSESSION`), which the host is not. Each is a command and its arguments; `null` where there is none
+ */
+export function systemStoppingQueries(platform: Platform = HOST_PLATFORM): readonly (readonly string[])[] | null {
+  if (platform !== 'linux') return null
+  return [
+    ['systemctl', 'is-system-running'],
+    ['systemctl', '--user', 'is-system-running'],
+  ]
+}

@@ -36,8 +36,11 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  *
  *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
  *                 response, the computer slept), after the tool's own retries
- *   quit          Centralu quit or the computer restarted while the turn ran, and the process went with it: a start
+ *   quit          Centralu quit or restarted while the turn ran, and the process went with it: a start
  *                 found the session `working` with no process left and reset it to `idle`
+ *   shutdown      the computer shut down, restarted or signed out while the turn ran (#1397): the last host was told
+ *                 the system was ending and recorded it as it went; the next start found the session in that turn, or
+ *                 ended by `adapter_crashed` about then, and reset it to `idle`. Not a crash, and continued as `quit` is
  *   interrupted   the tool interrupted the turn, and neither the person nor Centralu asked it to (Codex's
  *                 `turn/completed` with `interrupted` that no Stop of ours preceded)
  *   reconnecting  still `working`, but the tool has been reconnecting to its API for longer than the host's bound
@@ -47,9 +50,15 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  * newer host reads as `interrupted`, which still says "this turn did not finish".
  */
 export const InterruptionReason = z
-  .enum(['network', 'quit', 'interrupted', 'reconnecting'])
+  .enum(['network', 'quit', 'shutdown', 'interrupted', 'reconnecting'])
   .catch('interrupted')
 export type InterruptionReason = z.infer<typeof InterruptionReason>
+
+/**
+ * What a `shutdown` says happened, in the same words wherever it is said (#1397): the label, the note above the composer, the line in
+ * the conversation, the orchestrator's list and the report to the caller. After a colon, so it starts in lower case
+ */
+export const SHUTDOWN_WORDS = 'the computer shut down, restarted or signed out'
 
 export const Interruption = z.object({
   reason: InterruptionReason,

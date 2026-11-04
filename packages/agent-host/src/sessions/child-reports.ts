@@ -6,8 +6,9 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind, kindWord } from './error-kind.js'
+import { wentWithItsProcess } from './interruptions.js'
 import { TURN_ENDED, type ReportDraft, type ReportedAs } from '../mail/delegation.js'
 import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
@@ -53,6 +54,7 @@ function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | n
   if (stop?.reason === 'network') return 'network'
   if (stop?.reason === 'interrupted') return 'interrupted'
   if (stop?.reason === 'quit') return 'quit'
+  if (stop?.reason === 'shutdown') return 'shutdown'
   if (ending.type === 'error') return 'failed'
   if (ending.type === 'limit_reached') return 'limit_reached'
   if (ending.type === 'turn_complete') return 'finished'
@@ -74,6 +76,8 @@ function personReportLine(outcome: string, tasks: number): string {
       return '[Centralu] The session you started stopped before finishing: its tool interrupted the turn.'
     case 'quit':
       return '[Centralu] The session you started stopped before finishing: Centralu quit or restarted during its turn.'
+    case 'shutdown':
+      return `[Centralu] The session you started stopped before finishing: ${SHUTDOWN_WORDS} during its turn.`
     case 'paused':
       return `[Centralu] The session you started paused: its turn ended while its own background work is still running (${tasks} task${tasks === 1 ? '' : 's'}).`
     default:
@@ -404,7 +408,7 @@ export class ChildReports {
      * turn would clear its own mark before the person saw it. Once continued, its children's rows say they stopped.
      */
     const askerInfo = this.host.meta.get(asker)
-    if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
+    if (!askerInfo || wentWithItsProcess(askerInfo.interruption)) return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
     const { preview, seq } = this.stoppedTurnAnswer(sessionId)
@@ -519,7 +523,7 @@ export class ChildReports {
      * once it is sent a message, and nothing else will continue it. Said first, so the caller does not redo the work.
      */
     const stop = this.host.meta.get(sessionId)?.interruption
-    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
+    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || wentWithItsProcess(stop)
     const outcomeOf = (name: Naming) =>
       work && 'tookOver' in work ? tookOverReportLine(work.paused, name)
       : work && 'swapped' in work ? swappedReportLine()
@@ -532,6 +536,7 @@ export class ChildReports {
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
       : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
+      : stop?.reason === 'shutdown' ? `[Centralu] The assigned work stopped before finishing: ${SHUTDOWN_WORDS} during its turn.\n`
       : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `${TURN_ENDED}\n`

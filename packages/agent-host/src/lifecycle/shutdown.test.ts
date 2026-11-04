@@ -205,7 +205,7 @@ describe('detach or stop (HO15)', () => {
 })
 
 describe('leaving, once (HO8)', () => {
-  function shutdown(plan: (mode: string) => Step[]) {
+  function shutdown(plan: (mode: string) => Step[], beforeLeave?: () => Promise<void> | undefined) {
     const logged: string[] = []
     const exits: number[] = []
     let logStopped = 0
@@ -217,9 +217,35 @@ describe('leaving, once (HO8)', () => {
       exit: (code) => void exits.push(code),
       pid: 42,
       setTimer: (f) => void timers.push(f),
+      ...(beforeLeave ? { beforeLeave } : {}),
     })
     return { s, logged, exits, logStopped: () => logStopped, fireBound: () => timers.forEach((f) => f()) }
   }
+
+  // #1397: the host asks the system whether it is ending before its agents go, whichever way the leave began
+  it('waits for what comes before a leave, once, and stops nothing until it is done; with nothing to wait for it begins at once', async () => {
+    let answer: () => void = () => {}
+    let asked = 0
+    const ran: string[] = []
+    const t = shutdown(
+      () => [{ name: 'terminals', run: () => void ran.push('terminals') }],
+      () => (asked++, new Promise<void>((r) => (answer = r))),
+    )
+    const first = t.s.leave('stop', false)
+    void t.s.leave('stop', false)
+    await Promise.resolve()
+    expect({ asked, ran, leaving: t.s.leaving }).toEqual({ asked: 1, ran: [], leaving: 'stop' })
+    answer()
+    await first
+    expect(ran).toEqual(['terminals'])
+    expect(t.exits).toEqual([0])
+
+    // With nothing to wait for (no question where the system cannot be asked), the leave begins in the call, as before (HO8)
+    const sync: string[] = []
+    const u = shutdown(() => [{ name: 'terminals', run: () => void sync.push('terminals') }], () => undefined)
+    void u.s.leave('stop', false)
+    expect(sync).toEqual(['terminals'])
+  })
 
   it('a second ending changes nothing: the services stop once and the process exits once', async () => {
     let planned = 0

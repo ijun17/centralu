@@ -1,4 +1,4 @@
-import type { Interruption } from '@cc/protocol/client'
+import { SHUTDOWN_WORDS, type Interruption } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { CONTINUE_TEXT, interruptionLabel } from '../../components/primitives.jsx'
@@ -60,7 +60,9 @@ export function InterruptedNote({
       ? 'A network error ended the last turn before it finished.'
       : interruption.reason === 'quit'
         ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
-        : 'The agent tool interrupted the last turn before it finished.'
+        : interruption.reason === 'shutdown'
+          ? `The last turn did not finish: ${SHUTDOWN_WORDS} while it was running.`
+          : 'The agent tool interrupted the last turn before it finished.'
   return (
     <p
       className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
