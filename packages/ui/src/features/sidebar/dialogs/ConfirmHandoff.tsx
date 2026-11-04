@@ -51,8 +51,8 @@ export function ConfirmHandoff({
    * Archiving defaults to **on**, for both note sources (#1477, owner direction). It was off since #694
    * (#78's pairing: keep the original until the successor is known to work), but a kept original is not
    * idle: its process keeps running, and when one of its background tasks ends it wakes for a turn that rewrites
-   * its whole context (after an hour idle the cache has expired), its finished children stay with it
-   * (#1475), and two sessions claim one piece of work. Archiving is not deleting: the original stays in the
+   * its whole context (after an hour idle the cache has expired), its apps stay attached to it
+   * (#1638), and two sessions claim one piece of work. Archiving is not deleting: the original stays in the
    * archive and can be restored, so the safety the old default gave is still there. The box stays, so
    * branching (keeping both) is one click, and when it is off and the original has background work running
    * the dialog says what that costs.

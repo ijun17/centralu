@@ -7,7 +7,7 @@ import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
 import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
-import { MessageService } from './messages.js'
+import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { REFUSAL_TEXT, firstLineOf } from './rules.js'
 import { MailTool } from './tool.js'
@@ -76,6 +76,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const { hostId } = opts
   const now = opts.now ?? Date.now
   const addressOf = (id: string) => sessionAddress(hostId, id)
+  /** What a handoff moved, with the session a Centralu message is about as the session id the host uses (an address in the mailbox) */
+  const aboutSessions = (list: HandedOverMessage[]): HandedOverMessage[] =>
+    list.map(({ about, ...m }) => {
+      const party = about ? parseAddress(about) : null
+      return party?.kind === 'session' ? { ...m, about: party.sessionId } : m
+    })
   const projects = () => store.projects.listProjects()
   const reach = mailReach({
     hostId,
@@ -162,8 +168,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, mailTurns, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
-    handOver: (from, to, which) => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }),
-    handOverPreview: (from, to) => service.handOverPreview(addressOf(from), addressOf(to)),
+    handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
+    handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
     sessionEvent: (e, ended) => mailTurns.observe(e, ended),

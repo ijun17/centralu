@@ -289,6 +289,8 @@ export class SessionStarts {
     let handle: SessionHandle
     let apps: SessionApps | undefined
     let noCodeIntelligence = false
+    // The apps of a handoff's original that the successor was not given (an "Allow once" answer), for its note
+    let leftBehind: string[] = []
     this.host.record.unborn.set(id, [])
     // Everything from here until the session is saved is inside the cleanup below: a throw before the adapter starts
     // left the new worktree with no session pointing at it (#774)
@@ -296,10 +298,19 @@ export class SessionStarts {
       if (params.builderOf) this.host.appSessions.setBuilder(params.builderOf, id)
       // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
       // it
-      apps = this.host.apps.appsFor(info)
       // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
       // flag says what the row's slot already says
       const { profile, tools } = this.host.tools.toolChoice(info, !!params.builderOf)
+      /*
+       * The apps the original attached itself go with a handoff (#1638), copied before the process starts and counts its tools: a Codex thread
+       * fixes them when it starts (the app server's reload takes no servers of ours, so a later one would not reach it), and Claude reads them
+       * as it loads. What an app is allowed to see of this session (its tool profile, its preset) is read from the host's record of sessions,
+       * which does not have this one yet, so `starting` gives the checks those two until the row is saved. A copy, not a move, as the original
+       * keeps what it can still use; they leave with it when it is deleted. An "Allow once" answer is the original's only, unless the original goes
+       */
+      this.host.apps.starting.set(id, { permissionPreset, profile })
+      if (params.handoff?.fromSessionId) leftBehind = this.host.apps.appAccess?.carry(params.handoff.fromSessionId, id, !!params.handoff.removesOriginal) ?? []
+      apps = this.host.apps.appsFor(info)
       // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
       noCodeIntelligence = codeIntelligenceOff({
         kind: info.kind,
@@ -335,6 +346,9 @@ export class SessionStarts {
         throw new Error('Centralu is restarting or quitting')
       }
     } catch (err) {
+      this.host.apps.starting.delete(id)
+      // A handoff's copy of the original's apps (#1638) goes with a start that did not come up: no row of a session that never was
+      if (params.handoff?.fromSessionId) this.host.apps.appsHub?.sessionGone(id)
       this.host.record.unborn.delete(id)
       this.host.modelWindows.forget(id)
       apps?.close()
@@ -362,6 +376,7 @@ export class SessionStarts {
     // An imported conversation keeps the model it was started with: the record follows what runs (#1369), before it is saved
     adoptOpenedSettings(handle, info, { model: info.model, effort: info.effort }, !!params.resumeExternalId)
     this.host.meta.set(id, info)
+    this.host.apps.starting.delete(id)
     this.host.store.sessions.upsertSession(info)
     if (noCodeIntelligence) this.host.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
     // Started by another machine's session (#1038): that depth is this session's own, kept as one started here keeps its
@@ -475,12 +490,14 @@ export class SessionStarts {
       const { from, fromSessionId } = params.handoff
       let { note } = params.handoff
       /*
-       * The original's live children become this session's (#693), before its first turn reads the note: the note
+       * The original's children become this session's (#693, #738, #1475), before its first turn reads the note: the note
        * opens with them, in the file the opening message points at and in the marker that keeps the note's original.
        * Nothing here awaits until the first message is sent, so a moved child's report cannot reach this session first.
-       * When the window removes the original next (#738), every child moves, settled ones too, and the note lists them.
+       * The apps the original attached are listed with them (#1638); they were copied before this session started.
        */
-      const moved = fromSessionId ? this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'all' : 'live') : []
+      const moved = fromSessionId
+        ? [...this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'goes' : 'kept'), ...this.host.handoffChildren.carriedApps(id, leftBehind)]
+        : []
       if (moved.length) {
         const movedBlock = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session']))
         // The record's table of parts names lines; they move down by the block put above them (#1481)

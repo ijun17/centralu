@@ -469,7 +469,7 @@ describe('a session a newer host created', () => {
 })
 
 /*
- * A handoff moves the original's live children to the session that took over (#693); the host says so with
+ * A handoff moves the original's children to the session that took over (#693, #1475); the host says so with
  * `session_owner`, and the sidebar hangs the child under its new owner without waiting for a reconnect.
  */
 describe('a child that changed owner (#693)', () => {

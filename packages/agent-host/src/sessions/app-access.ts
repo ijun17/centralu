@@ -244,6 +244,38 @@ export class AppAccess implements OnDemandApps {
     }
   }
 
+  /**
+   * A handoff's successor starts with the apps its original attached itself (#1638): each keeps its server name and its consent. What the
+   * successor may use is still asked again on every count (`allowed`), under its own preset, trust and the person's consent: `always` against
+   * the pair's consent, `auto` only while it is `auto`, `none` for an app of the person's own folder. A copy: the original keeps its own, which go
+   * when it is deleted (`forget`). An "Allow once" answer was for the original's attachment alone (`dropOnce`), so it is copied only when
+   * `keepOnce`: the original goes, and the copy is in effect a move. Otherwise the successor attaches it again and the person is asked. An
+   * attachment this build cannot read is not copied: a consent it cannot read grants nothing here. Returns the refs of the ones left behind.
+   */
+  carry(from: string, to: string, keepOnce: boolean): string[] {
+    const mine = this.records(from)
+    const left = keepOnce ? [] : mine.filter((r) => r.consent === 'once')
+    const copy = mine.filter((r) => !left.includes(r))
+    if (copy.length > 0) this.save(to, copy)
+    return left.map((r) => this.refOf(r))
+  }
+
+  /** What this session attached itself and may use now, as `find_apps` names it and the server its tools come under — the handoff note lists them */
+  held(sessionId: string): { ref: string; server: string }[] {
+    return this.seen(sessionId).filter((x) => x.usable).map((x) => ({ ref: x.ref, server: x.server }))
+  }
+
+  /** What this session attached itself and cannot use now (a consent that does not apply to it, a project no longer trusted), by ref */
+  notHeld(sessionId: string): string[] {
+    return this.seen(sessionId).filter((x) => !x.usable).map((x) => x.ref)
+  }
+
+  private seen(sessionId: string): { ref: string; server: string; usable: boolean }[] {
+    const session = this.deps.session(sessionId)
+    const have = session ? this.deps.hub.refsFor(session) : []
+    return this.records(sessionId).map((r) => ({ ref: this.refOf(r), server: r.server, usable: have.some((h) => h.server === r.server) }))
+  }
+
   /** The apps this session attached itself, as `find_apps` names them — for the tool texts */
   attachedRefs(sessionId: string): string[] {
     return this.records(sessionId).map((r) => this.refOf(r))

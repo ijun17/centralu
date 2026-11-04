@@ -39,10 +39,10 @@ export const CreateSessionParams = z.object({
       fromSessionId: SessionId.optional(),
       /**
        * The window removes the predecessor right after this session is created (when the person leaves its delete box checked, #738). The
-       * host then gives this session **every** child of the predecessor, settled ones too, and lists them all in the
-       * note: a settled child left with a session about to be removed would belong to nobody. Without it (a handoff
-       * that keeps the predecessor, or an old frame) only the live children move (#693); the settled ones follow
-       * later if the predecessor is removed after all.
+       * host then moves all of the predecessor's unsettled mail too, and an app the predecessor was allowed only once comes along: the
+       * copy is in effect a move. Without it (a handoff that keeps the predecessor, or an old frame) every child still moves, settled ones
+       * included (#1475), but only the mail of those children does, and a one-time app answer stays with the predecessor (#1638). What the
+       * predecessor starts after the handoff follows later if it is removed after all.
        */
       removesOriginal: z.boolean().optional(),
     })

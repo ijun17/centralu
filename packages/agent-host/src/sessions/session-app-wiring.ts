@@ -1,7 +1,8 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
+import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
@@ -62,6 +63,11 @@ export class SessionAppWiring {
   appsHub: SessionAppsHub | null = null
   /** Another project's apps, attached on demand (#371 part A) — null exactly when `appsHub` is */
   appAccess: AppAccess | null = null
+  /**
+   * What the app checks need of a session being started (`createSession`), by id, until its row is saved (#1638): the tool profile and the preset
+   * are read from the host's record of sessions, which does not have it yet, and a handoff's copied apps are counted when the process starts
+   */
+  readonly starting = new Map<string, { permissionPreset: PermissionPreset; profile: ToolProfile | null }>()
 
   /** The session's share of the broker's body (M4 D) — called only after the runtime's gate has verified the
    * declaration */
@@ -105,13 +111,13 @@ export class SessionAppWiring {
          * as commands (#1205), for the root apps it attaches.
          */
         allowed: (session, app) => {
-          const profile = this.host.toolProfileOf(session.id)
+          const profile = this.host.toolProfileOf(session.id) ?? this.starting.get(session.id)?.profile ?? null
           return (profile === 'reader' || (profile === 'orchestrator' && session.kind === 'orchestrator')) && (this.appAccess?.allowed(session, app) ?? false)
         },
       },
     })
     this.appAccess = new AppAccess({
-      boundaryOpen: (id, boundary) => this.host.autoBoundaryOpen(id, boundary),
+      boundaryOpen: (id, boundary) => this.starting.get(id)?.permissionPreset === 'auto' || this.host.autoBoundaryOpen(id, boundary),
       hub: this.appsHub,
       store: this.host.store,
       session: (id) => {

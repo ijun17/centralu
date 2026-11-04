@@ -13,7 +13,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 /**
  * The orchestrator's handoff_session (#694) over the real manager: who may hand off what, the person's card unless
  * the orchestrator is `auto`, the note from the record by default or written by the session, the original kept and its
- * live children moved (#693). The window's own handoff is the UI store's (`handoffSession`); this is the tool's path.
+ * children moved (#693) and its apps copied (#1638). The window's own handoff is the UI store's (`handoffSession`); this is the tool's path.
  */
 
 class Handle implements SessionHandle {

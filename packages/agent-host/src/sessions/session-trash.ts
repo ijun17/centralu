@@ -69,7 +69,7 @@ export type SessionTrashHost = {
   readonly hostCards: HostCards
   loadMessages: (sessionId: string, limit: number, beforeSeq?: number) => Promise<StoredMessage[]>
   readonly meta: Map<string, SessionInfo>
-  moveChildren: (from: string, to: string, scope: 'live' | 'all' | 'removed') => unknown
+  moveChildren: (from: string, to: string, scope: 'kept' | 'goes' | 'removed') => unknown
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>

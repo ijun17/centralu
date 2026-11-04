@@ -104,7 +104,10 @@ export type RecipientRow = {
 export type NewMail = Omit<MailRow, 'rootId'> & { rootId?: string }
 export type NewRecipient = Pick<RecipientRow, 'recipient' | 'dueAt'> &
   Partial<Pick<RecipientRow, 'recipientProject' | 'via' | 'deliveredAt' | 'readAt' | 'held'>>
-/** Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) */
+/**
+ * Which of the original's rows a handoff moves: all, or those of mail from these senders (the children that move, §7.7) and Centralu's mail about
+ * them: a finished child's report is sent as Centralu, with the child in its `about`, so it goes with the child it reports
+ */
 export type HandOverScope = 'all' | { senders: readonly string[] }
 
 /** The stored message, and whether it was there already under the sender's `dedupeKey` */
@@ -652,6 +655,23 @@ export class MailboxRecords {
     return task ? this.handedOn(task.id) : []
   }
 
+  /**
+   * Whether session `ownerId` gave session `childId` a task, still open, while it worked on a task it was given that is still open (`cause_id`, §9.4): the
+   * child does the work `ownerId` owes its own giver, and its report is what finishes that task (#1932). The cause must be a task, as `handedOnFrom`
+   * reads it: a report, notice or message that started the turn is never watched, so its row never settles. From the two sessions' ids alone
+   */
+  carriesUpstream(ownerId: string, childId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+            WHERE m.kind = 'task' AND m.sender LIKE ? AND r.recipient LIKE ? AND r.settled IS NULL AND m.cause_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM mail c JOIN mail_recipients up ON up.message_id = c.id WHERE c.id = m.cause_id AND c.kind = 'task' AND up.recipient LIKE ? AND up.settled IS NULL) LIMIT 1`,
+        )
+        .get(`session:%/${ownerId}`, `session:%/${childId}`, `session:%/${ownerId}`) !== undefined
+    )
+  }
+
   /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
   unansweredTo(recipient: string): RecipientRow[] {
     return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
@@ -832,7 +852,10 @@ export class MailboxRecords {
 
   /** The ids of the messages a handoff would move, in the order sent: what `moveRows` moves, read only (the archive's preview, §7.7) */
   movable(from: string, to: string, scope: HandOverScope): string[] {
-    const inScope = scope === 'all' ? '1' : `m.sender IN (SELECT value FROM json_each(@senders))`
+    const inScope =
+      scope === 'all'
+        ? '1'
+        : `(m.sender IN (SELECT value FROM json_each(@senders)) OR (json_valid(m.facts) AND json_extract(m.facts, '$.about.session') IN (SELECT value FROM json_each(@senders))))`
     return this.db
       .prepare<{ from: string; to: string; senders: string }, { id: string }>(
         `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id

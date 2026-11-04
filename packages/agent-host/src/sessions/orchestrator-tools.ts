@@ -410,7 +410,7 @@ const HANDLERS: ToolHandlers = {
       text:
         `Handed off ${trustedJsonText(r.sessionName)} [${r.from}] to a fresh ${r.tool} session [${r.sessionId}] of the same name, ` +
         `starting from a note ${r.mode === 'record' ? 'built from the record' : 'the session wrote'} (${trustedJsonText(r.path)}). ` +
-        'Live work the original started now answers to the new session. The original stays; removing it is the person\'s call.',
+        'The sessions the original started now answer to the new session, and the apps it attached are attached to it too (one it was allowed only once is not: the note says so). The original stays; removing it is the person\'s call.',
     }
   },
 

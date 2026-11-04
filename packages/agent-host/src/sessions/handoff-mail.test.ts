@@ -183,6 +183,77 @@ describe("a handoff moves the original's mail to the session that took over (#15
     }, 5 * DEBOUNCE_MS)
   })
 
+  it("case 6, the original stays: a finished child's unread report, which Centralu sent, moves with the child and does not wake the original", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'write notes')
+    const task = read.tasks(at(parent), child)[0]!
+    h.claude.handles.get(child)!.answer('notes done')
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    const report = read.reportsOn(task.id)[0]!
+    expect(read.row(report.id, at(parent))).toMatchObject({ readAt: null })
+
+    const heir = await handOff(h, project, parent, false)
+    expect(read.row(report.id, at(heir))).toMatchObject({ readAt: null, deliveredAt: null })
+    expect(read.row(report.id, at(parent))).toBeUndefined()
+    // The finished child and its unread report are one count in the note, with no line of their own
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).toContain('1 finished session')
+    expect(note).toContain('A report the previous session had not read came with it as mail')
+    expect(note).not.toContain(report.id)
+  })
+
+  it("case 7 (#1932), the original stays: a child doing the work it owes its own giver stays with it, so the giver is told the end", async () => {
+    const h = host()
+    h.mgr.setUiPreferences({ agentDepth: 3 })
+    const { project, parent: upstream } = await parentOf(h)
+    // upstream asks the original; the original hands the work on to a child and answers that it waits
+    const original = await startChild(h, upstream, 'land #12')
+    const child = await startChild(h, original, 'write the tests')
+    const task = read.tasks(at(upstream), original)[0]!
+    h.claude.handles.get(original)!.answer('handed the tests on; waiting')
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    expect(read.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'waiting' })
+
+    const heir = await handOff(h, project, original, false)
+    // The child answers to the original still; the note and the original's conversation say so
+    expect(h.mgr.listSessions().find((x) => x.id === child)!.askedBy).toBe(original)
+    const note = readFileSync(handoffNotePath(project, original), 'utf8')
+    expect(note).toContain(`"write the tests" — stays with the previous session — handle: ${child}.`)
+    // The original is told too, though nothing else moved
+    expect(events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: original, text: expect.stringContaining(`Nothing moved to “You are taking over. Read the note.” [${heir}]. Still with this session, since their reports finish a task it was given: “write the tests” [${child}].`) }))
+
+    h.claude.handles.get(child)!.answer('tests written')
+    // The child's report is the original's to read: its delivery wakes the original, whose turn is the task's work
+    const report = read.reportsOn(read.tasks(at(original), child)[0]!.id)[0]!
+    await eventually(async () => {
+      await h.m.delivery.process(at(original))
+      return h.claude.handles.get(original)!.sent.some((t) => t.includes(report.id) || t.includes('tests written'))
+    }, 5 * DEBOUNCE_MS)
+    expect(pendingFor(heir, report.id)).toBe(false)
+    h.claude.handles.get(original)!.answer('landed')
+    await eventually(() => read.reportsOn(task.id).length === 2)
+    expect(read.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['waiting', 'finished'])
+  })
+
+  it("case 8 (#1932 review), a child started in a turn a report woke is no upstream work: it moves", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    // A's report wakes the original, which starts B in that turn: the cause of B's task is a report, which is never settled
+    const first = await startChild(h, parent, 'first piece')
+    h.claude.handles.get(first)!.answer('first done')
+    await eventually(async () => {
+      await h.m.delivery.process(at(parent))
+      return h.claude.handles.get(parent)!.sent.length > 0
+    }, 5 * DEBOUNCE_MS)
+    const second = await startChild(h, parent, 'second piece')
+    expect(store.mailbox.carriesUpstream(parent, second)).toBe(false)
+
+    const heir = await handOff(h, project, parent, false)
+    expect(h.mgr.listSessions().find((x) => x.id === second)!.askedBy).toBe(heir)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).not.toContain('stays with the previous session')
+  })
+
   it('case 5 (guard), a settled child given more work by the successor reports to the successor', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
@@ -379,18 +450,6 @@ describe('the re-check of the review fixes (#1580)', () => {
     expect(read.row(question.id, at(heir))).toBeUndefined()
     await h.mgr.trash.restoreSession(parent)
     expect(pendingFor(parent, question.id)).toBe(false)
-  })
-
-  it("keeps Centralu's unread report on its task to a child that moved with an original that stays", async () => {
-    const h = host()
-    const { project, parent } = await parentOf(h)
-    const child = await startChild(h, parent, 'long work')
-    const old = give(h, parent, child, 'A gave C work by mail')
-    const report = h.m.service.report(old.id, { outcome: 'finished', body: 'it is done' })
-    if (!('message' in report)) throw new Error('no report written')
-    const heir = await handOff(h, project, parent, false)
-    expect(read.row(report.message.id, at(parent))).toMatchObject({ readAt: null })
-    expect(read.row(report.message.id, at(heir))).toBeUndefined()
   })
 
   it("previews only the mail that goes to the heir, not the heir's own answer, and with the right article", async () => {

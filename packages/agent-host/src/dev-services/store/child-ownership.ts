@@ -129,7 +129,7 @@ export class ChildOwnershipRecords {
   }
 
   /**
-   * A handoff's move of the original session's live children to the session that took over (#693), in one
+   * A handoff's move of the original session's children to the session that took over (#693, #1475), in one
    * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
    * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
    * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
@@ -160,7 +160,10 @@ export class ChildOwnershipRecords {
         turn.run({ from, to, id })
       }
       // A removed original's queue stays with it, for the trash to drop (#738)
-      if (move.queued !== false) this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ?`).run(to, from)
+      // Only those for a session that moves: a request for a child that stays with the original stays its own (#1932)
+      if (move.queued !== false) {
+        this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ? AND session_id IN (SELECT value FROM json_each(?))`).run(to, from, JSON.stringify(move.sessions))
+      }
       const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
       for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
       const arm = this.db.prepare(

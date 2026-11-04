@@ -117,7 +117,7 @@ export type InboxView = {
   waiting: { row: RecipientRow; message: MailRow }[]
   held: { row: RecipientRow; message: MailRow; why: HoldReason }[]
 }
-export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean }
+export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
 /** The calls a wake names; `mailCalls` makes them. M3c renames `MessageCalls` when the old `MailCalls` of `frame.ts` goes */
 export type MailCalls = MessageCalls
 
@@ -818,7 +818,7 @@ export class MessageService {
   handOverPreview(from: string, to: string, scope: HandOverScope = 'all'): HandedOverMessage[] {
     return this.records.movable(from, to, scope).flatMap((id) => {
       const m = this.records.message(id)
-      return m ? [{ messageId: id, firstLine: firstLineOf(m.body, 160), kind: m.kind, unread: this.records.recipient(id, from)?.readAt === null }] : []
+      return m ? [{ messageId: id, firstLine: firstLineOf(m.body, 160), kind: m.kind, unread: this.records.recipient(id, from)?.readAt === null, ...(m.facts.about ? { about: m.facts.about.session } : {}) }] : []
     })
   }
 
