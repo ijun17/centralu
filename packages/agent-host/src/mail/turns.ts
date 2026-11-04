@@ -61,6 +61,8 @@ type Open = LastTurn & {
   owner?: string
   /** The address of the session whose request the turn is (§7.6), fixed when the turn began */
   asker?: string
+  /** A mail-started turn the session has begun (its first turn start, `beginOther`): a later start is a new turn (#1946) */
+  begun?: true
 }
 
 /**
@@ -107,7 +109,7 @@ export class MailTurns {
       if (this.opts.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
         const by = turnStartedBy(row.startedBy)
         const asker = by === 'mail' && row.messageId !== null ? this.opts.askerOf?.(row.sessionId, row.messageId) : undefined
-        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by, messageId: row.messageId, starter: row.starterId, ...(asker ? { asker } : {}) })
+        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by, messageId: row.messageId, starter: row.starterId, ...(asker ? { asker } : {}), begun: true })
       } else {
         this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
       }
@@ -126,11 +128,17 @@ export class MailTurns {
 
   /**
    * A turn the mailbox did not start begins: the person typed, a caller's message came, or the CLI ran on after its background work. `messageId`
-   * is the work it belongs to, if known (its starter too, the task that started it). When a turn mail started is going, this is that turn (the
-   * wake is its first input), and nothing is added. The guards do not count it
+   * is the work it belongs to, if known (its starter too, the task that started it). When a turn mail started is going and the session has not
+   * begun it yet, this is that turn (the wake is its first input), and nothing is added. Once begun, a start is a new turn: the session went to rest
+   * in between, so the mail's turn is over though its end was never heard, and it is closed `lost` (#1946: one stayed open 17 hours, and every turn
+   * the person began in that time was counted as the mail's). The guards do not count it
    */
   beginOther(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null, owner?: string): void {
-    if (this.open.get(sessionId)?.by === 'mail') return
+    const mail = this.open.get(sessionId)
+    if (mail?.by === 'mail' && !mail.begun) {
+      mail.begun = true
+      return
+    }
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     const startedAt = this.now()

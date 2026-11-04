@@ -58,6 +58,20 @@ describe('a delegation written down (§9.1)', () => {
 })
 
 describe('a turn the mailbox did not start', () => {
+  it('is the mail’s turn when mail just woke the session; a start after that is a new turn, and the mail’s is over though its end was never heard (#1946)', () => {
+    const w = turnWorld()
+    const ask = w.mail.send(A, { to: [ORC], text: 'is the build green?' })
+    const seq = w.turns.begin('orc', { workMessage: ask.message.id, starter: ask.message.id, asker: A })
+    // The wake opens the turn
+    w.turns.beginOther('orc', 'cli', null)
+    expect(w.turns.current('orc')).toMatchObject({ turnSeq: seq, by: 'mail' })
+    // Its end is never heard; hours later the person writes and a turn starts
+    w.clock.t += 17 * 3_600_000
+    w.turns.beginOther('orc', 'person', null)
+    expect(w.turns.current('orc')).toMatchObject({ by: 'person', asker: null, messageId: null })
+    expect(turnsOf(w.store, 'orc').find((t) => t.turnSeq === seq)).toMatchObject({ outcome: 'lost' })
+  })
+
   it('a caller’s message starts a turn of that caller’s task; the person’s own turn is nobody’s work; the person adding to the task is theirs, of the task', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
