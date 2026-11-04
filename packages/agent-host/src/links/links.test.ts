@@ -2944,14 +2944,16 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const id = r.sessionId.slice('m1.'.length)
     // Someone at that machine starts a turn of their own, which stays open
     await remote.mgr.send(id, 'a long job: by hand')
-    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'working')
+    // Its turn is open once it has said so: ended before that, its first words would come after its end
+    await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'working on it…'))
     const note = 'use the staging data'
     await eventually(async () => {
       const refused = await agent(r.sessionId, 'send', note, undefined, 'note')
       return !refused.ok && refused.error.includes('ifBusy "queue"')
     })
     expect(await agent(r.sessionId, 'send', note, undefined, 'queue')).toMatchObject({ ok: true, state: 'queued', position: 1 })
-    const noted = () => remote.store.messages.loadMessages(id, 50).filter((m) => (m.payload as { text?: string }).text?.includes(note))
+    // The words the machine was sent: its own reply repeats them, so only the message of the user there counts
+    const noted = () => remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'user' && (m.payload as { text?: string }).text?.includes(note))
     expect(noted()).toHaveLength(0)
     ;(remote.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!.finish('done by hand')
     // The turn ended: the note goes in as new work the caller owns, and its end is reported to the caller
