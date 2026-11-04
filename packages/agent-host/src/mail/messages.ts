@@ -787,9 +787,7 @@ export class MessageService {
 
   /** A session went to the trash or was deleted: its watched rows are `gone`, its own watched messages `withdrawn`, and each sender whose needsReply message it leaves is told once (D25) */
   partyGone(address: string): void {
-    this.run(() => {
-      const now = this.now()
-      const senders = new Set<string>()
+    this.releaseAndTell((now, senders) => {
       for (const row of this.records.watchedTo(address)) {
         // Mail sent to the orchestrator's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
         if (row.via === 'orchestrator') continue
@@ -798,6 +796,33 @@ export class MessageService {
         if (m?.needsReply && this.records.markReleased(row.messageId, address, now, 'gone')) senders.add(m.sender)
       }
       for (const row of this.records.watchedFrom(address)) this.records.settle(row.messageId, row.recipient, 'withdrawn', now)
+    })
+  }
+
+  /**
+   * Turns the last host left that nothing continues, closed `lost` at this start (#1916): a crash or a plain restart cut them, or a kept process's
+   * turn ended while no host was there to record it. The questions delivered in them that were not answered were read, so no delivery gives them
+   * again: each is released `lost`, and each sender is told once for all of them (D25), so it can ask again. A task is not: the old report path
+   * tells its owner of the stop (#698). `close` closes them and returns them, in the same write as the release: if the release fails, the turns
+   * stay open and the next start finds them again
+   */
+  turnsLost(close: () => readonly { address: string; turnSeq: number }[]): void {
+    this.releaseAndTell((now, senders) => {
+      for (const { address, turnSeq } of close()) {
+        for (const row of this.records.unansweredTo(address)) {
+          if (row.turnSeq !== turnSeq || row.settled !== null) continue
+          const m = this.records.message(row.messageId)
+          if (m && m.kind !== 'task' && this.records.markReleased(row.messageId, address, now, 'lost')) senders.add(m.sender)
+        }
+      }
+    })
+  }
+
+  /** One write: `release` releases rows and adds each released question's sender to `senders`; then each sender is told once, in one notice (D25) */
+  private releaseAndTell(release: (now: number, senders: Set<string>) => void): void {
+    this.run(() => {
+      const senders = new Set<string>()
+      release(this.now(), senders)
       for (const sender of senders) this.tellUnanswered(sender)
     })
   }
@@ -1100,6 +1125,7 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   stopped: 'the person stopped that session',
   error: 'that session stopped with an error',
   gone: 'that session is gone',
+  lost: 'its turn on your message ended while Centralu restarted, before it answered, so ask again if you still need the answer',
 }
 
 /** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */
@@ -1110,7 +1136,8 @@ function unansweredText(rows: readonly { id: string; recipient: string; why: Rel
     `${rows.length} of your messages are no longer watched, and Centralu will not remind their receivers again:`,
     ...lines,
     ...(later ? ['Those still working or waiting may answer later; the answer reaches you as mail.'] : []),
-    'For the others, go on without the answers, ask another session, or ask the person. Next time, send needsReply=false when you need no answer.',
+    // A `lost` line says to ask again: a notice of only those has no others, and the question was one whose answer was needed
+    ...(rows.some((r) => r.why !== 'lost') ? ['For the others, go on without the answers, ask another session, or ask the person. Next time, send needsReply=false when you need no answer.'] : []),
   ].join('\n')
 }
 

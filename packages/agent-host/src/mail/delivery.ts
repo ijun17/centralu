@@ -150,7 +150,16 @@ export class MailDelivery {
   start(): void {
     if (this.running) return
     this.running = true
-    this.turns?.closeStale()
+    // Turns the last host left that nothing continues (a crash or a plain restart): closed, and what they had to answer told to its senders once,
+    // in one write (#1916). If it fails, nothing of it is kept: the turns stay open and the next start tries again, and this one still delivers
+    const turns = this.turns
+    if (turns) {
+      try {
+        this.service.turnsLost(() => turns.closeStale().map((t) => ({ address: this.service.sessionAddress(t.sessionId), turnSeq: t.turnSeq })))
+      } catch (e) {
+        console.error(`[mail] closing the turns the last host left failed; the next start tries again: ${errorMessage(e)}`)
+      }
+    }
     this.sayWhatWasLeftHalfDone()
     const last = this.heartbeat?.read() ?? null
     if (last !== null && this.now() - last > this.o.catchUpAfterMs) {

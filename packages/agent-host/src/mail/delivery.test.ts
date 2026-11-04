@@ -285,6 +285,78 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     expect(w.turns.current('orc')).toEqual({ turnSeq: 4, by: 'mail', starter: r.message.id, messageId: r.message.id, asker: A, startedAt: NOW })
     expect(turnRows(w.store, 'b')[0]).toMatchObject({ outcome: 'lost' })
   })
+
+  /*
+   * #1916: A asked B, B's turn on it ran, and the host was killed and started again (not an update's stop, so nothing continues the turn). The
+   * question was delivered and read, so it is never given again; unanswered and unreleased, nobody heard. The start closes the turn lost, and
+   * each question that turn had and did not answer is released `lost`: its sender is told in the gathered notice (D25) and can ask again. A
+   * sender that asked two sessions whose turns were both cut is told once, for both
+   */
+  it('a turn cut by a plain restart releases the questions it had unanswered, and their senders are told once', () => {
+    const w = deliveryWorld()
+    const other = w.send(A, { to: [C], text: 'and what does the test need?' }).message
+    w.store.mailbox.markDelivered(C, [other.id], NOW, 1)
+    w.store.mailbox.markRead(C, [other.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'c', turnSeq: 1, messageId: null, starterId: other.id, startedBy: 'mail', startedAt: NOW })
+    const before = w.send(C, { to: [B], text: 'an older question' }).message
+    w.store.mailbox.markDelivered(B, [before.id], NOW, 1)
+    w.store.mailbox.markRead(B, [before.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 1, messageId: null, starterId: before.id, startedBy: 'mail', startedAt: NOW })
+    w.store.mailbox.endTurn('b', 1, NOW, 'acted')
+    const asked = w.send(A, { to: [B], text: 'what does the build need?' }).message
+    const note = w.send(A, { to: [B], text: 'fyi', needsReply: false }).message
+    w.store.mailbox.markDelivered(B, [asked.id, note.id], NOW, 2)
+    w.store.mailbox.markRead(B, [asked.id, note.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 2, messageId: null, starterId: asked.id, startedBy: 'mail', startedAt: NOW })
+
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    expect(turnRows(w.store, 'b')[1]).toMatchObject({ outcome: 'lost' })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedWhy: 'lost', toldAt: w.clock.t, settled: null })
+    expect(w.rowOf(other.id, C)).toMatchObject({ releasedWhy: 'lost', toldAt: w.clock.t, settled: null })
+    // Not a question, or a question of a turn that ended: nothing to tell
+    expect(w.rowOf(note.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.rowOf(before.id, B)).toMatchObject({ releasedAt: null })
+    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
+    expect(told).toHaveLength(1)
+    expect(told[0]?.message.facts.unanswered).toEqual(expect.arrayContaining([{ id: asked.id, recipient: B, why: 'lost' }, { id: other.id, recipient: C, why: 'lost' }]))
+    expect(told[0]?.message.body).toContain(`- ${asked.id} to beta (${B}): its turn on your message ended while Centralu restarted, before it answered, so ask again if you still need the answer.`)
+    // Every line says to ask again: the closing words for the others (and needsReply=false) are not said
+    expect(told[0]?.message.body).not.toContain('For the others')
+    expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])
+  })
+
+  // #1916: the close and the release are one write. A release that fails keeps nothing: the turn stays open, and the next start releases and tells
+  it('a release that fails at a start leaves the turn open, and the next start releases its question and tells the sender', async () => {
+    const w = deliveryWorld()
+    const asked = w.send(A, { to: [B], text: 'what does the build need?' }).message
+    w.store.mailbox.markDelivered(B, [asked.id], NOW, 1)
+    w.store.mailbox.markRead(B, [asked.id], NOW)
+    w.store.mailbox.startTurn({ sessionId: 'b', turnSeq: 1, messageId: null, starterId: asked.id, startedBy: 'mail', startedAt: NOW })
+    const fail = vi.spyOn(w.records, 'markReleased').mockImplementationOnce(() => {
+      throw new Error('disk full')
+    })
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    w.delivery.start()
+    expect(said).toHaveBeenCalledWith(expect.stringContaining('closing the turns the last host left failed'))
+    expect(turnRows(w.store, 'b')[0]).toMatchObject({ endedAt: null })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedAt: null })
+    // This start still delivers
+    w.send(C, { to: [B], text: 'and this?' })
+    await w.advance(2_000)
+    expect(w.to('b')).toHaveLength(1)
+
+    w.delivery.stop()
+    fail.mockRestore()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    expect(turnRows(w.store, 'b')[0]).toMatchObject({ outcome: 'lost' })
+    expect(w.rowOf(asked.id, B)).toMatchObject({ releasedWhy: 'lost', toldAt: w.clock.t })
+    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
+    expect(told).toHaveLength(1)
+    expect(told[0]?.message.facts.unanswered).toEqual([{ id: asked.id, recipient: B, why: 'lost' }])
+  })
 })
 
 describe('the pair loop guard (§7.5)', () => {

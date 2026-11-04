@@ -295,3 +295,57 @@ describe('the turn of a session the keeper kept', () => {
     expect(turnsOf(store, child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
   })
 })
+
+describe('a mail turn cut by a plain restart (#1916)', () => {
+  it('ends lost under the next host, and the asker is told its question was cut, once; the question is not given again', async () => {
+    const a = host()
+    const project = await a.mgr.addProject(root)
+    await a.mgr.setProjectTrusted(project.id, true)
+    const asker = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const helper = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const question = a.m.service.send(addressOf(asker), { to: [addressOf(helper)], text: 'what does the build need?' }).message
+    const due = wireHostMail(a.mgr, store, { now: () => Date.now() + 60_000 })
+    await deliverTo(due, addressOf(helper))
+    expect(a.claude.handles.get(helper)!.sent.some((t) => t.includes(question.id))).toBe(true)
+    expect(due.turns.current(helper)).toMatchObject({ by: 'mail', starter: question.id })
+    // The host is killed in the turn: no end is recorded, and no keeper keeps the process (not an update's stop either)
+    await a.mgr.detachAll()
+
+    const b = host()
+    await deliverTo(b.m, addressOf(helper))
+    expect(turnsOf(store, helper)).toEqual([expect.objectContaining({ startedBy: 'mail', outcome: 'lost' })])
+    expect(b.claude.handles.get(helper)?.sent ?? []).toEqual([])
+    const told = read().between('centralu', addressOf(asker), 'notice')
+    expect(told).toHaveLength(1)
+    expect(told[0]).toMatchObject({ facts: { unanswered: [{ id: question.id, recipient: addressOf(helper), why: 'lost' }] } })
+    expect(read().row(question.id, addressOf(helper))).toMatchObject({ releasedWhy: 'lost', settled: null })
+    // A later start tells nobody again: the turn is closed
+    await deliverTo(wireHostMail(b.mgr, store), addressOf(helper))
+    expect(read().between('centralu', addressOf(asker), 'notice')).toHaveLength(1)
+  })
+
+  /*
+   * #1916 review: the asker also started the session (`askedBy`), so #698's quit report could tell it of the same cut turn. The task it gave
+   * was reported when its turn ended: the quit report has no open work to go into (`closed`), and the notice is the one word it gets
+   */
+  it('tells an asker that also started the session once, by the notice, not a second time by a quit report', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('first turn')
+    const reports = () => read().between('centralu', addressOf(parent), 'report')
+    await until(() => reports().length === 1)
+    const question = a.m.service.send(addressOf(parent), { to: [addressOf(child)], text: 'what does the build need?' }).message
+    const due = wireHostMail(a.mgr, store, { now: () => Date.now() + 60_000 })
+    await deliverTo(due, addressOf(child))
+    expect(due.turns.current(child)).toMatchObject({ by: 'mail', starter: question.id })
+    await a.mgr.detachAll()
+
+    const b = host()
+    await deliverTo(b.m, addressOf(child))
+    // The quit's notices go out once the start's moment is over
+    await until(() => b.mgr.sessionInfo(child)?.interruption?.reason === 'quit')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(read().between('centralu', addressOf(parent), 'notice')).toEqual([expect.objectContaining({ facts: { unanswered: [{ id: question.id, recipient: addressOf(child), why: 'lost' }] } })])
+    expect(reports()).toHaveLength(1)
+  })
+})
