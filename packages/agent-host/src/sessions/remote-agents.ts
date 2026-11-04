@@ -237,7 +237,7 @@ export class RemoteAgents {
   private readonly personHeld = new Set<string>()
   /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
   private readonly lastSeq = new Map<string, number>()
-  /** Children whose held note is being sent now (`drain`): one at a time; true when the child was freed again meanwhile, so the answer being waited on may be older than that */
+  /** Children whose held note is being sent now (`drain`): one at a time; true when it was asked for again meanwhile (the child freed, a note held, the link resynced), so the answer being waited on may be older than that */
   private readonly draining = new Map<string, boolean>()
 
   constructor(
