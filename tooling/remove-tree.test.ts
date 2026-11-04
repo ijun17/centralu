@@ -26,6 +26,13 @@ const { removeWithin } = await import('./remove-tree.js')
  * retries at every level of the tree, so the wait multiplied with depth and a held folder ended in a hook timeout that named nothing.
  */
 describe('removing a test folder', () => {
+  // Windows opens a process's working folder in the new process itself, after the 'spawn' event: removed in between, the
+  // folder goes (4 of 40 tries, unloaded). So the holder says when it runs, and a test goes on only then.
+  const hold = async (cwd: string, ms: number) => {
+    const holder = spawn(process.execPath, ['-e', `process.stdout.write('held'); setTimeout(() => {}, ${ms})`], { cwd, stdio: ['ignore', 'pipe', 'ignore'] })
+    await new Promise((r) => holder.stdout.once('data', r))
+    return holder
+  }
   const folder = () => {
     const dir = mkdtempSync(join(tmpdir(), 'rt-'))
     mkdirSync(join(dir, 'a', 'b'), { recursive: true })
@@ -54,20 +61,19 @@ describe('removing a test folder', () => {
   // The real refusal: Windows will not remove a folder a process works in
   it.runIf(process.platform === 'win32')('waits for a process that works in the folder to end', async () => {
     const dir = folder()
-    const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1200)'], { cwd: join(dir, 'a'), stdio: 'ignore' })
-    await new Promise((r) => holder.once('spawn', r))
+    await hold(join(dir, 'a'), 1200)
     await removeWithin(dir, 15_000)
     expect(existsSync(dir)).toBe(false)
   }, 30_000 * SLOW)
 
   it.runIf(process.platform === 'win32')('gives up at the deadline on a folder a process keeps, however deep it is held', async () => {
     const dir = folder()
-    const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { cwd: join(dir, 'a', 'b'), stdio: 'ignore' })
+    const holder = await hold(join(dir, 'a', 'b'), 60_000)
     try {
-      await new Promise((r) => holder.once('spawn', r))
       const started = Date.now()
       await expect(removeWithin(dir, 1_000)).rejects.toThrow(/could not be removed within 1000 ms.*left in it: a/)
       expect(Date.now() - started).toBeLessThan(4_000 * SLOW)
+      expect(holder.exitCode).toBeNull()
     } finally {
       const ended = new Promise((r) => holder.once('exit', r))
       holder.kill()
