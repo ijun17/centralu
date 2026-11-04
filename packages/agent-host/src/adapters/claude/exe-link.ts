@@ -88,9 +88,8 @@ function runNode(file: string, args: string[], cwd: string | undefined, timeoutM
     const child = execFile(file, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 1 << 20, encoding: 'utf8' }, (err, stdout, stderr) => {
       const output = `${stdout}${stderr}`.trim()
       if (!err) return resolve({ status: 0, output })
-      const e = err as NodeJS.ErrnoException & { killed?: boolean }
-      if (e.killed) return resolve({ status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` })
-      resolve(typeof e.code === 'number' ? { status: e.code, output } : { status: null, output: e.message })
+      if (err.killed) return resolve({ status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` })
+      resolve(typeof err.code === 'number' ? { status: err.code, output } : { status: null, output: err.message })
     })
     child.stdin?.end()
   })
