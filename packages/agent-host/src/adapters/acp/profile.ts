@@ -96,4 +96,12 @@ export type AcpToolShape = {
   signedOut?(label: string): Error
   /** A line the tool wrote to stderr as it may reach host.log and a crash message: changed, or null to leave it out */
   stderrLine?(line: string): string | null
+  /**
+   * A line of stderr that says the model's provider refused the running turn for good (a usage limit, a quota), in the
+   * provider's words, or null. A tool may retry such a request quietly and send no frame meanwhile (OpenCode, measured: about
+   * 70 s, then an error), so this is the earliest the host can tell: the turn ends at once with those words, and the tool is
+   * cancelled so it stops retrying (#1569). `conversation`: this session's id in the tool, for a tool whose log also names
+   * other sessions' requests (a sub-agent's)
+   */
+  refusalOf?(line: string, conversation: string): string | null
 }

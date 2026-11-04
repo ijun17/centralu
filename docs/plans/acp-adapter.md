@@ -189,7 +189,7 @@ change to.
 | Input during a turn | Folded into the running turn by OpenCode; Centralu queues it for the turn's end instead (`midTurnInput: false`), the fold off |
 | Cost | `usage_update.cost` is the conversation's running total (read in its binary); a turn's cost is what it added. A new conversation starts from 0; the last total is kept beside the session (`app_settings` `running_cost:<id>`, `CreateSessionOpts.runningCost`), so the first turn after a restart, a wake or a host swap has its cost too |
 | Reply text | Its free model sometimes puts its reasoning in the reply and closes it with `</think>`, with no `<think>` (seen in most runs on 2026-10-25, in OpenCode's own store; its provider passes the text through). The core drops the first such tag of a message (`AcpNormalizer`); the reasoning before it stays reply text |
-| A refused model | When its model's provider refuses a turn (the free models' usage limit), OpenCode retries inside and sends no ACP frame: the turn shows nothing until it ends. `smoke:opencode` reports OpenCode's logged error when no event comes; Centralu itself shows the person nothing yet (#1569) |
+| A refused model | When its model's provider refuses a turn (the free models' usage limit), OpenCode retries inside and sends no ACP frame: the turn shows nothing until it ends. `smoke:opencode` reports OpenCode's logged error when no event comes. Centralu ends the turn with the provider's words at once for a usage limit or quota (#1569, §9). The launch passes `--print-logs --log-level ERROR`, so OpenCode's own log file keeps ERROR lines only |
 | Writes | After an asked edit it calls `fs/write_text_file` even with `fs` not advertised; the method-not-found answer is harmless (it writes itself) |
 | Ending | Started behind the host watch like every ACP CLI (§0.6) |
 
@@ -701,6 +701,7 @@ drops. `deleteExternalConversation`: OpenCode's `session/delete` / CLI; Cursor h
 | Effort | Cursor's model parameters (config options of category `model_config`), to measure logged in | the model's `variant`, later |
 | Model window | `size` of `usage_update` if it ever comes; none now | `usage_update.size` (200,000 for big-pickle) |
 | Cost per turn | — | `usage_update.cost`; not shown in PR 1 (no field for it) |
+| A provider refusing the turn (a usage limit, a quota; #1569) | no retry seen; the error ends the turn | retries quietly for about 70 s with no frame, then a JSON-RPC `-32603` with the provider's words (measured on 1.19.4 against a provider answering 429). Its log, sent to stderr by `--print-logs --log-level ERROR`, has the first failure at once: `AcpToolShape.refusalOf` reads it (a quota or usage limit of the session's own request; a rate limit is left to the tool's retries), sends `session/cancel` (which stops the retries and answers the prompt at once, measured), and the turn ends with those words when it answers |
 
 ## 10. Tests (#1498 from day one)
 
