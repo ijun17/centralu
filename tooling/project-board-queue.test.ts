@@ -2228,7 +2228,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     const fresh = async (state: Gh) => {
       await rt?.dispose({ awaitTree: true })
       rt = null
-      rmFakeDir(join(root, 'data'))
+      await removeFakeDir(join(root, 'data'))
       mkdirSync(join(root, 'data'))
       runtime(state)
     }
