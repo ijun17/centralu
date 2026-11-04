@@ -740,7 +740,8 @@ frames stay here and say so, as #1498 asks.
 
 | Scenario | OpenCode 1.19.4 | Cursor |
 |---|---|---|
-| a plain turn, a tool call, a file edit | recorded | after login |
+| a plain turn, a tool call, a file edit | recorded (the write under `auto`: Normal asks before a write, and `basic` answers no card) | recorded |
+| a file written, then a delete (`files`) | recorded (no delete tool: the model says so and stops) | recorded |
 | approval: allow, deny, "always" answered once | recorded | after login |
 | input during a turn | recorded (folds) | after login |
 | interrupt; interrupt with a permission open | recorded | after login |

@@ -98,7 +98,8 @@ for (const dir of readdirSync(RECORDINGS)) {
       })
     }
 
-    if (names.includes('files')) {
+    // OpenCode 1.19.4 has no tool that deletes a file (its model says so and stops, measured in `files`), so asks about none
+    if (names.includes('files') && !dir.startsWith('opencode-')) {
       it('files: a request about a delete reads as a delete, whatever kind the request itself says', () => {
         // The card as the session makes it: the call's frames so far, then the request (`AcpSession.onRequest`)
         const recording = loadRecording(join(RECORDINGS, dir, 'files.jsonl'))
