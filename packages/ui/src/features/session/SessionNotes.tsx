@@ -61,7 +61,7 @@ export function InterruptedNote({
       : interruption.reason === 'quit'
         ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
         : interruption.reason === 'shutdown'
-          ? 'The computer shut down or restarted while the last turn was running, so it did not finish.'
+          ? 'The computer shut down, restarted or signed out while the last turn was running, so it did not finish.'
           : 'The agent tool interrupted the last turn before it finished.'
   return (
     <p

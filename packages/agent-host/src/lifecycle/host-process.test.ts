@@ -11,8 +11,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { PROTOCOL_VERSION } from '@cc/protocol'
+import { uptime } from 'node:os'
+import { PROTOCOL_VERSION, sessionLiveDefaults } from '@cc/protocol'
 import { acquireInstanceLock } from '../dev-services/instance-lock.js'
+import { Store } from '../dev-services/store.js'
+import { ENDING_FILE } from './ending-record.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -394,4 +397,84 @@ describe('the host process, started for real', () => {
     expect(await host.exited).toBe(0)
     expect(s.log()).toContain('parent process exited; shutting down')
   }, 60_000 * SLOW)
+
+  /*
+   * #1397: why a host ended is written by that host as it goes (ending-record.ts), and the next start reads that alone. Asked of real
+   * hosts started as the window starts them: the record and its reading are steps main.ts takes in order (review finding 5).
+   */
+  const asWindow = (s: ReturnType<typeof setup>) => {
+    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_STARTED_BY: 'app' })
+    host.p.stdin.write(`${JSON.stringify({ token: 'token-handed-on-stdin-0123456789' })}
+`)
+    return host
+  }
+  const ending = (s: ReturnType<typeof setup>) => JSON.parse(readFileSync(join(s.dir, ENDING_FILE), 'utf8')) as { by: string; detail?: string }
+  /** A session the last host left in a turn, as a killed agent leaves it, and the mail heartbeat at `heartbeat` */
+  const leftInTurn = (s: ReturnType<typeof setup>, heartbeat: number) => {
+    const store = new Store(s.db)
+    try {
+      const path = join(s.dir, 'project')
+      mkdirSync(path, { recursive: true })
+      store.projects.addProject({ id: 'p1', path, name: 'project' })
+      store.sessions.upsertSession({
+        id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a long job', autoNamed: false, state: 'working',
+        lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: false, model: null, effort: null,
+        verbosity: null, serviceTier: null, permissionPreset: 'safe', importedFrom: null, worktree: null,
+        parentSessionId: null, scopeSessionIds: null, roleAppend: null, ...sessionLiveDefaults(),
+      })
+      store.settings.setAppSetting('mail.heartbeat', String(heartbeat))
+    } finally {
+      store.close()
+    }
+  }
+  const interruptionOf = (s: ReturnType<typeof setup>) => {
+    const store = new Store(s.db)
+    try {
+      return store.sessions.listSessions().find((x) => x.id === 's1')?.interruption?.reason ?? null
+    } finally {
+      store.close()
+    }
+  }
+  const bootAt = () => Date.now() - uptime() * 1000
+
+  it('a window that quits leaves its going as the cause, and the next start finds a quit, whatever the clocks say (#1397 review findings 1-3)', async () => {
+    const s = setup()
+    const first = asWindow(s)
+    await first.ready
+    // The window quitting in direct mode: its end of the pipe closes, and no stopped.json is written
+    first.p.stdin.end()
+    expect(await exitsSoon(first)).toBe(0)
+    expect(ending(s)).toMatchObject({ by: 'parent' })
+
+    // A heartbeat from before this computer's boot: a mail crowd froze it, or Windows' uptime kept counting through a Fast Startup
+    leftInTurn(s, bootAt() - 60 * 60_000)
+    const second = asWindow(s)
+    await second.ready
+    second.p.stdin.end()
+    expect(await exitsSoon(second)).toBe(0)
+    expect(s.log()).toContain('[agent-host] the last host ended: parent at ')
+    expect(interruptionOf(s)).toBe('quit')
+  }, 120_000 * SLOW)
+
+  it("the window's line that the system is ending makes the turn its leave cuts the system's (#1397)", async () => {
+    const s = setup()
+    const first = asWindow(s)
+    await first.ready
+    // As the window says it at Windows' end-session question, then goes with the session
+    first.p.stdin.write(`${JSON.stringify({ op: 'system-ending' })}
+`)
+    await settle(300)
+    first.p.stdin.end()
+    expect(await exitsSoon(first)).toBe(0)
+    expect(ending(s)).toMatchObject({ by: 'system', detail: 'parent' })
+
+    // A heartbeat after the boot, as a host this computer ran wrote it: the record alone says the system ended
+    leftInTurn(s, Date.now())
+    const second = asWindow(s)
+    await second.ready
+    second.p.stdin.end()
+    expect(await exitsSoon(second)).toBe(0)
+    expect(s.log()).toContain('[agent-host] the last host ended: system (parent) at ')
+    expect(interruptionOf(s)).toBe('shutdown')
+  }, 120_000 * SLOW)
 })

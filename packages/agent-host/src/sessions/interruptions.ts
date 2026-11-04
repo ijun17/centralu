@@ -103,7 +103,7 @@ export function interruptionWords(i: Interruption): string {
     case 'quit':
       return 'stopped: Centralu quit during its turn'
     case 'shutdown':
-      return 'stopped: the computer shut down during its turn'
+      return 'stopped: the computer shut down or signed out during its turn'
     case 'interrupted':
       return 'stopped: its tool interrupted the turn'
     case 'reconnecting':
@@ -111,7 +111,7 @@ export function interruptionWords(i: Interruption): string {
   }
 }
 
-/** A turn that went with its process: Centralu quit, or the computer shut down under the host (#1397). Both wait for the person's Continue, and neither is a failure of the work */
+/** A turn that went with its process: Centralu quit, or the system ended under the host (#1397). Both wait for the person's Continue, and neither is a failure of the work */
 export const wentWithItsProcess = (i: Interruption | null | undefined): boolean => i?.reason === 'quit' || i?.reason === 'shutdown'
 
 /** The line the conversation shows where that note went in */

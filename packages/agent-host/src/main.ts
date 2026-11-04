@@ -3,7 +3,7 @@ import { readHandedToken } from './lifecycle/handed-token.js'
 import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
-import { hostname, uptime } from 'node:os'
+import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
@@ -20,7 +20,7 @@ import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MailPerson } from './mail/person.js'
-import { MAIL_HEARTBEAT_KEY, hostMail, mailSessionsOf } from './mail/host-mail.js'
+import { hostMail, mailSessionsOf } from './mail/host-mail.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/orchestrator-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -55,8 +55,8 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { bootTimeOf, computerShutdownWindow } from './lifecycle/computer-shutdown.js'
-import { clearStoppedMark, markQuit, stoppedOnPurpose, updateResumeFolder } from './lifecycle/stopped-mark.js'
+import { EndingRecorder, systemEndOf, systemIsStopping, takeEndingRecord, writeEndingRecord } from './lifecycle/ending-record.js'
+import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
@@ -263,10 +263,17 @@ if (!lock.ok) {
  */
 const ownership = lock
 process.on('exit', ownership.release)
+/*
+ * Why the last host ended, as it wrote it going (lifecycle/ending-record.ts, #1397), taken once this host holds the folder: a
+ * record found from now on is this host's own. Only a `system` one changes anything: the turns it cut were the system's
+ */
+const lastEnding = dbPath === ':memory:' ? null : takeEndingRecord(dirname(dbPath))
+if (lastEnding) console.error(`[agent-host] the last host ended: ${lastEnding.by}${lastEnding.detail ? ` (${lastEnding.detail})` : ''} at ${new Date(lastEnding.at).toISOString()}`)
+const systemEnd = systemEndOf(lastEnding)
+/** Why this host ends, written as it learns it, for the next start. A host in memory has no folder to write it in */
+const ending = new EndingRecorder({ write: dbPath === ':memory:' ? () => {} : writeEndingRecord(dirname(dbPath)) })
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
-// Read first: a quit the person asked for is not the computer's shutdown, whenever the computer went down after it (#1397)
-const lastStopWasThePersons = dbPath !== ':memory:' && stoppedOnPurpose(dirname(dbPath))
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
 // The turns an update cut when it stopped the host before this one, and where this one lists those its own update stop ends (#1618)
 const updateResume = dbPath === ':memory:' ? undefined : updateResumeFolder(dirname(dbPath))
@@ -342,8 +349,8 @@ const mgr = new SessionManager(
   {
     ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}),
     ...(updateResume ? { updateResume } : {}),
-    // The host's last sign of life against the boot: the computer went down under the last host, or it did not (#1397)
-    computerShutdown: computerShutdownWindow({ lastAliveAt: Number(store.settings.appSetting(MAIL_HEARTBEAT_KEY)) || null, bootAt: bootTimeOf(Date.now(), uptime()), stoppedOnPurpose: lastStopWasThePersons }),
+    // The last host recorded that the system was ending (#1397)
+    ...(systemEnd ? { systemEnd } : {}),
   },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
@@ -588,12 +595,27 @@ const beginStopForUpdate = () => {
 }
 const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop') => {
   console.error(`[agent-host] asked to stop (${by}${o.forUpdate ? ', for an update' : ''})`)
+  ending.leaving(o.forUpdate ? 'update' : 'stop', by)
   if (o.forUpdate) beginStopForUpdate()
   if (stopNow) stopNow()
   else stopAsked = true
 }
 // The window stops the host it started for an update by a line on its stdin: it speaks no WebSocket, and `host.stop` is refused to a host the app runs (#1895)
 if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromRequest({ forUpdate: m.forUpdate === true }, 'the window'))
+/*
+ * The system is ending (a shutdown, restart or sign-out), told by the parent that hears it: the window's Windows end-session
+ * question, or the keeper (#1397). Said before the parent goes, so the cut turns this host's leave leaves are the system's.
+ * `cancelled`: the end was called off
+ */
+control?.on('system-ending', (m) => {
+  if (m.cancelled === true) {
+    console.error('[agent-host] the system is no longer ending')
+    ending.systemEndingCancelled()
+  } else {
+    console.error('[agent-host] the system is ending')
+    ending.systemEnding()
+  }
+})
 /*
  * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
  * the hosts of other machines the person linked, each over the person's own ssh. The router stands
@@ -968,6 +990,20 @@ const endings = wireEndings({
   quit: () => {
     if (dbPath !== ':memory:') markQuit(dirname(dbPath))
   },
+  cause: (by, detail) => ending.leaving(by, detail),
+  /*
+   * A SIGTERM or SIGHUP may be the system's own, at a shutdown or a sign-out: where the system can say so (Linux), it is asked
+   * first, within a second, so the answer is written before the host goes. The time is the signal's: the agents got theirs with it
+   */
+  signalled: (sig) => {
+    if (sig !== 'SIGTERM' && sig !== 'SIGHUP') return
+    const at = Date.now()
+    return systemIsStopping().then((stopping) => {
+      if (!stopping) return
+      console.error(`[agent-host] ${sig} came as the system is stopping`)
+      ending.systemEnding(at)
+    })
+  },
 })
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()
@@ -988,10 +1024,15 @@ if (control && launch.underKeeper) {
       const mode = signalMode(held !== null)
       // A swap that holds no agents ends them: that is an update's stop, so the next host continues what it ends (#1895)
       if (mode === 'stop') beginStopForUpdate()
+      ending.leaving(mode === 'stop' ? 'update' : 'swap', "the keeper's drain")
       return shutdown.stopServices(mode, true)
     },
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
-    release: ownership.release,
+    // The data folder is the next host's from here: nothing this one learns later is written in it
+    release: () => {
+      ending.close()
+      ownership.release()
+    },
     write: (line) => void writeSync(1, `${line}\n`),
     log: (line) => console.error(line),
     exit: (code) => {

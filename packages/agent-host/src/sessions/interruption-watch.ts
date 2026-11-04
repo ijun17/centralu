@@ -9,10 +9,10 @@ import type { SessionTrashHost } from './session-trash.js'
  */
 export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 'handingOver' | 'meta'> & Pick<SessionTrashHost, 'record'>
 
-/** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the computer shut down under the host (#1397) */
+/** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the system ended under the host (#1397) */
 const LOST_TURN_LINE = {
   quit: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
-  shutdown: 'The computer shut down or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
+  shutdown: 'The computer shut down, restarted or signed out while this turn was running, so the turn stopped before it finished. Send a message to continue.',
 } as const
 
 /**
@@ -72,7 +72,7 @@ export class InterruptionWatch {
   /**
    * The turn went with its process (#698): a start found the session mid-turn with no process left (a full quit, a
    * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. `shutdown`: the start found the
-   * computer shut down under the last host (#1397), which is said so rather than as a quit. The session is reset to
+   * last host recorded the system ending (a shutdown, restart or sign-out, #1397), which is said so rather than as a quit. The session is reset to
    * `idle`, which used to leave no mark at all: the conversation simply stopped. A line now says so, and the
    * interruption puts the session in the inbox with a way to continue.
    */

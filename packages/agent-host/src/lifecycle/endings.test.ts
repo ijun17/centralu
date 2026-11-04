@@ -149,7 +149,7 @@ describe('host-errors.log (HO4)', () => {
 })
 
 describe('every ending, wired (HO15)', () => {
-  function wired(heldChildren: boolean, watch = true) {
+  function wired(heldChildren: boolean, watch = true, signalled?: (sig: string) => Promise<void> | void) {
     const clock = { t: 0 }
     const f = fakeProcess()
     const s = fakeStdin()
@@ -157,6 +157,8 @@ describe('every ending, wired (HO15)', () => {
     const forced: string[] = []
     /** How many leaves had begun when each quit was said */
     const quits: number[] = []
+    /** Why it said it leaves, each time it said so (ending-record.ts, #1397) */
+    const causes: string[] = []
     const signals = holdSignals(f.proc, () => {})
     const endings = wireEndings({
       proc: f.proc,
@@ -170,8 +172,10 @@ describe('every ending, wired (HO15)', () => {
       log: () => {},
       now: () => clock.t,
       quit: () => void quits.push(left.length),
+      cause: (by, detail) => void causes.push(detail ? `${by} ${detail}` : by),
+      ...(signalled ? { signalled } : {}),
     })
-    return { f, s, left, forced, endings, clock, quits }
+    return { f, s, left, forced, endings, clock, quits, causes }
   }
 
   it('under the keeper\'s child service a signal is a restart: detach, and the next host takes the views', () => {
@@ -200,6 +204,31 @@ describe('every ending, wired (HO15)', () => {
     expect(w.quits).toEqual([])
     w.endings.keeperStop()
     expect(w.quits).toEqual([2])
+  })
+
+  // #1397: what the next start reads to tell the system's end from any other
+  it('says why it leaves, each way: a quit, a signal by name, the parent gone, a crash', () => {
+    const w = wired(false)
+    w.endings.keeperStop()
+    w.f.emitter.emit('SIGTERM', 'SIGTERM')
+    w.s.emitter.emit('end')
+    w.f.emitter.emit('uncaughtException', new Error('state broke'))
+    expect(w.causes).toEqual(['quit', 'signal SIGTERM', 'parent', 'crash'])
+  })
+
+  it('asks whether the system sent a signal before the leave it starts, so the answer is written before the host goes', async () => {
+    let answer: () => void = () => {}
+    const asked: string[] = []
+    const w = wired(false, true, (sig) => {
+      asked.push(sig)
+      return new Promise<void>((r) => (answer = r))
+    })
+    w.f.emitter.emit('SIGHUP', 'SIGHUP')
+    expect(asked).toEqual(['SIGHUP'])
+    expect(w.left).toEqual([])
+    answer()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(w.left).toEqual([['stop', false]])
   })
 
   it('a crash or a vanished parent hands nothing over', () => {

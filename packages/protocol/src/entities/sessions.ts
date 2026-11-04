@@ -38,9 +38,9 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  *                 response, the computer slept), after the tool's own retries
  *   quit          Centralu quit or restarted while the turn ran, and the process went with it: a start
  *                 found the session `working` with no process left and reset it to `idle`
- *   shutdown      the computer shut down, restarted or logged out while the turn ran (#1397): the next start found the
- *                 session in that turn or ended by `adapter_crashed` between the host's last sign of life and the boot,
- *                 and reset it to `idle`. Not a crash, and continued the same way as `quit`
+ *   shutdown      the computer shut down, restarted or signed out while the turn ran (#1397): the last host was told
+ *                 the system was ending and recorded it as it went; the next start found the session in that turn, or
+ *                 ended by `adapter_crashed` about then, and reset it to `idle`. Not a crash, and continued as `quit` is
  *   interrupted   the tool interrupted the turn, and neither the person nor Centralu asked it to (Codex's
  *                 `turn/completed` with `interrupted` that no Stop of ours preceded)
  *   reconnecting  still `working`, but the tool has been reconnecting to its API for longer than the host's bound

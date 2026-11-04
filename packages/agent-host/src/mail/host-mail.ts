@@ -14,12 +14,6 @@ import { MailTool } from './tool.js'
 import { MailTurns } from './turns.js'
 
 /**
- * The setting the mail delivery writes every minute it runs and as it stops (`MailDelivery`'s heartbeat). Also the host's last sign of
- * life, which a start reads to tell a computer's shutdown from a crash (lifecycle/computer-shutdown.ts, #1397): one clock, so it is kept as is
- */
-export const MAIL_HEARTBEAT_KEY = 'mail.heartbeat'
-
-/**
  * What the mail of this host reads of its sessions (docs/plans/mailbox.md §16 M3a): the manager answers it in `main.ts`, and tests answer it from
  * a real manager too, so the host and its tests wire mail one way
  */
@@ -135,8 +129,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     ...(opts.now ? { now: opts.now } : {}),
     // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions. A setting the previous build never reads
     heartbeat: {
-      read: () => Number(store.settings.appSetting(MAIL_HEARTBEAT_KEY)) || null,
-      write: (ms) => store.settings.setAppSetting(MAIL_HEARTBEAT_KEY, String(ms)),
+      read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
+      write: (ms) => store.settings.setAppSetting('mail.heartbeat', String(ms)),
     },
     ...opts.delivery,
   })

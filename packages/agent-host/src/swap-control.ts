@@ -76,7 +76,8 @@ export function viewPort(frontDoor: string | undefined, port: number | undefined
 /** The longest control line accepted. The real ones are tens of bytes */
 const MAX_LINE = 64 * 1024
 
-export type ControlMessage = { op: string; timeoutMs?: number; forUpdate?: boolean }
+/** `cancelled`: on `system-ending`, the end the line before announced was called off (#1397) */
+export type ControlMessage = { op: string; timeoutMs?: number; forUpdate?: boolean; cancelled?: boolean }
 
 /**
  * Control lines on the host's stdin. One handler per op; `next(op)` waits for one. The stream

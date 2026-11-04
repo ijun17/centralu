@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
 
@@ -12,11 +12,6 @@ import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.j
  * is the person's again.
  */
 export const STOPPED_MARK_FILE = 'stopped.json'
-
-/** Whether the person stopped the last host (the mark is there). Read before `clearStoppedMark` removes it: a quit is not a computer's shutdown (computer-shutdown.ts) */
-export function stoppedOnPurpose(dataDir: string): boolean {
-  return existsSync(join(dataDir, STOPPED_MARK_FILE))
-}
 
 /** Removes the mark, once this host holds the folder's lock. Never fatal: a mark left behind only waits for a Start */
 export function clearStoppedMark(dataDir: string): void {
