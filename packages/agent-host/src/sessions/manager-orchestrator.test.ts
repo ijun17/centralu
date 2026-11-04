@@ -207,6 +207,8 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       expect(r.error).toContain(`"Fix login" (id ${now})`)
       expect(r.error).not.toContain(other)
       expect(adapter.handleOf(now)?.sent.length ?? 0).toBe(sentBefore)
+      // An id nobody ever had is refused as before, with nothing added
+      expect((await tools.sendToSession('never-existed', 'hi')).error).toBe('Not a session this app manages: never-existed')
     })
 
     it('read_session gives the same help', async () => {
@@ -214,11 +216,6 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       const r = await tools.readSession(old)
       expect(r.ok).toBe(false)
       expect(r.error).toContain(`"Fix login" (id ${now})`)
-    })
-
-    it('an id nobody ever had is refused as before, with nothing added', async () => {
-      const { tools } = await staleWorld()
-      expect((await tools.sendToSession('never-existed', 'hi')).error).toBe('Not a session this app manages: never-existed')
     })
   })
 
