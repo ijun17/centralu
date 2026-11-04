@@ -3027,7 +3027,7 @@ tool-neutral (`sessions/interruptions.ts`):
 |---|---|---|
 | `network` | a running turn ends in an error the network caused (`interruptionAfter` with `endedTurn`; a crash, `adapter_crashed`, and an error at rest are not): the error codes (`ECONNREFUSED`, `ENOTFOUND`, ...), Claude's "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed" (the wordings read in the CLI's own connection-failure function; "Unable to connect to API: SSL …" is a setting, not the network), the computer sleeping, Codex's "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network" (`isNetworkFailure`; the sentences measured in the real store and host.log). Only the tool's sentence counts, not the stderr tail a crash carries (`failureSentence`); generic words ("connection closed", "network error") count only inside those sentences, since an MCP server or a dev server can say them | the session works again (`working`, output), or a turn ends otherwise |
 | `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached, or a turn a linked hub's update cut could not be continued (§4.8, #1618; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
-| `shutdown` | the last host recorded, as it went, that the system was ending (a shutdown, restart or sign-out, #1397; `ended.json`, below). Then a session that was `working` or `waiting_approval` with no process gets this reason instead of `quit` (unless it has rows from more than 2 minutes after that end, `SYSTEM_END_TAIL_MS`: a later host's, of a build that reads no record), and so does a session in `error` whose newest error, past the `internal` one closing the handle writes for follow-ups still queued, is an `adapter_crashed` stamped from 30 s before the notice (`SYSTEM_END_LEAD_MS`: where the system ends every process at once, the agent may exit before the host reads its own signal) to 2 minutes after it. Both are reset to `idle` and get a warning line ("The computer shut down, restarted or signed out while this turn was running …"); a session at rest or one that crashed outside that span is left as it is. With no record of the system ending (a quit, any other stop, a host killed with no notice) nothing is guessed: a cut turn stays `quit` and a crash an error. `lifecycle/ending-record.ts` | the same |
+| `shutdown` | the last host was told the system was ending (a shutdown, restart or sign-out, #1397; `system-end.json`, below). Then a session that was `working` or `waiting_approval` with no process gets this reason instead of `quit` (unless it has rows from more than 2 minutes after that end, `SYSTEM_END_TAIL_MS`: a later host's, of a build that reads no notice), and so does a session in `error` whose newest error, past the `internal` one closing the handle writes for follow-ups still queued, is an `adapter_crashed` stamped from 30 s before the notice (`SYSTEM_END_LEAD_MS`: where the system ends every process at once, the agent may exit before the host asks) to 2 minutes after it. Both are reset to `idle` and get a warning line ("This turn stopped before it finished: the computer shut down, restarted or signed out while it was running …"; the words are `SHUTDOWN_WORDS` in the protocol, the same in the label, the note, the list and the report); a session at rest or one that crashed outside that span is left as it is. With no notice (a quit, any other stop, a host killed with no notice) nothing is guessed: a cut turn stays `quit` and a crash an error. Known: the caller of a delegated turn whose agent crashed in that span keeps the old host's "failed" report, sent before the host went, while the child then reads `shutdown`; it is reported once. `lifecycle/system-end.ts` | the same |
 | `interrupted` | a turn ends `waiting_input` with the reason `interrupted_by_tool` (`INTERRUPTED_BY_TOOL`): Codex's `turn/completed {status: "interrupted"}` for a turn no `turn/interrupt` of ours preceded | the same |
 | `reconnecting` | the tool has stayed `retrying` for `RECONNECTING_FLAG_MS` (5 minutes): Codex waits for the network without end. Live only, never stored | the activity moves off `retrying` or the turn ends |
 
@@ -3369,27 +3369,26 @@ host that crashed or is missing, not one the person stopped:
   the folder removes the mark: a start, by whoever, is the person's again. `--connection` reports it as
   `stopped: { by, at }` while no host runs. The hub's own stop (an update, a rollback, an uninstall) runs `serve --stop`
   with `CENTRALU_STOP_BY=hub` and leaves no mark.
-- **Why the last host ended is recorded beside it** (#1397, `lifecycle/ending-record.ts`): `<data>/ended.json`, written by the
-  host as it learns why it leaves, in every mode: `quit` (the keeper's stop for good), `stop` or `update` (`host.stop`, the window's
-  stop line), `swap` (the keeper's drain; nothing is written once the drain lets go of the lock), `parent` (its parent's pipe
-  closed, which is how a direct-mode window quits), `signal` (with its name), `crash`. The first cause stands. A notice that the
-  system is ending writes `system` with its time: the control line `{"op":"system-ending"}` on the host's stdin from the window or
-  the keeper that hears the system's end (`{"op":"system-ending","cancelled":true}` when it is called off), and on Linux a SIGTERM
-  or SIGHUP, a keeper's stop, a stop request or the parent going while `systemctl is-system-running` (or `--user`, at the
-  sign-out that ends the user's manager) answers `stopping` (`os.ts` `systemStoppingQueries`): asked for at most a second, and
-  for a signal before the leave begins (a second signal meanwhile begins it at once). A notice makes the record `system`
-  whatever cause came before or after it: a stop asked for as the system ends (the keeper stopping its host as it gets the
-  system's SIGTERM, a Mac quitting its apps as it shuts down) is the system's too. A notice the host outlives by 2 minutes is
-  called off (the system did not go), so a host that runs on leaves no stale one. The next host takes the record once it holds the lock (read and removed, before
-  `stopped.json` is cleared), and only `system` changes anything (§4.6.2, `shutdown`). A host killed with no notice writes
-  nothing, so the next start knows nothing and guesses nothing. Separate from `stopped.json`, which keeps its meaning for a hub.
-  **Not sent yet**: no window or keeper writes the `system-ending` line. Measured on Windows 11 (a host log over a month of
-  restarts started by `shutdown.exe`, the Windows Update notifier and TrustedInstaller): a `centralu serve` host wrote no line at
-  a restart, so it was ended with no notice. It has no console or window, and Node does not map `CTRL_LOGOFF_EVENT` or
-  `CTRL_SHUTDOWN_EVENT` (libuv `src/win/signal.c`; Windows sends them only to services), so on Windows only a process with a
-  window hears the end (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), which is the window's to send. On macOS the window hears
-  `NSWorkspaceWillPowerOffNotification`; the keeper and the host get launchd's SIGTERM, which the host cannot tell from the
-  keeper's own.
+- **That the system was ending is recorded beside it** (#1397, `lifecycle/system-end.ts`): `<data>/system-end.json`
+  (`{"v":1,"at":…}`), written by the host when it is told the system is ending (a shutdown, restart or sign-out), and
+  nothing else: any other ending leaves no file. Told by the control line `{"op":"system-ending"}` on the host's stdin, from
+  the window or the keeper that hears the end (`{"op":"system-ending","cancelled":true}` removes it), or on Linux by
+  systemd: every leave, whichever way it began (a signal, the parent's pipe, a keeper's stop, `host.stop`, the window's
+  stop line, a crash), first asks `systemctl is-system-running` and `systemctl --user is-system-running` (`os.ts`
+  `systemStoppingQueries`), and `Shutdown` waits for the answer before it stops anything: the first `stopping` answers, at
+  most a second in all, and the queries still running are ended then or as the host exits, however it exits. Elsewhere
+  there is nothing to ask, and the leave begins at once as before. A notice the host outlives by 2 minutes is called off
+  (the system did not go). Nothing is written once a swap's drain lets go of the lock. The next host takes the file once
+  it holds the lock (read and removed, before `stopped.json` is cleared); with it, the turns the last host lost are the
+  system's (§4.6.2, `shutdown`). A host killed with no notice writes nothing, so the next start knows nothing and guesses
+  nothing. Separate from `stopped.json`, which keeps its meaning for a hub.
+  **Not sent yet** (#1970): no window or keeper writes the `system-ending` line. Measured on Windows 11 (a host log over a
+  month of restarts started by `shutdown.exe`, the Windows Update notifier and TrustedInstaller): a `centralu serve` host
+  wrote no line at a restart, so it was ended with no notice. It has no console or window, and Node does not map
+  `CTRL_LOGOFF_EVENT` or `CTRL_SHUTDOWN_EVENT` (libuv `src/win/signal.c`; Windows sends them only to services), so on
+  Windows only a process with a window hears the end (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), which is the window's to
+  send. On macOS the window hears `NSWorkspaceWillPowerOffNotification`; the keeper and the host get launchd's SIGTERM,
+  which the host cannot tell from the keeper's own.
 - **The link starts at most three hosts there within 10 minutes** (`RESTARTS`), and then none until the person's Start,
   however long it waits: the limit is kept, not read off the starts again as they age out. A start at the person's
   Start counts too, so a Start whose hosts stop before they answer is not repeated for good, and so does a host that

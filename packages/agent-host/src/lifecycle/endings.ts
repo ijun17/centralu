@@ -1,6 +1,5 @@
 import { appendFileSync } from 'node:fs'
 import { MAX_LOG_BYTES, rotateIfLarge } from '../log-file.js'
-import type { LeaveCause } from './ending-record.js'
 import { signalMode, type LeaveMode } from './shutdown.js'
 
 /**
@@ -61,7 +60,7 @@ export function holdSignals(
   proc: ProcessLike,
   log: (line: string) => void,
   now: () => number = Date.now,
-): { act(onSignal: (sig?: unknown) => void): void } {
+): { act(onSignal: () => void): void } {
   let pending: Signal | null = null
   let pendingAt = 0
   const hold = (sig: Signal) => {
@@ -82,7 +81,7 @@ export function holdSignals(
         proc.off(sig, hold as Listener)
       }
       // One that came while starting: the same ending it would have had, now that there is one
-      if (pending) onSignal(pending)
+      if (pending) onSignal()
     },
   }
 }
@@ -159,7 +158,7 @@ export function crashRecorder(
  */
 export function wireEndings(o: {
   proc: ProcessLike
-  signals: { act(onSignal: (sig?: unknown) => void): void }
+  signals: { act(onSignal: () => void): void }
   heldChildren: boolean
   leave: (mode: LeaveMode, handOver: boolean) => void
   /** Exit now, without finishing the shutdown */
@@ -171,22 +170,9 @@ export function wireEndings(o: {
   now?: () => number
   /** The keeper stops this host for good: the person quit Centralu here (lifecycle/stopped-mark.ts `markQuit`) */
   quit?: () => void
-  /** Says why the host is leaving, as each way of leaving comes (ending-record.ts, #1397). `keeperStop` says `quit`; `stopAsked` is the caller's to say */
-  cause?: (by: LeaveCause, detail?: string) => void
-  /**
-   * Asked once a signal came, before the leave it starts: whether the system sent it (ending-record.ts `systemIsStopping`). The
-   * leave waits for it, so its answer is written before the host exits; it is the caller's to keep short
-   */
-  signalled?: (sig: string) => Promise<void> | void
 }): { stopAsked: () => void; keeperStop: () => void } {
   const mode = signalMode(o.heldChildren)
-  guardErrors(o.proc, {
-    record: o.record,
-    onCrash: () => {
-      o.cause?.('crash')
-      o.leave(mode, false)
-    },
-  })
+  guardErrors(o.proc, { record: o.record, onCrash: () => o.leave(mode, false) })
   /*
    * A second signal while leaving is someone insisting (a second Ctrl+C on `centralu serve`): the
    * host exits at once rather than run a second, different ending. Not one within `REPEAT_AFTER_MS`
@@ -196,40 +182,22 @@ export function wireEndings(o: {
    */
   let signalledAt: number | null = null
   const now = o.now ?? Date.now
-  /** The leave a signal starts, once: at once, or when `signalled` has answered */
-  let leaveBegun = false
-  const leaveForSignal = () => {
-    if (leaveBegun) return
-    leaveBegun = true
-    o.leave(mode, mode === 'detach')
-  }
-  o.signals.act((sig) => {
+  o.signals.act(() => {
     if (signalledAt !== null) {
-      // Asked again while `signalled` still waits: the leave begins now, and a later one forces as before
-      if (!leaveBegun) {
-        signalledAt = now()
-        return leaveForSignal()
-      }
       if (deliberateRepeat(signalledAt, now())) o.force('asked again while shutting down')
       return
     }
     signalledAt = now()
-    const name = typeof sig === 'string' ? sig : 'a signal'
-    o.cause?.('signal', name)
-    const asked = o.signalled?.(name)
-    if (asked) void Promise.resolve(asked).catch(() => {}).then(leaveForSignal)
-    else leaveForSignal()
+    o.leave(mode, mode === 'detach')
   })
   watchParent(o.watchParent, o.stdin, () => {
     o.log('[agent-host] parent process exited; shutting down')
-    o.cause?.('parent')
     o.leave(mode, false)
   })
   return {
     stopAsked: () => o.leave('stop', false),
     // No next host to hand the views to
     keeperStop: () => {
-      o.cause?.('quit')
       o.quit?.()
       o.leave('stop', false)
     },

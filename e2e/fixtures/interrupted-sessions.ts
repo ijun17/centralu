@@ -98,18 +98,18 @@ export function interruptedSessionTests() {
     const s = await newSession(page, 'alpha')
     await newSession(page, 'alpha')
     await emit(page, [
-      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'The computer shut down, restarted or signed out while this turn was running, so the turn stopped before it finished. Send a message to continue.' },
+      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'This turn stopped before it finished: the computer shut down, restarted or signed out while it was running. Send a message to continue.' },
       { type: 'interruption', sessionId: s, interruption: { reason: 'shutdown', at: Date.now() } },
     ])
 
     await openInbox(page)
-    await expect(item(page, s)).toContainText('Stopped: computer shut down')
+    await expect(item(page, s)).toContainText('Stopped: the computer shut down, restarted or signed out')
     await expect(page.getByTestId(`inbox-continue-${s}`)).toBeVisible()
     await expect(mark(page, s)).toHaveAttribute('data-interruption', 'shutdown')
     await page.keyboard.press('Escape')
     await page.getByTestId(`session-row-${s}`).click()
     const note = page.getByTestId('interrupted-note')
-    await expect(note).toContainText('The computer shut down, restarted or signed out while the last turn was running')
+    await expect(note).toContainText('The last turn did not finish: the computer shut down, restarted or signed out while it was running.')
     await page.getByTestId('interrupted-continue').click()
     await expect(note).toHaveCount(0)
   })

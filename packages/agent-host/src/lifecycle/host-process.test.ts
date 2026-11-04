@@ -11,11 +11,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { uptime } from 'node:os'
 import { PROTOCOL_VERSION, sessionLiveDefaults } from '@cc/protocol'
 import { acquireInstanceLock } from '../dev-services/instance-lock.js'
 import { Store } from '../dev-services/store.js'
-import { ENDING_FILE } from './ending-record.js'
+import { SYSTEM_END_FILE } from './system-end.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -399,18 +398,18 @@ describe('the host process, started for real', () => {
   }, 60_000 * SLOW)
 
   /*
-   * #1397: why a host ended is written by that host as it goes (ending-record.ts), and the next start reads that alone. Asked of real
-   * hosts started as the window starts them: the record and its reading are steps main.ts takes in order (review finding 5).
+   * #1397: a host writes that the system is ending when it is told so (system-end.ts), and the next start reads that alone. Asked of
+   * real hosts: the notice, the leave that waits for systemd's answer, and the start that reads it are steps main.ts takes in order.
    */
-  const asWindow = (s: ReturnType<typeof setup>) => {
-    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_STARTED_BY: 'app' })
-    host.p.stdin.write(`${JSON.stringify({ token: 'token-handed-on-stdin-0123456789' })}
-`)
+  const token = 'token-handed-on-stdin-0123456789'
+  const asWindow = (s: ReturnType<typeof setup>, extra: Record<string, string> = {}) => {
+    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_STARTED_BY: 'app', ...extra })
+    host.p.stdin.write(`${JSON.stringify({ token })}\n`)
     return host
   }
-  const ending = (s: ReturnType<typeof setup>) => JSON.parse(readFileSync(join(s.dir, ENDING_FILE), 'utf8')) as { by: string; detail?: string }
-  /** A session the last host left in a turn, as a killed agent leaves it, and the mail heartbeat at `heartbeat` */
-  const leftInTurn = (s: ReturnType<typeof setup>, heartbeat: number) => {
+  const noticeOf = (s: ReturnType<typeof setup>) => (existsSync(join(s.dir, SYSTEM_END_FILE)) ? readFileSync(join(s.dir, SYSTEM_END_FILE), 'utf8') : null)
+  /** A session the last host left in a turn, as a killed agent leaves it */
+  const leftInTurn = (s: ReturnType<typeof setup>) => {
     const store = new Store(s.db)
     try {
       const path = join(s.dir, 'project')
@@ -422,12 +421,17 @@ describe('the host process, started for real', () => {
         verbosity: null, serviceTier: null, permissionPreset: 'safe', importedFrom: null, worktree: null,
         parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
       })
-      store.settings.setAppSetting('mail.heartbeat', String(heartbeat))
     } finally {
       store.close()
     }
   }
-  const interruptionOf = (s: ReturnType<typeof setup>) => {
+  /** The reason the next start gives the session `leftInTurn` left */
+  const nextStartSays = async (s: ReturnType<typeof setup>) => {
+    leftInTurn(s)
+    const next = asWindow(s)
+    await next.ready
+    next.p.stdin.end()
+    expect(await exitsSoon(next)).toBe(0)
     const store = new Store(s.db)
     try {
       return store.sessions.listSessions().find((x) => x.id === 's1')?.interruption?.reason ?? null
@@ -435,25 +439,24 @@ describe('the host process, started for real', () => {
       store.close()
     }
   }
-  const bootAt = () => Date.now() - uptime() * 1000
+  /** A `systemctl` that answers `word` to `is-system-running`, first on the host's PATH (and the login shell's answer, setup's `tools`) */
+  const systemctl = (s: ReturnType<typeof setup>, word: string) => {
+    const tools = join(s.dir, 'tools')
+    mkdirSync(tools, { recursive: true })
+    writeFileSync(join(tools, 'systemctl'), `#!/bin/sh\necho ${word}\nexit 1\n`)
+    chmodSync(join(tools, 'systemctl'), 0o755)
+    return { PATH: `${tools}:${process.env.PATH ?? ''}` }
+  }
 
-  it('a window that quits leaves its going as the cause, and the next start finds a quit, whatever the clocks say (#1397 review findings 1-3)', async () => {
+  it('a window that quits leaves no notice, and the next start finds a quit (#1397 review finding 1)', async () => {
     const s = setup()
     const first = asWindow(s)
     await first.ready
     // The window quitting in direct mode: its end of the pipe closes, and no stopped.json is written
     first.p.stdin.end()
     expect(await exitsSoon(first)).toBe(0)
-    expect(ending(s)).toMatchObject({ by: 'parent' })
-
-    // A heartbeat from before this computer's boot: a mail crowd froze it, or Windows' uptime kept counting through a Fast Startup
-    leftInTurn(s, bootAt() - 60 * 60_000)
-    const second = asWindow(s)
-    await second.ready
-    second.p.stdin.end()
-    expect(await exitsSoon(second)).toBe(0)
-    expect(s.log()).toContain('[agent-host] the last host ended: parent at ')
-    expect(interruptionOf(s)).toBe('quit')
+    expect(noticeOf(s)).toBeNull()
+    expect(await nextStartSays(s)).toBe('quit')
   }, 120_000 * SLOW)
 
   it("the window's line that the system is ending makes the turn its leave cuts the system's (#1397)", async () => {
@@ -461,20 +464,37 @@ describe('the host process, started for real', () => {
     const first = asWindow(s)
     await first.ready
     // As the window says it at Windows' end-session question, then goes with the session
-    first.p.stdin.write(`${JSON.stringify({ op: 'system-ending' })}
-`)
+    first.p.stdin.write(`${JSON.stringify({ op: 'system-ending' })}\n`)
     await settle(300)
     first.p.stdin.end()
     expect(await exitsSoon(first)).toBe(0)
-    expect(ending(s)).toMatchObject({ by: 'system', detail: 'parent' })
+    expect(noticeOf(s)).toMatch(/^\{"v":1,"at":\d+\}/)
+    expect(await nextStartSays(s)).toBe('shutdown')
+    expect(s.log()).toContain('[agent-host] the last host was told the system was ending, at ')
+  }, 120_000 * SLOW)
 
-    // A heartbeat after the boot, as a host this computer ran wrote it: the record alone says the system ended
-    leftInTurn(s, Date.now())
-    const second = asWindow(s)
-    await second.ready
-    second.p.stdin.end()
-    expect(await exitsSoon(second)).toBe(0)
-    expect(s.log()).toContain('[agent-host] the last host ended: system (parent) at ')
-    expect(interruptionOf(s)).toBe('shutdown')
+  // systemd is asked only on Linux (os.ts `systemStoppingQueries`)
+  const linux = process.platform === 'linux'
+  it.skipIf(!linux)('on Linux the parent going while systemd is stopping waits for its answer, and the next start finds a shutdown (#1397 deep review 1)', async () => {
+    const s = setup()
+    const first = asWindow(s, systemctl(s, 'stopping'))
+    await first.ready
+    first.p.stdin.end()
+    expect(await exitsSoon(first)).toBe(0)
+    expect(s.log()).toContain('[agent-host] leaving as the system is stopping')
+    expect(noticeOf(s)).toMatch(/^\{"v":1,"at":\d+\}/)
+    systemctl(s, 'running')
+    expect(await nextStartSays(s)).toBe('shutdown')
+  }, 120_000 * SLOW)
+
+  it.skipIf(!linux)('on Linux a SIGTERM is the system’s when systemd says it is stopping, and only then (#1397 deep review 1)', async () => {
+    for (const [word, noticed] of [['running', false], ['stopping', true]] as const) {
+      const s = setup()
+      const host = startHost(s, [], systemctl(s, word))
+      await host.ready
+      host.p.kill('SIGTERM')
+      expect(await exitsSoon(host)).toBe(0)
+      expect(noticeOf(s) !== null).toBe(noticed)
+    }
   }, 120_000 * SLOW)
 })

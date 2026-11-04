@@ -54,6 +54,12 @@ export const InterruptionReason = z
   .catch('interrupted')
 export type InterruptionReason = z.infer<typeof InterruptionReason>
 
+/**
+ * What a `shutdown` says happened, in the same words wherever it is said (#1397): the label, the note above the composer, the line in
+ * the conversation, the orchestrator's list and the report to the caller. After a colon, so it starts in lower case
+ */
+export const SHUTDOWN_WORDS = 'the computer shut down, restarted or signed out'
+
 export const Interruption = z.object({
   reason: InterruptionReason,
   /** When it happened (ms); for `reconnecting`, when the reconnecting began */

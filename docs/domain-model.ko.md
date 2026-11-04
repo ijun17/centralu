@@ -59,7 +59,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 용어 | 뜻 | 정의된 곳 | 피할 말 |
 |---|---|---|---|
 | 턴 | 메시지 하나에서 `turn_complete`까지, 에이전트가 한 번 도는 것 | `turn_complete`, `events.ts` | |
-| 중단 | 여기서 아무도 멈추라고 하지 않았는데 마지막 턴이 끝까지 가지 못한 이유: `network`(모델의 API에 닿지 못함), `quit`(턴 도중에 Centralu가 종료되거나 재시작됨), `shutdown`(턴 도중에 컴퓨터가 종료·재시작되거나 로그아웃됨, 마지막 호스트가 끝나면서 기록한 대로, #1397), `interrupted`(도구가 턴을 중단함), `reconnecting`(아직 일하는 중이지만 5분 넘게 다시 연결하는 중). 상태와 따로 있고, 세션이 다시 일하면 지워진다. 사람이 직접 누른 Stop은 여기에 들지 않는다(#698) | `SessionInfo.interruption`, `interruption` 이벤트; `sessions.interruption`(스토어 v53); `sessions/interruptions.ts`; [agent-host.ko.md](agent-host.ko.md) §4.6.2 | stopped, stalled |
+| 중단 | 여기서 아무도 멈추라고 하지 않았는데 마지막 턴이 끝까지 가지 못한 이유: `network`(모델의 API에 닿지 못함), `quit`(턴 도중에 Centralu가 종료되거나 재시작됨), `shutdown`(턴 도중에 컴퓨터가 종료·재시작되거나 로그아웃됨, 마지막 호스트가 그렇게 들은 대로, #1397), `interrupted`(도구가 턴을 중단함), `reconnecting`(아직 일하는 중이지만 5분 넘게 다시 연결하는 중). 상태와 따로 있고, 세션이 다시 일하면 지워진다. 사람이 직접 누른 Stop은 여기에 들지 않는다(#698) | `SessionInfo.interruption`, `interruption` 이벤트; `sessions.interruption`(스토어 v53); `sessions/interruptions.ts`; [agent-host.ko.md](agent-host.ko.md) §4.6.2 | stopped, stalled |
 | 정규화된 이벤트 | 어댑터가 도구의 출력을 바꿔 놓은 것: 델타, 도구 호출과 결과, 승인, 질문, 상태 변화. UI와 스토어가 읽는 단 하나의 흐름 | `NormalizedEvent`, `packages/protocol/src/events.ts` | |
 | 메시지 | 대화에 저장된 한 줄. 세션 안에서 번호(`seq`)가 붙는다. 종류: 글, 도구 호출, 도구 결과, 승인, 표지, 이미지, 추론, 앱 화면 | `StoredMessage`, `commands/sessions.ts` | |
 | 도구 호출 / 도구 결과 | 에이전트가 도구를 쓴 것과 돌아온 것. `callId`로 짝을 짓고, 도구 카드 하나로 그린다 | `tool_call`, `tool_result`, `events.ts` | |

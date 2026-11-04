@@ -241,7 +241,7 @@ export function logonFromGroups(stdout: string): HostLogon | null {
 }
 
 /**
- * How to ask whether the system is ending now (#1397, lifecycle/ending-record.ts `systemIsStopping`): on Linux, systemd says
+ * How to ask whether the system is ending now (#1397, lifecycle/system-end.ts `askSystemStopping`): on Linux, systemd says
  * `stopping` for the system's manager at a shutdown or restart, and for the user's at the sign-out that ends it. There is no such
  * question elsewhere: macOS and Windows tell a process with a window (`NSWorkspaceWillPowerOffNotification`,
  * `WM_QUERYENDSESSION`), which the host is not. Each is a command and its arguments; `null` where there is none

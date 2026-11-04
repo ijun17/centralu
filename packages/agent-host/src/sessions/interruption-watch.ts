@@ -1,4 +1,4 @@
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import { SHUTDOWN_WORDS, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -12,7 +12,7 @@ export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 
 /** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the system ended under the host (#1397) */
 const LOST_TURN_LINE = {
   quit: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
-  shutdown: 'The computer shut down, restarted or signed out while this turn was running, so the turn stopped before it finished. Send a message to continue.',
+  shutdown: `This turn stopped before it finished: ${SHUTDOWN_WORDS} while it was running. Send a message to continue.`,
 } as const
 
 /**

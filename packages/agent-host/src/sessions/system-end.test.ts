@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SYSTEM_END_LEAD_MS, SYSTEM_END_TAIL_MS, type SystemEnd } from '../lifecycle/ending-record.js'
+import { SYSTEM_END_LEAD_MS, SYSTEM_END_TAIL_MS, type SystemEnd } from '../lifecycle/system-end.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
 
 /*
  * #1397: a shutdown, restart or sign-out ends the agents' processes. Codex's app-servers got the system's termination and exited 0
  * while the host was still up, which was written as `adapter_crashed` and shown as an error. The host now records, as it goes, that
- * it was told the system was ending (lifecycle/ending-record.ts); the next start reads that record and nothing else.
+ * it was told the system was ending (lifecycle/system-end.ts); the next start reads that notice and nothing else.
  */
 
 const T0 = 1_800_000_000_000
@@ -74,7 +74,7 @@ describe('a session the system ended under the host (#1397)', () => {
     for (const id of [crashed, inTurn]) {
       expect(info(b, id)).toMatchObject({ state: 'idle', interruption: { reason: 'shutdown' } })
       expect(w.store.sessions.listSessions().find((s) => s.id === id)).toMatchObject({ state: 'idle', interruption: { reason: 'shutdown' } })
-      expect(rowsOf(id).at(-1)).toContain('The computer shut down, restarted or signed out while this turn was running')
+      expect(rowsOf(id).at(-1)).toContain('This turn stopped before it finished: the computer shut down, restarted or signed out while it was running')
     }
   })
 

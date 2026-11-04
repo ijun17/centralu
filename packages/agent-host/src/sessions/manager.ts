@@ -145,7 +145,7 @@ import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
-import { crashedInSystemEnd, cutBySystemEnd, type SystemEnd } from '../lifecycle/ending-record.js'
+import { crashedInSystemEnd, cutBySystemEnd, type SystemEnd } from '../lifecycle/system-end.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import type { Ended } from '../lifecycle/update-ended.js'
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
@@ -403,7 +403,7 @@ export class SessionManager {
        */
       updateResume?: UpdateResumeFolder
       /**
-       * When the last host was told the system was ending, as it recorded it going (lifecycle/ending-record.ts, #1397): a session
+       * When the last host was told the system was ending, as it wrote it (lifecycle/system-end.ts, #1397): a session
        * in a turn the host lost, or ended by `adapter_crashed` about then, stopped because of that, and says so
        */
       systemEnd?: SystemEnd | null

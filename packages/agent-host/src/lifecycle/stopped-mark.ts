@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ENDING_FILE, parseEndingRecord, type EndingRecord } from './ending-record.js'
+import { SYSTEM_END_FILE, parseSystemEnd, systemEndText, type SystemEnd } from './system-end.js'
 import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
 
 /**
@@ -35,27 +35,21 @@ export function markQuit(dataDir: string, now: number = Date.now()): void {
   }
 }
 
-/**
- * Writes why this host ends (`ended.json`, ending-record.ts, #1397), or removes it for `null`. Never fatal: a host that cannot
- * write it ends all the same, and the next start knows nothing
- */
-export function writeEndingRecord(dataDir: string): (r: EndingRecord | null) => void {
-  return (r) => {
+/** Writes that the system is ending (`system-end.json`, system-end.ts, #1397), or removes it for `null`. Never fatal */
+export function writeSystemEnd(dataDir: string): (end: SystemEnd | null) => void {
+  return (end) => {
     try {
-      if (r) writeFileSync(join(dataDir, ENDING_FILE), `${JSON.stringify(r)}\n`)
-      else rmSync(join(dataDir, ENDING_FILE), { force: true })
+      if (end) writeFileSync(join(dataDir, SYSTEM_END_FILE), systemEndText(end))
+      else rmSync(join(dataDir, SYSTEM_END_FILE), { force: true })
     } catch {
       // nothing to remember it in
     }
   }
 }
 
-/**
- * The last host's record, removed as it is read: once this host holds the folder's lock, a record found later is this host's own.
- * Text that is not a record is no record
- */
-export function takeEndingRecord(dataDir: string): EndingRecord | null {
-  const path = join(dataDir, ENDING_FILE)
+/** The last host's notice, removed as it is read: once this host holds the folder's lock, a notice found later is this host's own */
+export function takeSystemEnd(dataDir: string): SystemEnd | null {
+  const path = join(dataDir, SYSTEM_END_FILE)
   let text: string
   try {
     text = readFileSync(path, 'utf8')
@@ -65,9 +59,9 @@ export function takeEndingRecord(dataDir: string): EndingRecord | null {
   try {
     rmSync(path, { force: true })
   } catch {
-    // a record left behind is read again by the next start, which removes it then
+    // one left behind is read again by the next start, which removes it then
   }
-  return parseEndingRecord(text)
+  return parseSystemEnd(text)
 }
 
 /**

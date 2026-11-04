@@ -55,8 +55,8 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { EndingRecorder, systemEndOf, systemIsStopping } from './lifecycle/ending-record.js'
-import { clearStoppedMark, markQuit, takeEndingRecord, updateResumeFolder, writeEndingRecord } from './lifecycle/stopped-mark.js'
+import { SystemEndNotice, askSystemStopping } from './lifecycle/system-end.js'
+import { clearStoppedMark, markQuit, takeSystemEnd, updateResumeFolder, writeSystemEnd } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
@@ -264,28 +264,36 @@ if (!lock.ok) {
 const ownership = lock
 process.on('exit', ownership.release)
 /*
- * Why the last host ended, as it wrote it going (lifecycle/ending-record.ts, #1397), taken once this host holds the folder: a
- * record found from now on is this host's own. Only a `system` one changes anything: the turns it cut were the system's
+ * Whether the last host was told the system was ending (lifecycle/system-end.ts, #1397), taken once this host holds the folder: a
+ * notice found from now on is this host's own. Then the turns it cut were the system's
  */
-const lastEnding = dbPath === ':memory:' ? null : takeEndingRecord(dirname(dbPath))
-if (lastEnding) console.error(`[agent-host] the last host ended: ${lastEnding.by}${lastEnding.detail ? ` (${lastEnding.detail})` : ''} at ${new Date(lastEnding.at).toISOString()}`)
-const systemEnd = systemEndOf(lastEnding)
-/** Why this host ends, written as it learns it, for the next start. A host in memory has no folder to write it in */
-const ending = new EndingRecorder({
-  write: dbPath === ':memory:' ? () => {} : writeEndingRecord(dirname(dbPath)),
+const systemEnd = dbPath === ':memory:' ? null : takeSystemEnd(dirname(dbPath))
+if (systemEnd) console.error(`[agent-host] the last host was told the system was ending, at ${new Date(systemEnd.at).toISOString()}`)
+/** This host's notice that the system is ending, for the next start. A host in memory has no folder to write it in */
+const systemEnding = new SystemEndNotice({
+  write: dbPath === ':memory:' ? () => {} : writeSystemEnd(dirname(dbPath)),
   outlived: () => console.error('[agent-host] still running well after the system said it was ending: it did not end'),
 })
 /**
- * Asks the system whether it is ending (Linux: systemd, lifecycle/ending-record.ts `systemIsStopping`), for a leave that does not
- * say who asked for it, or one asked for as the system ends. `at` is when the leave was asked for: the agents got theirs with it
+ * Asks the system whether it is ending (Linux: systemd, `askSystemStopping`), once, as this host begins to leave: whichever way
+ * the leave began, `Shutdown` waits for the answer (at most a second), so it is written before the agents go. The time is the
+ * leave's: the agents got the system's end with it. Its queries end with it, or with the host however it exits
  */
-const askSystem = (why: string): Promise<void> => {
+let systemQuestion: Promise<void> | null = null
+let endSystemQuestion = () => {}
+process.on('exit', () => endSystemQuestion())
+const askSystem = (): Promise<void> | undefined => {
+  if (systemQuestion) return systemQuestion
   const at = Date.now()
-  return systemIsStopping().then((stopping) => {
+  const q = askSystemStopping()
+  if (!q.stopping) return undefined
+  endSystemQuestion = q.end
+  systemQuestion = q.stopping.then((stopping) => {
     if (!stopping) return
-    console.error(`[agent-host] ${why} came as the system is stopping`)
-    ending.systemEnding(at)
+    console.error('[agent-host] leaving as the system is stopping')
+    systemEnding.notice(at)
   })
+  return systemQuestion
 }
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
@@ -610,9 +618,6 @@ const beginStopForUpdate = () => {
 }
 const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop') => {
   console.error(`[agent-host] asked to stop (${by}${o.forUpdate ? ', for an update' : ''})`)
-  ending.leaving(o.forUpdate ? 'update' : 'stop', by)
-  // A stop asked for as the system ends is the system's (a keeper or a script stopping its host as it gets the system's SIGTERM)
-  void askSystem(`a stop (${by})`)
   if (o.forUpdate) beginStopForUpdate()
   if (stopNow) stopNow()
   else stopAsked = true
@@ -627,10 +632,10 @@ if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromReq
 control?.on('system-ending', (m) => {
   if (m.cancelled === true) {
     console.error('[agent-host] the system is no longer ending')
-    ending.systemEndingCancelled()
+    systemEnding.cancel()
   } else {
     console.error('[agent-host] the system is ending')
-    ending.systemEnding()
+    systemEnding.notice()
   }
 })
 /*
@@ -902,6 +907,8 @@ const shutdown = new Shutdown({
   stopLog,
   exit: (code) => process.exit(code),
   pid: process.pid,
+  // Whether the system is ending, asked as the leave begins, whichever way it began (#1397). Nothing where it cannot say (`undefined`)
+  beforeLeave: () => askSystem(),
 })
 
 start.at('listen')
@@ -1007,16 +1014,6 @@ const endings = wireEndings({
   quit: () => {
     if (dbPath !== ':memory:') markQuit(dirname(dbPath))
   },
-  cause: (by, detail) => {
-    ending.leaving(by, detail)
-    // The keeper stops its host for good as it gets the system's SIGTERM too: asked, not waited for (the leave is long enough)
-    if (by === 'quit' || by === 'parent') void askSystem(by === 'quit' ? "the keeper's stop" : 'the parent going')
-  },
-  /*
-   * A SIGTERM or SIGHUP may be the system's own, at a shutdown or a sign-out: where the system can say so (Linux), it is asked
-   * first, within a second, so the answer is written before the host goes. A second signal meanwhile begins the leave at once
-   */
-  signalled: (sig) => (sig === 'SIGTERM' || sig === 'SIGHUP' ? askSystem(sig) : undefined),
 })
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()
@@ -1037,13 +1034,12 @@ if (control && launch.underKeeper) {
       const mode = signalMode(held !== null)
       // A swap that holds no agents ends them: that is an update's stop, so the next host continues what it ends (#1895)
       if (mode === 'stop') beginStopForUpdate()
-      ending.leaving(mode === 'stop' ? 'update' : 'swap', "the keeper's drain")
       return shutdown.stopServices(mode, true)
     },
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
     // The data folder is the next host's from here: nothing this one learns later is written in it
     release: () => {
-      ending.close()
+      systemEnding.close()
       ownership.release()
     },
     write: (line) => void writeSync(1, `${line}\n`),

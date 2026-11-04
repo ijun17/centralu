@@ -1,4 +1,4 @@
-import type { Interruption, NormalizedEvent } from '@cc/protocol'
+import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 
 /**
@@ -103,7 +103,7 @@ export function interruptionWords(i: Interruption): string {
     case 'quit':
       return 'stopped: Centralu quit during its turn'
     case 'shutdown':
-      return 'stopped: the computer shut down or signed out during its turn'
+      return `stopped: ${SHUTDOWN_WORDS} during its turn`
     case 'interrupted':
       return 'stopped: its tool interrupted the turn'
     case 'reconnecting':

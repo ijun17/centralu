@@ -6,7 +6,7 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind, kindWord } from './error-kind.js'
 import { wentWithItsProcess } from './interruptions.js'
 import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
@@ -76,7 +76,7 @@ function personReportLine(outcome: string, tasks: number): string {
     case 'quit':
       return '[Centralu] The session you started stopped before finishing: Centralu quit or restarted during its turn.'
     case 'shutdown':
-      return '[Centralu] The session you started stopped before finishing: the computer shut down, restarted or signed out during its turn.'
+      return `[Centralu] The session you started stopped before finishing: ${SHUTDOWN_WORDS} during its turn.`
     case 'paused':
       return `[Centralu] The session you started paused: its turn ended while its own background work is still running (${tasks} task${tasks === 1 ? '' : 's'}).`
     default:
@@ -535,7 +535,7 @@ export class ChildReports {
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
       : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
-      : stop?.reason === 'shutdown' ? `[Centralu] The assigned work stopped before finishing: the computer shut down, restarted or signed out during its turn.\n`
+      : stop?.reason === 'shutdown' ? `[Centralu] The assigned work stopped before finishing: ${SHUTDOWN_WORDS} during its turn.\n`
       : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
