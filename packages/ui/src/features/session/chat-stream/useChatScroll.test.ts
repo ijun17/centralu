@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import { useStore, type ChatItem } from '../../../store/store.js'
-import { useChatScroll } from './useChatScroll.js'
+import { isSearchHit, useChatScroll } from './useChatScroll.js'
 
 /**
  * Where the conversation's view sits (#31, #61): following the bottom, letting go of a person who
@@ -272,5 +272,22 @@ describe('returning to the row left behind', () => {
     show('s2', rows(101, 20))
     runFrames()
     expect(scroller.scrollTop).toBe(scroller.bottom)
+  })
+})
+
+describe('isSearchHit', () => {
+  const sent: ChatItem = { kind: 'user', seq: 7, text: 'just sent' }
+  const stored: ChatItem = { kind: 'assistant', seq: 8, storedSeq: 40, text: 'the match' }
+
+  it('a message sent a moment ago, not stored yet, is never the hit: with no search and with one', () => {
+    expect(isSearchHit(sent, null)).toBe(false)
+    expect(isSearchHit(sent, { seq: 40 })).toBe(false)
+  })
+
+  it('the stored row with the searched sequence is the hit, and only while there is a search', () => {
+    expect(isSearchHit(stored, { seq: 40 })).toBe(true)
+    expect(isSearchHit(stored, { seq: 41 })).toBe(false)
+    expect(isSearchHit(stored, null)).toBe(false)
+    expect(isSearchHit(undefined, { seq: 40 })).toBe(false)
   })
 })

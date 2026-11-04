@@ -44,6 +44,14 @@ function mountedRows(scroller: HTMLElement): LaidOutRow[] {
   }))
 }
 
+/**
+ * Whether a row is the message a search landed on (#590). Only a stored row can be: a message sent a moment ago has no
+ * stored sequence yet, and with no search target `undefined === undefined` used to light it up as a hit.
+ */
+export function isSearchHit(row: ChatItem | undefined, target: { seq: number } | null): boolean {
+  return target !== null && row?.storedSeq !== undefined && row.storedSeq === target.seq
+}
+
 export function useChatScroll({
   sessionId,
   scrollRef,
@@ -356,7 +364,7 @@ export function useChatScroll({
     }
     if (landed.current || chat.length === 0) return
     if (searchTarget) {
-      const index = chat.findIndex((c) => c.storedSeq === searchTarget.seq)
+      const index = chat.findIndex((c) => isSearchHit(c, searchTarget))
       // The history request is still on its way. Do not spend this landing: the effect runs
       // again when that page arrives.
       if (index < 0) return

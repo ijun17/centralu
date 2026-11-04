@@ -11,7 +11,7 @@ import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
-import { useChatScroll } from './useChatScroll.js'
+import { isSearchHit, useChatScroll } from './useChatScroll.js'
 import { EDGE_FADE_PX, useEdgeFade } from './useEdgeFade.js'
 import { answerEnds as answerEndsOf, bubbleOf, dayBreaks as dayBreaksOf, joinsNext, type BubblePart } from './answerBubble.js'
 import { forgetUnlistedSizes, rowKeys, writeScroll } from '../scroll.js'
@@ -315,11 +315,11 @@ export function ChatStream({
                     ? ''
                     : 'pb-3'
               } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
-                chat[v.index]?.storedSeq === searchTarget?.seq
+                isSearchHit(chat[v.index], searchTarget)
                   ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
                   : ''
               }`}
-              data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
+              data-search-hit={isSearchHit(chat[v.index], searchTarget) ? 'true' : undefined}
               /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller
