@@ -278,6 +278,22 @@ describe('the allowlist', () => {
       expect(grown(main, [...five, `${dir}other.test.ts`], [], over({ ...Object.fromEntries(five.map((f) => [f, text(140)])), [`${dir}other.test.ts`]: text(5) }))).toEqual(five)
     })
 
+    it('hands nothing to a file that existed at the base and not on the list, though it reaches the OS now', () => {
+      const x = `${dir}x.test.ts`
+      const other = `${dir}x-other.test.ts`
+      const files = { base: (f: string) => (f === x || f === other ? text(100) : null), now: (f: string) => (f === other ? text(100) : null) }
+      expect(grown([x], [other], [], files)).toEqual([other])
+      // The same file, new at the base, is a piece
+      expect(grown([x], [other], [], { ...files, base: (f: string) => (f === x ? text(100) : null) })).toEqual([])
+    })
+
+    it('caps the pieces at five, though six small ones are within the line budget', () => {
+      const six = Array.from({ length: 6 }, (_, i) => `${dir}install-windows-q${i}.test.ts`)
+      const small = (fs: string[]) => over(Object.fromEntries([...fs.map((f) => [f, text(10)]), [`${dir}other.test.ts`, text(5)]]))
+      expect(grown(main, [...six, `${dir}other.test.ts`], [], small(six))).toEqual(six)
+      expect(grown(main, [...six.slice(0, 5), `${dir}other.test.ts`], [], small(six.slice(0, 5)))).toEqual([])
+    })
+
     it('(C) hands a test no line for shipped code, nor the other way round', () => {
       const code = `${dir}install-windows-extra.ts`
       expect(grown(main, [code, `${dir}other.test.ts`], [], over({ [code]: text(400), [`${dir}other.test.ts`]: text(5) }))).toEqual([code])

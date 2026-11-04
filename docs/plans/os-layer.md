@@ -250,6 +250,10 @@ through its `clock.mjs` (`no-restricted-properties` and `no-restricted-syntax` i
 folder (`mkdtemp`, `realpath`, `tmpdir`, `TMPDIR`), in the test or in a module it imports. It follows imports, not programs the
 test starts: a test that runs a script as a process is not picked for the script's temp folder.
 
+The temp-folder rule matches by name: an alias or a destructuring (`tmpdir as t`, `const { TMPDIR } = process.env`), a
+`realpathSync.native` assigned to a variable, and a module loaded through `createRequire` are not seen or followed. A test that
+imports the in-memory OS fake (`os/memory.ts`) is selected too, since that file is in the OS layer.
+
 Today: 384 files, 123 shipped (119 host, 4 launcher) and 261 tests (258 host, 2 `platform`, 1 `protocol`). Adding
 `net`, `node-pty` and `better-sqlite3` (owner's session, 2026-10-26) put 9 more files on it; `http`, `https`, `dgram`,
 `ws`, `worker_threads` and the uses of `process` and `node:url` (the deep review) 22 more.
