@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
+import { chmodSync, cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -17,13 +17,21 @@ const TRUSTED = { trusted: true }
 let repo = ''
 let root = ''
 
+// The repository every test starts from, made once and copied (a `git init` and a commit per test were most of the setup)
+let template = ''
+beforeAll(() => {
+  template = tempRoot('cc-wt-template-')
+  fixtureGit(template, ['init', '-q', '-b', 'main'])
+  writeFileSync(join(template, 'a.txt'), 'hello\n')
+  fixtureGit(template, ['add', '.'])
+  fixtureGit(template, ['commit', '-qm', 'init'])
+})
+afterAll(() => removeTree(template))
+
 beforeEach(() => {
   root = tempRoot('cc-wt-')
   repo = join(root, 'repo')
-  fixtureGit(root, ['init', '-q', '-b', 'main', repo])
-  writeFileSync(join(repo, 'a.txt'), 'hello\n')
-  fixtureGit(repo, ['add', '.'])
-  fixtureGit(repo, ['commit', '-qm', 'init'])
+  cpSync(template, repo, { recursive: true })
 })
 
 afterEach(() => removeTree(root))

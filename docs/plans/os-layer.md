@@ -321,7 +321,8 @@ gh run download <run id> -p 'windows-test-times-*' -D /tmp/times
 pnpm exec tsx tooling/os-tests.ts --refresh-durations /tmp/times/*/vitest-times.json
 ```
 
-and commit the file. The first version was read from run 40303859800's log, which prints each file's time. Times
+and commit the file. `.github/workflows/test-durations.yml` does this weekly: it takes the reports of the latest green
+push run of `build.yml` on main and opens (or updates) one pull request, `test-durations/weekly`. The first version was read from run 40303859800's log, which prints each file's time. Times
 that are a little old only make the split a little uneven; a refresh is due when a shard runs more than a few
 minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks the
 file is as the refresh writes it and names a time for most of the selected tests.

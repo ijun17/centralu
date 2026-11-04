@@ -1,9 +1,9 @@
 import { execFileSync, execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, filesRunMs, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
@@ -366,8 +366,10 @@ describe('pre-pr on a stack of two pull requests', () => {
     return { ...result, calls: fake.calls }
   }
 
-  beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-'))
+  // The repository every test starts from, built once and copied: the init and the commits per test were most of the setup
+  let template = ''
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-template-'))
     git(repo, 'init', '-q', '-b', 'main')
     write('src/a.mjs', 'export const value = 1\n')
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\n')
@@ -383,6 +385,16 @@ describe('pre-pr on a stack of two pull requests', () => {
     write('src/b.test.mjs', 'has b :: src/b.mjs :: b = 1\nhas a :: src/a.mjs :: value\n')
     write('docs/b.md', 'b\n')
     commit('top')
+    template = repo
+  })
+
+  afterAll(() => {
+    rmSync(template, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-'))
+    cpSync(template, repo, { recursive: true })
   })
 
   afterEach(() => {
@@ -765,8 +777,10 @@ ${ns.map(step).join('')}    ]
   }
   const stepFiles = (r: { findings: { check: string; message: string }[] }) => r.findings.filter((f) => f.check === 'store-step').map((f) => f.message)
 
-  beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-step-'))
+  // The repository every test starts from, built once and copied: the init and the commits per test were most of the setup
+  let template = ''
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-step-template-'))
     git(repo, 'init', '-q', '-b', 'main')
     write(`${STEP_DIR}v55.ts`, file(55, 56, 57))
     write(`${STEP_DIR}index.ts`, 'export const note = "a step is { to: 3, }"\n')
@@ -774,6 +788,16 @@ ${ns.map(step).join('')}    ]
     git(repo, 'checkout', '-q', '-b', 'feat')
     write(`${STEP_DIR}v58.ts`, file(58))
     commit('feat: step 58')
+    template = repo
+  })
+
+  afterAll(() => {
+    rmSync(template, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-step-'))
+    cpSync(template, repo, { recursive: true })
   })
 
   afterEach(() => {
@@ -917,19 +941,37 @@ describe('pre-pr and the guards a branch adds', () => {
     throw new Error('gh was called')
   }
 
+  // The repository and its origin every test starts from, built once and copied (the init, the commit and the origin per test were most of the setup)
+  let template = ''
+  let templateBare = ''
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-template-'))
+    templateBare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-template-'))
+    git(templateBare, 'init', '-q', '--bare')
+    git(repo, 'init', '-q', '-b', 'main')
+    git(repo, 'remote', 'add', 'origin', templateBare)
+    write('src/a.txt', 'fine\n')
+    commit('main')
+    git(repo, 'checkout', '-q', '-b', 'feat')
+    template = repo
+  })
+
+  afterAll(() => {
+    rmSync(template, { recursive: true, force: true })
+    rmSync(templateBare, { recursive: true, force: true })
+  })
+
   beforeEach(() => {
     clock.t = 0
     step = 1000
     for (const f of Object.keys(fileMs)) delete fileMs[f]
     vitestCalls.length = 0
+    // Each test copies the template's repository and its own origin: no test writes to another's
     repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
     bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
-    git(bare, 'init', '-q', '--bare')
-    git(repo, 'init', '-q', '-b', 'main')
-    git(repo, 'remote', 'add', 'origin', bare)
-    write('src/a.txt', 'fine\n')
-    commit('main')
-    git(repo, 'checkout', '-q', '-b', 'feat')
+    cpSync(template, repo, { recursive: true })
+    cpSync(templateBare, bare, { recursive: true })
+    git(repo, 'remote', 'set-url', 'origin', bare)
   })
 
   afterEach(() => {
