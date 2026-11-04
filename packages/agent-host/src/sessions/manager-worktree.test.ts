@@ -2,12 +2,13 @@
  * SessionManager through RPC with an in-memory adapter: worktree sessions.
  * Shared fakes and the world each test starts from are in manager.test-helpers.ts.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   closeSync,
   constants as fsConstants,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -34,6 +35,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { CwdFiledAdapter, FakeAdapter, managerWorld } from './manager.test-helpers.js'
 import { itSymlink, linkDir } from '../link.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -54,17 +56,25 @@ describe('worktree sessions', () => {
   let wtRpc: ReturnType<typeof createRpcHandler>
   let project: { id: string; path: string }
 
+  // The repository every test starts from, made once and copied: a `git init` and a commit per test were most of the setup
+  let template = ''
+  beforeAll(() => {
+    template = mkdtempSync(join(tmpdir(), 'cc-mgr-wt-template-'))
+    execFileSync('git', ['init', '-q', '-b', 'main', template], { cwd: template })
+    // Byte-level recovery assertions use a deterministic Git policy, independent of the runner's global config.
+    execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: template })
+    writeFileSync(join(template, 'a.txt'), 'hello\n')
+    execFileSync('git', ['add', '.'], { cwd: template })
+    // No detached `git maintenance run --auto` after the commit (#368): see the cleanup section
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', 'commit', '-qm', 'init'], { cwd: template })
+  })
+  afterAll(() => removeTree(template))
+
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-mgr-wt-'))
     repo = join(root, 'repo')
     wtRoot = join(root, 'worktrees')
-    execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
-    // Byte-level recovery assertions use a deterministic Git policy, independent of the runner's global config.
-    execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: repo })
-    writeFileSync(join(repo, 'a.txt'), 'hello\n')
-    execFileSync('git', ['add', '.'], { cwd: repo })
-    // No detached `git maintenance run --auto` after the commit (#368): see the cleanup section
-    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', 'commit', '-qm', 'init'], { cwd: repo })
+    cpSync(template, repo, { recursive: true })
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)

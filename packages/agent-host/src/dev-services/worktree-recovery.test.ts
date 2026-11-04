@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { errorMessage } from '@cc/protocol'
 import { FIXTURE_GIT_CONFIG, fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import * as gitModule from './git-exec.js'
@@ -22,18 +22,25 @@ describe('worktree recovery follow-ups (#608)', () => {
   let sessionId: string
   const branch = 'worker'
 
+  // The repository every test starts from, made once and copied (a `git init` and a commit per test were most of the setup)
+  let template: string
+  beforeAll(() => {
+    template = tempRoot('cc-recovery-template-')
+    git(template, ['init', '-q', '-b', 'main'])
+    git(template, ['config', 'core.autocrlf', 'false'])
+    writeFileSync(join(template, 'file.txt'), 'base\n')
+    git(template, ['add', '.'])
+    git(template, ['commit', '-qm', 'base'])
+  })
+  afterAll(() => removeTree(template))
+
   beforeEach(() => {
     dir = tempRoot('cc-recovery-')
     vi.stubEnv('CC_DATA_DIR', join(dir, 'data'))
     repo = join(dir, 'repo')
     child = join(dir, 'child')
     sessionId = randomUUID()
-    mkdirSync(repo)
-    git(repo, ['init', '-q', '-b', 'main'])
-    git(repo, ['config', 'core.autocrlf', 'false'])
-    writeFileSync(join(repo, 'file.txt'), 'base\n')
-    git(repo, ['add', '.'])
-    git(repo, ['commit', '-qm', 'base'])
+    cpSync(template, repo, { recursive: true })
   })
 
   afterEach(async () => {

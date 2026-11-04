@@ -120,6 +120,9 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
  * remote repository" and exits 128). Here the program git runs says it before the bound fires, and again when it is
  * signalled, and exits non-zero on the signal where the OS lets it: on every OS the failure is the bound's.
  */
+// A fixed bound, not SLOW-scaled (15 s on Windows for nothing). The program has to speak before it fires, which a cold node can need seconds for under load; each test's own limit stays scaled.
+const BOUND = 5_000
+
 describe('a git that runs past its time reports the bound, not its own words (#1842)', () => {
   let root: string
 
@@ -156,20 +159,20 @@ ${shPath(process.execPath)} ${shPath(program)}
 
   it('runGit: the failure says the bound, with no output of its own', { timeout: 30_000 * SLOW }, async () => {
     const { repo, said } = talkative()
-    const failed = await runGit(repo, ['commit', '--allow-empty', '-m', 'x'], { allowRepoPrograms: true, timeout: 5_000 * SLOW }).then(
+    const failed = await runGit(repo, ['commit', '--allow-empty', '-m', 'x'], { allowRepoPrograms: true, timeout: BOUND }).then(
       () => null,
       (e: unknown) => e,
     )
     // The program spoke before the bound fired: what the test is about happened
     expect(existsSync(said)).toBe(true)
-    expect(failed).toMatchObject({ message: `git did not answer within ${5_000 * SLOW} ms`, timedOut: true, stderr: '', stdout: '' })
+    expect(failed).toMatchObject({ message: `git did not answer within ${BOUND} ms`, timedOut: true, stderr: '', stdout: '' })
   })
 
   it('streamGit: the failure says the bound, with no output of its own', { timeout: 30_000 * SLOW }, async () => {
     const { repo, said } = talkative()
     // Run by a status in a repository whose fsmonitor is the program; the hook above is not needed
     git(repo, 'config', 'core.fsmonitor', `${shPath(process.execPath)} ${shPath(join(root, 'talk.cjs'))}`)
-    const failed = await streamGit(repo, ['status', '-z'], () => false, { allowRepoPrograms: true, timeout: 5_000 * SLOW }).then(
+    const failed = await streamGit(repo, ['status', '-z'], () => false, { allowRepoPrograms: true, timeout: BOUND }).then(
       () => null,
       (e: unknown) => e,
     )

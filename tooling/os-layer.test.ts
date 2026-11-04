@@ -22,6 +22,14 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = virtualFileLinter()
 const allowlist = layer.readOsAllowlist(ROOT)
 
+let repoPick: Promise<{ all: string[]; picked: string[] }> | undefined
+/** Every test file of the repository and the ones that run on every OS: a whole-repository lint scan, so once per file */
+const pickedOnRepo = () =>
+  (repoPick ??= (async () => {
+    const all = await vitestFiles()
+    return { all, picked: await osSelector().selectTests(all) }
+  })())
+
 async function refused(filePath: string, code: string): Promise<string[]> {
   const [res] = await eslint.lintText(code, { filePath: join(ROOT, filePath), warnIgnored: false })
   return (res?.messages ?? []).filter((m) => m.ruleId === 'local/os-imports').map((m) => m.message)
@@ -358,8 +366,8 @@ describe('the tests that run on every OS', () => {
   it(
     'on the repository: every layer test and every listed test runs, no ui or core test does, and a listed run runs exactly the list',
     async () => {
-      const all = await vitestFiles()
-      const picked = new Set(await osSelector().selectTests(all))
+      const { all, picked: pickedList } = await pickedOnRepo()
+      const picked = new Set(pickedList)
       for (const t of all.filter((f) => layer.inOsLayer(f) || allowlist.includes(f))) expect(picked.has(t), t).toBe(true)
       for (const { file } of layer.EVERY_OS_TESTS) expect(picked.has(file), file).toBe(true)
       expect([...picked].filter((t) => /^packages\/(ui|core)\//.test(t))).toEqual([])
@@ -442,7 +450,7 @@ describe("the Windows shards, split by each file's measured time", () => {
     const source = (JSON.parse(text) as { source: string }).source
     expect(formatDurations(durations, source)).toBe(text)
     // A missing file only weighs the median; most having a time is what keeps the shards even
-    const picked = await osSelector().selectTests(await vitestFiles())
+    const { picked } = await pickedOnRepo()
     expect(picked.filter((t) => durations[t] !== undefined).length / picked.length).toBeGreaterThan(0.8)
   }, 120_000 * SLOW)
 })
