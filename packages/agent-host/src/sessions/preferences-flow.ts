@@ -1,4 +1,5 @@
 import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { themeSlug } from '../themes.js'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -133,6 +134,7 @@ export class PreferencesFlow {
     let theme: ThemeChoice | null = null
     const done: string[] = []
     const failed: string[] = []
+    const modelWarnings: string[] = []
     /*
      * Every check comes first and the theme file is written last, so a refused call leaves nothing behind. A theme named in
      * the same call as the file that makes it cannot be looked up yet: it is looked up after the write (a miss then is a
@@ -146,7 +148,7 @@ export class PreferencesFlow {
     if (changes.theme !== undefined) {
       const found = await this.theme(rpc, changes.theme)
       const wanted = changes.theme.trim().toLowerCase()
-      const madeHere = file !== undefined && (file.name.trim().toLowerCase() === wanted || file.id?.trim().toLowerCase() === wanted)
+      const madeHere = file !== undefined && (file.name.trim().toLowerCase() === wanted || (await this.idOfFile(rpc, file)) === wanted)
       if (typeof found === 'string' && !madeHere) return { ok: false, error: found }
     }
     if (changes.textSize !== undefined) {
@@ -162,7 +164,8 @@ export class PreferencesFlow {
     if (changes.agentModels !== undefined) {
       const merged = await this.mergedAgentModels(rpc, changes.agentModels)
       if (typeof merged === 'string') return { ok: false, error: merged }
-      patch.agentModels = merged
+      patch.agentModels = merged.models
+      modelWarnings.push(...merged.warnings)
     }
     if (changes.lineHeight !== undefined) patch.lineHeight = changes.lineHeight
     if (changes.sendWithModifierEnter !== undefined) patch.sendWithModifierEnter = changes.sendWithModifierEnter
@@ -172,7 +175,7 @@ export class PreferencesFlow {
       patch.foldedGroups = keys
     }
     const parsed = UiPreferencesPatch.safeParse(patch)
-    if (!parsed.success) return { ok: false, error: `Nothing changed: ${issuesOf(parsed.error)}.` }
+    if (!parsed.success) return { ok: false, error: `${issuesOf(parsed.error)}.` }
     const sleep = changes.idleSleepMinutes
     if (sleep !== undefined && sleep !== 'never' && !(Number.isInteger(sleep) && sleep > 0)) {
       return { ok: false, error: `idleSleepMinutes is ${SLEEP_CHOICES}.` }
@@ -195,8 +198,12 @@ export class PreferencesFlow {
         patch.themeMode = found.base
         patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
         const again = UiPreferencesPatch.safeParse(patch)
-        if (!again.success) return { ok: false, error: `${issuesOf(again.error)}.` }
-        toApply = again.data
+        if (again.success) toApply = again.data
+        else {
+          // After the write this is a partial success, not a refusal
+          theme = null
+          failed.push(`Theme: not picked. ${issuesOf(again.error)}.`)
+        }
       }
     }
 
@@ -211,7 +218,7 @@ export class PreferencesFlow {
     if (Object.keys(patch).length) {
       await attempt('Appearance', async () => {
         const now = await callWindow(rpc, 'prefs.set', { patch: toApply })
-        return appearanceText(now, patch, theme)
+        return [appearanceText(now, patch, theme), ...modelWarnings].join(' ')
       })
     }
     // The notification switches (#1306): only those named change, merged into the host's record one by one
@@ -268,7 +275,7 @@ export class PreferencesFlow {
     if (Object.keys(compact).length) {
       await attempt('Auto compact', async () => {
         const checked = UiPreferencesPatch.safeParse({ autoCompact: compact })
-        if (!checked.success) throw new Error(`Nothing changed: ${issuesOf(checked.error)}.`)
+        if (!checked.success) throw new Error(`${issuesOf(checked.error)}.`)
         const now = autoCompactOf(await callWindow(rpc, 'prefs.set', { patch: checked.data }))
         return `Now: ${autoCompactText(now)}. It reaches a running session when its process next starts.`
       })
@@ -349,7 +356,7 @@ export class PreferencesFlow {
       })
     }
 
-    if (!done.length) return { ok: false, error: `Nothing changed. ${failed.join(' ')}` }
+    if (!done.length) return { ok: false, error: failed.join(' ') }
     return { ok: true, text: [...done, ...(failed.length ? [`Not changed: ${failed.join(' ')}`] : [])].join('\n') }
   }
 
@@ -376,15 +383,16 @@ export class PreferencesFlow {
 
   /**
    * The saved models with this call's changes merged in (the patch carries the whole map), or the sentence that says what is
-   * wrong. The map steers every difficulty-based start_agent in every project, so what Settings' picker offers is the limit: a
-   * tool that is known on this computer, and a model and effort from that tool's own list when it gives one (`agent_models`;
-   * Claude lists its models only while a session runs, and then, as the picker's "Other…", any plain text goes). Clearing a
+   * wrong. The map steers every difficulty-based start_agent in every project, so the tool must be an agent CLI on this
+   * computer. A model or effort is free text, as Settings' picker takes with "Other…", also when the tool lists its models
+   * (a newer id may not be in the list yet); one the list lacks is saved as typed and said so in a warning. Clearing a
    * difficulty that was never set changes nothing and leaves no empty entry.
    */
-  private async mergedAgentModels(rpc: WindowRpc, change: NonNullable<PreferenceChanges['agentModels']>): Promise<Record<string, Record<string, unknown>> | string> {
+  private async mergedAgentModels(rpc: WindowRpc, change: NonNullable<PreferenceChanges['agentModels']>): Promise<{ models: Record<string, Record<string, unknown>>; warnings: string[] } | string> {
     const now = (await callWindow(rpc, 'prefs.get', {})).agentModels ?? {}
     const known = (await callWindow(rpc, 'agents.detect', {})).map((s) => s.name)
     const out: Record<string, Record<string, unknown>> = { ...now }
+    const warnings: string[] = []
     for (const [tool, levels] of Object.entries(change)) {
       if (!known.includes(tool)) return `agentModels: ${plainQuoted(tool, 80)} is not an agent CLI on this computer; agent_status lists them (${known.join(', ') || 'none'}).`
       const own: Record<string, unknown> = { ...out[tool] }
@@ -394,6 +402,7 @@ export class PreferencesFlow {
         else if (choice !== undefined) {
           const model = choice.model.trim()
           const effort = choice.effort?.trim()
+          if (!model) return 'agentModels: a model is empty; give its id as plain text.'
           if (HIDDEN.test(model) || HIDDEN.test(effort ?? '')) return 'agentModels has a control or formatting character in a model or effort; give plain text.'
           if (catalog === undefined) {
             const r = await callWindow(rpc, 'agents.models', { tool }).catch(() => null)
@@ -401,8 +410,8 @@ export class PreferencesFlow {
           }
           if (catalog) {
             const m = catalog.find((x) => x.id === model)
-            if (!m) return `agentModels: ${plainQuoted(model, 200)} is not a model ${plainQuoted(tool, 80)} offers. agent_models shows them: ${catalog.slice(0, 15).map((x) => plainQuoted(x.id, 80)).join(', ')}.`
-            if (effort && m.efforts.length && !m.efforts.includes(effort)) return `agentModels: ${plainQuoted(effort, 80)} is not an effort of ${plainQuoted(model, 200)}: ${m.efforts.map((e) => plainQuoted(e, 40)).join(', ')}.`
+            if (!m) warnings.push(`Note: ${plainQuoted(model, 200)} is not in ${tool}'s current list (agent_models); saved as typed.`)
+            else if (effort && m.efforts.length && !m.efforts.includes(effort)) warnings.push(`Note: ${plainQuoted(effort, 80)} is not in the current efforts of ${plainQuoted(model, 200)} (${m.efforts.map((e) => plainQuoted(e, 40)).join(', ')}); saved as typed.`)
           }
           own[level] = effort ? { model, effort } : { model }
         }
@@ -410,7 +419,20 @@ export class PreferencesFlow {
       if (Object.keys(own).length) out[tool] = own
       else delete out[tool]
     }
-    return out
+    return { models: out, warnings }
+  }
+
+  /** The id a theme file will be written under: the one named, else the one `themes.save` files its name under among the ids taken now */
+  private async idOfFile(rpc: WindowRpc, file: NonNullable<PreferenceChanges['themeFile']>): Promise<string> {
+    const named = file.id?.trim().toLowerCase()
+    if (named) return named
+    const taken = new Set((await callWindow(rpc, 'themes.list', {})).map((f) => f.id))
+    const base = themeSlug(file.name.trim())
+    for (let n = 1; n < 1000; n++) {
+      const id = n === 1 ? base : `${base}-${n}`
+      if (!taken.has(id)) return id
+    }
+    return base
   }
 
   /** The session header's action: idle sessions on an older agent CLI restart on the installed one, and the busy ones are named */

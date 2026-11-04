@@ -585,7 +585,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
       const orc = await mgr.orchestrator()
       const { r } = await answered(orc.id, { autoUpdate: true }, 'deny')
       expect(r.isError).toBe(true)
-      expect(r.text).toMatch(/Nothing changed\. Automatic updates: The person did not approve it/)
+      expect(r.text).toMatch(/Nothing changed: Automatic updates: The person did not approve it/)
     })
 
     it('asks under auto too, and "always" is read as allow, once: the next turn-on asks again', async () => {
@@ -810,22 +810,44 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(((await prefs()) as { agentModels: { claude: object } }).agentModels.claude).toEqual({ light: { model: 'haiku' } })
   })
 
-  it('refuses a tool that is not on this computer, and a model or effort the tool does not offer; clearing what was never set leaves no entry', async () => {
+  it('refuses a tool that is not on this computer; a model or effort outside the tool\'s list is saved as typed, with a note; clearing what was never set leaves no entry', async () => {
     const orc = await mgr.orchestrator()
     const unknown = await run(orc.id, 'set_preferences', { agentModels: { codex: { standard: { model: 'gpt-5' } } } })
     expect(unknown.isError).toBe(true)
     expect(unknown.text).toContain('"codex" is not an agent CLI on this computer')
+    expect(unknown.text).not.toMatch(/Nothing changed: Nothing changed/)
     claude.listModels = async () => [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'], defaultEffort: null, tiers: [] }]
-    const badModel = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'gpt-5' } } } })
-    expect(badModel.text).toContain('"gpt-5" is not a model "claude" offers')
-    expect(badModel.text).toContain('"opus"')
+    const newer = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus-next' } } } })
+    expect(newer.isError).toBeFalsy()
+    expect(newer.text).toContain(`Note: "opus-next" is not in claude's current list (agent_models); saved as typed.`)
+    expect(await prefs()).toMatchObject({ agentModels: { claude: { heavy: { model: 'opus-next' } } } })
     const badEffort = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'max' } } } })
-    expect(badEffort.text).toContain('"max" is not an effort of "opus": "low", "high"')
-    expect((await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'low' } } } })).isError).toBeFalsy()
+    expect(badEffort.text).toContain('Note: "max" is not in the current efforts of "opus" ("low", "high"); saved as typed.')
+    expect(await prefs()).toMatchObject({ agentModels: { claude: { heavy: { model: 'opus', effort: 'max' } } } })
+    const inList = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'low' } } } })
+    expect(inList.text).not.toContain('Note:')
+    expect((await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: ' ' } } } })).isError).toBe(true)
     await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: null } } })
     expect((await prefs()).agentModels).toEqual({})
     await run(orc.id, 'set_preferences', { agentModels: { claude: { light: null } }, textSize: 1.1 })
     expect((await prefs()).agentModels).toEqual({})
+  })
+
+  it('a theme named by the id the new file will get is picked in the same call, also when the id carries a number', async () => {
+    const orc = await mgr.orchestrator()
+    const first = await run(orc.id, 'set_preferences', { themeFile: { name: 'My theme', base: 'dark', tokens: {} }, theme: 'my-theme' })
+    expect(first.isError).toBeFalsy()
+    expect(await prefs()).toMatchObject({ themeDark: 'my-theme' })
+    const second = await run(orc.id, 'set_preferences', { themeFile: { name: 'My theme', base: 'light', tokens: {} }, theme: 'my-theme-2' })
+    expect(second.isError).toBeFalsy()
+    expect(await prefs()).toMatchObject({ themeMode: 'light', themeLight: 'my-theme-2' })
+  })
+
+  it('a full failure carries one "Nothing changed" prefix', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 5 } })
+    expect(r.isError).toBe(true)
+    expect(r.text.match(/Nothing changed/g)).toHaveLength(1)
   })
 
   it('a refused call leaves no theme file behind, whichever check refuses it', async () => {

@@ -19,6 +19,18 @@ const MAX_FILE_BYTES = 256 * 1024
 /** Editors save in bursts (write, rename, chmod); one refetch per burst is enough */
 const SETTLE_MS = 100
 
+/** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
+export function themeSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'theme'
+  )
+}
+
 /** Where `remove` keeps what it took out of the folder */
 const REMOVED_DIR = '.removed'
 
@@ -166,13 +178,7 @@ export class ThemeFiles {
   }
 
   private async freeId(name: string): Promise<string> {
-    const base =
-      name
-        .toLowerCase()
-        .normalize('NFKD')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 48) || 'theme'
+    const base = themeSlug(name)
     for (let n = 1; n < 1000; n++) {
       const id = n === 1 ? base : `${base}-${n}`
       const taken = await stat(this.pathOf(id)).then(

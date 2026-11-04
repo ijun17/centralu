@@ -23,6 +23,9 @@ describe('staleSessionHint', () => {
     expect(staleSessionHint(hostWith('p3', sessions), 'old', () => true)).toBe('')
     expect(staleSessionHint(hostWith('p3', sessions), 'old', () => true, true)).toContain('deleted')
   })
+  it('closes a non-send, non-read call with a retry of the same call', () => {
+    expect(staleSessionHint(hostWith('p1', sessions), 'old', () => true)).toContain('retry the same call with the id of the live session you meant.')
+  })
   it('says nothing for a live session out of view, or an id nobody had', () => {
     expect(staleSessionHint(hostWith('p1', sessions), 'new', () => false)).toBe('')
     expect(staleSessionHint(hostWith('p1', sessions), 'nobody', () => true)).toBe('')

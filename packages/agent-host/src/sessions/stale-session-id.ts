@@ -41,7 +41,10 @@ export function staleSessionHint(
   else parts.push('That id was a session that has been replaced by a handoff.')
   if (heir) parts.push(`The live session that took over from it: ${label(heir)}.`)
   if (named.length) parts.push(`Live in the same project with the same name: ${named.map(label).join(', ')}.`)
-  const then = doing === 'send' ? 'Nothing was sent; send to' : doing === 'read' ? 'Nothing was read; read' : 'Nothing was done; use'
-  parts.push(heir || named.length ? `${then} the one you meant, by its id.` : 'No live session carries its name; list the sessions to find the one you meant.')
+  const then =
+    doing === 'send' ? 'Nothing was sent; send to the one you meant, by its id.'
+    : doing === 'read' ? 'Nothing was read; read the one you meant, by its id.'
+    : 'Nothing was done; retry the same call with the id of the live session you meant.'
+  parts.push(heir || named.length ? then : 'No live session carries its name; list the sessions to find the one you meant.')
   return ' ' + parts.join(' ')
 }
