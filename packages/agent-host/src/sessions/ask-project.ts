@@ -118,6 +118,13 @@ export type AnswerAt = { sessionId: string; seq: number }
 export const NO_WORDS = '(its turn ended without saying anything: read_session shows what it did)'
 
 /**
+ * In a report's place of the session's last response when its machine could not be reached and nothing of it was read (#1186): Centralu's words, not
+ * the session's, so a report does not keep them as the session's answer. `IN_PAUSE_REPORT`: the work's pause had read it, and that report holds it
+ */
+export const MACHINE_UNREACHABLE = '(not read: its machine could not be reached)'
+export const IN_PAUSE_REPORT = '(in the paused report before this one)'
+
+/**
  * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it
  * left out (#1186): read_session from the answer's first message, at the character the cut starts. It used to send
  * the caller to the session by name only, and read_session cut the same answer again at 2,000 characters, so the

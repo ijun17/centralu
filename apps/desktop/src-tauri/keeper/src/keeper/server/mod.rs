@@ -11,6 +11,7 @@
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
 //! | `{"op":"upgrade","exe":path,"source":BuildSource}` | a window's only (#1405): `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
+//! | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970): `{"ok":true}` once the host has been told, on its stdin, that the system is ending (a shutdown, restart or sign-out; `cancelled`: that it is not after all); `{"ok":false}` when no host is up |
 //! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
 //! | `{"op":"settings"}` | `{"ok":true,"background":bool}` |
 //! | `{"op":"set_background","on":bool}` | `{"ok":true,"background":bool}` |
@@ -271,6 +272,12 @@ pub(super) struct Keeper {
 
 /// Runs a keeper that is fully set up: the idle rule and the control socket, until it exits.
 pub(super) fn serve(k: Arc<Keeper>) -> i32 {
+    // launchd stopping everything at a shutdown (macOS): the host is told before this process goes (#1970)
+    let host = k.clone();
+    os::on_system_stop(move || {
+        log("stopped by the system: telling the host");
+        let _ = host.sup.send_line(host_proc::SYSTEM_ENDING_LINE);
+    });
     spawn_idle_watch(k.clone());
     accept_loop(&k);
     0
@@ -515,7 +522,7 @@ fn reply(stream: &mut UnixStream, v: &Value) {
 /// Every op `handle` answers (#1405): `ops_are_listed` checks this list against the dispatcher, so a new op
 /// is in `no_reply_carries_the_token_to_a_process_that_is_not_a_window` from the day it is added.
 #[cfg(test)]
-pub(super) const OPS: &[&str] = &["status", "attach", "children", "stop", "relaunching", "switch", "upgrade", "restart", "settings", "set_background"];
+pub(super) const OPS: &[&str] = &["status", "attach", "children", "stop", "relaunching", "system_ending", "switch", "upgrade", "restart", "settings", "set_background"];
 
 fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
     if !accept::from_this_user(&stream, log) {
@@ -557,6 +564,20 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             k.shutdown("asked to stop (Quit completely, or Restart completely)");
         }
         "relaunching" => relaunching(&k, &mut stream, &req),
+        // The window heard the system end (macOS: the workspace's power-off notice). A process that is not a window could make a
+        // false mark, so it is the window's alone
+        "system_ending" if !k.is_window(&stream) => {
+            log("refused system_ending to a process that is not a Centralu window");
+            reply(&mut stream, &json!({ "ok": false, "error": "window_only: only a Centralu window can tell the host the system is ending" }))
+        }
+        "system_ending" => {
+            let cancelled = req.get("cancelled").and_then(Value::as_bool) == Some(true);
+            let line = if cancelled { host_proc::SYSTEM_ENDING_CANCELLED_LINE } else { host_proc::SYSTEM_ENDING_LINE };
+            match k.sup.send_line(line) {
+                Ok(()) => reply(&mut stream, &json!({ "ok": true })),
+                Err(e) => reply(&mut stream, &json!({ "ok": false, "error": format!("the host was not told: {e}") })),
+            }
+        }
         // Both start code the request names and hand it the token: a window's only (#1405)
         "switch" | "upgrade" if !k.is_window(&stream) => {
             log(&format!("refused {op} to a process that is not a Centralu window"));

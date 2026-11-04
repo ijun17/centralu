@@ -70,6 +70,11 @@ pub fn relaunching(sock: &Path) -> Result<u64, String> {
     Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
 }
 
+/// `system_ending` (#1970): tells the host, through the keeper, that the system is ending (`cancelled`: that it is not after all)
+pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
+    request(sock, &json!({ "op": "system_ending", "cancelled": cancelled }), Duration::from_secs(3)).map(|_| ())
+}
+
 /// `restart`: starts the host again (the failure screen's Retry). Whether the keeper started one.
 pub fn restart_host(sock: &Path) -> Result<bool, String> {
     let v = request(sock, &json!({ "op": "restart" }), Duration::from_secs(5))?;
@@ -255,6 +260,7 @@ mod tests {
             "Ok(true)",
         );
         check("stop", r#"{"ok":true}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), "Ok(())");
+        check("system-ending", r#"{"ok":true}"#, &|s| format!("{:?}", system_ending(s, false)), json!({ "op": "system_ending", "cancelled": false }), "Ok(())");
         let source = BuildSource { commit: "abc".into(), ..Default::default() };
         check(
             "switch",

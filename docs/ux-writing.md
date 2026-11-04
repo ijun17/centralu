@@ -118,7 +118,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   tool.
 - A linked machine is named by the name the person gave it: "Runs on <name>" (`machines/MachineTag.tsx`).
 - The product is "Centralu", used where the person needs to know who did something: "Stopped: Centralu
-  quit or restarted" (`components/primitives.tsx`), "Keep agents running after Centralu quits"
+  quit or restarted" (`components/primitives.tsx`; the computer's end reads "Stopped: the computer shut down, restarted or signed out", the computer's act, not Centralu's, in the same words (`SHUTDOWN_WORDS`) wherever it is said), "Keep agents running after Centralu quits"
   (`settings/Settings.tsx`).
 - Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`)
   and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;

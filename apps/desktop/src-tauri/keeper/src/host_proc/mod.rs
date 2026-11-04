@@ -198,6 +198,13 @@ pub const STOP_GRACE: Duration = Duration::from_secs(3);
 /// The line that asks a host the window started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
 
+/// The lines that tell a host the system is ending, and that it is not after all (agent-host `main.ts`, `system-ending`; #1397,
+/// #1970): said by whoever hears the end first, the window at Windows' end-session question or the keeper at launchd's stop
+pub const SYSTEM_ENDING_LINE: &str = r#"{"op":"system-ending"}"#;
+/// The same for a sign-out, which a serve host in a network logon survives (the launcher leaves it out of that one, #1970)
+pub const SYSTEM_ENDING_LOGOFF_LINE: &str = r#"{"op":"system-ending","logoff":true}"#;
+pub const SYSTEM_ENDING_CANCELLED_LINE: &str = r#"{"op":"system-ending","cancelled":true}"#;
+
 /// How long a host asked to stop for an update gets before it is stopped the usual way. The host ends its shutdown after
 /// 10 s whatever is left (`SHUTDOWN_BOUND_MS`), so this is that and a margin
 pub const STOP_FOR_UPDATE_WAIT: Duration = Duration::from_secs(15);

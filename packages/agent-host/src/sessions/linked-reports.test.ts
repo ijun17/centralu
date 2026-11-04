@@ -30,6 +30,8 @@ let reports: LinkedReports
 /** What the machine says the last turn said, and what the hub asked for of it (#1604) */
 let said: (id: string) => string
 let wordsAsked: unknown[]
+/** Holds every read of the session's words until it is released, to have the link drop while one is out */
+let readGate: Promise<void>
 
 beforeEach(() => {
   store = new Store()
@@ -47,11 +49,13 @@ beforeEach(() => {
   gateAnswer = 'deliver'
   said = (id) => `last words of ${id}`
   wordsAsked = []
+  readGate = Promise.resolve()
   /** The hub's reader over its links, as far as the reports read it: the mirror, the last words, and the machine's list */
   const reader = {
     describe: (id: string) => mirror.get(id) ?? null,
     lastWords: async (id: string, _max: number, opts?: unknown) => {
       wordsAsked.push(opts)
+      await readGate
       return { ok: true as const, text: said(id), length: 0, seq: null }
     },
     machineLinked: (id: string) => linked.has(id),
@@ -521,16 +525,106 @@ describe('a machine whose link drops or comes back', () => {
     status('m1', 'unreachable')
     await flush()
     expect(delivered).toHaveLength(3)
-    // A machine that cannot be reached cannot be read: the preview points at the pause, which carried its last words
+    // A machine that cannot be reached cannot be read: the report keeps the words the pause was written with, marked as read then
     expect(delivered[2]).toEqual({
       orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site',
-      preview: '(in the paused report before this one)', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify] },
+      preview: 'last words of m1.w1', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify], asRead: true },
     })
     // m10 kept its wait and what the hub knew of its work: its next turn end, with that work still running, is no report
     expect(children.linkedReports.get('m10.w1')?.paused).toEqual([build])
     turn('m10.w1')
     await flush()
     expect(delivered).toHaveLength(3)
+  })
+
+  it('a link that drops does not give one asker the words another asker’s pause read', async () => {
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    // The session's wait passes to another orchestrator, whose own pause stands over the same work
+    children.setLinkedReport('m1.w1', { orchestratorId: 'o2', busy: false, paused: [verify] })
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ orchestratorId: 'o2', preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a later pause of the same session, for the same asker, does not report the words of the pause before it', async () => {
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered[0]).toMatchObject({ preview: 'last words of m1.w1' })
+    // The asker sends again: the first pause is over, and the second turn pauses on other work and is not read
+    expect(reports.releaseAsker('m1.w1', 'o1')).toBeTypeOf('function')
+    reports.observe(tasks('m1.w1', [verify, build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(2)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('words a read returns after the link dropped belong to no report: the next pause of the session does not report them', async () => {
+    let release!: () => void
+    readGate = new Promise<void>((resolve) => (release = resolve))
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    status('m1', 'unreachable')
+    await flush()
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]).toMatchObject({ work: { linkLost: 'Box' } })
+    release()
+    await flush()
+    // The machine is back, the session pauses again for the same asker, and the link drops once more
+    status('m1', 'connected')
+    readGate = Promise.resolve()
+    reports.observe(tasks('m1.w1', [verify, build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(2)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a session deleted there takes the words its pause read with it: the same id on the machine later reports none of them', async () => {
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    reports.observe({ type: 'session_deleted', sessionId: 'm1.w1' })
+    // A session with the same id on the machine (it was added again), paused for the same asker, whose link then drops
+    reports.observe(tasks('m1.w1', [build]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toHaveLength(1)
+    status('m1', 'unreachable')
+    await flush()
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a machine removed while a later task’s turn runs does not report the words of the task before it', async () => {
+    status('m1', 'connected', 'Box')
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    turn('m1.w1')
+    await flush()
+    // A new task of the same session, its turn still running when the machine goes
+    ask('m1.w1', 'o1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    linked.delete('m1')
+    reports.observe({ type: 'machine_resync', machineId: 'm1' })
+    await flush()
+    expect(delivered.at(-1)).toMatchObject({ preview: '(not read: its machine could not be reached)', work: { machineRemoved: 'Box' } })
+    expect(delivered.at(-1)?.work).not.toHaveProperty('asRead')
   })
 
   it('a turn in progress keeps its wait across a drop, and reports when it ends after the link is back', async () => {
@@ -605,7 +699,7 @@ describe('a machine removed from Centralu', () => {
     reports.observe({ type: 'machine_resync', machineId: 'm1' })
     await flush()
     expect(delivered.slice(1)).toEqual([
-      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: '(in the paused report before this one)', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify] } },
+      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify], asRead: true } },
       // Not an empty last response (#1186): nothing could be read, and it says why
       { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '(not read: its machine could not be reached)', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
     ])

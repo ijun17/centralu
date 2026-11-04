@@ -47,13 +47,15 @@ import {
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
-import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
+import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, readBack, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
 import { systemNow } from './clock.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
+/** A merge into the batch branch whose answer was lost and which the branch does not show: no new batch for this long, so a GitHub that keeps failing is not built against in a loop. */
+export const LOST_OFF_MS = 5 * 60_000
 const RED = new Set(['failed', 'failing'])
 const TIERS = CI.fullTier !== null
 /**
@@ -202,6 +204,21 @@ async function build(b, ctx) {
       r = await mergeInto(repo, b.branch, m.head, `Merge queue batch ${b.id}: #${m.pr} ${m.title}`)
     } catch (e) {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      // The answer was lost (gh's "EOF", a 5xx): GitHub may have merged it. If the branch moved it did, and the member is a
+      // step (the branch has one writer). Unmoved, or unreadable, says nothing safe: GitHub may still be doing it, and a
+      // member left in the branch unseen has the later ones tested with it and landed from a tree no run saw (#1961). So no
+      // batch goes on with this branch, and nobody is blamed for a dropped connection
+      if (e.lost) {
+        const seen = await readBack(() => readCommit(repo, b.branch))
+        if (seen && seen.sha !== (steps.at(-1)?.sha ?? main.sha)) {
+          steps.push({ pr: m.pr, head: m.head, sha: seen.sha, tree: seen.tree })
+          continue
+        }
+        return drop(b, ctx, `GitHub's answer to merging #${m.pr} into it was lost (${e.message}), and ${seen ? 'the branch did not show it afterwards' : 'the branch could not be read afterwards'}; its pull requests go back to their own CI, and no batch is made for ${Math.round(LOST_OFF_MS / 60_000)} minutes.`, {
+          batchless: false,
+          then: (fq) => (fq.batchOff = { until: new Date(now + LOST_OFF_MS).toISOString(), reason: e.message }),
+        })
+      }
       // Not a conflict, but GitHub would not merge it (a head gone, a 404 or 422): as a conflict, it is left out
       refused.push(m.pr)
       continue

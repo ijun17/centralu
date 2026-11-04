@@ -14,6 +14,7 @@ import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { raceBound } from '../timing.js'
+import { staleSessionHint } from './stale-session-id.js'
 
 /**
  * What agent_session reaches of the rest of the delegation flow (`DelegationFlow`): the child's run and its wait, the
@@ -119,7 +120,7 @@ export class AgentSessionActions {
     const seat = caller?.projectId ? 'project' : caller?.kind === 'orchestrator' ? 'orchestrator' : null
     const owns = seat === 'orchestrator' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
     if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
-      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'orchestrator' || s.askedBy === callerId))}` }
     }
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')

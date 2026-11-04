@@ -98,6 +98,8 @@ export type RpcServices = {
   stopGate?: StopGate
   /** Where `host.handover` is kept and said (#1224) */
   handover?: (h: HostHandover | null) => void
+  /** What `host.systemEnding` tells: the system is ending, or (`cancelled`) is no longer (#1970, lifecycle/system-end.ts) */
+  systemEnding?: (cancelled: boolean) => void
   /** What would stop if this host stopped now (`host.activity`, idle.ts `activityCounts`) */
   activity?: () => HostActivity
   /** The windows' answers to an agent's "Apply now" (#665, update-apply.ts) */
@@ -156,7 +158,7 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   const requireThemes = (): ThemeFiles => {
@@ -256,6 +258,10 @@ export function createRpcHandler(
     'terminal.close': async (p: unknown) => {
       requireTerminals().close(RpcMethods['terminal.close'].params.parse(p).terminalId)
       return { ok: true as const }
+    },
+    'themes.remove': async (p: unknown) => {
+      const keptAt = await requireThemes().remove(RpcMethods['themes.remove'].params.parse(p).id)
+      return { removed: keptAt !== null, keptAt }
     },
     'themes.import': async (p: unknown) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
     'themes.resolve': async (p: unknown) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
@@ -931,6 +937,7 @@ export function createRpcHandler(
       return {}
     },
     'host.handover': async ({ handover: h }) => ack(handover?.(h)),
+    'host.systemEnding': async ({ cancelled }) => ack(systemEnding?.(cancelled === true)),
   }
 
   const routes: Record<string, ((p: never, ctx?: RpcContext) => Promise<unknown>) | undefined> = { ...raw, ...handlers }

@@ -98,7 +98,7 @@ const give = (h: Host, from: string, to: string, text: string) => h.m.service.ta
 const pendingFor = (recipient: string, messageId: string) => store.mailbox.pendingFor(at(recipient), Date.now() + 10 * DEBOUNCE_MS).some((p) => p.message.id === messageId)
 /** The report texts stored in a session's conversation that name the child */
 const reportsIn = (sessionId: string, child: string) =>
-  store.messages.loadMessages(sessionId, 50).map((x) => JSON.stringify(x.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+  store.messages.loadMessages(sessionId, 50).map((x) => JSON.stringify(x.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
 /** The note's line for a moved message, as `movedMessage` words it */
 const unreadLine = (firstLine: string, id: string) =>
   `- mail message "${firstLine}" — unread, now waiting for you — handle: ${id}. It was addressed to the previous session and is yours to read and answer now. Read it with the mail tool.`

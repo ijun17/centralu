@@ -907,3 +907,13 @@ impl Drop for HostGuard<'_> {
         drop(GroupGuard(pgid));
     }
 }
+
+/// #1970: the lines the window and the keeper write are the control lines the host takes (`system-ending`, agent-host `main.ts`)
+#[test]
+fn the_system_ending_lines_are_the_hosts_control_lines() {
+    let said = |line: &str| serde_json::from_str::<serde_json::Value>(line).unwrap();
+    assert_eq!(said(SYSTEM_ENDING_LINE), serde_json::json!({ "op": "system-ending" }));
+    assert_eq!(said(SYSTEM_ENDING_CANCELLED_LINE), serde_json::json!({ "op": "system-ending", "cancelled": true }));
+    assert_eq!(said(SYSTEM_ENDING_LOGOFF_LINE), serde_json::json!({ "op": "system-ending", "logoff": true }));
+    assert!(!SYSTEM_ENDING_LINE.contains('\n') && !SYSTEM_ENDING_CANCELLED_LINE.contains('\n'));
+}

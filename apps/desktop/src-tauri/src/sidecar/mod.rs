@@ -29,6 +29,7 @@ pub use crate::host_proc::HostInfo;
 use crate::host_proc::{self, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink};
 
 mod launch;
+pub(crate) mod ending;
 #[cfg(unix)]
 mod link;
 #[cfg(unix)]

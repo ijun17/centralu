@@ -767,7 +767,10 @@ describe('a successor reads and recalls its archived handoff lineage (#1487)', (
     const reader = orchestratorToolsFor(host, 'a', undefined, true)
     // The lineage opens the archive to its own members only: one of them is read, the neighbour in the archive is not
     expect(await reader.readSession('old1')).toMatchObject({ ok: true })
-    expect(await reader.readSession('stranger')).toEqual({ ok: false, error: 'Not a session you can read: stranger' })
+    // Refused with the archive's help (it was deleted); nothing of its conversation comes back
+    const refused = await reader.readSession('stranger')
+    expect(refused.ok).toBe(false)
+    expect(refused.error).toMatch(/^Not a session you can read: stranger That id was the session/)
     expect(await reader.readSession('nowhere')).toEqual({ ok: false, error: 'Not a session you can read: nowhere' })
     // Another session’s lineage is its own: `old1`'s chain does not make `a`'s reader of `stranger`
     expect(await orchestratorToolsFor(host, 'b', undefined, true).readSession('old0')).toMatchObject({ ok: false })

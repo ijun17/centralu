@@ -428,7 +428,7 @@ fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
                     assert_eq!(pushed["view"]["status"]["token"], json!(limited));
                 }
             }
-            "switch" | "upgrade" => assert!(lines[0].contains("window_only"), "{op}: {}", lines[0]),
+            "switch" | "upgrade" | "system_ending" => assert!(lines[0].contains("window_only"), "{op}: {}", lines[0]),
             _ => {}
         }
     }

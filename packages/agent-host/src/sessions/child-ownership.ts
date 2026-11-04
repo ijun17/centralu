@@ -218,6 +218,8 @@ export type LinkedReport = {
   lastBy?: 'person' | 'work'
   /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
   addNext?: number
+  /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
+  read?: { preview: string; seq: number | undefined }
 }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
@@ -530,7 +532,7 @@ export class ChildOwnership {
     /*
      * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
      * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
-     * rather than left to name an unrelated later turn as "the assigned work finished" (#166): a session with no
+     * rather than left to name an unrelated later turn as the work's end (#166): a session with no
      * process lost its turn with the old host, and a kept session already at rest finished its turn while the old host
      * was letting go (`handingOver` held that report back); its answer stays readable through agent_session.
      * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs

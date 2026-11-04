@@ -2221,7 +2221,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
     const there = remote.store.messages.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
     expect(there.payload).toMatchObject({ from: { name: 'hub-orch on Hub mac' } })
-    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The session ended its turn.')))
     const report = told(hub).find((t) => t.startsWith('[Centralu]'))!
     expect(report).toContain('id: m1.w1')
     expect(report).toMatch(/Project: .+ on Remote box/)
@@ -2312,7 +2312,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
 
     const loud = await tool('create_session', { project: 'm1.p-remote', name: 'Loud', firstMessage: 'say when done' })
     expect(loud.text).toContain('you are told when its turn ends')
-    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The session ended its turn.')))
     const reports = told(hub).filter((t) => t.startsWith('[Centralu]'))
     expect(reports).toHaveLength(1)
     expect(reports[0]).toContain('echo: say when done')
@@ -2643,7 +2643,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
     const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
-    const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
+    const reports = () => told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t)).length
     const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
     /*
      * The clock for "no report comes" (#845): another child is given a task, and its report awaited. It travels the same
@@ -2657,7 +2657,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const r = await call
       if (!r.ok) throw new Error(r.error)
       // Its own report, not any: a wrongful one coming in meanwhile must not end the wait
-      await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work') && t.includes(`id: ${r.sessionId}`)))
+      await eventually(() => told().some((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(`id: ${r.sessionId}`)))
     }
     return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf, control }
   }
@@ -2915,7 +2915,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'working', reported: true })
     if (!r.ok) return
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
     // More work, waited on: its answer is the call's, and no second report comes
     expect(await agent(r.sessionId, 'send', 'and now this')).toMatchObject({ ok: true, state: 'working' })
     expect(await agent(r.sessionId, 'wait')).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('and now this') })
@@ -2958,7 +2958,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     ;(remote.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!.finish('done by hand')
     // The turn ended: the note goes in as new work the caller owns, and its end is reported to the caller
     await eventually(() => noted().length === 1)
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished') && t.includes(`echo: `)))
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn') && t.includes(`echo: `)))
     expect(told().join(' ')).not.toContain('done by hand')
   })
 
@@ -3015,8 +3015,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // The note's row is stored while the first turn runs, so the record has nothing of anyone's between the two turns' words
     it("reports the follow-up turn's own answer, not the turn before's joined to it", async () => {
       const { agent, r, remote, id, told } = await followUp('a plain note')
-      await eventually(() => told().filter((t) => t.startsWith('[Centralu] The assigned work finished')).length === 2)
-      const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+      await eventually(() => told().filter((t) => t.startsWith('[Centralu] The session ended its turn')).length === 2)
+      const reported = told().filter((t) => t.startsWith('[Centralu] The session ended its turn'))
       expect(reported[1]).toContain('echo: ')
       expect(reported[1]).toContain('a plain note')
       expect(reported[1]).not.toContain('answered: Yes')
@@ -3061,7 +3061,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         // The instruction's turn ends and is reported; the note it did not read then runs as a turn of its own, reported after
         // it. The count is 3 only until that turn ends, some 30 ms, which a wait under load can miss (#1809): wait for both
         await eventually(() => reports() === 4)
-        const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+        const reported = told().filter((t) => t.startsWith('[Centralu] The session ended its turn'))
         expect(reported[3]).toContain('use the staging data')
         // The two turns ran in that order there. Report 3's words are not checked: they are read once it is written, and
         // by then the note's turn may have begun (#1809 review)
@@ -3097,7 +3097,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       it("reads each report's words of the turn that ended, though the next turn has ended when the hub reads", async () => {
         const { reports, told } = await slowReadsThenInstruction()
         await eventually(() => reports() === 4)
-        const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+        const reported = told().filter((t) => t.startsWith('[Centralu] The session ended its turn'))
         expect(reported[2]).toContain('answered: Yes')
         expect(reported[2]).not.toContain('use the staging data')
         expect(reported[3]).toContain('use the staging data')
@@ -3139,7 +3139,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: false, error: expect.stringContaining('before deleting it') })
     // The person answers there: the turn ends, and its report comes
     await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
   })
 
   it('starts it in a new worktree there on the branch asked for', async () => {
@@ -3213,7 +3213,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // Back on the same port: its process went with the host, so the turn is over, and its report comes now
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work')), 10_000)
+    await eventually(() => told().some((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t)), 10_000)
   })
 
   // #1038 review: deleted there, or its machine removed, while the hub could not see it
@@ -3293,7 +3293,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // Into the running turn: no new turn is armed, and the turn's end is still the report owed
     expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working', reported: true })
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
     // The person starts a turn there: not the caller's to add to
     await remote.mgr.send(id, 'please approve my own command')
     await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
@@ -3655,13 +3655,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const continued = () => told().filter((t) => t.includes('cut the turn') && t.includes('Centralu continued it there on the new version'))
     await eventually(() => continued().length === 1)
     expect(told().filter((t) => t.includes('dropped'))).toEqual([])
-    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toEqual([])
+    expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
 
     // The continued turn's end is the one report
     const handle = (running.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!
     handle.finish('Tests migrated.')
-    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
-    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toHaveLength(1)
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
+    expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toHaveLength(1)
     expect(continued()).toHaveLength(1)
     expect(continuedThere()).toHaveLength(1)
   })

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 const ROOTS = [
   fileURLToPath(new URL('../acp/recordings/', import.meta.url)),
   fileURLToPath(new URL('../antigravity/recordings/', import.meta.url)),
+  fileURLToPath(new URL('../claude/recordings/', import.meta.url)),
 ]
 
 const PRIVATE: readonly [string, RegExp][] = [
@@ -23,6 +24,13 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a Linux home folder', /(?<![\w<])\/home\/(?!<)[^/\s"'`]+/],
   ['a bridge token', /ccb\d+:[\w-]+:[\w-]{16,}/],
   ['a secret in an environment entry', /\\?"name\\?":\\?"[A-Z_]*(?:TOKEN|SECRET|PASSWORD|KEY)[A-Z_]*\\?",\\?"value\\?":\\?"(?!<secret>)/],
+]
+
+/** What Claude Code's recordings must also be free of: its frames carry the person's account and connectors, and real session ids */
+const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
+  ['an id that is not a placeholder', /\b(?!0{4}\d{4}-0000-4000-8000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  ['an account address', /[\w.+-]+@[\w-]+\.[\w.-]+/],
+  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+/],
 ]
 
 /**
@@ -45,14 +53,32 @@ function machineWords(): [string, RegExp][] {
   return words
 }
 
-type Line = { dir?: string; msg?: { method?: string; params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } } } }
+type Delta = { type?: string; text?: unknown; thinking?: unknown; partial_json?: unknown }
+type Command = { name?: unknown; builtin?: unknown }
+type Line = {
+  dir?: string
+  msg?: {
+    method?: string
+    type?: string
+    params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } }
+    /** Claude Code's stream-json */
+    event?: { delta?: Delta }
+    commands?: Command[]
+    response?: { response?: { commands?: Command[] } }
+  }
+}
 
 /** The recording's text as the screen would read it: every streamed chunk joined to the ones beside it */
 function joinedChunks(lines: readonly Line[]): string {
   return lines
     .map((l) => {
       const u = l.msg?.params?.update
-      return u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string' ? u.content.text : '\n'
+      if (u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string') return u.content.text
+      // A line of Claude Code's that is no stream event is between the pieces of a block, not a break in it
+      if (typeof l.msg?.type === 'string' && l.msg.type !== 'stream_event') return ''
+      const d = l.msg?.event?.delta
+      const piece = d?.type === 'text_delta' ? d.text : d?.type === 'thinking_delta' ? d.thinking : d?.type === 'input_json_delta' ? d.partial_json : undefined
+      return typeof piece === 'string' ? piece : '\n'
     })
     .join('')
 }
@@ -70,10 +96,13 @@ describe('the committed recordings', () => {
       const text = readFileSync(file, 'utf8')
       const lines = text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line)
       const readings = [text, joinedChunks(lines)]
-      const found = [...PRIVATE, ...machineWords()].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
+      const found = [...PRIVATE, ...(/[\\/]claude[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...machineWords()].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
       expect(found).toEqual([])
       const commands = lines.flatMap((l) => l.msg?.params?.update?.availableCommands ?? []).map((c) => c.name)
       expect(commands.filter((c) => typeof c !== 'string' || !/^command-\d+$/.test(c))).toEqual([])
+      // Claude Code's lists keep the commands that ship with it and number the rest
+      const own = lines.flatMap((l) => [...(l.msg?.commands ?? []), ...(l.msg?.response?.response?.commands ?? [])]).filter((c) => c.builtin !== true)
+      expect(own.filter((c) => typeof c.name !== 'string' || !/^command-\d+$/.test(c.name))).toEqual([])
     })
   }
 })

@@ -372,6 +372,8 @@ pub fn run() {
             let sup = supervisor.clone();
             move |app| {
                 sup.start(app.handle().clone());
+                // The system ending (a shutdown, restart or sign-out) is told to the host (#1970)
+                sidecar::ending::install(app.handle());
                 #[cfg(target_os = "macos")]
                 traffic_lights::install(app.handle());
                 // Windows: no OS title bar above ours; the top bar draws the controls (os_integration.rs)

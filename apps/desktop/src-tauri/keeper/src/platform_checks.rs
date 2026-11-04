@@ -30,7 +30,7 @@ const MAY_ASK: &[&str] = &["keeper/src/os/", "keeper/src/start_plan.rs"];
 
 /// The window's OS integration, not the runtime: finding VS Code's `code`, the badge, sounds, the
 /// trash and the file manager, app links and the Quit menu item.
-const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs", "src/os_integration.rs", "src/app_links.rs", "src/quit.rs"];
+const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs", "src/os_integration.rs", "src/app_links.rs", "src/quit.rs", "src/sidecar/ending.rs"];
 
 /// Today's sites outside the OS layer, with how many each has. Only shrinks.
 const NOT_YET: &[(&str, usize)] = &[

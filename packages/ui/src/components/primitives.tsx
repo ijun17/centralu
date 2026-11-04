@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { Interruption, SessionState } from '@cc/protocol/client'
+import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
 import { useCapability } from '../app/PlatformProvider.jsx'
 import { formatDuration } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'
@@ -33,6 +33,8 @@ export function interruptionLabel(i: Interruption): string {
       return 'Stopped: network'
     case 'quit':
       return 'Stopped: Centralu quit or restarted'
+    case 'shutdown':
+      return `Stopped: ${SHUTDOWN_WORDS}`
     case 'interrupted':
       return 'Stopped: interrupted'
     case 'reconnecting':

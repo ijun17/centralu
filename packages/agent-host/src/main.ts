@@ -55,7 +55,8 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
+import { SystemEndNotice, askSystemStopping } from './lifecycle/system-end.js'
+import { clearStoppedMark, markQuit, takeSystemEnd, updateResumeFolder, writeSystemEnd } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
@@ -262,6 +263,38 @@ if (!lock.ok) {
  */
 const ownership = lock
 process.on('exit', ownership.release)
+/*
+ * Whether the last host was told the system was ending (lifecycle/system-end.ts, #1397), taken once this host holds the folder: a
+ * notice found from now on is this host's own. Then the turns it cut were the system's
+ */
+const systemEnd = dbPath === ':memory:' ? null : takeSystemEnd(dirname(dbPath))
+if (systemEnd) console.error(`[agent-host] the last host was told the system was ending, at ${new Date(systemEnd.at).toISOString()}`)
+/** This host's notice that the system is ending, for the next start. A host in memory has no folder to write it in */
+const systemEnding = new SystemEndNotice({
+  write: dbPath === ':memory:' ? () => {} : writeSystemEnd(dirname(dbPath)),
+  outlived: () => console.error('[agent-host] still running well after the system said it was ending: it did not end'),
+})
+/**
+ * Asks the system whether it is ending (Linux: systemd, `askSystemStopping`), once, as this host begins to leave: whichever way
+ * the leave began, `Shutdown` waits for the answer (at most a second), so it is written before the agents go. The time is the
+ * leave's: the agents got the system's end with it. Its queries end with it, or with the host however it exits
+ */
+let systemQuestion: Promise<void> | null = null
+let endSystemQuestion = () => {}
+process.on('exit', () => endSystemQuestion())
+const askSystem = (): Promise<void> | undefined => {
+  if (systemQuestion) return systemQuestion
+  const at = Date.now()
+  const q = askSystemStopping()
+  if (!q.stopping) return undefined
+  endSystemQuestion = q.end
+  systemQuestion = q.stopping.then((stopping) => {
+    if (!stopping) return
+    console.error('[agent-host] leaving as the system is stopping')
+    systemEnding.notice(at)
+  })
+  return systemQuestion
+}
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
@@ -336,7 +369,12 @@ const mgr = new SessionManager(
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
-  { ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}), ...(updateResume ? { updateResume } : {}) },
+  {
+    ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}),
+    ...(updateResume ? { updateResume } : {}),
+    // The last host recorded that the system was ending (#1397)
+    ...(systemEnd ? { systemEnd } : {}),
+  },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
 mgr.useProjectsHome(() => projectsHome())
@@ -587,6 +625,22 @@ const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop'
 // The window stops the host it started for an update by a line on its stdin: it speaks no WebSocket, and `host.stop` is refused to a host the app runs (#1895)
 if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromRequest({ forUpdate: m.forUpdate === true }, 'the window'))
 /*
+ * The system is ending (a shutdown, restart or sign-out), told by the parent that hears it: the window's Windows end-session
+ * question, or the keeper (#1397). Said before the parent goes, so the cut turns this host's leave leaves are the system's. A serve
+ * host has no such parent: the window tells it by `host.systemEnding` (#1970).
+ * `cancelled`: the end was called off
+ */
+const systemEndingTold = (cancelled: boolean): void => {
+  if (cancelled) {
+    console.error('[agent-host] the system is no longer ending')
+    systemEnding.cancel()
+  } else {
+    console.error('[agent-host] the system is ending')
+    systemEnding.notice()
+  }
+}
+control?.on('system-ending', (m) => systemEndingTold(m.cancelled === true))
+/*
  * Linked machines (#82, docs/plans/remote-hub.md): this host is the hub for its own UI, and reaches
  * the hosts of other machines the person linked, each over the person's own ssh. The router stands
  * in front of the RPC handler and sends a call that names another machine's session, project or
@@ -709,6 +763,7 @@ const router: Router = new Router({
     // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
     stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
     // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
+    systemEnding: systemEndingTold,
     handover: (h) => {
       handover = h
       server.broadcast({ type: 'host_handover', handover: h })
@@ -855,6 +910,8 @@ const shutdown = new Shutdown({
   stopLog,
   exit: (code) => process.exit(code),
   pid: process.pid,
+  // Whether the system is ending, asked as the leave begins, whichever way it began (#1397). Nothing where it cannot say (`undefined`)
+  beforeLeave: () => askSystem(),
 })
 
 start.at('listen')
@@ -983,7 +1040,11 @@ if (control && launch.underKeeper) {
       return shutdown.stopServices(mode, true)
     },
     keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
-    release: ownership.release,
+    // The data folder is the next host's from here: nothing this one learns later is written in it
+    release: () => {
+      systemEnding.close()
+      ownership.release()
+    },
     write: (line) => void writeSync(1, `${line}\n`),
     log: (line) => console.error(line),
     exit: (code) => {
