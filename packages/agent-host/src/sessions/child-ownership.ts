@@ -159,7 +159,7 @@ export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
 /**
  * The hub's messages the tool holds (#1604), in `input_origins:<session>`: `[inputId, origin][]`. Written from the held entries (the ones
  * with an `origin`) for a build before #1639, which reads it during a swap; this build reads the entries. Removed in the release after
- * #1639 (add first, remove later). Its presence also marks a session a hub follows (`followedByHub`)
+ * #1639 (add first, remove later).
  */
 export const inputOriginsKey = (sessionId: string) => `input_origins:${sessionId}`
 const MAX_INPUT_ORIGINS = 64
@@ -785,13 +785,11 @@ export class ChildOwnership {
     this.named.delete(sessionId)
     this.takenOver.delete(sessionId)
   }
-  /** Whether a hub gives this session messages: nothing is kept of the turns of any other (#1604) */
-  private followedByHub(sessionId: string): boolean {
-    return this.store.settings.appSetting(turnSpanKey(sessionId)) !== null || this.store.settings.appSetting(inputOriginsKey(sessionId)) !== null
-  }
-  /** A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604) */
+  /**
+   * A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604). Kept for every session, not only
+   * one a hub follows: a stop notice quotes the stopped turn's words, never the turn before's (#1946)
+   */
   noteTurnStart(sessionId: string, seq: number): void {
-    if (!this.followedByHub(sessionId)) return
     this.store.settings.updateAppSetting(turnSpanKey(sessionId), (raw) => {
       const was = readTurnSpan(raw)
       const starts = [...startsOf(was), seq].slice(-TURN_STARTS_KEPT)
@@ -826,6 +824,11 @@ export class ChildOwnership {
     if (span.latest?.ended) return { after: span.latest.since }
     if (span.latest && span.previous) return { after: span.previous.since, through: span.latest.since }
     return span.latest ? { after: span.latest.since } : undefined
+  }
+  /** The rows of the turn that began last, ended or not (#1946): the turn a stop cut, though an update's continue runs on in it */
+  latestTurnRows(sessionId: string): { after: number } | undefined {
+    const since = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId))).latest?.since
+    return since === undefined ? undefined : { after: since }
   }
   /** The mailbox's way of hearing that a turn started (§6), set by the host when it has one */
   private turnStartedHook: ((sessionId: string, turn: TurnStart) => void) | undefined

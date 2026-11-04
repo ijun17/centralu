@@ -768,7 +768,7 @@ at all ("which this hub did not see begin"), never the person without a message 
 
 What the caller reads of such a turn is that turn's words (#1604). `host.lastAnswer` takes `turn: true`: the answer is
 that of the last turn that ended, read from the row the machine saw it begin after (`ChildOwnership.noteTurnStart`, in the
-app setting `turn_span:<session>` for a session a hub gives messages, so a host that takes the session over after a swap
+app setting `turn_span:<session>`, kept for every session since #1946, which a stop notice reads too, so a host that takes the session over after a swap
 reads it), not the last response of the record. A note's row is stored while the turn before it runs, so the last response
 joined the two turns' words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's
 text ended that text, so a wait read only what followed the note. A caller's notes in a turn (a row that names its sender)

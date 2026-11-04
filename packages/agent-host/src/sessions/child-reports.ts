@@ -15,7 +15,7 @@ import type { ReportWork } from './linked-reports.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
-import { clipPreview, lastResponseSeq } from './turn-answer.js'
+import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
 import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
@@ -406,7 +406,8 @@ export class ChildReports {
     if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
-    await this.deliverReport(asker, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, this.answerSeq(sessionId))
+    const { preview, seq } = this.stoppedTurnAnswer(sessionId)
+    await this.deliverReport(asker, sessionId, name, project, preview, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)
   }
 
   /**
@@ -420,7 +421,19 @@ export class ChildReports {
     const { name, project } = this.reportedAs(m)
     const owed = this.host.children.awaitingReport.get(sessionId) === requester
     console.error(`[sessions] ${sessionId.slice(0, 8)}: an update cut its turn and it was continued; telling ${requester.slice(0, 8)}`)
-    await this.deliverReport(requester, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: 'state_change' }, { resumed: true, owed }, this.answerSeq(sessionId))
+    const { preview, seq } = this.stoppedTurnAnswer(sessionId)
+    await this.deliverReport(requester, sessionId, name, project, preview, { type: 'state_change' }, { resumed: true, owed }, seq)
+  }
+
+  /**
+   * The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn
+   * before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does
+   */
+  private stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
+    const span = this.host.children.latestTurnRows(sessionId)
+    if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }
+    const rows = this.host.store.messages.loadMessages(sessionId, 200)
+    return { preview: clipPreview(lastResponse(rows, span), 600), seq: lastResponseSeq(rows, span) ?? undefined }
   }
 
   /**
