@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -66,7 +66,7 @@ export class PreferencesFlow {
     const rpc = this.rpc
     if (!rpc) return { ok: false, error: 'This host has no window calls to make.' }
     try {
-      if (req.action === 'get') return await this.get(rpc)
+      if (req.action === 'get') return await this.get(rpc, req.themeFile)
       if (req.action === 'apply_agent_versions') return await this.applyVersions(rpc)
       return await this.set(rpc, sessionId, req.changes, signal)
     } catch (e) {
@@ -75,7 +75,7 @@ export class PreferencesFlow {
   }
 
   /** Every setting Settings shows, one line each; a part the host cannot read says so, and the rest still answers */
-  private async get(rpc: WindowRpc): Promise<PreferencesAnswer> {
+  private async get(rpc: WindowRpc, themeFile?: string): Promise<PreferencesAnswer> {
     const [prefs, themes, sleep, updates, versions] = await Promise.allSettled([
       callWindow(rpc, 'prefs.get', {}),
       callWindow(rpc, 'themes.list', {}),
@@ -95,9 +95,11 @@ export class PreferencesFlow {
       'Appearance',
       `- Theme mode: ${p.themeMode}; dark theme ${named(p.themeDark)}; light theme ${named(p.themeLight)}`,
       `- Themes to choose from (set_preferences theme): ${choices.map((c) => `${plainQuoted(c.name)} [${c.id}] (${c.base}${c.file ? ', a theme file' : ''})`).join(', ')}`,
+      ...(themes.status === 'fulfilled' ? themeFileLines(themes.value, themeFile) : []),
       `- Text size: ${p.textSize} (${TEXT_SIZES.join(', ')}; 1 is the default)`,
       `- Body font: ${p.bodyFont ? plainQuoted(p.bodyFont, 200) : "the app's own"}; code font: ${p.codeFont ? plainQuoted(p.codeFont, 200) : "the app's own"}`,
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
+      `- Models for the agents a session starts (set_preferences agentModels): ${agentModelsText(p.agentModels)}`,
       'Notifications (set_preferences notifications)',
       `- Approval needed: ${onOff(notify.approval)}; a session finishes out of sight: ${onOff(notify.done)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval one off, or the sound while it notifies, asks the person`,
       'Auto compact (set_preferences autoCompact)',
@@ -126,9 +128,23 @@ export class PreferencesFlow {
     // Everything that can be known first is refused before anything changes
     const patch: Record<string, unknown> = {}
     let theme: ThemeChoice | null = null
+    const done: string[] = []
+    const failed: string[] = []
+    // A theme file is written before a theme is picked, so one call can make a theme and show it
+    const file = changes.themeFile
+    if (file !== undefined) {
+      const bad = themeFileRefusal(file)
+      if (bad) return { ok: false, error: bad }
+      try {
+        const saved = await callWindow(rpc, 'themes.save', { id: file.id?.trim() || null, content: { name: file.name.trim(), base: file.base, tokens: file.tokens } })
+        done.push(themeFileWritten(saved))
+      } catch (e) {
+        return { ok: false, error: `Nothing changed: ${errorMessage(e)}` }
+      }
+    }
     if (changes.theme !== undefined) {
       const found = await this.theme(rpc, changes.theme)
-      if (typeof found === 'string') return { ok: false, error: found }
+      if (typeof found === 'string') return { ok: false, error: file ? `${done.join(' ')} But the theme was not picked: ${found}` : found }
       theme = found
       patch.themeMode = found.base
       patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
@@ -142,6 +158,11 @@ export class PreferencesFlow {
       if (value === undefined) continue
       if (HIDDEN.test(value)) return { ok: false, error: `${key} has a control or formatting character in it; give a font family as plain text.` }
       patch[key] = value.trim()
+    }
+    if (changes.agentModels !== undefined) {
+      const merged = await this.mergedAgentModels(rpc, changes.agentModels)
+      if (typeof merged === 'string') return { ok: false, error: merged }
+      patch.agentModels = merged
     }
     if (changes.lineHeight !== undefined) patch.lineHeight = changes.lineHeight
     if (changes.sendWithModifierEnter !== undefined) patch.sendWithModifierEnter = changes.sendWithModifierEnter
@@ -157,8 +178,6 @@ export class PreferencesFlow {
       return { ok: false, error: `idleSleepMinutes is ${SLEEP_CHOICES}.` }
     }
 
-    const done: string[] = []
-    const failed: string[] = []
     const attempt = async (what: string, run: () => Promise<string>) => {
       try {
         done.push(await run())
@@ -292,6 +311,22 @@ export class PreferencesFlow {
       })
     }
 
+    if (changes.deleteThemeFile !== undefined) {
+      const id = changes.deleteThemeFile.trim()
+      await attempt('Theme file', async () => {
+        if (!ThemeId.safeParse(id).success) throw new Error(`${plainQuoted(id)} is not a theme file id; get_preferences lists them.`)
+        const { removed } = await callWindow(rpc, 'themes.remove', { id })
+        if (!removed) throw new Error(`No theme file [${id}]; get_preferences lists them.`)
+        // A side that showed it goes back to its preset, as Settings does
+        const now = await callWindow(rpc, 'prefs.get', {})
+        const back: Record<string, string> = {}
+        if (now.themeDark === id) back.themeDark = 'dark'
+        if (now.themeLight === id) back.themeLight = 'light'
+        if (Object.keys(back).length) await callWindow(rpc, 'prefs.set', { patch: back })
+        return `Removed the theme file [${id}] (kept in the themes folder's .removed).${Object.keys(back).length ? ' A side that showed it is back on its preset.' : ''}`
+      })
+    }
+
     if (!done.length) return { ok: false, error: `Nothing changed. ${failed.join(' ')}` }
     return { ok: true, text: [...done, ...(failed.length ? [`Not changed: ${failed.join(' ')}`] : [])].join('\n') }
   }
@@ -315,6 +350,25 @@ export class PreferencesFlow {
     const now = (await callWindow(rpc, 'prefs.get', {})).foldedGroups
     const kept = now.filter((key) => !drop.has(key) && !add.includes(key))
     return [...kept, ...add].slice(-FOLDED_GROUPS_MAX)
+  }
+
+  /** The saved models with this call's changes merged in (the patch carries the whole map), or the sentence that says what is wrong */
+  private async mergedAgentModels(rpc: WindowRpc, change: NonNullable<PreferenceChanges['agentModels']>): Promise<Record<string, Record<string, unknown>> | string> {
+    const now = (await callWindow(rpc, 'prefs.get', {})).agentModels ?? {}
+    const out: Record<string, Record<string, unknown>> = { ...now }
+    for (const [tool, levels] of Object.entries(change)) {
+      if (!tool.trim() || HIDDEN.test(tool)) return 'agentModels is keyed by a tool name such as claude or codex.'
+      const own: Record<string, unknown> = { ...out[tool] }
+      for (const [level, choice] of Object.entries(levels)) {
+        if (choice === null) delete own[level]
+        else if (choice !== undefined) {
+          if (HIDDEN.test(choice.model) || HIDDEN.test(choice.effort ?? '')) return 'agentModels has a control or formatting character in a model or effort; give plain text.'
+          own[level] = choice.effort ? { model: choice.model.trim(), effort: choice.effort.trim() } : { model: choice.model.trim() }
+        }
+      }
+      out[tool] = own
+    }
+    return out
   }
 
   /** The session header's action: idle sessions on an older agent CLI restart on the installed one, and the busy ones are named */
@@ -358,6 +412,53 @@ function automatic(s: Pick<UpdateStatus, 'auto' | 'autoApply'>): string {
   return s.auto ? 'off (checking is on, installing is off)' : 'off (installing is on, checking is off)'
 }
 
+/** Why a theme file to write is refused before anything is written, or null: the rules of `themes.save` (its params), and plain text */
+function themeFileRefusal(file: NonNullable<PreferenceChanges['themeFile']>): string | null {
+  if (file.id !== undefined && file.id.trim() && !ThemeId.safeParse(file.id.trim()).success) {
+    return `themeFile.id ${plainQuoted(file.id)} is not a theme id: lowercase letters, digits and dashes, up to 60. Leave it out for a new file.`
+  }
+  const content = ThemeFileContent.safeParse({ name: file.name.trim(), base: file.base, tokens: file.tokens })
+  if (!content.success) return `Nothing changed: themeFile: ${issuesOf(content.error)}.`
+  if (HIDDEN.test(file.name) || Object.entries(file.tokens).some(([k, v]) => HIDDEN.test(k) || HIDDEN.test(v))) {
+    return 'themeFile has a control or formatting character in its name or tokens; give plain text.'
+  }
+  return null
+}
+
+/** What a saved theme file came to: its place, and what the reader will skip of it */
+function themeFileWritten(f: ThemeFileEntry): string {
+  const problems = f.problems.length ? ` Problems the reader found, skipped when applied: ${f.problems.map((x) => plainQuoted(x, 200)).join(' ')}` : ''
+  return `Wrote the theme file ${plainQuoted(f.name)} [${f.id}] (${f.base}, ${Object.keys(f.tokens).length} tokens).${problems}`
+}
+
+/** The theme files in get_preferences: a line for all, and one in full when asked for */
+function themeFileLines(files: readonly ThemeFileEntry[], one?: string): string[] {
+  const state = (f: ThemeFileEntry) => (f.broken ? ', unreadable' : f.problems.length ? `, ${f.problems.length} problems` : '')
+  const lines = [
+    files.length
+      ? `- Theme files (set_preferences themeFile writes one, deleteThemeFile removes one): ${files.map((f) => `${plainQuoted(f.name)} [${f.id}] (${f.base}, ${Object.keys(f.tokens).length} tokens${state(f)})`).join(', ')}`
+      : '- Theme files: none (set_preferences themeFile writes one)',
+  ]
+  if (one) {
+    const f = files.find((x) => x.id === one.trim())
+    if (!f) lines.push(`- Theme file ${plainQuoted(one)}: no such file`)
+    else {
+      lines.push(`- Theme file ${plainQuoted(f.name)} [${f.id}], ${f.base}${f.problems.length ? `; problems: ${f.problems.map((x) => plainQuoted(x, 200)).join(' ')}` : ''}`)
+      lines.push(...Object.entries(f.tokens).map(([k, v]) => `  ${k}: ${plainQuoted(v, 400)}`))
+      lines.push(`  Token keys to set: ${THEME_TOKENS.map((t) => t.key).join(', ')}`)
+    }
+  }
+  return lines
+}
+
+/** The models chosen for started agents, in a line */
+function agentModelsText(models: UiPreferences['agentModels']): string {
+  const parts = Object.entries(models ?? {}).flatMap(([tool, levels]) =>
+    Object.entries(levels).flatMap(([level, c]) => (c ? [`${plainQuoted(tool, 80)} ${level}: ${plainQuoted(c.model, 200)}${c.effort ? ` (${plainQuoted(c.effort, 80)})` : ''}`] : [])),
+  )
+  return parts.length ? parts.join('; ') : 'none chosen (each project keeps its last choice)'
+}
+
 /** The presets, then the theme files that read cleanly: what a window's theme list offers */
 function themeChoices(files: readonly { id: string; name: string; base: 'dark' | 'light'; broken: boolean }[]): ThemeChoice[] {
   return [
@@ -378,6 +479,7 @@ function appearanceText(now: UiPreferences, patch: Record<string, unknown>, them
   if ('codeFont' in patch) parts.push(`code font ${now.codeFont ? plainQuoted(now.codeFont, 200) : "the app's own"}`)
   if ('lineHeight' in patch) parts.push(`line height ${now.lineHeight}`)
   if ('sendWithModifierEnter' in patch) parts.push(`send with ${now.sendWithModifierEnter ? 'Ctrl+Enter (Enter breaks the line)' : 'Enter'}`)
+  if ('agentModels' in patch) parts.push(`models for started agents: ${agentModelsText(now.agentModels)}`)
   if ('foldedGroups' in patch) parts.push(`${now.foldedGroups.length} sidebar ${now.foldedGroups.length === 1 ? 'group' : 'groups'} folded`)
   return `Now: ${parts.join('; ')}.`
 }

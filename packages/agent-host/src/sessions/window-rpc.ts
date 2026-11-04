@@ -16,6 +16,8 @@ export const WINDOW_METHODS = [
   'prefs.get',
   'prefs.set',
   'themes.list',
+  'themes.save',
+  'themes.remove',
   'agents.sleepPolicy',
   'agents.setSleepPolicy',
   'updates.status',

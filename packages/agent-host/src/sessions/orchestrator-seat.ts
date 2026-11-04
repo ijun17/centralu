@@ -19,6 +19,7 @@ import type { TrashAnswer, TrashRequest } from './trash-flow.js'
 import type { TrustAnswer, TrustRequest } from './trust-flow.js'
 import type { AppUpkeepAnswer, AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingAnswer, HousekeepingRequest } from './housekeeping-flow.js'
+import { staleSessionHint } from './stale-session-id.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { LINE_WINDOW_CHARS, asPredecessor, budgetOf, fitLines, lineText, sessionLines, toolLinesOf, type SessionLine } from './session-lines.js'
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
@@ -194,8 +195,11 @@ export function orchestratorToolsFor(
     const trusted = trustedIds()
     return (id: string) => !trusted.has(id)
   }
-  const readError = (id: string) => (ownProject && wide() ? `Not a session you can read: ${id}` : scopeError(id))
-  const scopeError = (id: string) =>
+  // A stale id (deleted, replaced) says what it was and which live session now carries its name (stale-session-id.ts)
+  const readError = (id: string) =>
+    (ownProject && wide() ? `Not a session you can read: ${id}` : scopeText(id)) + staleSessionHint(host, id, readable, central)
+  const scopeError = (id: string) => scopeText(id) + staleSessionHint(host, id, inScope, central)
+  const scopeText = (id: string) =>
     scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
     : ownProject ? `Not a session in this project: ${id}`
     : hubView ? `Not a session this machine shares: ${id}`

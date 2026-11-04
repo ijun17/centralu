@@ -51,11 +51,18 @@ export type PreferenceChanges = {
   notifications?: { approval?: boolean; done?: boolean; whenFocused?: boolean; sound?: boolean }
   /** When agents compact by themselves (#1376): whether Centralu sets it, and the share of the model's window; the ones to change */
   autoCompact?: { controlled?: boolean; share?: number; idleShare?: number; nudge?: boolean; nudgeFirst?: number; nudgeSecond?: number | null }
+  /** The model and effort start_agent runs per tool and difficulty (#729); null clears one. The ones to change, merged into the saved map */
+  agentModels?: Record<string, Partial<Record<'light' | 'standard' | 'heavy', { model: string; effort?: string } | null>>>
+  /** Writes a theme file as Settings does (`themes.save`): no id makes a new file named after the theme, an id replaces that file. It does not pick the theme; `theme` does */
+  themeFile?: { id?: string; name: string; base: 'dark' | 'light'; tokens: Record<string, string> }
+  /** Removes a theme file by id (it is kept in the folder's `.removed/`); a side that showed it goes back to its preset */
+  deleteThemeFile?: string
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
 export type PreferencesRequest =
-  | { action: 'get' }
+  /** `themeFile`: one theme file in full, tokens and problems, else the list shows them in a line each */
+  | { action: 'get'; themeFile?: string }
   | { action: 'set'; changes: PreferenceChanges }
   /** The session header's "restart idle sessions on the new agent CLI" (#297): a session that is busy is left as it is */
   | { action: 'apply_agent_versions' }

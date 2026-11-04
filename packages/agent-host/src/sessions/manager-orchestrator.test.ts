@@ -185,6 +185,43 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(r.error).toMatch(/Not a session this app manages/)
   })
 
+  describe('a stale session id names what replaced it (the caller keeps ids in memory)', () => {
+    const staleWorld = async () => {
+      const { p, a, tools } = await setup()
+      await rpc('sessions.rename', { sessionId: a.id, name: 'Fix login' })
+      await rpc('agents.deleteSession', { sessionId: a.id })
+      const b = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+      await rpc('sessions.rename', { sessionId: b.id, name: 'Fix login' })
+      const other = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+      await rpc('sessions.rename', { sessionId: other.id, name: 'Something else' })
+      return { old: a.id, now: b.id, other: other.id, tools }
+    }
+
+    it('send_to_session says it was deleted and gives the live session of the same name and project, and sends nothing', async () => {
+      const { old, now, other, tools } = await staleWorld()
+      const sentBefore = adapter.handleOf(now)?.sent.length ?? 0
+      const r = await tools.sendToSession(old, 'hi')
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain(`Not a session this app manages: ${old}`)
+      expect(r.error).toContain('deleted')
+      expect(r.error).toContain(`"Fix login" (id ${now})`)
+      expect(r.error).not.toContain(other)
+      expect(adapter.handleOf(now)?.sent.length ?? 0).toBe(sentBefore)
+    })
+
+    it('read_session gives the same help', async () => {
+      const { old, now, tools } = await staleWorld()
+      const r = await tools.readSession(old)
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain(`"Fix login" (id ${now})`)
+    })
+
+    it('an id nobody ever had is refused as before, with nothing added', async () => {
+      const { tools } = await staleWorld()
+      expect((await tools.sendToSession('never-existed', 'hi')).error).toBe('Not a session this app manages: never-existed')
+    })
+  })
+
   it('cannot send to itself', async () => {
     const { orc, tools } = await setup()
     const r = await tools.sendToSession(orc.id, 'to me')

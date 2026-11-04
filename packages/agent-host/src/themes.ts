@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import {
   THEME_SCHEMA_FILE,
@@ -18,6 +18,9 @@ import { rpcError } from './rpc-error.js'
 const MAX_FILE_BYTES = 256 * 1024
 /** Editors save in bursts (write, rename, chmod); one refetch per burst is enough */
 const SETTLE_MS = 100
+
+/** Where `remove` keeps what it took out of the folder */
+const REMOVED_DIR = '.removed'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,59}$/
 
@@ -117,6 +120,19 @@ export class ThemeFiles {
     await mkdir(this.dir, { recursive: true })
     writeFileWhole(realOs().files, this.pathOf(target), formatThemeFile(content))
     return this.read(target)
+  }
+
+  /**
+   * Takes a theme file out of the list without destroying it: it moves to `.removed/<id>-<time>.json`, a place the list does not
+   * look, so a mistaken removal is one move back. False when there was no such file.
+   */
+  async remove(id: string): Promise<boolean> {
+    const from = this.pathOf(id)
+    if (!(await stat(from).then(() => true, () => false))) return false
+    const kept = join(this.dir, REMOVED_DIR)
+    await mkdir(kept, { recursive: true })
+    await rename(from, join(kept, `${id}-${Date.now()}.json`))
+    return true
   }
 
   /** Copies a file from elsewhere in, under a fresh id if its name is taken. Refuses what does not read as a theme. */

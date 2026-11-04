@@ -133,6 +133,7 @@ With the limited credential: runs.
 - `terminal.restart`
 - `themes.import`
 - `themes.list`
+- `themes.remove`
 - `themes.resolve`
 - `themes.save`
 - `trash.list`

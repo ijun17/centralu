@@ -381,6 +381,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'themes.list': 'everyday',
   'themes.save': 'everyday',
   'themes.import': 'everyday',
+  'themes.remove': 'everyday',
   'themes.resolve': 'everyday',
   'approvals.rules': 'everyday',
 }
