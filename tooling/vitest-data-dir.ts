@@ -51,6 +51,6 @@ afterAll(async () => {
     await rm(own, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   } catch (e) {
     const left = await readdir(own).catch(() => [])
-    throw new Error(`the test file's temporary folder ${own} could not be removed (${(e as NodeJS.ErrnoException).code}); left in it: ${left.join(', ') || 'nothing seen'}`)
+    throw new Error(`the test file's temporary folder ${own} could not be removed (${e instanceof Error ? e.message : String(e)}); left in it: ${left.join(', ') || 'nothing seen'}`)
   }
 })

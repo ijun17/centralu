@@ -17,7 +17,7 @@ export default function setup(): () => Promise<void> {
       await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     } catch (e) {
       const left = await readdir(root).catch(() => [])
-      throw new Error(`the test run's temporary folder ${root} could not be removed (${(e as NodeJS.ErrnoException).code}); left in it: ${left.join(', ') || 'nothing seen'}`)
+      throw new Error(`the test run's temporary folder ${root} could not be removed (${e instanceof Error ? e.message : String(e)}); left in it: ${left.join(', ') || 'nothing seen'}`)
     }
   }
 }
