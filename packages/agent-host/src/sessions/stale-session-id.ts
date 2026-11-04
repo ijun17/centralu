@@ -1,6 +1,6 @@
 import type { SessionInfo } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
-import { liveHeirOf } from './handoff-notes.js'
+import { liveHeirOf } from './handoff-heirs.js'
 import { plainQuoted } from './tool-answers.js'
 
 /**
