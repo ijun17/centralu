@@ -24,7 +24,10 @@ class Handle implements SessionHandle {
     private readonly failSend = false,
   ) {}
   readonly sent: string[] = []
+  /** How many times Centralu tried to send something in, taken or not */
+  attempts = 0
   send(text: string) {
+    this.attempts++
     if (this.failSend) throw new Error('the tool takes no input')
     this.sent.push(text)
   }
@@ -110,12 +113,15 @@ describe('a swap mid-turn (#1562 review)', () => {
 
   it('ends the turn as a quit does when that Continue cannot be sent', async () => {
     const { b, id } = await swapMidTurn(false, false, true)
+    // It was tried before the turn was given up
+    expect(b.adapter.last.attempts).toBe(1)
     expect(b.session(id)).toMatchObject({ state: 'idle', live: true, interruption: { reason: 'quit' } })
     expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /Centralu quit or restarted/.test(e.text))).toBe(true)
   })
 
   it('closes the turn a hub follows and takes off what it was given when the Continue cannot be sent: the process that held them is gone', async () => {
-    const { id } = await swapMidTurn(false, true, true)
+    const { b, id } = await swapMidTurn(false, true, true)
+    expect(b.adapter.last.attempts).toBe(1)
     expect(store.settings.appSetting(`input_origins:${id}`)).toBeNull()
     expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1, ended: true } })
   })
