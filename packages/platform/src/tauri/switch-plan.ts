@@ -310,7 +310,7 @@ export type ShellStart = {
 
 export type BuildBarInput = {
   build: {
-    mode: 'keeper' | 'direct'
+    mode: 'keeper' | 'direct' | 'serve'
     app?: SwapBuild
     host?: SwapBuild
     keeper?: SwapBuild
@@ -336,6 +336,13 @@ export const KEEPER_LATER_TEXT = 'Running this build. The background keeper move
  * stop, and with them every agent process, terminal and running command; nothing else does that.
  */
 export const COMPLETELY_STOPS = 'Also stops agents, terminals and running commands.'
+
+/**
+ * What "Quit completely" stops in a window on the computer's `centralu serve` host (#1466): the host is the one a hub's
+ * link uses too, so stopping it ends that link as well. Closing the window alone leaves it running.
+ */
+export const SERVE_COMPLETELY_STOPS =
+  'Quit completely stops the host on this computer (centralu serve) with its agents, terminals and running commands, and ends the link a hub has to this computer.'
 
 /** What restarting the keeper costs, for its confirmation */
 export const RESTART_COMPLETELY_LOSES =

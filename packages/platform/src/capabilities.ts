@@ -23,6 +23,8 @@ export function defaultCapabilities(over: Partial<PlatformCapabilities> = {}): P
     fileManagerName: ANY_FILE_MANAGER,
     // A browser window has its own controls
     windowControls: false,
+    // A browser window has no host of its own to leave running
+    servesHost: false,
     // Unlike the keyboard, the engine is the page's own: whichever one runs it
     frameDragEndInPage: frameDragEndInPage(),
     ...over,

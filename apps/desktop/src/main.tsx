@@ -8,6 +8,7 @@ import {
   buildBar,
   createTauriPlatform,
   focusWindow,
+  hostBuild,
   keepRunningThenQuit,
   listenForQuit,
   onHostStatus,
@@ -108,6 +109,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    * unknown or where the platform has no keeper — then the dialog reads as it always did.
    */
   const [background, setBackground] = useState<boolean | null>(null)
+  // The window runs on the computer's `centralu serve` host, which stays running when it closes (#1466)
+  const [servesHost, setServesHost] = useState(platform.capabilities.servesHost)
   const [quitError, setQuitError] = useState<string | null>(null)
   /*
    * Work on this computer that a plain quit ends: a session in a turn, or one with a background job running. A session on a
@@ -196,7 +199,13 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     () =>
       onHostStatus((p) => {
         if (p.state === 'failed') setHostFailure(p.message)
-        else if (p.state === 'ready') setHostFailure(null)
+        else if (p.state === 'ready') {
+          setHostFailure(null)
+          // A later attempt can fall back to the bundled host, which quitting stops by itself (#1466): the dialog follows the host now running
+          void hostBuild()
+            .then((b) => setServesHost(b.mode === 'serve'))
+            .catch(() => {})
+        }
       }),
     [],
   )
@@ -410,6 +419,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       {askQuit && (
         <QuitDialog
           background={background}
+          serve={servesHost}
           strays={strays}
           straysError={straysError}
           alsoStop={alsoStop}

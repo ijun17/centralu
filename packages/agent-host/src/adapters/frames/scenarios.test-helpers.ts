@@ -120,8 +120,9 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: 'basic',
     tools: ANY_TOOL,
-    // Claude Code asks before it writes a file unless the preset grants edits in the folder
-    presetFor: { claude: 'edits' },
+    // Claude Code asks before it writes a file unless the preset grants edits in the folder, and OpenCode before every write under Normal;
+    // this scenario answers no card (it would wait for ever)
+    presetFor: { claude: 'edits', opencode: 'auto' },
     async run(d) {
       await turn(d, 'Reply with exactly: hello')
       await turn(d, 'Create a file named probe.txt containing the word hi, using your tools. Then say done.')

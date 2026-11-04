@@ -740,13 +740,14 @@ frames stay here and say so, as #1498 asks.
 
 | Scenario | OpenCode 1.19.4 | Cursor |
 |---|---|---|
-| a plain turn, a tool call, a file edit | recorded | after login |
-| approval: allow, deny, "always" answered once | recorded | after login |
-| input during a turn | recorded (folds) | after login |
-| interrupt; interrupt with a permission open | recorded | after login |
-| compaction (`/compact`) | recorded (text only) | after login, if it has one |
-| process dies mid-turn, then load in a new process | recorded | after login |
-| resume after a host restart (no keeper) | recorded (load, resume) | after login |
+| a plain turn, a tool call, a file edit | recorded (the write under `auto`: Normal asks before a write, and `basic` answers no card) | recorded |
+| a file written, then a delete (`files`) | recorded (its model found no delete tool and stopped; the replay checks no delete call is made) | recorded |
+| approval: allow, deny, "always" answered once | recorded | recorded |
+| input during a turn | recorded (folds) | recorded |
+| interrupt; interrupt with a permission open | recorded | recorded |
+| compaction (`/compact`) | recorded (text only) | recorded (text only) |
+| process dies mid-turn, then load in a new process | recorded | recorded |
+| resume after a host restart (no keeper) | recorded (load, resume) | recorded |
 | adoption after a host swap | fake peer | fake peer |
 | not logged in | — | recorded |
 | sub-agents | — | PR 2 |

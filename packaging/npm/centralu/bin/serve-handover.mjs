@@ -26,7 +26,7 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * And only a host `serve` started (`startedByServe`, #1722): a lock held by the app's or the keeper's host is theirs,
  * whatever answers on the port, so `--stop` says whose it is and leaves it.
  *
- * `{ ok, wasRunning, how?, message? }`, the `--stop` line's `stop`. With `ifIdle` (#1224, the hand-over) the host stops only
+ * `{ ok, wasRunning, how?, heldByOther?, message? }`, the `--stop` line's `stop`. With `ifIdle` (#1224, the hand-over) the host stops only
  * when nothing runs there, and `{ ok: false, busy: true }` says it did not. `forUpdate` (#1618): a hub's update stops it, and
  * the host writes the turns it ends for the next one (`host.stop { forUpdate }`); a host that does not take the request is
  * ended as any is, and lists nothing.
@@ -45,7 +45,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
     // The folder is held, but not by a serve (#1722): the app's or the keeper's host, whatever answered on the port
     const other = foreignHolder(dataDir)
     const whose = other ? `. It belongs to another Centralu host (pid ${other.pid}), ${holderWho(other.by)}; not stopping it` : ''
-    return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}${whose}` }
+    // `heldByOther`: the folder is held by a host that is not this serve's, which this left alone (the window's quit says so rather than claim a stop)
+    return { ok: true, wasRunning: false, ...(other ? { heldByOther: true } : {}), message: `centralu serve is not running for ${dataDir}${whose}` }
   }
 
   const hostPid = lockHolderPid(dataDir)

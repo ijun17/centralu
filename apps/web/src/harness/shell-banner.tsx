@@ -34,7 +34,7 @@ import '../../../../packages/ui/src/styles/index.css'
  *     "Message too long", the second click), `keeper-later-first`: the same on the first click
  *   - `shell`: everything on this build, but a release started its keeper without the permission
  *     shell (thin-shell plan §6), which refused the content
- * `?dialog=quit&background=on|off` (`&running=n`: sessions in a turn) opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
+ * `?dialog=quit&background=on|off|serve` (`serve`: the window runs on the computer's `centralu serve` host, #1466; `&running=n`: sessions in a turn) opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
  * switch-build and restart-completely questions (e2e/desktop-dialog-layers.spec.ts).
  *
  * Only on the dev server: `vite build`'s only input is index.html.
@@ -169,6 +169,7 @@ function Quit() {
   return (
     <QuitDialog
       background={params.get('background') === 'on'}
+      serve={params.get('background') === 'serve'}
       strays={[]}
       straysError={params.get('strays') === 'unknown' ? 'The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again' : null}
       alsoStop={false}
