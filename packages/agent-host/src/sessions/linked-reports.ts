@@ -140,10 +140,10 @@ export class LinkedReports {
   /** What a waited-on session is called, kept while it can be read: a removed machine's mirror is gone */
   private readonly about = new Map<string, { name: string; project: string }>()
   /**
-   * The last response of a waited-on session as it was last read there (#1186): a report written after its machine went out of reach carries it
-   * (`asRead`), where it used to point at an earlier report or say nothing. Bounded; the oldest goes first
+   * The last response of a waited-on session as its paused report read it (#1186): the report written after its machine went out of reach carries
+   * it (`asRead`), where it used to point at that report or say nothing. For one asker's one pause; bounded, the oldest goes first
    */
-  private readonly lastRead = new Map<string, { preview: string; seq: number | undefined }>()
+  private readonly lastRead = new Map<string, { orchestratorId: string; preview: string; seq: number | undefined }>()
 
   constructor(private readonly host: LinkedReportsHost) {}
 
@@ -419,7 +419,7 @@ export class LinkedReports {
     this.changedAt.delete(sessionId)
   }
 
-  private keepRead(sessionId: string, read: { preview: string; seq: number | undefined }): void {
+  private keepRead(sessionId: string, read: { orchestratorId: string; preview: string; seq: number | undefined }): void {
     this.lastRead.delete(sessionId)
     this.lastRead.set(sessionId, read)
     const oldest = this.lastRead.size > LAST_READ_MAX ? this.lastRead.keys().next() : undefined
@@ -517,8 +517,10 @@ export class LinkedReports {
     const about = reader.describe(sessionId) ?? known ?? this.about.get(sessionId) ?? { name: sessionId, project: '(unknown)' }
     // A machine that cannot be reached cannot be read: its last answer went with the paused report, which says so
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
-    // What it said when it was last read stands in for the words that cannot be read now, marked as read then
-    const kept = unreachable ? this.lastRead.get(sessionId) : undefined
+    // What it said when the paused report was written stands in for the words that cannot be read now, marked as read then: only that wait's
+    // own pause (a turn still running, or another asker's, has said nothing to this one)
+    const read = unreachable ? this.lastRead.get(sessionId) : undefined
+    const kept = read && read.orchestratorId === orchestratorId && work && 'paused' in work && work.paused ? read : undefined
     if (unreachable) this.lastRead.delete(sessionId)
     // Words of the turn go only through the gate (#1038 review); a report that the link or the machine went says no words
     if (!unreachable && this.gate(sessionId) !== 'deliver') return
@@ -537,7 +539,9 @@ export class LinkedReports {
       // A turn that ended with nothing to say says so, rather than a preview that reads as an unread one (#1604)
       : words.ok ? (words.text === '' ? NO_WORDS : words.text)
       : `(its last response could not be read there: ${words.error})`
-    if (words?.ok && words.text !== '') this.keepRead(sessionId, { preview: words.text, seq: words.seq ?? undefined })
+    // Kept for the pause only (the one report a lost link can follow); every other read of the session ends what was kept
+    if (words?.ok && words.text !== '' && work && 'paused' in work && 'stoppable' in work) this.keepRead(sessionId, { orchestratorId, preview: words.text, seq: words.seq ?? undefined })
+    else if (words) this.lastRead.delete(sessionId)
     const seq = words?.ok ? (words.seq ?? undefined) : kept?.seq
     await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, kept && unreachable ? { ...work, asRead: true } : work, seq, part)
   }

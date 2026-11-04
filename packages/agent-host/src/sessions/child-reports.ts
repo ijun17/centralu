@@ -563,7 +563,7 @@ export class ChildReports {
       resume +
       (inThread && answered
         ? `Its last response${asReadWords} is that session's own words: it is the message above in this thread, and ${read} reads more.`
-        : `Its last response is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
+        : `Its last response${asReadWords} is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
       cleanUp
     const stored =
       outcome +

@@ -533,16 +533,37 @@ describe('a machine whose link drops or comes back', () => {
     expect(delivered).toHaveLength(3)
   })
 
-  it('a link that drops after a pause whose words were empty keeps the pointer to that pause, not words it never read', async () => {
-    said = () => ''
+  it('a link that drops does not give one asker the words another asker’s pause read', async () => {
     ask('m1.w1', 'o1')
     reports.observe(tasks('m1.w1', [verify]))
     turn('m1.w1')
     await flush()
+    // The session's wait passes to another orchestrator, whose own pause stands over the same work
+    children.setLinkedReport('m1.w1', { orchestratorId: 'o2', busy: false, paused: [verify] })
     status('m1', 'unreachable')
     await flush()
-    expect(delivered[1]).toMatchObject({ preview: '(in the paused report before this one)', work: { linkLost: 'Box', paused: [verify] } })
-    expect(delivered[1]?.work).not.toHaveProperty('asRead')
+    const lost = delivered.at(-1)
+    expect(lost).toMatchObject({ orchestratorId: 'o2', preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost?.work).not.toHaveProperty('asRead')
+  })
+
+  it('a machine removed while a later task’s turn runs does not report the words of the task before it', async () => {
+    status('m1', 'connected', 'Box')
+    ask('m1.w1', 'o1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    turn('m1.w1')
+    await flush()
+    // A new task of the same session, its turn still running when the machine goes
+    ask('m1.w1', 'o1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    linked.delete('m1')
+    reports.observe({ type: 'machine_resync', machineId: 'm1' })
+    await flush()
+    expect(delivered.at(-1)).toMatchObject({ preview: '(not read: its machine could not be reached)', work: { machineRemoved: 'Box' } })
+    expect(delivered.at(-1)?.work).not.toHaveProperty('asRead')
   })
 
   it('a turn in progress keeps its wait across a drop, and reports when it ends after the link is back', async () => {
