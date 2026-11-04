@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ENDING_FILE, parseEndingRecord, type EndingRecord } from './ending-record.js'
 import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
 
 /**
@@ -32,6 +33,41 @@ export function markQuit(dataDir: string, now: number = Date.now()): void {
   } catch {
     // nothing to remember it in; the host stops all the same
   }
+}
+
+/**
+ * Writes why this host ends (`ended.json`, ending-record.ts, #1397), or removes it for `null`. Never fatal: a host that cannot
+ * write it ends all the same, and the next start knows nothing
+ */
+export function writeEndingRecord(dataDir: string): (r: EndingRecord | null) => void {
+  return (r) => {
+    try {
+      if (r) writeFileSync(join(dataDir, ENDING_FILE), `${JSON.stringify(r)}\n`)
+      else rmSync(join(dataDir, ENDING_FILE), { force: true })
+    } catch {
+      // nothing to remember it in
+    }
+  }
+}
+
+/**
+ * The last host's record, removed as it is read: once this host holds the folder's lock, a record found later is this host's own.
+ * Text that is not a record is no record
+ */
+export function takeEndingRecord(dataDir: string): EndingRecord | null {
+  const path = join(dataDir, ENDING_FILE)
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+  try {
+    rmSync(path, { force: true })
+  } catch {
+    // a record left behind is read again by the next start, which removes it then
+  }
+  return parseEndingRecord(text)
 }
 
 /**

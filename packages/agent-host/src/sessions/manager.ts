@@ -591,7 +591,7 @@ export class SessionManager {
        * so it is reset and marked as a lost turn is
        */
       const end = keeperOpts.systemEnd
-      const recent = end && (stale || s.state === 'error') ? store.messages.loadMessages(s.id, 10) : []
+      const recent = end && (stale || s.state === 'error') ? store.messages.loadMessages(s.id, 20) : []
       const crashedAtEnd = !cut && crashedInSystemEnd(s, recent, end)
       const lost = stale || crashedAtEnd
       const bySystem = crashedAtEnd || (stale && cutBySystemEnd(end, recent.at(-1)?.ts))

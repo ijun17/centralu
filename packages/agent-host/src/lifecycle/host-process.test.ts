@@ -420,7 +420,7 @@ describe('the host process, started for real', () => {
         id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a long job', autoNamed: false, state: 'working',
         lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: false, model: null, effort: null,
         verbosity: null, serviceTier: null, permissionPreset: 'safe', importedFrom: null, worktree: null,
-        parentSessionId: null, scopeSessionIds: null, roleAppend: null, ...sessionLiveDefaults(),
+        parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
       })
       store.settings.setAppSetting('mail.heartbeat', String(heartbeat))
     } finally {

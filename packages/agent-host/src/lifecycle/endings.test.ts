@@ -231,6 +231,20 @@ describe('every ending, wired (HO15)', () => {
     expect(w.left).toEqual([['stop', false]])
   })
 
+  it('a second signal while that question waits begins the leave at once, and only a later one forces the exit', () => {
+    const w = wired(false, true, () => new Promise<void>(() => {}))
+    w.f.emitter.emit('SIGTERM', 'SIGTERM')
+    expect(w.left).toEqual([])
+    w.clock.t = 1500
+    w.f.emitter.emit('SIGTERM', 'SIGTERM')
+    expect(w.left).toEqual([['stop', false]])
+    expect(w.forced).toEqual([])
+    w.clock.t = 3000
+    w.f.emitter.emit('SIGTERM', 'SIGTERM')
+    expect(w.forced).toEqual(['asked again while shutting down'])
+    expect(w.left).toEqual([['stop', false]])
+  })
+
   it('a crash or a vanished parent hands nothing over', () => {
     const w = wired(true)
     w.f.emitter.emit('uncaughtException', new Error('state broke'))

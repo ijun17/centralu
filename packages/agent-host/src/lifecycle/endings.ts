@@ -61,7 +61,7 @@ export function holdSignals(
   proc: ProcessLike,
   log: (line: string) => void,
   now: () => number = Date.now,
-): { act(onSignal: (sig?: string) => void): void } {
+): { act(onSignal: (sig?: unknown) => void): void } {
   let pending: Signal | null = null
   let pendingAt = 0
   const hold = (sig: Signal) => {
@@ -159,7 +159,7 @@ export function crashRecorder(
  */
 export function wireEndings(o: {
   proc: ProcessLike
-  signals: { act(onSignal: (sig?: string) => void): void }
+  signals: { act(onSignal: (sig?: unknown) => void): void }
   heldChildren: boolean
   leave: (mode: LeaveMode, handOver: boolean) => void
   /** Exit now, without finishing the shutdown */
@@ -196,8 +196,20 @@ export function wireEndings(o: {
    */
   let signalledAt: number | null = null
   const now = o.now ?? Date.now
+  /** The leave a signal starts, once: at once, or when `signalled` has answered */
+  let leaveBegun = false
+  const leaveForSignal = () => {
+    if (leaveBegun) return
+    leaveBegun = true
+    o.leave(mode, mode === 'detach')
+  }
   o.signals.act((sig) => {
     if (signalledAt !== null) {
+      // Asked again while `signalled` still waits: the leave begins now, and a later one forces as before
+      if (!leaveBegun) {
+        signalledAt = now()
+        return leaveForSignal()
+      }
       if (deliberateRepeat(signalledAt, now())) o.force('asked again while shutting down')
       return
     }
@@ -205,8 +217,8 @@ export function wireEndings(o: {
     const name = typeof sig === 'string' ? sig : 'a signal'
     o.cause?.('signal', name)
     const asked = o.signalled?.(name)
-    if (asked) void Promise.resolve(asked).catch(() => {}).then(() => o.leave(mode, mode === 'detach'))
-    else o.leave(mode, mode === 'detach')
+    if (asked) void Promise.resolve(asked).catch(() => {}).then(leaveForSignal)
+    else leaveForSignal()
   })
   watchParent(o.watchParent, o.stdin, () => {
     o.log('[agent-host] parent process exited; shutting down')

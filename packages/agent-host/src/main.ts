@@ -55,8 +55,8 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { EndingRecorder, systemEndOf, systemIsStopping, takeEndingRecord, writeEndingRecord } from './lifecycle/ending-record.js'
-import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
+import { EndingRecorder, systemEndOf, systemIsStopping } from './lifecycle/ending-record.js'
+import { clearStoppedMark, markQuit, takeEndingRecord, updateResumeFolder, writeEndingRecord } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
@@ -271,7 +271,22 @@ const lastEnding = dbPath === ':memory:' ? null : takeEndingRecord(dirname(dbPat
 if (lastEnding) console.error(`[agent-host] the last host ended: ${lastEnding.by}${lastEnding.detail ? ` (${lastEnding.detail})` : ''} at ${new Date(lastEnding.at).toISOString()}`)
 const systemEnd = systemEndOf(lastEnding)
 /** Why this host ends, written as it learns it, for the next start. A host in memory has no folder to write it in */
-const ending = new EndingRecorder({ write: dbPath === ':memory:' ? () => {} : writeEndingRecord(dirname(dbPath)) })
+const ending = new EndingRecorder({
+  write: dbPath === ':memory:' ? () => {} : writeEndingRecord(dirname(dbPath)),
+  outlived: () => console.error('[agent-host] still running well after the system said it was ending: it did not end'),
+})
+/**
+ * Asks the system whether it is ending (Linux: systemd, lifecycle/ending-record.ts `systemIsStopping`), for a leave that does not
+ * say who asked for it, or one asked for as the system ends. `at` is when the leave was asked for: the agents got theirs with it
+ */
+const askSystem = (why: string): Promise<void> => {
+  const at = Date.now()
+  return systemIsStopping().then((stopping) => {
+    if (!stopping) return
+    console.error(`[agent-host] ${why} came as the system is stopping`)
+    ending.systemEnding(at)
+  })
+}
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
@@ -596,6 +611,8 @@ const beginStopForUpdate = () => {
 const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop') => {
   console.error(`[agent-host] asked to stop (${by}${o.forUpdate ? ', for an update' : ''})`)
   ending.leaving(o.forUpdate ? 'update' : 'stop', by)
+  // A stop asked for as the system ends is the system's (a keeper or a script stopping its host as it gets the system's SIGTERM)
+  void askSystem(`a stop (${by})`)
   if (o.forUpdate) beginStopForUpdate()
   if (stopNow) stopNow()
   else stopAsked = true
@@ -990,20 +1007,16 @@ const endings = wireEndings({
   quit: () => {
     if (dbPath !== ':memory:') markQuit(dirname(dbPath))
   },
-  cause: (by, detail) => ending.leaving(by, detail),
+  cause: (by, detail) => {
+    ending.leaving(by, detail)
+    // The keeper stops its host for good as it gets the system's SIGTERM too: asked, not waited for (the leave is long enough)
+    if (by === 'quit' || by === 'parent') void askSystem(by === 'quit' ? "the keeper's stop" : 'the parent going')
+  },
   /*
    * A SIGTERM or SIGHUP may be the system's own, at a shutdown or a sign-out: where the system can say so (Linux), it is asked
-   * first, within a second, so the answer is written before the host goes. The time is the signal's: the agents got theirs with it
+   * first, within a second, so the answer is written before the host goes. A second signal meanwhile begins the leave at once
    */
-  signalled: (sig) => {
-    if (sig !== 'SIGTERM' && sig !== 'SIGHUP') return
-    const at = Date.now()
-    return systemIsStopping().then((stopping) => {
-      if (!stopping) return
-      console.error(`[agent-host] ${sig} came as the system is stopping`)
-      ending.systemEnding(at)
-    })
-  },
+  signalled: (sig) => (sig === 'SIGTERM' || sig === 'SIGHUP' ? askSystem(sig) : undefined),
 })
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()

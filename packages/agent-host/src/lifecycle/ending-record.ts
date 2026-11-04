@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { systemStoppingQueries } from '../os.js'
+import type { OsProcesses } from '../os/port.js'
+import { realOs } from '../os/real.js'
 
 /**
  * Why the last host ended, written by that host as it went and read by the next start (#1397). The cause is recorded at the moment,
@@ -12,7 +12,8 @@ import { join } from 'node:path'
  * host killed with no notice writes nothing, and the start before it removed the last record: the next start then knows nothing, and
  * a turn it finds cut stays a quit and a crash an error, as before. Only a recorded `system` makes a cut turn a `shutdown`.
  *
- * In the data folder beside `stopped.json` (stopped-mark.ts), which is the person's stop for a linked hub and is left as it was.
+ * In the data folder beside `stopped.json`, which is the person's stop for a linked hub and is left as it was: both are read and
+ * written in stopped-mark.ts (`writeEndingRecord`, `takeEndingRecord`).
  */
 export const ENDING_FILE = 'ended.json'
 
@@ -29,16 +30,15 @@ export type EndingRecord = { v: 1; by: LeaveCause | 'system'; at: number; system
 /** The system's end the last host recorded: when it was told */
 export type SystemEnd = { at: number }
 
-/**
- * Causes that say what the host was asked for and not by whom: a SIGTERM may be the system's, the parent's pipe closes when the
- * system ends the window. A notice that the system is ending upgrades them. The others are a person's or Centralu's own request,
- * which a later notice does not rewrite: the turn was already being stopped on purpose
- */
-const ASKED_BY_SOMEONE_UNKNOWN: ReadonlySet<LeaveCause> = new Set(['parent', 'signal', 'crash'])
+const CAUSES = ['quit', 'stop', 'update', 'swap', 'parent', 'signal', 'crash', 'system'] as const
+const isCause = (x: unknown): x is EndingRecord['by'] => typeof x === 'string' && (CAUSES as readonly string[]).includes(x)
 
 /**
- * One host's record, kept as it learns why it is leaving. The first cause stands; a system notice upgrades an unknown one, and comes
- * first if it came first. `close` is called when the host lets go of the data folder (a swap's successor owns it from then on).
+ * One host's record, kept as it learns why it is leaving. The first cause stands. A notice that the system is ending makes it
+ * `system`, whatever cause came before or after: a stop asked for as the system ends (the keeper stopping its host as it gets the
+ * system's SIGTERM, a Mac quitting its apps as it shuts down) is the system's too. A notice the host outlives by
+ * `SYSTEM_END_TAIL_MS` was no end: the system did not go. `close` is called when the host lets go of the data folder (a swap's
+ * successor owns it from then on).
  */
 export class EndingRecorder {
   private cause: { by: LeaveCause; at: number; detail?: string } | null = null
@@ -46,7 +46,16 @@ export class EndingRecorder {
   private closed = false
 
   /** `write(null)`: there is nothing to say (an end called off before any leave), so no record is left */
-  constructor(private readonly o: { write: (r: EndingRecord | null) => void; now?: () => number }) {}
+  constructor(
+    private readonly o: {
+      write: (r: EndingRecord | null) => void
+      now?: () => number
+      /** Runs `f` after `ms`, without holding the process open */
+      setTimer?: (f: () => void, ms: number) => void
+      /** The host outlived a notice: it is called off (`systemEndingCancelled`), and this says so */
+      outlived?: () => void
+    },
+  ) {}
 
   private now(): number {
     return (this.o.now ?? Date.now)()
@@ -62,10 +71,14 @@ export class EndingRecorder {
   /** The system said it is ending (a shutdown, restart or sign-out), told at `at` */
   systemEnding(at: number = this.now()): void {
     if (this.systemAt !== null) return
-    // The person or Centralu asked for this ending before the system did: it stays theirs
-    if (this.cause && !ASKED_BY_SOMEONE_UNKNOWN.has(this.cause.by) && this.cause.at <= at) return
     this.systemAt = at
     this.flush()
+    const setTimer = this.o.setTimer ?? ((f, ms) => void setTimeout(f, ms).unref())
+    setTimer(() => {
+      if (this.systemAt !== at) return
+      this.o.outlived?.()
+      this.systemEndingCancelled()
+    }, SYSTEM_END_TAIL_MS)
   }
 
   /** The system's end was called off (Windows: another app refused it) */
@@ -94,38 +107,6 @@ export class EndingRecorder {
   }
 }
 
-/** Writes the record in the data folder. Never fatal: a host that cannot write it ends all the same, and the next start knows nothing */
-export function writeEndingRecord(dataDir: string): (r: EndingRecord | null) => void {
-  return (r) => {
-    try {
-      if (!r) rmSync(join(dataDir, ENDING_FILE), { force: true })
-      else writeFileSync(join(dataDir, ENDING_FILE), `${JSON.stringify(r)}\n`)
-    } catch {
-      // nothing to remember it in
-    }
-  }
-}
-
-/**
- * The last host's record, removed as it is read: once this host holds the folder's lock, a record found later is this host's own.
- * Text that is not a record (a host killed while it wrote) is no record
- */
-export function takeEndingRecord(dataDir: string): EndingRecord | null {
-  const path = join(dataDir, ENDING_FILE)
-  let text: string
-  try {
-    text = readFileSync(path, 'utf8')
-  } catch {
-    return null
-  }
-  try {
-    rmSync(path, { force: true })
-  } catch {
-    // a record left behind is read again by the next start, which removes it then
-  }
-  return parseEndingRecord(text)
-}
-
 export function parseEndingRecord(text: string): EndingRecord | null {
   let r: unknown
   try {
@@ -134,10 +115,14 @@ export function parseEndingRecord(text: string): EndingRecord | null {
     return null
   }
   if (typeof r !== 'object' || r === null) return null
-  const { v, by, at, systemAt } = r as Record<string, unknown>
-  if (v !== 1 || typeof by !== 'string' || typeof at !== 'number') return null
+  const v: unknown = 'v' in r ? r.v : undefined
+  const by: unknown = 'by' in r ? r.by : undefined
+  const at: unknown = 'at' in r ? r.at : undefined
+  const systemAt: unknown = 'systemAt' in r ? r.systemAt : undefined
+  const detail: unknown = 'detail' in r ? r.detail : undefined
+  if (v !== 1 || !isCause(by) || typeof at !== 'number') return null
   if (by === 'system' && typeof systemAt !== 'number') return null
-  return r as EndingRecord
+  return { v: 1, by, at, ...(typeof systemAt === 'number' ? { systemAt } : {}), ...(typeof detail === 'string' ? { detail } : {}) }
 }
 
 /** The system's end the record says the last host went in, or `null` when it went for any other reason, or none is known */
@@ -188,28 +173,24 @@ export function crashedInSystemEnd(s: { state: string }, rows: readonly { ts: nu
 }
 
 /**
- * Whether a SIGTERM or SIGHUP is the system ending, where the system says so (Linux with systemd: the manager is `stopping` at a
- * shutdown or restart, and the user's manager at the sign-out that ends it; systemctl(1), is-system-running). Elsewhere, and when
- * it cannot be asked within `timeoutMs`, false: a signal alone does not say who sent it (the keeper's restart is one too).
+ * Whether the system says it is ending now (a shutdown, restart or sign-out), where it can say so (`systemStoppingQueries`: Linux's
+ * systemd, the manager or the user's manager `stopping`; systemctl(1), is-system-running). Elsewhere, and when it does not answer
+ * within `timeoutMs`, false: a signal alone does not say who sent it (the keeper's restart is one too).
  */
-export function systemIsStopping(o: { platform?: NodeJS.Platform; ask?: (args: string[], timeoutMs: number) => Promise<string>; timeoutMs?: number } = {}): Promise<boolean> {
-  if ((o.platform ?? process.platform) !== 'linux') return Promise.resolve(false)
+export function systemIsStopping(
+  o: { queries?: readonly (readonly string[])[] | null; run?: OsProcesses['run']; timeoutMs?: number } = {},
+): Promise<boolean> {
+  const queries = o.queries === undefined ? systemStoppingQueries() : o.queries
+  if (!queries || queries.length === 0) return Promise.resolve(false)
   const timeoutMs = o.timeoutMs ?? 1000
-  const ask = o.ask ?? askSystemctl
-  const one = (args: string[]) =>
-    Promise.race([
-      ask(args, timeoutMs).then((out) => out.trim() === 'stopping', () => false),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs).unref()),
-    ])
-  return Promise.all([one(['is-system-running']), one(['--user', 'is-system-running'])]).then(([system, user]) => system || user)
-}
-
-/** `systemctl … is-system-running`'s word. It exits non-zero for every state but `running`, with the word on stdout all the same */
-function askSystemctl(args: string[], timeoutMs: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('systemctl', args, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => {
-      if (typeof stdout === 'string' && stdout.trim()) resolve(stdout)
-      else reject(err ?? new Error('no answer'))
-    })
-  })
+  const run: OsProcesses['run'] = o.run ?? ((command, args, options) => realOs().processes.run(command, args, options))
+  // `is-system-running` exits non-zero for every state but `running`, with the word on stdout all the same
+  const one = ([command, ...args]: readonly string[]) =>
+    command === undefined
+      ? Promise.resolve(false)
+      : Promise.race([
+          run(command, args, { timeoutMs }).then((r) => String(r.stdout).trim() === 'stopping', () => false),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs).unref()),
+        ])
+  return Promise.all(queries.map(one)).then((answers) => answers.some(Boolean))
 }

@@ -3375,10 +3375,12 @@ host that crashed or is missing, not one the person stopped:
   closed, which is how a direct-mode window quits), `signal` (with its name), `crash`. The first cause stands. A notice that the
   system is ending writes `system` with its time: the control line `{"op":"system-ending"}` on the host's stdin from the window or
   the keeper that hears the system's end (`{"op":"system-ending","cancelled":true}` when it is called off), and on Linux a SIGTERM
-  or SIGHUP that comes while `systemctl is-system-running` (or `--user`, at the sign-out that ends the user's manager) answers
-  `stopping`, asked for at most a second before the leave begins. A notice upgrades the causes that do not say who asked
-  (`parent`, `signal`, `crash`), and comes first if it came first (a Mac quits its apps as it shuts down); a quit, stop, update or
-  swap asked for before it stays what it was. The next host takes the record once it holds the lock (read and removed, before
+  or SIGHUP, a keeper's stop, a stop request or the parent going while `systemctl is-system-running` (or `--user`, at the
+  sign-out that ends the user's manager) answers `stopping` (`os.ts` `systemStoppingQueries`): asked for at most a second, and
+  for a signal before the leave begins (a second signal meanwhile begins it at once). A notice makes the record `system`
+  whatever cause came before or after it: a stop asked for as the system ends (the keeper stopping its host as it gets the
+  system's SIGTERM, a Mac quitting its apps as it shuts down) is the system's too. A notice the host outlives by 2 minutes is
+  called off (the system did not go), so a host that runs on leaves no stale one. The next host takes the record once it holds the lock (read and removed, before
   `stopped.json` is cleared), and only `system` changes anything (§4.6.2, `shutdown`). A host killed with no notice writes
   nothing, so the next start knows nothing and guesses nothing. Separate from `stopped.json`, which keeps its meaning for a hub.
   **Not sent yet**: no window or keeper writes the `system-ending` line. Measured on Windows 11 (a host log over a month of
