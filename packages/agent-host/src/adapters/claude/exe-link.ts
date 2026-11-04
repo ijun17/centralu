@@ -42,7 +42,7 @@ import { basename, dirname, join } from 'node:path'
 export const PLACEHOLDER_MAX_BYTES = 1_000_000
 
 /** How long the package's own setup step may run: a link is instant, a copy of the 250 MB program is not */
-export const INSTALLER_TIMEOUT_MS = 60_000
+export const INSTALLER_TIMEOUT_MS = 30_000
 
 /** What `start` throws when Claude Code's program is the npm placeholder: the message says what to do */
 export class ClaudePlaceholderError extends Error {
@@ -318,7 +318,7 @@ export class ClaudeLinks {
       tried = `${step} earlier since it started and does not run it again.`
     } else if (/\b(EBUSY|EPERM|EACCES)\b/.test(run.output)) {
       this.log(`[claude] the setup step could not replace ${exe}; a running program holds it: ${firstLine(run.output)}`)
-      tried = `${step} and the file is still a placeholder: a running Claude Code holds it.`
+      tried = `${step} and the file is still a placeholder: it could not be replaced, usually because a running Claude Code held it.`
     } else {
       const why = run.status === null ? run.output : run.status === 0 ? firstLine(run.output) || 'it left the placeholder in place' : `exit code ${run.status}: ${firstLine(run.output)}`
       this.log(`[claude] the setup step did not repair ${exe}: ${why}`)

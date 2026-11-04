@@ -128,7 +128,7 @@ process.exitCode = 1;`
     stub(HELD)
     const log: string[] = []
     const msg = message(links({}, 'win32', log))
-    expect(msg).toContain('a running Claude Code holds it')
+    expect(msg).toContain('usually because a running Claude Code held it')
     expect(msg).toContain(`node "${join(pkg, 'install.cjs')}"`)
     expect(readFileSync(exe, 'utf8')).toBe(PLACEHOLDER)
     expect(log.join('\n')).toContain('EBUSY')
@@ -172,9 +172,9 @@ process.exitCode = 1;`
     stub('')
     expect(message(links())).toContain('it left the placeholder in place')
     stub(COPIES)
-    const timedOut = message(links({ runInstaller: () => ({ status: null, output: 'it did not finish within 60 seconds' }) }))
-    expect(timedOut).toContain('it did not repair the file: it did not finish within 60 seconds')
-    expect(timedOut).not.toContain('holds it')
+    const timedOut = message(links({ runInstaller: () => ({ status: null, output: 'it did not finish within 30 seconds' }) }))
+    expect(timedOut).toContain('it did not repair the file: it did not finish within 30 seconds')
+    expect(timedOut).not.toContain('held it')
     expect(runs()).toBe(0)
   })
 
