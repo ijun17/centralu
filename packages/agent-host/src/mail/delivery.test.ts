@@ -320,7 +320,7 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
     expect(told).toHaveLength(1)
     expect(told[0]?.message.facts.unanswered).toEqual(expect.arrayContaining([{ id: asked.id, recipient: B, why: 'lost' }, { id: other.id, recipient: C, why: 'lost' }]))
-    expect(told[0]?.message.body).toContain(`- ${asked.id} to beta (${B}): its turn on it ended while Centralu restarted, before it answered, so ask again if you still need the answer.`)
+    expect(told[0]?.message.body).toContain(`- ${asked.id} to beta (${B}): its turn on your message ended while Centralu restarted, before it answered, so ask again if you still need the answer.`)
     // Every line says to ask again: the closing words for the others (and needsReply=false) are not said
     expect(told[0]?.message.body).not.toContain('For the others')
     expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])

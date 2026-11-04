@@ -1085,7 +1085,7 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   stopped: 'the person stopped that session',
   error: 'that session stopped with an error',
   gone: 'that session is gone',
-  lost: 'its turn on it ended while Centralu restarted, before it answered, so ask again if you still need the answer',
+  lost: 'its turn on your message ended while Centralu restarted, before it answered, so ask again if you still need the answer',
 }
 
 /** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */
