@@ -1,12 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Asker } from '../mail/asked-by.js'
 import { AskedGate, type AskedGateHost } from './asked-gate.js'
 import { HostCards } from './host-cards.js'
 
-const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }
+/** A request that cites the person's message 7 of the asking session, checked at send */
+const ASKER: Asker = { messageId: 't1', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 7, at: 1_000 } }
+/** The same request citing nothing the person wrote */
+const UNCITED: Asker = { ...ASKER, cites: null }
 
 type Out = { text: string; isError?: boolean }
 const refused = (text: string): Out => ({ text, isError: true })
@@ -16,17 +16,13 @@ function world(
     asker?: () => Asker | null
     answer?: 'allow' | 'deny' | null
     afterAsk?: () => void
-    folders?: string[]
-    projects?: Record<string, string | null>
-    /** What each asking session reaches, where it differs between askers */
-    reachOf?: (sessionId: string) => { folders: string[]; project: string | null }
-    projectName?: string
-    /** The gate has seen the orchestrator's conversation begin (the usual case) */
-    begun?: boolean
+    /** Whether work handed on goes to a session no looser than the asking one (the manager's `noLooser`) */
+    noLooser?: boolean
   } = {},
 ) {
   const asked: string[] = []
   const covered: boolean[] = []
+  const records: { asker: string; seq: number | null; act: string }[] = []
   const host: AskedGateHost = {
     askedBy: over.asker ?? (() => ASKER),
     ask: async (_id, question) => {
@@ -38,12 +34,10 @@ function world(
       covered.push(true)
       return run()
     },
-    reach: (id) => ({ ...(over.reachOf?.(id) ?? { folders: over.folders ?? [], project: 'p1' }), ...(over.projectName ? { projectName: over.projectName } : {}) }),
-    projectOf: (id) => over.projects?.[id],
+    noLooser: () => over.noLooser ?? true,
+    done: (asker, act) => void records.push({ asker: asker.sessionId, seq: asker.cites?.seq ?? null, act }),
   }
-  const gate = new AskedGate(host)
-  if (over.begun !== false) gate.beginConversation('orc')
-  return { gate, asked, covered }
+  return { gate: new AskedGate(host), asked, covered, records }
 }
 const ran = () => {
   const calls: number[] = []
@@ -54,9 +48,9 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('a step that changes something asks first, and runs once the person allows it', async () => {
     const w = world()
     const r = ran()
-    expect(await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
+    expect(await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
     expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run rename_session')
+    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run delete_session')
     expect(r.calls).toHaveLength(1)
     expect(w.covered).toEqual([true])
   })
@@ -122,6 +116,19 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
     expect(await allowing.gate.askCli('orc', 'Bash', { command: 'ls' })).toEqual({ allowed: true, asked: true })
   })
 
+  it('a step of the CLI’s own is recorded once the CLI says it ran, not when the person allowed it', async () => {
+    const w = world({ answer: 'allow' })
+    expect(await w.gate.askCli('orc', 'Bash', { command: 'false' })).toEqual({ allowed: true, asked: true })
+    // Allowed, and then it failed or a rule of the CLI's stopped it: the CLI never says it ran, so there is no record
+    expect(w.records).toEqual([])
+    w.gate.cliDone('orc', 'Bash', { command: 'ls' })
+    expect(w.records).toEqual([{ asker: 'asker', seq: 7, act: 'run Bash {"command":"ls"}' }])
+    // A read, and a turn that is nobody's request, are not recorded
+    w.gate.cliDone('orc', 'Read', { file_path: 'a' })
+    world({ asker: () => null }).gate.cliDone('orc', 'Bash', { command: 'ls' })
+    expect(w.records).toHaveLength(1)
+  })
+
   it('a step that would outlive the turn is refused without a question: a subagent, a scheduled prompt, a watched command', async () => {
     const w = world({ answer: 'allow' })
     for (const tool of ['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor', 'RemoteTrigger']) {
@@ -141,441 +148,95 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   })
 })
 
-/*
- * What a request's turn reads that the asker could not read itself (found by the second review of #1516): reading is free, but the orchestrator answers
- * in the asker's thread, and the asker reads the answer. After such a read the answer asks the person, showing its words.
- */
-describe('a reply after a read outside the asker’s reach (§9.7)', () => {
-  const HOME = resolve('/work/acme')
-  const INSIDE = resolve('/work/acme/src/a.ts')
-  const OUTSIDE = resolve('/private/secret.txt')
-  const reply = (text = 'the file says: hunter2') => ({ action: 'reply', thread: 't1', text })
-  const send = (w: ReturnType<typeof world>, args: Record<string, unknown>, name = 'mail') => {
-    const r = ran()
-    return w.gate.when('orc', { name, args }, undefined, r.run, refused).then((out) => ({ out, r }))
-  }
-  const read = (w: ReturnType<typeof world>, name: string, args: Record<string, unknown>) => w.gate.askCli('orc', name, args)
+describe('a step that can be undone runs, cited or not, and every step that changed something is recorded (#1739)', () => {
+  const undoable = [
+    { name: 'add_project', args: { path: '/work/app', machine: 'laptop' } },
+    { name: 'rename_session', args: { sessionId: 's', name: 'n' } },
+    { name: 'set_project_trust', args: { project: 'p1', trusted: true } },
+  ]
+  /** Work handed on, which runs without the request's card unless it goes to a session looser than the asking one, wherever that session is */
+  const handsOn = [
+    { name: 'create_session', args: { project: 'Acme', firstMessage: 'set it up' } },
+    // #1739's own case: a session on a linked machine
+    { name: 'create_session', args: { project: 'laptop/app', firstMessage: 'set it up there' } },
+    { name: 'start_agent', args: { task: 'go' } },
+    { name: 'ask_project', args: { project: 'Other', session: 's', task: 'go' } },
+    { name: 'handoff_session', args: { sessionId: 's' } },
+    { name: 'send_to_session', args: { sessionId: 's', text: 'hi' } },
+    { name: 'agent_session', args: { action: 'send', sessionId: 's', text: 'hi' } },
+    { name: 'mail', args: { action: 'send', to: 'session:h/s2', text: 'hi' } },
+  ]
 
-  it('a reply asks, showing its words whole and naming the asker; Deny sends nothing', async () => {
-    const w = world({ folders: [HOME], answer: 'deny' })
-    expect(await read(w, 'Read', { file_path: OUTSIDE })).toEqual({ allowed: true, asked: false })
-    const { out, r } = await send(w, reply('x'.repeat(1_500) + ' hunter2'))
-    expect(out.isError).toBe(true)
-    expect(r.calls).toEqual([])
-    expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to answer it')
-    expect(w.asked[0]).toContain(`Read of ${JSON.stringify(OUTSIDE)}`)
-    expect(w.asked[0]).toContain('x'.repeat(1_500) + ' hunter2')
-    expect(out.text).toContain('Nothing was sent')
-  })
-
-  it('Allow sends it; the next turn of the same thread asks again, since the conversation still has what it read', async () => {
-    let turn = 1
-    const w = world({ asker: () => ({ ...ASKER, turn }), folders: [HOME], answer: 'allow' })
-    await read(w, 'Read', { file_path: OUTSIDE })
-    expect((await send(w, reply())).r.calls).toHaveLength(1)
-    expect(w.asked).toHaveLength(1)
-    turn = 2
-    expect((await send(w, reply())).r.calls).toHaveLength(1)
-    expect(w.asked).toHaveLength(2)
-  })
-
-  it('reads in reach leave the reply free: a file in the asker’s folders, a session of its project, the asker itself', async () => {
-    const w = world({ folders: [HOME], projects: { s2: 'p1', asker: 'p1' } })
-    await read(w, 'Read', { file_path: INSIDE })
-    await read(w, 'Grep', { pattern: 'x', path: resolve('/work/acme/src') })
-    await read(w, 'Glob', { pattern: '**/*.ts', path: HOME })
-    await w.gate.when('orc', { name: 'read_session', args: { sessionId: 's2' } }, undefined, ran().run, refused)
-    await w.gate.when('orc', { name: 'read_session', args: { sessionId: 'asker' } }, undefined, ran().run, refused)
-    const { r } = await send(w, reply())
-    expect(r.calls).toHaveLength(1)
-    expect(w.asked).toEqual([])
-  })
-
-  it('each way out of reach counts: another project’s conversation, recall, the list, a path that climbs out, a relative path, a pattern aimed elsewhere', async () => {
-    const outs: [string, Record<string, unknown>][] = [
-      ['read_session', { sessionId: 's9' }],
-      ['read_session', { sessionId: 'nobody' }],
-      ['recall', { query: 'password' }],
-      ['list_sessions', {}],
-      ['list_archive', {}],
-      ['agent_session', { action: 'status', sessionId: 's9' }],
-      ['Read', { file_path: resolve('/work/acme/../private/x.txt') }],
-      ['Read', { file_path: 'secret.txt' }],
-      ['Grep', { pattern: 'x' }],
-      ['Glob', { pattern: `${resolve('/private').replace(/\\/g, '/')}/*.txt`, path: HOME }],
-      ['Glob', { pattern: '../private/*.txt', path: HOME }],
-      // (as the CLI writes a path on Windows)
-      ['Glob', { pattern: `${resolve('/private')}\\*.txt`, path: HOME }],
-    ]
-    for (const [name, args] of outs) {
-      const w = world({ folders: [HOME], projects: { s9: 'p2' } })
-      if (name === 'Read' || name === 'Grep' || name === 'Glob') await read(w, name, args)
-      else await w.gate.when('orc', { name, args }, undefined, ran().run, refused)
-      const { r } = await send(w, reply())
-      expect(r.calls, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
-      expect(w.asked, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
-    }
-  })
-
-  it('every word back into the thread asks, except marking it handled; mail to the person was never the asker’s', async () => {
-    const w = world({ folders: [HOME], answer: 'allow' })
-    await read(w, 'Read', { file_path: OUTSIDE })
-    await send(w, { action: 'update', thread: 't1', state: 'review', outcome: 'the file says hunter2' })
-    await send(w, { action: 'close', thread: 't1', outcome: 'done' })
-    expect(w.asked).toHaveLength(2)
-    await send(w, { action: 'handled', thread: 't1' })
-    expect(w.asked).toHaveLength(2)
-    await send(w, { action: 'send', to: 'person', text: 'the file says hunter2' })
-    expect(w.asked).toHaveLength(2)
-  })
-
-  it('a reply too long to show whole is refused, not asked about in part', async () => {
-    const w = world({ folders: [HOME], answer: 'allow' })
-    await read(w, 'Read', { file_path: OUTSIDE })
-    const { out, r } = await send(w, reply('x'.repeat(7_000)))
-    expect(out.isError).toBe(true)
-    expect(out.text).toContain('too long to show the person')
-    expect(w.asked).toEqual([])
-    expect(r.calls).toEqual([])
-  })
-
-  it('a turn that is not a request remembers nothing', async () => {
-    const w = world({ asker: () => null, folders: [HOME] })
-    await read(w, 'Read', { file_path: OUTSIDE })
-    expect((await send(w, reply())).r.calls).toHaveLength(1)
-    expect(w.asked).toEqual([])
-  })
-})
-
-describe('a read the CLI itself asks about, in a request (§9.7)', () => {
-  it('is the gate’s card, naming the session, Allow or Deny; outside a request the CLI keeps its own', async () => {
-    const w = world({ answer: 'deny' })
-    expect(await w.gate.askCliRead('orc', 'Read', { file_path: resolve('/private/a.txt') })).toMatchObject({ allowed: false })
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run Read')
-    const allowing = world({ answer: 'allow' })
-    expect(await allowing.gate.askCliRead('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: true })
-    const none = world({ asker: () => null })
-    expect(await none.gate.askCliRead('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: false })
-    expect(none.asked).toEqual([])
-  })
-
-  it('an Allow that comes in a later turn of the same thread runs nothing: it was for the turn it was asked in', async () => {
-    let turn = 1
-    const w = world({ asker: () => ({ ...ASKER, turn }), folders: [], answer: 'allow', afterAsk: () => void (turn = 2) })
-    expect(await w.gate.askCliRead('orc', 'Read', { file_path: resolve('/private/a.txt') })).toMatchObject({ allowed: false, message: expect.stringContaining('has ended') })
-  })
-})
-
-
-describe('what the orchestrator’s whole conversation has read (§9.7)', () => {
-  const HOME = resolve('/work/acme')
-  const OTHER_HOME = resolve('/work/zed')
-  const OUTSIDE = resolve('/private/secret.txt')
-  const reply = (text = 'the file says: hunter2', thread = 't1') => ({ action: 'reply', thread, text })
-  const send = (w: ReturnType<typeof world>, args: Record<string, unknown>, name = 'mail') => {
-    const r = ran()
-    return w.gate.when('orc', { name, args }, undefined, r.run, refused).then((out) => ({ out, r }))
-  }
-
-  it('a read in one turn is still read in the next turn of the same request: the reply asks', async () => {
-    let turn = 1
-    const w = world({ asker: () => ({ ...ASKER, turn }), folders: [HOME], answer: 'allow' })
-    await w.gate.askCli('orc', 'Read', { file_path: OUTSIDE })
-    turn = 2
-    const { r } = await send(w, reply())
-    expect(r.calls).toHaveLength(1)
-    expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain(`Read of ${JSON.stringify(OUTSIDE)}`)
-  })
-
-  it('and a read in the person’s own turn, or in another session’s request, reaches a later request’s reply', async () => {
-    let asker: Asker | null = null
-    const w = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
-    // The person's turn: the hook tells the gate, nothing is asked
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
-    asker = ASKER
-    const { r } = await send(w, reply())
-    expect(r.calls).toHaveLength(1)
-    expect(w.asked).toHaveLength(1)
-
-    // A read by the host's own tools in the person's turn goes through the gate's `when`, with no asker
-    let later: Asker | null = null
-    const viaTool = world({ asker: () => later, folders: [HOME], answer: 'allow' })
-    await viaTool.gate.when('orc', { name: 'recall', args: { query: 'x' } }, undefined, ran().run, refused)
-    later = ASKER
-    await send(viaTool, reply())
-    expect(viaTool.asked).toHaveLength(1)
-  })
-
-  it('what it read is judged against whoever asks now: a file of the other asker’s folder is out of reach for this one', async () => {
-    let asker: Asker = ASKER
-    const w = world({ asker: () => asker, answer: 'allow', reachOf: (id) => ({ folders: [id === 'asker' ? HOME : OTHER_HOME], project: id === 'asker' ? 'p1' : 'p2' }) })
-    w.gate.seen('orc', 'Read', { file_path: resolve('/work/zed/notes.txt') })
-    // Its own folder's file: free
-    asker = { ...ASKER, sessionId: 'zed', messageId: 't2' }
-    expect((await send(w, reply('fine', 't2'))).r.calls).toHaveLength(1)
-    expect(w.asked).toEqual([])
-    // Another session's request: the file is not in its reach
-    asker = ASKER
-    await send(w, reply())
-    expect(w.asked).toHaveLength(1)
-  })
-
-  it('a conversation this host did not see begin is not known to have read nothing; a new conversation starts clean', async () => {
-    const w = world({ begun: false, folders: [HOME] })
-    await send(w, reply())
-    expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('not seen from its beginning')
-    w.gate.beginConversation('orc')
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
-    await send(w, reply())
-    expect(w.asked).toHaveLength(2)
-    w.gate.beginConversation('orc')
-    await send(w, reply())
-    expect(w.asked).toHaveLength(2)
-    // One that starts from a summary of an earlier conversation carries its answers, and is not known to have read nothing
-    w.gate.beginConversation('orc', false)
-    await send(w, reply())
-    expect(w.asked).toHaveLength(3)
-  })
-
-  it('a mail thread other than the request’s counts as read out of reach; its own thread does not', async () => {
-    const own = world({ folders: [HOME] })
-    await own.gate.when('orc', { name: 'mail', args: { action: 'read', thread: ' t1 ' } }, undefined, ran().run, refused)
-    await send(own, reply())
-    expect(own.asked).toEqual([])
-    const other = world({ folders: [HOME] })
-    await other.gate.when('orc', { name: 'mail', args: { action: 'read', thread: 't9' } }, undefined, ran().run, refused)
-    await send(other, reply())
-    expect(other.asked).toHaveLength(1)
-    expect(other.asked[0]).toContain('mail of "t9"')
-  })
-
-  it('after a recorded read any mail to a session asks with its whole text: a new thread to the asker, a padded thread id, update and close in another thread', async () => {
-    const long = 'y'.repeat(900) + ' hunter2'
-    const w = world({ folders: [HOME], answer: 'deny' })
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
-    for (const args of [
-      { action: 'send', to: 'session:asker', text: long },
-      { action: 'reply', thread: ' t1', text: long },
-      { action: 'reply', thread: 't1 ', text: long },
-      { action: 'reply', thread: 't7', text: long },
-      { action: 'update', thread: 't7', state: 'review', outcome: long },
-      { action: 'close', thread: 't7', outcome: long },
-    ]) {
-      const { r, out } = await send(w, args)
-      expect(r.calls, JSON.stringify(args)).toEqual([])
-      expect(out.text).toContain('Nothing was sent')
-    }
-    expect(w.asked).toHaveLength(6)
-    for (const q of w.asked) {
-      expect(q).toContain('Session "Fix login" in project "Acme" asked the orchestrator to')
-      expect(q).toContain(long)
-      expect(q).toContain('Read of')
-    }
-    // The person is not a session: free, and marking handled carries no words
-    await send(w, { action: 'send', to: ' person ', text: long })
-    await send(w, { action: 'handled', thread: ' t1' })
-    expect(w.asked).toHaveLength(6)
-  })
-
-  it('without a recorded read a padded id of the request’s own thread is the same thread, and a send to a session asks as before', async () => {
-    const w = world({ folders: [HOME], answer: 'allow' })
-    expect((await send(w, reply('ok', ' t1 '))).r.calls).toHaveLength(1)
-    expect(w.asked).toEqual([])
-    await send(w, { action: 'send', to: 'session:asker', text: 'hello' })
-    expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).not.toContain('has read what this session could not')
-  })
-
-  it('other steps that pass words on show them whole after a recorded read, not cut', async () => {
-    const w = world({ folders: [HOME], answer: 'allow' })
-    // (a read inside the asker's reach, so far: the first card cuts)
-    w.gate.seen('orc', 'Read', { file_path: resolve(HOME, 'notes.txt') })
-    await w.gate.when('orc', { name: 'send_to_session', args: { sessionId: 's', text: 'z'.repeat(1_000) } }, undefined, ran().run, refused)
-    expect(w.asked[0]).toContain('(1000 characters)')
-    w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
-    await w.gate.when('orc', { name: 'send_to_session', args: { sessionId: 's', text: 'z'.repeat(1_000) } }, undefined, ran().run, refused)
-    expect(w.asked[1]).toContain('z'.repeat(1_000))
-    expect(w.asked[1]).not.toContain('characters)')
-  })
-
-  it('a command, a fetch or an app’s data in the person’s own turn counts as reading everything: a later request’s reply asks', async () => {
-    const names: [string, Record<string, unknown>][] = [
-      ['Bash', { command: 'cat ~/.ssh/config' }],
-      ['PowerShell', { command: 'Get-Content C:/secret.txt' }],
-      ['WebFetch', { url: 'https://example.com' }],
-      ['WebSearch', { query: 'x' }],
-      ['mcp__app-board__list_items', {}],
-      ['mcp__notion__search', { query: 'x' }],
-    ]
-    for (const [name, args] of names) {
-      let asker: Asker | null = null
-      const w = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
-      // The person's turn: only the hook's `seen`, nothing is asked
-      w.gate.seen('orc', name, args)
+  it('registering, renaming, trusting, and work handed on to a session no looser than the asking one take no request card, cited or not; their own cards are not answered for them', async () => {
+    for (const asker of [ASKER, UNCITED]) {
+      const w = world({ asker: () => asker })
+      const r = ran()
+      for (const step of [...undoable, ...handsOn]) expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toEqual({ text: 'did it' })
       expect(w.asked).toEqual([])
-      asker = ASKER
-      await send(w, reply())
-      expect(w.asked, name).toHaveLength(1)
+      expect(r.calls).toHaveLength(undoable.length + handsOn.length)
+      // Nothing covered: a trust card, a project's card or a start's consent asks as in the person's own turn
+      expect(w.covered).toEqual([])
+      expect(w.records.map((x) => x.seq)).toEqual([...undoable, ...handsOn].map(() => asker.cites?.seq ?? null))
     }
   })
 
-  it('so does an app tool the app calls read-only, which is never asked about but whose answer is in the conversation; Centralu’s own tools through the CLI do not', async () => {
-    const w = world({ folders: [HOME], answer: 'allow' })
-    const r = ran()
-    // In a request's turn: runs with no card
-    await w.gate.when('orc', { name: 'app-board.list_items', args: {}, readOnly: true }, undefined, r.run, refused)
-    expect(r.calls).toHaveLength(1)
-    expect(w.asked).toEqual([])
-    await send(w, reply())
-    expect(w.asked).toHaveLength(1)
-
-    const own = world({ folders: [HOME], answer: 'allow' })
-    own.gate.seen('orc', 'mcp__centralu__centralu_run', { command: 'rename_session' })
-    own.gate.seen('orc', 'mcp__centralu__mail', { action: 'inbox' })
-    await send(own, reply())
-    expect(own.asked).toEqual([])
-  })
-
-  it('only a call that provably gives back nothing, or whose scope is exact, stays out of the record: an unknown tool counts as reading everything', async () => {
-    const reads: [string, Record<string, unknown>][] = [
-      ['a_tool_added_next_year', {}],
-      ['ask_project', { project: 'zed' }],
-      ['ask_project', {}],
-      ['start_agent', { task: 'x', wait: true }],
-      ['agent_session', { action: 'send', sessionId: 'w1', text: 'x' }],
-      ['agent_session', { action: 'answer', sessionId: 'w1' }],
-      ['search_project_files', { query: 'x' }],
-      ['check_app', { app: 'board' }],
-      ['ReadMcpResourceTool', { server: 's', uri: 'u' }],
-      ['ListMcpResourcesTool', {}],
-      ['BashOutput', { bash_id: '1' }],
-      ['TaskOutput', { task_id: '1' }],
-      ['list_projects', {}],
-      ['find_apps', {}],
-      ['app_guide', {}],
-      ['usage_history', {}],
-      ['list_app_versions', { app: 'board' }],
-      ['list_app_grants', {}],
-      ['mail', { action: 'inbox' }],
-      ['agent_session', { action: 'status' }],
-      // `list` ignores the session named and gives every worker of every project
-      ['agent_session', { action: 'list', sessionId: 'mine' }],
-      // An update gives back the thread's next step, which another session may have written: another thread's is out of reach
-      ['mail', { action: 'update', thread: 't9', state: 'running' }],
-      ['mail', { action: 'update', state: 'running' }],
+  it('work handed to a session looser than the asking one asks, and so do an answer for the person and a session stopped or deleted', async () => {
+    const out = world({ noLooser: false, answer: 'deny' })
+    for (const step of handsOn) expect(await out.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
+    expect(out.asked).toHaveLength(handsOn.length)
+    const within = world({ noLooser: true, answer: 'deny' })
+    // No looser, the same steps run without the card
+    for (const step of handsOn) expect(await within.gate.when('orc', step, undefined, ran().run, refused), step.name).toEqual({ text: 'did it' })
+    const never = [
+      { name: 'answer_question', args: { sessionId: 's', answers: ['yes'] } },
+      { name: 'agent_session', args: { action: 'stop', sessionId: 's' } },
+      { name: 'mail', args: { action: 'reply', thread: 'another-thread', text: 'x' } },
     ]
-    for (const [name, args] of reads) {
-      const w = world({ folders: [HOME], projects: { mine: 'p1' } })
-      w.gate.seen('orc', name, args)
-      await send(w, reply())
-      expect(w.asked, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
-    }
-    // Calls that give back nothing anybody read, and those whose scope is exact and inside the asker's reach
-    const nothing: [string, Record<string, unknown>][] = [
-      ['Write', { file_path: OUTSIDE, content: 'x' }],
-      ['Edit', { file_path: OUTSIDE }],
-      ['TodoWrite', { todos: [] }],
-      ['NotebookEdit', { notebook_path: OUTSIDE }],
-      ['ToolSearch', { query: 'x' }],
-      ['compact_self', {}],
-      ['centralu_run', { command: 'list_sessions' }],
-      ['centralu_help', { command: 'recall' }],
-      ['mail', { action: 'send', to: 'person', text: 'x' }],
-      ['mail', { action: 'handled', thread: 't1' }],
-      ['mail', { action: 'update', thread: ' t1 ', state: 'review' }],
-      ['ask_project', { project: 'p1' }],
-      ['agent_session', { action: 'status', sessionId: 'mine' }],
+    for (const step of never) expect(await within.gate.when('orc', step, undefined, ran().run, refused), step.name).toMatchObject({ isError: true })
+    expect(within.asked).toHaveLength(never.length)
+  })
+
+  it('only what cannot be undone asks, cited or not: a delete, an uninstall, an OS entry, an update applied, a command, a file written, an app’s step', async () => {
+    const floor = [
+      { name: 'delete_session', args: { sessionId: 's' } },
+      { name: 'delete_all_archived', args: {} },
+      { name: 'uninstall_machine', args: { machineId: 'm' } },
+      { name: 'set_machine_autostart', args: { machineId: 'm', enabled: true } },
+      { name: 'update_centralu', args: { action: 'apply' } },
+      { name: 'server.queue_merge', args: { pr: 1 } },
+      // A command nobody has said can be undone asks until someone does
+      { name: 'some_command_added_later', args: {} },
     ]
-    for (const [name, args] of nothing) {
-      const w = world({ folders: [HOME], projects: { mine: 'p1' } })
-      w.gate.seen('orc', name, args)
-      await send(w, reply())
-      expect(w.asked, `${name} ${JSON.stringify(args)}`).toEqual([])
-    }
-  })
-
-  it('the person’s answer to a question is read in a request’s turn, where the asker could have got the person to type it; in the person’s own turn it is not', async () => {
-    const request = world({ folders: [HOME] })
-    request.gate.seen('orc', 'AskUserQuestion', { questions: [] })
-    await send(request, reply())
-    expect(request.asked).toHaveLength(1)
-    const own = world({ asker: () => null, folders: [HOME] })
-    own.gate.seen('orc', 'AskUserQuestion', { questions: [] })
-    expect(own.asked).toEqual([])
-    // (the same conversation, later asked by a session)
-    let asker: Asker | null = null
-    const later = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
-    later.gate.seen('orc', 'AskUserQuestion', { questions: [] })
-    asker = ASKER
-    await send(later, reply())
-    expect(later.asked).toEqual([])
-  })
-
-  it('where a path was when it was read is what counts, not where a link there points by the time the reply is written', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'cc-gate-swap-'))
-    try {
-      const project = join(root, 'project')
-      const elsewhere = join(root, 'elsewhere')
-      mkdirSync(join(project, 'inner'), { recursive: true })
-      mkdirSync(elsewhere)
-      writeFileSync(join(elsewhere, 'secret.txt'), 'hunter2')
-      writeFileSync(join(project, 'inner', 'secret.txt'), 'mine')
-      const link = join(project, 'link')
-      try {
-        symlinkSync(elsewhere, link, 'junction')
-      } catch (err) {
-        console.warn(`asked-gate.test: no link could be made here (${err instanceof Error ? err.message : String(err)}); the case is not exercised`)
-        return
+    for (const asker of [ASKER, UNCITED]) {
+      const w = world({ asker: () => asker, answer: 'deny' })
+      for (const step of floor) {
+        const r = ran()
+        expect(await w.gate.when('orc', step, undefined, r.run, refused), step.name).toMatchObject({ isError: true })
+        expect(r.calls, step.name).toEqual([])
       }
-      const w = world({ folders: [project], answer: 'allow' })
-      // Read through the link while it points outside, then the link is made to point inside
-      w.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
-      rmSync(link, { recursive: true, force: true })
-      symlinkSync(join(project, 'inner'), link, 'junction')
-      await send(w, reply())
-      expect(w.asked).toHaveLength(1)
-      expect(w.asked[0]).toContain('Read of')
-      // And the other way round: read while inside, swapped to outside afterwards, is still a read inside
-      const inside = world({ folders: [project], answer: 'allow' })
-      inside.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
-      rmSync(link, { recursive: true, force: true })
-      symlinkSync(elsewhere, link, 'junction')
-      await send(inside, reply())
-      expect(inside.asked).toEqual([])
-    } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 5 })
+      for (const tool of ['Bash', 'PowerShell', 'Write', 'Edit', 'mcp__other__drop']) expect(await w.gate.askCli('orc', tool, { command: 'rm -rf x', file_path: '/x' }), tool).toMatchObject({ allowed: false })
+      expect(w.asked).toHaveLength(floor.length + 5)
+      expect(w.records).toEqual([])
+      // The floor is the line: a rename, which can be undone, runs in the same turn without asking
+      const rename = ran()
+      await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's', name: 'n' } }, undefined, rename.run, refused)
+      expect(rename.calls).toHaveLength(1)
+      expect(w.asked).toHaveLength(floor.length + 5)
     }
   })
 
-  it('a project’s own state counts when it is another project’s or none is named; a machine’s activity always counts', async () => {
-    const outs: [string, Record<string, unknown>][] = [
-      ['project_git_status', { project: 'zed' }],
-      ['list_app_errors', { app: 'board' }],
-      ['list_app_runs', { app: 'board', project: 'p9' }],
-      ['app_usage', { app: 'board' }],
-      ['machine_activity', { machine: 'laptop' }],
-    ]
-    for (const [name, args] of outs) {
-      const w = world({ folders: [HOME] })
-      await w.gate.when('orc', { name, args }, undefined, ran().run, refused)
-      await send(w, reply())
-      expect(w.asked, name).toHaveLength(1)
-    }
-    // Its own project, by id or by name (any case), is in reach
-    const mine = world({ folders: [HOME], projectName: 'Acme' })
-    await mine.gate.when('orc', { name: 'project_git_status', args: { project: 'p1' } }, undefined, ran().run, refused)
-    await mine.gate.when('orc', { name: 'project_git_status', args: { project: 'ACME' } }, undefined, ran().run, refused)
-    await mine.gate.when('orc', { name: 'list_app_errors', args: { app: 'board', project: 'acme' } }, undefined, ran().run, refused)
-    await send(mine, reply())
-    expect(mine.asked).toEqual([])
+  it('a read, an answer in the thread, a failed step and a refused one leave no record; a step the person allowed does', async () => {
+    const w = world({ asker: () => UNCITED })
+    const r = ran()
+    await w.gate.when('orc', { name: 'read_session', args: { sessionId: 's' } }, undefined, r.run, refused)
+    await w.gate.when('orc', { name: 'mail', args: { action: 'reply', thread: 't1', text: 'done' } }, undefined, r.run, refused)
+    await w.gate.when('orc', { name: 'add_project', args: { path: '/nope' } }, undefined, async () => ({ text: 'No folder there.', isError: true }), refused)
+    expect(w.records).toEqual([])
+    await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, r.run, refused)
+    expect(w.records).toEqual([{ asker: 'asker', seq: null, act: 'run delete_session {"sessionId":"s"}' }])
   })
 })
 
-
-// The cover itself is HostCards': what the manager test cannot show is its edges
 describe('the Allow covers one call, not the session', () => {
   it('is kept by the call’s own async work and ends with the call and with its signal', async () => {
     const cards = new HostCards({ meta: new Map(), autoBoundaryOpen: () => false } as never)

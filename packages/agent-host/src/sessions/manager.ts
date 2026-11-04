@@ -1,7 +1,9 @@
 import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
-import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { createdPreset, orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { parseAddress } from '../mail/address.js'
+import { presetWithin } from './start-agent.js'
 import { AskedGate } from './asked-gate.js'
 import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
@@ -78,6 +80,7 @@ import {
   alwaysAllowKey,
   errorMessage,
   ORCHESTRATOR_CHANGE,
+  oneLineText,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -461,14 +464,35 @@ export class SessionManager {
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      reach: (sessionId) => {
-        const m = this.meta.get(sessionId)
-        const folders = [this.store.sessions.sessionCwd(sessionId), m?.projectId ? this.projectRegistry.cwdOf(m.projectId) : null, m?.worktree?.path, ...(this.readGrants.get(sessionId) ?? [])]
-        return { folders: folders.filter((f): f is string => typeof f === 'string' && f !== ''), project: m?.projectId ?? null, projectName: this.projectRegistry.projectRow(m?.projectId)?.name ?? null }
+      // Work handed on to a session no looser than the asking one, the one check about power (docs/plans/cited-requests.md §4); where it goes is the orchestrator's judgement
+      noLooser: (asker, call) => {
+        const me = this.meta.get(asker.sessionId)
+        if (!me) return false
+        const seatId = this.orchestratorId()
+        const seat = (seatId === null ? undefined : this.meta.get(seatId))?.permissionPreset ?? 'safe'
+        // A session of this host by id or mail address; one on a linked machine is not known here, so its preset is not either
+        const of = (v: unknown): PermissionPreset | undefined => {
+          if (typeof v !== 'string') return undefined
+          const party = parseAddress(v.trim())
+          return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())?.permissionPreset
+        }
+        const preset =
+          call.name === 'create_session' ? createdPreset(seat) // here or on a linked machine, the same cap
+          : call.name === 'start_agent' ? seat // its child runs under the caller's preset (start-agent-flow.ts)
+          : call.name === 'handoff_session' ? (call.args.sessionId === undefined ? seat : of(call.args.sessionId)) // the new session keeps the old one's
+          : call.name === 'ask_project' ? of(call.args.session)
+          : call.name === 'mail' ? of(call.args.to)
+          : of(call.args.sessionId)
+        return preset !== undefined && presetWithin(preset, me.permissionPreset)
       },
-      projectOf: (sessionId) => {
-        const m = this.meta.get(sessionId)
-        return m ? (m.projectId ?? null) : undefined
+      done: (asker, act) => {
+        const cites = asker.cites
+        const cited = cites ? this.store.messages.loadMessagesFrom(asker.sessionId, cites.seq - 1, 1).find((r) => r.seq === cites.seq) : undefined
+        const words = cited && typeof cited.payload === 'object' && cited.payload !== null && 'text' in cited.payload ? String(cited.payload.text) : ''
+        const why = cites
+          ? `On your message from ${Math.max(1, Math.round((Date.now() - cites.at) / 60_000))} min ago (${JSON.stringify(oneLineText(words, 60))}), the orchestrator did this for this session's request`
+          : "For this session's request, which cites no message of yours, the orchestrator did this"
+        this.events.onEvent({ type: 'notice', sessionId: asker.sessionId, level: 'info', from: 'Centralu', label: 'request record', text: `${why}: ${oneLineText(act, 300)}` })
       },
     })
     this.linkedReports = new LinkedReports(this.parts())
@@ -1969,8 +1993,11 @@ export class SessionManager {
       refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
-      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
+      requestTurn: (id) => ({
+        active: () => self.askedGate.active(id),
+        ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal),
+        done: (tool, input) => self.askedGate.cliDone(id, tool, input),
+      }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {

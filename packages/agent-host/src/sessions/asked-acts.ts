@@ -1,14 +1,13 @@
 import { oneLineText } from '@cc/protocol'
 
 /**
- * Which acts of the orchestrator ask the person when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
+ * What the orchestrator's acts are in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md): reads and answers in the
+ * request's thread (`askedAct` null), and steps that change something. Of those, the ones listed as able to be undone (`UNDOABLE`) run without the
+ * request's card, and so does work handed on to a session no looser than the asking one (`HANDS_ON`, decided by `AskedGate`'s host); every other step
+ * asks the person first, whatever the orchestrator's own preset (`stepKind`).
  *
- * A turn whose thread a session opened is that session's request, and a session's words are not the person's. So in such a turn every
- * step the orchestrator could not take from an untrusted text alone raises the person's card, whatever the orchestrator's own preset:
- * anything that changes sessions, projects, settings, machines, installations or apps, starts agents, deletes, runs a command or writes a
- * file. Reading, and answering in the thread that asked, need no card.
- *
- * **Fail closed.** The reading acts are listed; every other tool or command asks, so a command added later asks until someone says it only reads.
+ * **Fail closed.** The reading acts and the steps that can be undone are listed; every other tool or command asks the person, so a command added
+ * later asks until someone says it only reads or can be undone (`asked-acts.test.ts` holds every definition to one of the lists).
  */
 
 /** Tools and commands that only read, or only change this orchestrator's own turn: no card (§9.7) */
@@ -32,6 +31,7 @@ const READS: ReadonlySet<string> = new Set([
   'agent_status',
   'agent_models',
   'project_git_status',
+  'search_project_files',
   'list_app_versions',
   'list_app_runs',
   'list_app_errors',
@@ -114,16 +114,99 @@ function argsLine(args: Record<string, unknown>, cut: boolean): string {
 }
 
 /** What the person is asked to allow: the step as one line, or that it does not fit a card */
-export type AskedStep = { act: string; afterRead?: true } | { tooLong: true }
+export type AskedStep = { act: string } | { tooLong: true }
 
 /**
- * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post
- * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks.
- * `reached` says what the orchestrator's conversation read that the asking session could not read itself (`AskedGate`): after that every word to a
- * session asks, the answer in the thread included, with its text shown whole, since it could carry what was read to the session. The thread is
- * compared as the mail tool takes it, trimmed
+ * Centralu's commands that can be undone, which a session's request runs without its card (owner, 2026-11-03), each with the way back. The cards a
+ * command raises itself still ask, as in the person's own turn: adding a project or a machine, making one, trusting one, sharing an app, the
+ * settings that ask (`AskedGate` does not cover them)
  */
-export function askedAct(name: string, args: Record<string, unknown>, thread: string, reached: string | null = null): AskedStep | null {
+const UNDOABLE: ReadonlySet<string> = new Set([
+  'add_project', // removed from the list again
+  'create_project', // its folder deleted
+  'create_app', // removed
+  'add_machine', // removed
+  'disconnect_machine', // connected again
+  'reconnect_machine', // disconnected
+  'set_machine_auto_reconnect', // set back
+  'set_project_trust', // set back
+  'set_preferences', // set back
+  'set_agent_limits', // set back
+  'update_session_settings', // set back
+  'rename_session', // renamed back
+  'restore_archived', // archived again
+  'attach_app', // detached
+  'detach_app', // attached
+  'share_app', // stopped
+  'restart_app', // it starts again when called
+  'check', // restarts the app being built
+  'check_app', // the same, for an app
+  'propose_mcp_server', // the person decides on the proposal
+  'propose_skill', // the same
+  // Three that take a remembered answer away, so that step asks again: the person answers it again
+  'remove_approval_rule',
+  'revoke_project_consent',
+  'forget_app_answer',
+])
+
+/**
+ * Work handed on to a session: run without the request's card unless the session it goes to runs under a looser preset than the asking session's
+ * own (`AskedGateHost.noLooser`), the one check about power. Where it goes (another project, a linked machine) is the orchestrator's judgement,
+ * recorded as every step is (owner, 2026-11-03)
+ */
+const HANDS_ON: ReadonlySet<string> = new Set(['create_session', 'send_to_session', 'start_agent', 'ask_project', 'handoff_session'])
+
+/**
+ * The steps a session's request never takes without the person's card, cited or not, besides every step no list names: what cannot be undone (a
+ * delete, an uninstall, an OS entry, an install, a version put back over the current one, work stopped, an update applied), and an answer given
+ * for the person
+ */
+const CANNOT_BE_UNDONE: ReadonlySet<string> = new Set([
+  'delete_session',
+  'delete_archived',
+  'delete_all_archived',
+  'archive_subagent_steps',
+  'install_machine',
+  'remove_machine',
+  'uninstall_machine',
+  'rollback_machine',
+  'set_machine_autostart',
+  'remove_app',
+  'restore_app_version',
+  'apply_agent_versions',
+  'clear_background_tasks',
+  'update_centralu',
+  'answer_question',
+])
+
+/** Tools whose kind is read from their arguments (`askedAct`, `stepKind`): an action, or who the mail is for */
+const BY_ARGUMENTS: ReadonlySet<string> = new Set(['agent_session', 'mail'])
+
+/** Every list above: the test holds every tool and command definition to exactly one */
+export const CLASSIFIED = { reads: READS, undoable: UNDOABLE, handsOn: HANDS_ON, asks: CANNOT_BE_UNDONE, byArguments: BY_ARGUMENTS } as const
+
+/**
+ * How a step of a request's turn that changes something is taken (`AskedGate`): `undoable` runs without the request's card, `handsOn` runs without
+ * it unless the work goes to a session looser than the asking one, and `asks` puts it to the person first. `asks` is everything else: what cannot be undone, every
+ * step of the CLI's own that is not a read, of another MCP server's or of an app's, which nobody here can tell can be undone (a command, a file
+ * written or edited, an app's `queue_merge`), and every name no list holds
+ */
+export function stepKind(name: string, args: Record<string, unknown>): 'undoable' | 'handsOn' | 'asks' {
+  if (UNDOABLE.has(name)) return 'undoable'
+  if (HANDS_ON.has(name)) return 'handsOn'
+  // Work given to a session's turn; stopping one, deleting one or answering its card is not undoable
+  if (name === 'agent_session') return args.action === 'send' ? 'handsOn' : 'asks'
+  // Mail that is neither an answer in the request's own thread nor to the person (`askedAct`): words to someone, who may act on them
+  if (name === 'mail') return args.action === 'send' ? 'handsOn' : 'asks'
+  return 'asks'
+}
+
+/**
+ * The step as the person would be asked about it, or null for a read, which is free and leaves no record. `thread` is the thread of the turn (the
+ * session's request): a post in it is the answer, and so is free; so is mail to the person. A post in another thread, or mail to anyone else,
+ * reaches someone else (`stepKind`). The thread is compared as the mail tool takes it, trimmed
+ */
+export function askedAct(name: string, args: Record<string, unknown>, thread: string): AskedStep | null {
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
@@ -131,22 +214,16 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     const action = args.action
     if (action === 'inbox' || action === 'read') return null
     const inThread = typeof args.thread === 'string' && args.thread.trim() === thread
-    const toPerson = action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person'
-    if (reached !== null && !toPerson && (action === 'reply' || action === 'update' || action === 'close' || action === 'send')) {
-      const act = `${inThread ? 'answer it' : 'write to a session'}, though the orchestrator has read what this session could not read itself (${reached}): run mail ${argsLine(args, false)}`
-      return act.length > CLI_ACT_MAX ? { tooLong: true } : { act, afterRead: true }
-    }
     // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
     if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && inThread) return null
-    if (toPerson) return null
+    if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
-  // After such a read any step that passes words on shows them whole, as the mail does
-  return stepOf(name, args, reached !== null)
+  return stepOf(name, args)
 }
 
 /** The step as the card shows it, whatever the call is: `run <name> <arguments>`, or that it does not fit */
-export function stepOf(name: string, args: Record<string, unknown>, whole = false): AskedStep {
-  const cli = isCliTool(name) || whole
+export function stepOf(name: string, args: Record<string, unknown>): AskedStep {
+  const cli = isCliTool(name)
   const shown = argsLine(args, !cli)
   const act = `run ${name} ${shown === '{}' ? '' : shown}`.trim()
   return act.length > (cli ? CLI_ACT_MAX : ACT_MAX) ? { tooLong: true } : { act }

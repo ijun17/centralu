@@ -68,9 +68,25 @@ export type SendInput = {
   urgent?: boolean
   /** Per recipient: `orchestrator` when the sender named the role (D15) */
   via?: readonly (string | null)[]
+  /** A request to the orchestrator cites the person's newest message in the sender's conversation as their word for it (docs/plans/cited-requests.md) */
+  cite?: boolean
 }
-/** `asWork`: an answer to a clarification, stored as a task (§9.7) */
-export type SendResult = { message: MailRow; held: { recipient: string; why: HoldReason }[]; answered: string | null; quiet: boolean; asWork: boolean }
+/**
+ * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the orchestrator cites, checked.
+ * `notCited`: why a citation the request asked for did not pass the check, so the orchestrator reads the request as the session's own words
+ */
+export type SendResult = {
+  message: MailRow
+  held: { recipient: string; why: HoldReason }[]
+  answered: string | null
+  quiet: boolean
+  asWork: boolean
+  cited?: { seq: number; at: number }
+  notCited?: string
+}
+
+/** How old the person's message a request cites may be (owner, 2026-11-03) */
+export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
 export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string }
@@ -156,6 +172,8 @@ export class MessageService {
       turn?: (sessionAddress: string) => TurnNow | null
       /** How a wake names its calls to this session; the tool at the version-2 schema when absent */
       calls?: (sessionAddress: string) => MailCalls
+      /** The newest message the person typed in this session (`MessageRecords.newestPersonMessage`); none cites anything when absent */
+      personSaid?: (sessionId: string) => { seq: number; ts: number } | null
     },
   ) {
     this.now = opts.now ?? Date.now
@@ -237,6 +255,9 @@ export class MessageService {
 
     return this.run(() => {
       const now = this.now()
+      // The person's message a request cites, checked here, in the send's transaction: evidence for the orchestrator's judgement (docs/plans/cited-requests.md §3)
+      const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
+      const cited = word !== null && typeof word === 'object' ? word : undefined
       this.guards(sender, cls, to, text, target, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
@@ -249,10 +270,11 @@ export class MessageService {
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
-      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}) }
+      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}) }
 
       const stored = this.put(
-        { sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail' },
+        // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
+        { sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -264,8 +286,23 @@ export class MessageService {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
         else this.answerHeld(target, stored, held[0]?.why ?? 'policy')
       }
-      return { message: stored, held, answered: target?.id ?? null, quiet, asWork }
+      return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
     })
+  }
+
+  /**
+   * The person's word a request cites, checked in code (docs/plans/cited-requests.md §3): the newest message the person typed in the sender's own
+   * conversation, at most `CITE_MS` old and not later than now, not cited before by this sender. Or, when none passes, why not, in words for the sender
+   */
+  private personWord(sender: string, sessionId: string, now: number): { seq: number; at: number } | string {
+    const said = this.opts.personSaid?.(sessionId) ?? null
+    if (!said) return 'the person has typed nothing in this session that it could cite'
+    const age = now - said.ts
+    // A clock set back makes a message look newer than it is
+    if (age < 0) return "the person's last message here is dated later than now"
+    if (age > CITE_MS) return `the person's last message here is ${Math.round(age / 60_000)} minutes old, and a citation may be ${CITE_MS / 60_000} at most`
+    if (this.records.hasDedupe(sender, citeKey(said.seq))) return "the person's last message here was cited by an earlier request already"
+    return { seq: said.seq, at: said.ts }
   }
 
   /** Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words */
@@ -1040,6 +1077,9 @@ export class MessageService {
 }
 
 /** A row the reader was not told of (held by the one hold or the depth): its message reads as a phantom (§5.5) */
+/** The dedupe key of a request that cites the person's message `seq` of its sender's conversation: one use (`UNIQUE(sender, dedupe_key)`) */
+const citeKey = (seq: number): string => `cite:${seq}`
+
 const isHidden = (row: RecipientRow): boolean => (HIDDEN_HOLDS as readonly string[]).includes(row.held ?? '')
 
 /** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */

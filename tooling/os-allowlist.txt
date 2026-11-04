@@ -270,9 +270,6 @@ packages/agent-host/src/sessions/app-sessions.ts
 packages/agent-host/src/sessions/app-upkeep-commands.test.ts
 packages/agent-host/src/sessions/ask-project.test.ts
 packages/agent-host/src/sessions/ask-project.ts
-packages/agent-host/src/sessions/asked-gate.test.ts
-packages/agent-host/src/sessions/asked-reach.test.ts
-packages/agent-host/src/sessions/asked-reach.ts
 packages/agent-host/src/sessions/auto-boundaries.test.ts
 packages/agent-host/src/sessions/auto-compact.test.ts
 packages/agent-host/src/sessions/background-tasks-swap.test.ts

@@ -106,6 +106,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const party = parseAddress(address)
       return mailCalls(1, party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
+    personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
   })
   box.turns = new MailTurns(store.mailbox, {
     ...(opts.now ? { now: opts.now } : {}),
@@ -134,8 +135,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     project: (id) => projects().find((p) => p.id === id),
     untrusted: (projectId) => reach.untrusted(projectId),
+    cites: (messageId) => store.mailbox.message(messageId)?.facts.cites ?? null,
   }
   const tool = new MailTool(service, store.mailbox, reach, {
+    personMessage: (sessionId, seq) => {
+      const row = store.messages.loadMessagesFrom(sessionId, seq - 1, 1).find((r) => r.seq === seq)
+      return row && typeof row.payload === 'object' && row.payload !== null && 'text' in row.payload && typeof row.payload.text === 'string' ? row.payload.text : null
+    },
     caller: (id) => {
       const s = sessions.sessionInfo(id)
       return s && { address: addressOf(id), askedBy: s.askedBy ?? null }

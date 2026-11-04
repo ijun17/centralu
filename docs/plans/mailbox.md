@@ -712,6 +712,7 @@ task is never reminded: its report settles it.
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
+| `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `mailbox.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key
 survives a read. `docs/stored-shapes.md` gets the row for `mail.facts` in M1.
@@ -881,8 +882,8 @@ a row for that session, so that mail is delivered and nothing new is allowed.
 
 **A moved request** (round 5). A moved pending message from a session to the orchestrator is a request by §7.6 like
 any other: settled `legacy` changes what is awaited, not what is work. So it is a work candidate for `pickWork`, its
-sender is the turn's asker, and the request cards and the read gate apply, since mail grants nothing whatever its
-age. Its row is already settled, so the turn's end (`requestTurnEnded`) settles nothing more, it is never reminded,
+sender is the turn's asker, and the request card, the floor and the record apply (#1739), since mail grants nothing
+whatever its age; it cites nothing, so the orchestrator reads it as the session's words. Its row is already settled, so the turn's end (`requestTurnEnded`) settles nothing more, it is never reminded,
 and the asker gets S12 as for any request turn. `requestsSince` counts it by its `created_at`, as stored. A moved
 pending `assign` that became a `task` is work the same way, and its report is the old path's (D18).
 
@@ -1056,8 +1057,8 @@ message.
 | Per-pair new threads, 5 an hour (owner, #1455) | **keep, re-keyed** | 5 **non-reply** messages an hour per ordered pair: refused `pair_rate`. Replies are not counted | A message that is not a reply is what a new thread was |
 | One open request to the orchestrator per group (`checkAsk`, `service.ts:1819`) | **drop** | — | #1683: a report is not a second request, and the gate stranded it |
 | 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
-| Request turns: every non-read step raises the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message | Mail grants nothing |
-| The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **keep, re-keyed** | "a mail thread other than its own request" becomes "a message the asker was not party to" | Unchanged in spirit (#1516) |
+| Request turns: the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **keep, re-keyed** | the asker comes from the turn's work message; since #1739 a step that can be undone, and work handed on to a session no looser than the asker, run without it ([cited-requests.md](cited-requests.md)) | Mail grants nothing |
+| The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **dropped** (#1739) | the orchestrator judges a request, with the person's message it cites as evidence; a step that cannot be undone asks, and every change is recorded ([cited-requests.md](cited-requests.md)) | Replaced, not re-keyed |
 | Mail never answers a card, never passes for the person, grants nothing (old §9.2) | **keep** | unchanged: the frame, quoted bodies, the held `card` state | Not about threads |
 | The `auto` receiver's hold (`holdsInbound`, `policy.ts:22`) | **drop** | — | Owner, 2026-11-02 (D10) |
 | The untrusted asker's request hold (`delivery.ts:518-520`) | **folded** into §7.4 | | One rule for text leaving an untrusted project |
@@ -1072,6 +1073,14 @@ message.
   §9.7). A worker answering the orchestrator's question, asking about the orchestrator's task, or reporting it is not
   asking for anything. A reply to an orchestrator message that did not need a reply is a request: the orchestrator did
   not ask for it, so the person's cards apply.
+- **The person's message a request cites** (#1739, [cited-requests.md](cited-requests.md), replacing the read gate of
+  #1516 and #1926's reply cards). `send` checks a request's `cite` against the person's newest message in the sender's
+  own conversation (sent from the window, at most 30 minutes old and not later than now, cited once: `dedupe_key`
+  `cite:<seq>`) and stores `facts.cites`; `mail read` puts that message with the request, as evidence for the
+  orchestrator's judgement. A request that cites nothing, or fails the check, is delivered all the same, as the
+  session's own words. In the turn, a step not listed as undoable, and work handed to a session looser than the asker, ask
+  the person; a step's own cards ask as in the person's turn; every change is recorded in the asking session once it
+  ran.
 - **One asker per wake.** `drain` for the orchestrator keeps the requests of one session (the person's words and
   urgent mail first, then needsReply requests, then the oldest). Requests from other sessions wait for the next turn.
   Mail that is not a request rides along.
@@ -2404,8 +2413,8 @@ export type MailToolHost = {
 - `sendLinked` itself; only the refusal check of §7.4 is put before its two calls.
 - The wake frame's header lines.
 - The tool's advertised schema and its definition text.
-- The cards and gates of request turns (`request-hook.ts`, `asked-acts.ts`, `asked-gate.ts`, `asked-reach.ts`), except
-  where they read "the turn's thread": there they read the turn's message.
+- The cards and gates of request turns (`request-hook.ts`, `asked-acts.ts`, `asked-gate.ts`, and `asked-reach.ts` until
+  #1739 dropped it), except where they read "the turn's thread": there they read the turn's message.
 - `mail/service.ts` stays in the tree, unused, until M3a-person deletes it (Q-M3a-28).
 
 **Tests** (in `sessions/` and `mail/`; ✗ means the test fails on main)

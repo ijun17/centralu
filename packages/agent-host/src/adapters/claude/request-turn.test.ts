@@ -14,7 +14,7 @@ type HookOutput = { hookSpecificOutput?: { permissionDecision?: string; permissi
 type HookCallback = (input: HookInputLike, id: string | undefined, o: { signal: AbortSignal }) => Promise<HookOutput>
 type Options = {
   canUseTool: (name: string, input: Record<string, unknown>) => Promise<{ behavior: string; message?: string }>
-  hooks?: { PreToolUse: { hooks: HookCallback[]; timeout?: number }[] }
+  hooks?: { PreToolUse: { hooks: HookCallback[]; timeout?: number }[]; PostToolUse: { hooks: HookCallback[] }[] }
 }
 const cli = vi.hoisted(() => ({ options: null as null | Options }))
 
@@ -45,7 +45,7 @@ afterEach(() => {
 const ALLOWED: RequestTurnAnswer = { allowed: true, asked: true }
 
 function world(preset: 'auto' | 'normal' = 'auto') {
-  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], read: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], seen: [] as { tool: string; input: Record<string, unknown> }[], seenFails: false, answer: ALLOWED, fails: false }
+  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], answer: ALLOWED, fails: false, done: [] as string[] }
   const requestTurn: RequestTurn = {
     active: () => turn.active,
     ask: async (tool, input, signal) => {
@@ -53,14 +53,7 @@ function world(preset: 'auto' | 'normal' = 'auto') {
       if (turn.fails) throw new Error('the card could not be raised')
       return turn.answer
     },
-    askRead: async (tool, input, signal) => {
-      turn.read.push({ tool, input, ...(signal ? { signal } : {}) })
-      return turn.answer
-    },
-    seen: (tool, input) => {
-      if (turn.seenFails) throw new Error('the gate is gone')
-      turn.seen.push({ tool, input })
-    },
+    done: (tool) => void turn.done.push(tool),
   }
   const events: NormalizedEvent[] = []
   const start = (sessionId: string) =>
@@ -72,8 +65,11 @@ function world(preset: 'auto' | 'normal' = 'auto') {
     return (tool: string, input: unknown = {}) => built({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input } as never, 'toolu_3', { signal: new AbortController().signal }) as Promise<HookOutput>
   }
   /** What the CLI’s hook says to a tool call */
-  const hook = (tool: string, input: unknown = {}) => cli.options!.hooks!.PreToolUse[0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, 'toolu_1', { signal: new AbortController().signal })
-  return { turn, events, start, hook, hookWithApps }
+  const hook = (tool: string, input: unknown = {}, id = 'toolu_1') => cli.options!.hooks!.PreToolUse[0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, id, { signal: new AbortController().signal })
+  /** The CLI saying a call ran (`PostToolUse`) or failed (`PostToolUseFailure`) */
+  const after = (event: 'PostToolUse' | 'PostToolUseFailure', tool: string, id: string) =>
+    cli.options!.hooks!.PostToolUse[0]!.hooks[0]!({ hook_event_name: event, tool_name: tool, tool_input: {} }, id, { signal: new AbortController().signal })
+  return { turn, events, start, hook, after, hookWithApps }
 }
 
 describe('a hook in front of every tool call of a session’s request', () => {
@@ -94,16 +90,6 @@ describe('a hook in front of every tool call of a session’s request', () => {
     const handle = await w.start('h3')
     expect(await w.hook('Bash', { command: 'ls' })).toEqual({})
     expect(w.turn.asked).toEqual([])
-    await handle.dispose()
-  })
-
-  it('but it tells the host what the person’s own turn reads, since a later request’s reply could carry it; a host that cannot note it never holds the tool', async () => {
-    const w = world('auto')
-    const handle = await w.start('h3b')
-    expect(await w.hook('Read', { file_path: '/elsewhere/a.txt' })).toEqual({})
-    expect(w.turn.seen).toEqual([{ tool: 'Read', input: { file_path: '/elsewhere/a.txt' } }])
-    w.turn.seenFails = true
-    expect(await w.hook('Read', { file_path: '/elsewhere/b.txt' })).toEqual({})
     await handle.dispose()
   })
 
@@ -159,8 +145,6 @@ describe('a hook in front of every tool call of a session’s request', () => {
     expect(await withApps('mcp__app-board__queue_merge')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
     expect(await w.hook('AskUserQuestion', { questions: [] })).toEqual({})
     expect(w.turn.asked).toEqual([])
-    // ...but the gate is told, as the person’s answer is read in a request’s turn
-    expect(w.turn.seen).toEqual([{ tool: 'AskUserQuestion', input: { questions: [] } }])
     // A server called app-x that this session was never given is not Centralu’s: it asks like any other (#93)
     expect(await withApps('mcp__app-evil__run')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     // Nor is Centralu’s own name on a server that is not Centralu’s (it has three parts, and the server is the one the session was given)
@@ -178,10 +162,29 @@ describe('a hook in front of every tool call of a session’s request', () => {
     await handle.dispose()
   })
 
+  it('a step the person allowed is recorded once the CLI says it ran; one that failed, or one the hook did not let through as asked, is not (#1739)', async () => {
+    const w = world('auto')
+    const handle = await w.start('h9c')
+    w.turn.active = true
+    await w.hook('Bash', { command: 'ls' }, 'toolu_ran')
+    await w.hook('Bash', { command: 'false' }, 'toolu_failed')
+    // Allowed and not yet run: no record
+    expect(w.turn.done).toEqual([])
+    await w.after('PostToolUseFailure', 'Bash', 'toolu_failed')
+    await w.after('PostToolUse', 'Bash', 'toolu_ran')
+    // A call the hook left to the CLI's own flow (a read) is not the request's step to record; nor is one heard of twice
+    w.turn.answer = { allowed: true, asked: false }
+    await w.hook('Read', { file_path: 'a' }, 'toolu_read')
+    await w.after('PostToolUse', 'Read', 'toolu_read')
+    await w.after('PostToolUse', 'Bash', 'toolu_ran')
+    expect(w.turn.done).toEqual(['Bash'])
+    await handle.dispose()
+  })
+
   it('a turn that cannot be told is refused, not let through: a hook that throws would let the tool run', async () => {
     const w = world('auto')
     const handle = await w.start('h9b')
-    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED, askRead: async () => ALLOWED, seen: () => {} } }, () => true)!.PreToolUse[0]!.hooks[0]!
+    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED, done: () => {} } }, () => true)!.PreToolUse[0]!.hooks[0]!
     const out = (await broken({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} } as never, 'toolu_4', { signal: new AbortController().signal })) as HookOutput
     expect(out).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await handle.dispose()
@@ -202,26 +205,6 @@ describe('a hook in front of every tool call of a session’s request', () => {
     w.turn.active = true
     await w.hook('Bash', { command: 'npm test' })
     expect(w.turn.asked.map((a) => a.tool)).toEqual(['Bash'])
-    await handle.dispose()
-  })
-
-  it('a read the CLI itself asks about, in a request’s turn, is the host’s card naming the session: not the CLI’s plain one with its “always”', async () => {
-    const w = world('normal')
-    const handle = await w.start('h12')
-    // Outside a request the CLI’s own card is raised, as before
-    const own = cli.options!.canUseTool('Read', { file_path: '/elsewhere/a.txt' })
-    for (let i = 0; i < 20 && !w.events.some((e) => e.type === 'approval_request'); i++) await new Promise((r) => setTimeout(r, 5))
-    expect(w.events.filter((e) => e.type === 'approval_request')).toHaveLength(1)
-    handle.respondApproval((w.events.find((e) => e.type === 'approval_request') as { requestId: string }).requestId, 'deny')
-    await own
-    // In a request’s turn the question is the host’s, and no card of the CLI’s own is raised
-    w.events.length = 0
-    w.turn.active = true
-    expect(await cli.options!.canUseTool('Read', { file_path: '/elsewhere/a.txt' })).toMatchObject({ behavior: 'allow' })
-    w.turn.answer = { allowed: false, message: 'Nothing was done: the person did not allow it.' }
-    expect(await cli.options!.canUseTool('Grep', { pattern: 'x', path: '/elsewhere' })).toEqual({ behavior: 'deny', message: 'Nothing was done: the person did not allow it.' })
-    expect(w.turn.read.map((a) => a.tool)).toEqual(['Read', 'Grep'])
-    expect(w.events.filter((e) => e.type === 'approval_request')).toEqual([])
     await handle.dispose()
   })
 

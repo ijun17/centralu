@@ -61,16 +61,8 @@ export type RequestTurn = {
    * would outlive the turn (a subagent, a scheduled prompt): it is refused, since the person's card belongs to the turn
    */
   ask(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
-  /**
-   * The CLI is itself about to ask the person about a read (a file outside its working folder, in a preset that asks): the card is the host's, naming who
-   * asked, with Allow or Deny only, instead of the CLI's own with its "always"
-   */
-  askRead(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
-  /**
-   * A tool call in a turn that is not a request (the person's own), told to the host as it is made: what the conversation reads there can be carried to a
-   * session by a later request's reply. Never throws, never holds the call
-   */
-  seen(tool: string, input: Record<string, unknown>): void
+  /** A step `ask` let through as asked has run and did not fail: its record (docs/plans/cited-requests.md §5). Not called for one that failed */
+  done(tool: string, input: Record<string, unknown>): void
 }
 
 export type CreateSessionOpts = {

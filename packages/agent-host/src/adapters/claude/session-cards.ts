@@ -130,7 +130,7 @@ export class ClaudeCards {
        * are not ours to vouch for.
        */
       ownTool: isOrchestratorTool(toolName) && this.host.ownServer(),
-      before: [() => this.requestRead(toolName, toolInput, options?.signal)],
+      before: [],
       auto: preset === 'auto',
       after: [() => this.appToolUnasked(preset, toolName, toolInput), () => this.readGranted(toolName, toolInput)],
       /*
@@ -173,17 +173,6 @@ export class ClaudeCards {
       this.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })
       this.releaseOnCancel(requestId, signal)
     })
-  }
-
-  /**
-   * **A read the CLI itself asks about, in a session's request** (§9.7): a file outside the working folder under a preset that asks. The card is the
-   * host's, which names the session that asked and offers Allow or Deny only; the CLI's own would not name it and would offer "always". A read the CLI
-   * does not ask about never gets here, and is free.
-   */
-  private requestRead(toolName: string, toolInput: Record<string, unknown>, signal: AbortSignal | undefined): Promise<StepAnswer> | null {
-    const request = this.host.opts.requestTurn
-    if (!request || !READ_TOOLS.has(toolName) || !request.active()) return null
-    return request.askRead(toolName, toolInput, signal).then((answer) => (answer.allowed ? ALLOW : { grant: 'deny', message: answer.message }))
   }
 
   /**
