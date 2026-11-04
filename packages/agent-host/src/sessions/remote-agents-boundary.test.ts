@@ -107,8 +107,10 @@ class Machine {
     return {
       read: async () => {
         this.onRead?.(++this.reads)
+        // What it answers is what the session was as the read reached it, however long the answer is on its way
+        const state = this.state
         if (this.readGate) await this.readGate
-        return this.reachable ? { ok: true, state: this.state, lines: [] } : { ok: false, error: 'not reachable' }
+        return this.reachable ? { ok: true, state, lines: [] } : { ok: false, error: 'not reachable' }
       },
       list: async () => [{ sessionId: CHILD, name: 'Child', project: 'app', state: this.state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
@@ -739,6 +741,21 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       machine.callerTurnEnds()
       await flush()
       expect(gotten()).toEqual(['first', 'second'])
+    })
+
+    it('sends the note when the turn ended while an earlier read of the child was still on its way', async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      // The read that finds the child in its turn is answered late; the turn's end reaches the hub before the answer does
+      let release!: () => void
+      machine.readGate = new Promise<void>((resolve) => (release = resolve))
+      await flush()
+      machine.selfTurnEnds()
+      await flush()
+      machine.readGate = null
+      release()
+      await flush()
+      expect(gotten()).toEqual(['first'])
     })
 
     it("does not send a held note the caller's stop dropped while the child was being read", async () => {
