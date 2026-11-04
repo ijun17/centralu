@@ -10,6 +10,8 @@ import type { AcpProfile } from './profile.js'
  * stderr (`AcpToolShape.refusalOf`) cancels the tool at once so it stops retrying, and the turn ends with the provider's words.
  */
 
+const SID = 'ses-a'
+
 class FakeAdapter extends AcpAdapter {
   readonly tool = 'fake'
 }
@@ -21,10 +23,10 @@ const profile: AcpProfile = {
   launch: async () => ({ command: 'fake', args: ['acp'] }),
   detect: async () => ({ tool: 'fake', installed: true, loggedIn: true, detail: '' }),
   installedVersion: async () => '0.0.1',
-  shape: { refusalOf: (line) => /^refused: (.+)$/.exec(line)?.[1] ?? null },
+  // Only this session's own requests count (OpenCode's log also names a sub-agent's)
+  shape: { refusalOf: (line, conversation) => (conversation === SID ? /^refused: (.+)$/.exec(line)?.[1] ?? null : null) },
 }
 
-const SID = 'ses-a'
 const script: PeerScript = (method) => {
   if (method === 'initialize') return { result: INIT_RESULT }
   if (method === 'session/new') return { result: { sessionId: SID } }
@@ -56,7 +58,8 @@ const isPrompt = (m: Record<string, unknown>) => m.method === 'session/prompt'
 const isError = (e: NormalizedEvent) => e.type === 'error'
 
 describe('a provider refusal the tool only retries quietly', () => {
-  it('cancels the tool at once and ends the turn with the provider’s words when it answers, before the next input starts', async () => {
+  // OpenCode answers the cancel with end_turn (measured); the spec's answer is cancelled
+  it.each(['end_turn', 'cancelled'])('cancels the tool at once and ends the turn with the provider’s words when it answers %s, before the next input starts', async (stopReason) => {
     const w = await start()
     w.handle.send('hello')
     await w.peer().next(isPrompt)
@@ -68,13 +71,48 @@ describe('a provider refusal the tool only retries quietly', () => {
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
     expect(w.events.some(isError)).toBe(false)
     expect(w.peer().methods().filter((m) => m === 'session/prompt')).toHaveLength(1)
-    w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
+    w.peer().release('session/prompt', { result: { stopReason } })
     const err = await w.event(isError)
     expect(err).toMatchObject({ type: 'error', error: { code: 'internal', message: "Fake's model refused the turn: Free usage limit reached", retryable: false } })
     await w.peer().next((m) => isPrompt(m) && JSON.stringify(m).includes('again'))
     w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
     await w.event((e) => e.type === 'turn_complete')
     expect(w.events.filter(isError)).toHaveLength(1)
+    expect(w.peer().methods().filter((m) => m === 'session/cancel')).toHaveLength(1)
+  })
+
+  it('ends the turn as refused when the tool answers the cancel with an error', async () => {
+    const w = await start()
+    w.handle.send('hello')
+    await w.peer().next(isPrompt)
+    w.peer().stderr.write('refused: Free usage limit reached\n')
+    await w.peer().next((m) => m.method === 'session/cancel')
+    w.peer().release('session/prompt', { error: { code: -32603, message: 'Internal error: Free usage limit reached' } })
+    expect(await w.event(isError)).toMatchObject({ error: { message: "Fake's model refused the turn: Free usage limit reached", retryable: false } })
+  })
+
+  it('answers a permission request that comes after the refusal as cancelled, with no card', async () => {
+    const w = await start()
+    w.handle.send('hello')
+    await w.peer().next(isPrompt)
+    w.peer().stderr.write('refused: Free usage limit reached\n')
+    await w.peer().next((m) => m.method === 'session/cancel')
+    const options = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }]
+    const answer = await w.peer().ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: 'call-1', kind: 'execute', title: 'ls', rawInput: { command: 'ls' } } })
+    expect(answer).toEqual({ outcome: { outcome: 'cancelled' } })
+    expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
+  })
+
+  it('leaves a turn the person already stopped as stopped', async () => {
+    const w = await start()
+    w.handle.send('hello')
+    await w.peer().next(isPrompt)
+    w.handle.interrupt()
+    await w.peer().next((m) => m.method === 'session/cancel')
+    w.peer().stderr.write('refused: Free usage limit reached\n')
+    w.peer().release('session/prompt', { result: { stopReason: 'cancelled' } })
+    await w.event((e) => e.type === 'state_change' && e.state === 'waiting_input')
+    expect(w.events.some(isError)).toBe(false)
     expect(w.peer().methods().filter((m) => m === 'session/cancel')).toHaveLength(1)
   })
 

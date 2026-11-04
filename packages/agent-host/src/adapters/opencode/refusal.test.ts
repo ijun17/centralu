@@ -24,6 +24,8 @@ describe('OpenCode’s log line for a refused request', () => {
     expect(openCodeRefusal(line(quota, { agent: 'title' }), SES)).toBeNull()
     expect(openCodeRefusal(line('AI_APICallError: You exceeded your current quota'), 'ses_other')).toBeNull()
     expect(openCodeRefusal(line('AI_APICallError: Rate limit reached for gpt-5 on tokens per min. Please try again in 6.0s'), SES)).toBeNull()
+    const gemini = 'AI_APICallError: You exceeded your current quota. Quota exceeded for metric: generate_content_free_tier_requests, limit: 10. Please retry in 41s.'
+    expect(openCodeRefusal(line(gemini), SES)).toBeNull()
     expect(openCodeRefusal(line('AI_APICallError: Cannot connect to API: socket hang up'), SES)).toBeNull()
     expect(openCodeRefusal('timestamp=2026-11-03T05:47:05.067Z level=INFO message=stream small=false', SES)).toBeNull()
   })

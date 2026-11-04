@@ -59,7 +59,8 @@ its label and mark (Antigravity, `A`) are carried over.
 they did not, a `CC_ANTIGRAVITY=1` switch kept it out of every picker.
 
 The ACP core gains one optional profile part, `AcpToolShape` (`acp/profile.ts`): hooks at fixed points, each absent for
-Cursor and OpenCode, so their behaviour is unchanged (their replays pass as before).
+Cursor and OpenCode, so their behaviour is unchanged (their replays pass as before), except OpenCode's `refusalOf` (#1569: a usage
+limit or quota ends the turn at once).
 
 ## 3. Install
 

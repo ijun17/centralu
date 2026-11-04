@@ -369,7 +369,8 @@ class AcpWire implements ToolWire {
    */
   private onStderrLine(line: string): void {
     const turn = this.turn
-    const words = turn && !turn.refusal ? this.deps.shape?.refusalOf?.(line, this.conversation ?? '') : null
+    // Not for a turn the person already stopped: their Stop is what it ends as
+    const words = turn && !turn.refusal && !turn.core.stopAsked ? this.deps.shape?.refusalOf?.(line, this.conversation ?? '') : null
     if (!turn || !words) return
     turn.refusal = `${this.label}'s model refused the turn: ${words}`
     this.conn.notify('session/cancel', { sessionId: this.conversation })
@@ -573,9 +574,9 @@ class AcpWire implements ToolWire {
     return CANCELLED
   }
 
-  /** Whether a question asked now belongs to a turn that still runs: none after Stop, after the turn's end or the close */
+  /** Whether a question asked now belongs to a turn that still runs: none after Stop or a refusal (both cancelled), after the turn's end or the close */
   private askable(turn: Turn | null): boolean {
-    return turn !== null && this.turn === turn && !turn.core.stopAsked
+    return turn !== null && this.turn === turn && !turn.core.stopAsked && !turn.refusal
   }
 
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {

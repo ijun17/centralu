@@ -16,10 +16,13 @@ const STREAM_ERROR = /message="stream error".* session\.id=(\S+) small=false .*e
  */
 const NO_RETRY = /usage limit|quota|credits|billing/i
 
+/** Words that say the limit lifts soon (Gemini words a per-minute limit as a quota: "Please retry in 41s"): the tool's retry answers */
+const LIFTS = /retry in|retry after|try again in|per.?minute|requests_per|RPM|TPM/i
+
 /** The provider's words for a refusal of `conversation`'s own request (not a sub-agent's, nor the title's), or null */
 export function openCodeRefusal(line: string, conversation: string): string | null {
   const found = STREAM_ERROR.exec(line)
-  if (found?.[1] !== conversation || !found[2] || !NO_RETRY.test(found[2])) return null
+  if (found?.[1] !== conversation || !found[2] || !NO_RETRY.test(found[2]) || LIFTS.test(found[2])) return null
   // The log quotes a value that has spaces as JSON does
   try {
     return String(JSON.parse(`"${found[2]}"`)).trim()
