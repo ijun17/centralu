@@ -113,8 +113,12 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       const exec: HostControl['exec'] = async (cmd) => {
         if (down) throw new Error('ssh: connect to host box port 22: Connection timed out')
         const r = await recorded(t)(cmd)
-        // The link goes down once the stop has happened there, whichever command did it
-        if (events().some((e) => e.startsWith('stop'))) down = true
+        // The link goes down once the stop has happened there, whichever command saw it, and that command's answer is lost
+        // with it: a switcher fast enough to be done between two polls cannot get its end to the hub first
+        if (events().some((e) => e.startsWith('stop'))) {
+          down = true
+          throw new Error('ssh: connect to host box port 22: Connection timed out')
+        }
         return r
       }
       const { done } = update('9.9.2', {}, { exec, followMs: 3_000 })

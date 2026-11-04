@@ -239,12 +239,16 @@ through its `clock.mjs` (`no-restricted-properties` and `no-restricted-syntax` i
 - the list equals the checked files that touch the OS outside the layer (`tsx tooling/os-tests.ts --offenders`): a
   file that moved behind the layer, or is gone, takes its line out in the same change;
 - no line may be new against main's list where this branch left it, except a file git sees renamed
-  (`git diff -M`), whose line follows it, and a file cut in pieces: a file removed in the change that was on main's list hands
-  its line to new files in the same folder whose names start with its stem (the name up to the first dot) and then `-` or
-  `.` (`install-windows.test.ts` to `install-windows-update.test.ts` and `install-windows.test-helpers.ts`), as long as
-  together they are no longer than it was, 30 lines more for each piece (the imports each repeats): the same code reaching
-  the OS, cut in pieces, not more of it. A new file of another name still fails;
+  (`git diff -M`), whose line follows it, and a file cut in pieces (`splitPieces` in `tooling/os-tests.ts`, which `--tighten` uses too): a file removed in the change that
+  was on main's list hands its line to new files in the same folder, absent from main, whose names start with its stem (the name up
+  to the first dot) and then `-` or `.` (`install-windows.test.ts` to `install-windows-update.test.ts` and
+  `install-windows.test-helpers.ts`), tests to tests and shipped code to shipped code, at most 5 of them, together no longer
+  than it was by 50 lines and 20 for each piece: the same code reaching the OS, cut in pieces, not more of it. A new file of another name still fails;
 - sorted, unique, none in the layer.
+
+**The macOS selection's limit.** The macOS job's full run adds to this selection the tests that make folders in the temp
+folder (`mkdtemp`, `realpath`, `tmpdir`, `TMPDIR`), in the test or in a module it imports. It follows imports, not programs the
+test starts: a test that runs a script as a process is not picked for the script's temp folder.
 
 Today: 384 files, 123 shipped (119 host, 4 launcher) and 261 tests (258 host, 2 `platform`, 1 `protocol`). Adding
 `net`, `node-pty` and `better-sqlite3` (owner's session, 2026-10-26) put 9 more files on it; `http`, `https`, `dgram`,

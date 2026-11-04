@@ -122,7 +122,7 @@ script rehearses by default and why nothing publishes automatically.
   the npm launcher's, `e2e-lock` and `screen-protocol-rules`, the two that failed on a Mac and nowhere else in #1695: 158 test
   files, about 5.5 minutes); on a full run that changes the host's tests, the tests of the host, the protocol and `tooling/` that
   reach the OS: the ones Windows picks (`tsx tooling/os-tests.ts`) and those that make folders in the temp folder, where a Mac
-  answers differently (`--macos`; 479 of 603 files); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
+  answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
   with it. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
   (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
   the Node this job runs. The release's darwin job still runs `pnpm verify` whole. Its `pnpm test` stays until a change decides otherwise: `tooling/` has Mac-only failures (#1695), and the UI and core tests run on Linux only.

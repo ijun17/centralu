@@ -78,14 +78,24 @@ const collect: Rule.RuleModule = {
   },
 }
 
-/** `mkdtemp`, `realpath` and `tmpdir`, called by name or as a member (`fs.mkdtempSync`, `os.tmpdir()`) */
+/** `mkdtemp`, `realpath` (and `realpathSync.native`) and `tmpdir`, called by name or as a member (`fs.mkdtempSync`, `os.tmpdir()`), and the variables the temp folder is named by (`process.env.TMPDIR`) */
 const TEMP_FOLDER_CALLS = /^(mkdtemp|mkdtempSync|realpath|realpathSync|tmpdir)$/
+const TEMP_FOLDER_VARIABLES = /^(TMPDIR|TMP|TEMP)$/
 const tempFolder: Rule.RuleModule = {
   create: (context) => ({
     CallExpression: (n) => {
       const c = n.callee
-      const name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : ''
+      let name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : ''
+      // `realpathSync.native(…)` is the call of `realpathSync`
+      if (name === 'native' && c.type === 'MemberExpression' && c.object.type === 'MemberExpression' && c.object.property.type === 'Identifier') name = c.object.property.name
+      else if (name === 'native' && c.type === 'MemberExpression' && c.object.type === 'Identifier') name = c.object.name
       if (TEMP_FOLDER_CALLS.test(name)) context.report({ node: n, message: 'temp folder' })
+    },
+    MemberExpression: (n) => {
+      const o = n.object
+      const env = o.type === 'MemberExpression' && o.property.type === 'Identifier' && o.property.name === 'env'
+      if (env && n.property.type === 'Identifier' && !n.computed && TEMP_FOLDER_VARIABLES.test(n.property.name)) context.report({ node: n, message: 'temp folder' })
+      if (env && n.computed && n.property.type === 'Literal' && typeof n.property.value === 'string' && TEMP_FOLDER_VARIABLES.test(n.property.value)) context.report({ node: n, message: 'temp folder' })
     },
   }),
 }
@@ -200,11 +210,28 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
   /** The tests that run on every OS, of `tests` */
   const selectTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null)
 
+  /** Does this test, or a module it imports (a script, a helper), make or resolve a folder in the OS temp folder? */
+  function reachesTempFolder(test: string): boolean {
+    const seen = new Set<string>([test])
+    const queue = [test]
+    for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+      if (scanFile(file).usesTempFolder) return true
+      for (const spec of scanFile(file).imports) {
+        const target = resolveImport(file, spec)
+        if (target && !seen.has(target)) {
+          seen.add(target)
+          queue.push(target)
+        }
+      }
+    }
+    return false
+  }
+
   /**
    * The tests the macOS job runs on a full run: those that run on every OS, and the tests that make or resolve folders in
    * the OS temp folder, whose answers differ on a Mac (`/var` is a link to `/private/var`, #1695) wherever they sit.
    */
-  const selectMacTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null || scanFile(t).usesTempFolder)
+  const selectMacTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null || reachesTempFolder(t))
 
   /** The checked files that import an OS module outside the layer: what the allowlist holds */
   const offenders = async (files: readonly string[]): Promise<string[]> =>
@@ -315,20 +342,89 @@ export function formatDurations(durations: Durations, source: string): string {
   return `{\n  "source": ${JSON.stringify(source)},\n  "files": {\n${files.join(',\n')}\n  }\n}\n`
 }
 
+/** What the split rule reads of a file: its text at main's merge base and in the working tree, null when it is not there */
+export type SplitFiles = { base: (file: string) => string | null; now: (file: string) => string | null }
+
+/** At most this many pieces take a removed file's line, and together they may hold this many lines more than it did, plus `SPLIT_LINES_PER_PIECE` for each */
+export const SPLIT_MAX_PIECES = 5
+export const SPLIT_LINES = 50
+export const SPLIT_LINES_PER_PIECE = 20
+
+const isTestFile = (file: string) => /\.(test|test-helpers)\.(ts|tsx|mts|mjs)$/.test(file)
+
+/**
+ * The files that may take the allowlist line of a file this change removed, because they are pieces of it
+ * (`os-layer.test.ts` and `tightened` both ask): for each file of `main`'s list that is gone now, the `candidates` (files
+ * the list would gain: the lines the list has that main's has not, or the offenders it lacks) that
+ * - are in its folder and are named by its stem (the name up to the first dot) and then `-` or `.`
+ *   (`install-windows.test.ts` to `install-windows-update.test.ts` and `install-windows.test-helpers.ts`);
+ * - were not there at `base`: a file that existed already (`links/away.ts` beside a removed `links/away.test.ts`) is not a piece;
+ * - are tests and test helpers when the removed file was one, and neither when it was not: a test lends nothing to shipped code;
+ * - are at most `SPLIT_MAX_PIECES`, together no longer than the file was by `SPLIT_LINES` lines and `SPLIT_LINES_PER_PIECE`
+ *   for each (the imports each repeats, the setup moved to a helper): the same code reaching the OS, cut in pieces, not more of it.
+ * A file that fits none is a new offender, as before. A candidate goes to the first removed file that takes it.
+ */
+export function splitPieces(main: readonly string[], current: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> {
+  const lines = (text: string | null) => (text === null ? 0 : text.split('\n').length)
+  const out = new Map<string, string[]>()
+  const taken = new Set<string>()
+  for (const gone of main.filter((f) => !current.includes(f) && files.now(f) === null)) {
+    const dir = gone.slice(0, gone.lastIndexOf('/') + 1)
+    const stem = gone.slice(dir.length).split('.')[0] ?? ''
+    const pieces = candidates.filter((f) => {
+      const name = f.slice(dir.length)
+      return (
+        !taken.has(f) &&
+        f.startsWith(dir) &&
+        !name.includes('/') &&
+        (name.startsWith(`${stem}-`) || name.startsWith(`${stem}.`)) &&
+        files.base(f) === null &&
+        isTestFile(f) === isTestFile(gone)
+      )
+    })
+    const size = pieces.reduce((sum, f) => sum + lines(files.now(f)), 0)
+    if (pieces.length === 0 || pieces.length > SPLIT_MAX_PIECES || size > lines(files.base(gone)) + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
+    for (const f of pieces) taken.add(f)
+    out.set(gone, pieces)
+  }
+  return out
+}
+
+/** A file's text at `base`, or null when it was not there */
+export function gitShow(base: string, file: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${base}:${file}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return null
+  }
+}
+
+/** The files of the working tree, with the text at `base` (null when there is no merge base to read) */
+export function splitFilesAt(base: string | null): SplitFiles {
+  return {
+    base: (f) => (base === null ? null : gitShow(base, f)),
+    now: (f) => (existsSync(`${ROOT}${f}`) ? readFileSync(`${ROOT}${f}`, 'utf8') : null),
+  }
+}
+
 /**
  * The allowlist's text with every line the code no longer needs taken out (`--tighten`): a file that moved behind the
  * layer, or is gone. A file git sees renamed since main (`renames`, which `pnpm lint:tighten` follows too) keeps its
- * line under its new path; nothing else is added, so a new offender still fails `os-layer.test.ts`. Comments stay where
+ * line under its new path, and the pieces of a file cut up in this change (`splitPieces`, given `files`) take its line; nothing
+ * else is added, so a new offender still fails `os-layer.test.ts`. Comments stay where
  * they are and the paths stay sorted. The merge queue runs it on a conflict in the list
  * (`.centralu/apps/project-board/project.json` `queue.conflicts.mechanical`): two pull requests that each take out a
  * line next to the other's conflict in git, and the merged tree says which lines are left.
  */
-export function tightened(text: string, offenders: ReadonlySet<string>, renames: readonly Rename[] = []): string {
+export function tightened(text: string, offenders: ReadonlySet<string>, renames: readonly Rename[] = [], files?: SplitFiles): string {
   const lines = text.split(/\r?\n/)
   if (lines.at(-1) === '') lines.pop()
   const isPath = (l: string) => l.trim() !== '' && !l.trim().startsWith('#')
   const moved = new Map(renames.map(({ from, to }) => [from, to]))
-  const paths = [...new Set(lines.filter(isPath).map((l) => moved.get(l.trim()) ?? l.trim()))].filter((p) => offenders.has(p)).sort()
+  const listed = [...new Set(lines.filter(isPath).map((l) => moved.get(l.trim()) ?? l.trim()))]
+  const added = files ? [...offenders].filter((o) => !listed.includes(o)) : []
+  const pieces = files ? [...splitPieces(listed, listed.filter((f) => files.now(f) !== null), added, files).values()].flat() : []
+  const paths = [...listed, ...pieces].filter((p) => offenders.has(p)).sort()
   // Each path line takes the next kept path in order; a path line left over is dropped
   let next = 0
   const kept = lines.flatMap((l) => {
@@ -338,7 +434,8 @@ export function tightened(text: string, offenders: ReadonlySet<string>, renames:
     next++
     return [path]
   })
-  return kept.join('\n') + '\n'
+  // The pieces sort after the paths that took a line, or among them: what is left of the sorted list goes last
+  return [...kept, ...paths.slice(next)].join('\n') + '\n'
 }
 
 /** The files git sees renamed since main (`CC_LINT_BASE`, which the merge queue sets, else origin/main); none when unknown */
@@ -351,7 +448,8 @@ async function main(argv: string[]) {
   if (argv.includes('--tighten')) {
     const file = `${ROOT}${OS_ALLOWLIST}`
     const before = readFileSync(file, 'utf8')
-    const after = tightened(before, new Set(await repo.offenders(repoFiles())), renamesSinceMain())
+    const base = baseCommit(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
+    const after = tightened(before, new Set(await repo.offenders(repoFiles())), renamesSinceMain(), splitFilesAt(base))
     if (after !== before) writeFileSync(file, after)
     const count = (t: string) => parseOsAllowlist(t).length
     console.error(`${OS_ALLOWLIST}: ${count(before)} -> ${count(after)} lines`)
