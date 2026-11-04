@@ -215,21 +215,20 @@ export function FolderPlusIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * Centralu's mark (#730): the orbit of the former app icon (a ring, the arc the app draws for "working", the centre), in one ink.
+ * Centralu's mark (#730): the app icon's four panes (`apps/desktop/src-tauri/icons/sources/panes.svg`, #1705), in one
+ * ink: three faint, the different one (top right, its inner corner cut) full. Outer corners rounder than inner, as there.
  * It marks a call to Centralu's own tools in a conversation, the points where an agent reaches other sessions,
  * projects, machines or apps. Kind by shape: it is emphasis, never the signal's brightness.
  */
 export function CentraluMarkIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
-      <path
-        d="M8 2.4 A5.6 5.6 0 1 1 3.7 11.6"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <circle cx="8" cy="8" r="1.7" fill="currentColor" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden className="shrink-0">
+      <g fillOpacity="0.35">
+        <path d="M1.5 6.7V3.5A2 2 0 0 1 3.5 1.5H6.7A.85 .85 0 0 1 7.55 2.35V6.7A.85 .85 0 0 1 6.7 7.55H2.35A.85 .85 0 0 1 1.5 6.7Z" />
+        <path d="M1.5 12.5V9.3A.85 .85 0 0 1 2.35 8.45H6.7A.85 .85 0 0 1 7.55 9.3V13.65A.85 .85 0 0 1 6.7 14.5H3.5A2 2 0 0 1 1.5 12.5Z" />
+        <path d="M8.45 13.65V9.3A.85 .85 0 0 1 9.3 8.45H13.65A.85 .85 0 0 1 14.5 9.3V12.5A2 2 0 0 1 12.5 14.5H9.3A.85 .85 0 0 1 8.45 13.65Z" />
+      </g>
+      <path d="M8.45 5.13V2.35A.85 .85 0 0 1 9.3 1.5H12.5A2 2 0 0 1 14.5 3.5V6.7A.85 .85 0 0 1 13.65 7.55H10.87Q10.27 7.55 9.84 7.12L8.88 6.16Q8.45 5.73 8.45 5.13Z" />
     </svg>
   )
 }
