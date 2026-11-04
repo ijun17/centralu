@@ -49,7 +49,7 @@ const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
 /** A command the tool asks about: Claude Code runs a read-only one such as echo without asking, so it is given one that writes */
-const asked = (d: Driver, n: number | string) => (d.tool === 'claude' ? `touch probe-${n}.txt` : `echo probe-${n}`)
+const commandAsked = (d: Driver, n: number | string) => (d.tool === 'claude' ? `touch probe-${n}.txt` : `echo probe-${n}`)
 /** A turn in which every card asked is answered `decide` until the turn ends; the kinds of card asked, in order */
 const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): Promise<string[]> => {
   d.session().send(text)
@@ -140,10 +140,10 @@ export const SCENARIOS: readonly Scenario[] = [
         d.session().respondApproval(card.requestId, decide, undefined, matcher)
         await d.waitFor('the end of the turn', ended)
       }
-      await answer(`Run the shell command: ${asked(d, 1)} . Then say done.`, 'allow')
-      await answer(`Run the shell command: ${asked(d, 2)} . Then say done.`, 'deny')
-      await answer(`Run exactly this shell command: ${asked(d, 3)} . Then say done.`, 'always')
-      await turn(d, `Run exactly this shell command again: ${asked(d, 3)} . Then say done.`)
+      await answer(`Run the shell command: ${commandAsked(d, 1)} . Then say done.`, 'allow')
+      await answer(`Run the shell command: ${commandAsked(d, 2)} . Then say done.`, 'deny')
+      await answer(`Run exactly this shell command: ${commandAsked(d, 3)} . Then say done.`, 'always')
+      await turn(d, `Run exactly this shell command again: ${commandAsked(d, 3)} . Then say done.`)
     },
   },
   {
@@ -162,7 +162,7 @@ export const SCENARIOS: readonly Scenario[] = [
     tools: ANY_TOOL,
     asksForCommands: true,
     async run(d) {
-      d.session().send(`Run the shell command: ${asked(d, 'x')} . Then say done.`)
+      d.session().send(`Run the shell command: ${commandAsked(d, 'x')} . Then say done.`)
       await d.waitFor('an approval card', (e) => e.type === 'approval_request')
       d.session().interrupt()
       await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')

@@ -59,6 +59,7 @@ type Line = {
   dir?: string
   msg?: {
     method?: string
+    type?: string
     params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } }
     /** Claude Code's stream-json */
     event?: { delta?: Delta }
@@ -73,6 +74,8 @@ function joinedChunks(lines: readonly Line[]): string {
     .map((l) => {
       const u = l.msg?.params?.update
       if (u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string') return u.content.text
+      // A line of Claude Code's that is no stream event is between the pieces of a block, not a break in it
+      if (typeof l.msg?.type === 'string' && l.msg.type !== 'stream_event') return ''
       const d = l.msg?.event?.delta
       const piece = d?.type === 'text_delta' ? d.text : d?.type === 'thinking_delta' ? d.thinking : d?.type === 'input_json_delta' ? d.partial_json : undefined
       return typeof piece === 'string' ? piece : '\n'

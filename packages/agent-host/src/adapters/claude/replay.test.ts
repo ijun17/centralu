@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
-import { loadRecording, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder } from '../frames/replay.test-helpers.js'
+import type { AgentSpawnSpec } from '../contract.js'
+import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
 import { ClaudeAdapter } from './index.js'
-import { recordedVersion } from './recorded.test-helpers.js'
+import { CLAUDE_RECORDINGS, recordedVersion } from './recorded.test-helpers.js'
 
 /**
  * The Claude adapter against recordings of the real CLI (#1498): the CLI's stream-json, recorded at its process by
@@ -12,20 +13,20 @@ import { recordedVersion } from './recorded.test-helpers.js'
  * what the CLI answered, and the tests below read the events it emitted. A scenario's lines were never written by hand.
  */
 
-const RECORDINGS = `${import.meta.dirname}/recordings`
-
-export type Replayed = { events: NormalizedEvent[]; problems: string[]; left: number; spawned: number }
+type Replayed = { events: NormalizedEvent[]; problems: string[]; left: number; spawned: number; started: AgentSpawnSpec[] }
 
 /** The recording of `scenario` played through the adapter; `cwd` is the folder the recording's `<cwd>` stands for */
-export async function replay(dir: string, name: string): Promise<Replayed> {
-  const recording = loadRecording(recordedFolders(RECORDINGS).find((f) => f.dir === dir)!.file(name))
+async function replay(dir: string, name: string): Promise<Replayed> {
+  const recording = loadRecording(recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === dir)!.file(name))
   const named = scenariosFor('claude').find((s) => s.name === name)!
   // Driven under the preset it was recorded with
   const preset = PermissionPreset.safeParse(recording.header.preset)
   const scenario = preset.success ? { ...named, preset: preset.data } : named
   const folder = temporaryFolder('claude-replay-')
   const cwd = folder.path
-  const { spawn, state, peers } = replaySpawner(recording, streamJsonCodec(cwd))
+  const { spawn: replayed, state, peers } = replaySpawner(recording, streamJsonCodec(cwd))
+  const started: AgentSpawnSpec[] = []
+  const spawn = (spec: AgentSpawnSpec) => (started.push(spec), replayed(spec))
   const adapter = new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' })
   // A step the adapter never reaches fails with what it sent instead of the recording's next line, not with a timeout
   const events = await drive(adapter, scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
@@ -36,27 +37,10 @@ export async function replay(dir: string, name: string): Promise<Replayed> {
       throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
     })
     .finally(() => folder.remove())
-  return { events, problems: state.problems, left: state.left(), spawned: state.spawned }
+  return { events, problems: state.problems, left: state.left(), spawned: state.spawned, started }
 }
 
-/** What is wrong with the calls' order: a result before its call, a call with no result or two */
-export function callOrder(events: NormalizedEvent[]): string[] {
-  const wrong: string[] = []
-  const results = new Map<string, number>()
-  const called = new Set<string>()
-  for (const e of events) {
-    if (e.type === 'tool_call') called.add(e.callId)
-    if (e.type !== 'tool_result') continue
-    if (!called.has(e.callId)) wrong.push(`${e.callId}: a result before its call`)
-    results.set(e.callId, (results.get(e.callId) ?? 0) + 1)
-  }
-  for (const id of called) if (results.get(id) !== 1) wrong.push(`${id}: ${results.get(id) ?? 0} results`)
-  return wrong
-}
-
-export const of = <T extends NormalizedEvent['type']>(events: NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
-
-for (const { dir, names: recorded } of recordedFolders(RECORDINGS)) {
+for (const { dir, names: recorded } of recordedFolders(CLAUDE_RECORDINGS)) {
   const names = recorded.filter((n) => scenariosFor('claude').some((s) => s.name === n))
   describe(`replaying ${dir}`, () => {
     for (const name of names) {
@@ -159,8 +143,13 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
   })
 
   it('resume: the conversation goes on in a new process that knows the first one’s word', async () => {
-    const { events, spawned } = await run('resume')
+    const { events, spawned, started } = await run('resume')
     expect(spawned).toBe(2)
+    // The second process is told which conversation to go on with (the id the first one said); the first starts a new one
+    const flagged = (spec: AgentSpawnSpec, name: string) => spec.args.find((a) => a === name || a.startsWith(`${name}=`)) ?? null
+    expect(flagged(started[0]!, '--resume')).toBeNull()
+    expect(flagged(started[1]!, '--resume')).toBe('--resume=00000003-0000-4000-8000-000000000002')
+    expect(started.map((s) => s.args[s.args.indexOf('--model') + 1])).toEqual(['haiku', 'haiku'])
     expect(said(events)).toContain('pelican')
     expect(of(events, 'agent_version')).toHaveLength(2)
   })

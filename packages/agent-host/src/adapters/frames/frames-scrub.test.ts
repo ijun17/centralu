@@ -81,4 +81,21 @@ describe('scrubbing Claude Code’s frames', () => {
     expect(pieces.join('')).toBe('see <home>/Documents/a.txt and ')
     expect(JSON.stringify(frames[2]!.msg)).toContain('<cwd>/sub/note.txt')
   })
+
+  it('scrubs a tool input streamed as JSON though other messages come between its pieces, and leaves its escapes alone', () => {
+    const input = { command: `Get-Content "${HOME}\\Docs\\a.txt"`, content: 'one\ntwo' }
+    const text = JSON.stringify(input)
+    const at = text.indexOf('alice')
+    const cuts = [text.slice(0, at + 2), text.slice(at + 2, at + 9), text.slice(at + 9)]
+    const piece = (partial_json: string) => line('in', { type: 'stream_event', api_message_id: 'msg_01', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json } } })
+    const frames = run([
+      piece(cuts[0]!),
+      line('in', { type: 'control_response', response: { subtype: 'success', request_id: 'q1', response: {} } }),
+      piece(cuts[1]!),
+      line('in', { type: 'system', subtype: 'status', status: 'requesting' }),
+      piece(cuts[2]!),
+    ])
+    const streamed = frames.filter((f) => f.msg.type === 'stream_event').map((f) => (f.msg.event as { delta: { partial_json: string } }).delta.partial_json)
+    expect(JSON.parse(streamed.join(''))).toEqual({ command: 'Get-Content "<home>/Docs/a.txt"', content: 'one\ntwo' })
+  })
 })

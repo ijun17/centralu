@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { isDeepStrictEqual } from 'node:util'
+import type { NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
 
 /**
@@ -55,7 +56,7 @@ export type FrameCodec = {
    * They are sent from separate asynchronous paths (an answer to the tool's request, a context query, a Stop), so their
    * order differs between runs; what a line is answered with does not depend on it
    */
-  readonly unordered?: boolean
+  readonly unordered?: (sent: Record<string, unknown>) => boolean
   /**
    * A query the adapter makes when it likes, not because the tool said something (Claude: a context reading, sent when
    * the previous one has been answered, so how many go out and where depends on timing). Neither it nor its answer is
@@ -101,7 +102,8 @@ const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'obje
  * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for.
  */
 export const streamJsonCodec = (cwd: string): FrameCodec => ({
-  unordered: true,
+  // Two inputs of the person are in the order they were sent; the lines around them are not
+  unordered: (line) => line.type !== 'user',
   probe: {
     is: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_context_usage',
     answers: (line, asked) => line.type === 'control_response' && asked.has(String(record(line.response).request_id)),
@@ -111,15 +113,10 @@ export const streamJsonCodec = (cwd: string): FrameCodec => ({
   match(sent, want, ids) {
     if (sent.type !== want.type) return `the adapter sent ${describeLine(sent)} where the recording sends ${describeLine(want)}`
     if (want.type === 'control_request') {
-      const [asked, wanted] = [record(sent.request), record(want.request)]
-      if (asked.subtype !== wanted.subtype) return `the adapter sent ${describeLine(sent)} where the recording sends ${describeLine(want)}`
+      if (!isDeepStrictEqual(sent.request, inFolder(want.request, cwd))) return `the adapter sent ${JSON.stringify(sent.request)} where the recording sends ${JSON.stringify(inFolder(want.request, cwd))}`
       if (typeof want.request_id === 'string' && typeof sent.request_id === 'string') ids.set(want.request_id, sent.request_id)
     } else if (want.type === 'control_response') {
-      const [answered, wanted] = [record(sent.response), record(want.response)]
-      const [verdict, wantedVerdict] = [record(answered.response), record(wanted.response)]
-      if (answered.request_id !== wanted.request_id || answered.subtype !== wanted.subtype || verdict.behavior !== wantedVerdict.behavior) {
-        return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
-      }
+      if (!isDeepStrictEqual(sent.response, inFolder(want.response, cwd))) return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
     } else if (want.type === 'user') {
       if (!isDeepStrictEqual(sent.message, want.message)) return `the adapter sent the message ${JSON.stringify(sent.message)} where the recording sends ${JSON.stringify(want.message)}`
       if (typeof want.uuid === 'string' && typeof sent.uuid === 'string') ids.set(want.uuid, sent.uuid)
@@ -128,7 +125,7 @@ export const streamJsonCodec = (cwd: string): FrameCodec => ({
   },
   rewrite(incoming, ids) {
     const swap = (v: unknown): unknown => {
-      if (typeof v === 'string') return ids.get(v) ?? v.split('<cwd>').join(cwd)
+      if (typeof v === 'string') return ids.get(v) ?? inFolder(v, cwd)
       if (Array.isArray(v)) return v.map(swap)
       if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)]))
       return v
@@ -136,6 +133,35 @@ export const streamJsonCodec = (cwd: string): FrameCodec => ({
     return swap(incoming) as Record<string, unknown>
   },
 })
+
+/** A recorded value as it reads in the folder the replay runs in: its `<cwd>` is that folder */
+function inFolder<T>(v: T, cwd: string): T {
+  if (typeof v === 'string') return v.split('<cwd>').join(cwd) as T
+  if (Array.isArray(v)) return v.map((x) => inFolder(x, cwd)) as T
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, inFolder(x, cwd)])) as T
+  return v
+}
+
+/** What is wrong with the calls' order: a result before its call, a call announced twice, a call with no result or two */
+export function callOrder(events: readonly NormalizedEvent[]): string[] {
+  const wrong: string[] = []
+  const called = new Set<string>()
+  const results = new Map<string, number>()
+  for (const e of events) {
+    if (e.type === 'tool_call') {
+      if (called.has(e.callId)) wrong.push(`${e.callId}: announced twice`)
+      called.add(e.callId)
+    }
+    if (e.type !== 'tool_result') continue
+    if (!called.has(e.callId)) wrong.push(`${e.callId}: a result before its call`)
+    results.set(e.callId, (results.get(e.callId) ?? 0) + 1)
+  }
+  for (const id of called) if (results.get(id) !== 1) wrong.push(`${id}: ${results.get(id) ?? 0} results`)
+  return wrong
+}
+
+/** The events of one type, typed */
+export const of = <T extends NormalizedEvent['type']>(events: readonly NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 const describeLine = (m: Record<string, unknown>): string => {
   const subtype = record(m.request).subtype ?? m.subtype
@@ -235,7 +261,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     }
     let problem = this.codec.match(msg, expected.msg, this.ids)
     // The run of lines recorded with nothing from the tool between them: the line may be any of them
-    for (let j = this.i + 1; problem && this.codec.unordered && this.frames[j]?.dir === 'out' && this.frames[j]!.msg; j++) {
+    for (let j = this.i + 1; problem && this.codec.unordered?.(msg) && this.frames[j]?.dir === 'out' && this.frames[j]!.msg && this.codec.unordered(this.frames[j]!.msg!); j++) {
       if (this.codec.match(msg, this.frames[j]!.msg!, this.ids)) continue
       this.frames.splice(this.i, 0, ...this.frames.splice(j, 1))
       problem = null

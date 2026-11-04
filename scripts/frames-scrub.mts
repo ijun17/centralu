@@ -89,11 +89,11 @@ function spans(s: string, places: Required<ScrubPlaces>): { start: number; end: 
 }
 
 /** `pieces` scrubbed as the one text they make, each kept where it was: a replacement goes in the piece it starts in */
-export function scrubPieces(pieces: readonly string[], places: ScrubPlaces): string[] {
+export function scrubPieces(pieces: readonly string[], places: ScrubPlaces, json = false): string[] {
   const all = withDefaults(places)
   const joined = pieces.join('')
   const found = spans(joined, all)
-  const { slashes, drops } = separatorsAfterFolders(joined, found)
+  const { slashes, drops } = separatorsAfterFolders(joined, found, json)
   const out: string[] = []
   let at = 0
   let next = 0
@@ -119,9 +119,11 @@ export function scrubPieces(pieces: readonly string[], places: ScrubPlaces): str
 /**
  * A path under a placeholder folder as a Linux machine would write it, whatever the recording machine's separator: where, in
  * `joined`, a backslash that follows `<cwd>`, `<tmp>` or `<home>` in a path is a `/` (a doubled one, as JSON text escapes it, is one `/`).
- * Read over the joined text, so a path cut between two chunks is still one path
+ * Read over the joined text, so a path cut between two chunks is still one path. `json`: the text is JSON (a tool input
+ * streamed as it is written), where a path's separator is the escaped pair `\\\\` and a single backslash starts an escape
+ * (`\"`, `\n`), which stays as it is
  */
-function separatorsAfterFolders(joined: string, found: readonly { start: number; end: number; with: string }[]): { slashes: Set<number>; drops: Set<number> } {
+function separatorsAfterFolders(joined: string, found: readonly { start: number; end: number; with: string }[], json: boolean): { slashes: Set<number>; drops: Set<number> } {
   const slashes = new Set<number>()
   const drops = new Set<number>()
   const starts = new Map(found.map((f) => [f.start, f]))
@@ -135,7 +137,15 @@ function separatorsAfterFolders(joined: string, found: readonly { start: number;
       }
       const c = joined[i]!
       if (/[\s"'`<>|*?:]/.test(c)) break
-      if (c === '\\') (joined[i - 1] === '\\' && (slashes.has(i - 1) || drops.has(i - 1)) ? drops : slashes).add(i)
+      if (c === '\\') {
+        const second = joined[i - 1] === '\\' && (slashes.has(i - 1) || drops.has(i - 1))
+        // In JSON a lone backslash is an escape; only the pair is a separator
+        if (json && !second && joined[i + 1] !== '\\') {
+          i++
+          continue
+        }
+        ;(second ? drops : slashes).add(i)
+      }
       i++
     }
   }
@@ -199,7 +209,7 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'request_id' && !/^req_/.test(v)) return stable('rid', v)
       if (key === 'serverName') return stable('server', v)
       if (key === 'signature' && v.length > 40) return '<signature>'
-      return mcpNames(claudeIds(scrubPieces([v], places)[0]!))
+      return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
     }
     if (Array.isArray(v)) {
       // Size, not secrecy: the picture of the window as a grid, and the connectors' tools, are the bulk of a context reading and of the init lists
@@ -277,14 +287,17 @@ function chunkOf(msg: unknown): Chunk | null {
 function rejoinChunks(frames: readonly { dir: string; msg?: unknown }[], places: ScrubPlaces): void {
   let run: Chunk[] = []
   const flush = () => {
-    if (run.length > 1) scrubPieces(run.map((c) => c.holder[c.field]!), places).forEach((text, i) => (run[i]!.holder[run[i]!.field] = text))
+    if (run.length > 1) scrubPieces(run.map((c) => c.holder[c.field]!), places, run[0]!.field === 'partial_json').forEach((text, i) => (run[i]!.holder[run[i]!.field] = text))
     run = []
   }
   for (const f of frames) {
-    // What the adapter sends meanwhile does not break a run of what the tool streams
+    // What the adapter sends meanwhile does not break a run of what the tool streams, nor do Claude Code's other messages (an answer to a
+    // query, a status, a snapshot of the message): only a change of the streamed block does
     if (f.dir !== 'in') continue
     const c = chunkOf(f.msg)
     if (!c) {
+      const type = (f.msg as { type?: unknown } | null)?.type
+      if (typeof type === 'string' && type !== 'stream_event') continue
       flush()
       continue
     }

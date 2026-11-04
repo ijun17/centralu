@@ -10,7 +10,7 @@ import { AcpNormalizer } from './normalize.js'
 import { detailOf } from './session.js'
 import { readUpdate, RequestPermission } from './wire.js'
 import type { AcpProfile } from './profile.js'
-import { loadRecording, replaySpawner } from '../frames/replay.test-helpers.js'
+import { callOrder, loadRecording, of, replaySpawner } from '../frames/replay.test-helpers.js'
 import { drive, SCENARIOS, scenariosFor } from '../frames/scenarios.test-helpers.js'
 
 /**
@@ -45,23 +45,6 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
   const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'))
   return { events, problems: state.problems, left: state.left() }
 }
-
-/** What is wrong with the calls' order: a result before its call, a call with no result or two */
-function callOrder(events: NormalizedEvent[]): string[] {
-  const wrong: string[] = []
-  const results = new Map<string, number>()
-  const called = new Set<string>()
-  for (const e of events) {
-    if (e.type === 'tool_call') called.add(e.callId)
-    if (e.type !== 'tool_result') continue
-    if (!called.has(e.callId)) wrong.push(`${e.callId}: a result before its call`)
-    results.set(e.callId, (results.get(e.callId) ?? 0) + 1)
-  }
-  for (const id of called) if (results.get(id) !== 1) wrong.push(`${id}: ${results.get(id) ?? 0} results`)
-  return wrong
-}
-
-const of = <T extends NormalizedEvent['type']>(events: NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 for (const dir of readdirSync(RECORDINGS)) {
   const names = readdirSync(join(RECORDINGS, dir))

@@ -11,7 +11,11 @@ import type { ClaudeMessage } from './json.js'
 export const CLAUDE_RECORDINGS = `${import.meta.dirname}/recordings`
 
 /** The recorded CLI version's folder: the newest, as a re-recording on a version bump replaces the old one */
-export const recordedVersion = (): string => recordedFolders(CLAUDE_RECORDINGS).map((f) => f.dir).sort().at(-1)!
+export const recordedVersion = (): string => {
+  const numbers = (dir: string) => dir.replace(/^claude-code-/, '').split('.').map(Number)
+  const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
+  return recordedFolders(CLAUDE_RECORDINGS).map((f) => f.dir).sort(newer).at(-1)!
+}
 
 const fileOf = (scenario: string): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === recordedVersion())!.file(scenario)
 
