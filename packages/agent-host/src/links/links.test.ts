@@ -2193,6 +2193,19 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
   })
 
+  it("changes no setting of the machine's orchestrator nor its coordinator, on the hub nor there (#1941 review)", async () => {
+    const { tool, remote } = await rig()
+    for (const id of ['orch', 'coord']) {
+      expect(await tool('update_session_settings', { sessionId: `m1.${id}`, model: 'scripted-1' })).toMatchObject({ isError: true, text: expect.stringContaining('shares') })
+    }
+    // The machine refuses one too, as a hub from before the hub's own check asks it
+    const asHub = await ui(remote.port)
+    for (const id of ['orch', 'coord']) {
+      await expect(asHub.call('agents.updateSettings', { sessionId: id, model: 'scripted-1', by: 'orchestrator' })).rejects.toThrow(`Not a session this machine shares: ${id}`)
+    }
+    expect(remote.mgr.listSessions().filter((s) => s.model === 'scripted-1')).toEqual([])
+  })
+
   /** What the hub's orchestrator was told: the text of each message in its own session */
   const told = (hub: Hub) => hub.store.messages.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
 

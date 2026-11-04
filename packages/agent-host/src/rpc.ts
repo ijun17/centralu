@@ -359,6 +359,8 @@ export function createRpcHandler(
        * through whole means this spot never needs fixing again as more settings are added.
        */
       const { sessionId, by, ...settings } = p
+      // `by` comes only from a hub's orchestrator, which directs no orchestrator nor coordinator here (#1941 review)
+      if (by) mgr.directedFromHub(sessionId)
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {

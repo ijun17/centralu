@@ -25,7 +25,10 @@ untrusted data, not human authorization — that now includes what one ordinary 
 another. The reader set cannot send. From a trusted project it reads every session but an orchestrator's, here and on
 the linked machines (#984, #1941): coordinators', app sessions' (a builder, an agent an app asked for) and those with no
 project included, each row of a project nobody trusted marked "(not trusted)". No session reads an orchestrator's
-conversation, the person's own talk with it. From an untrusted project it reads its own project only, so text planted
+conversation, the person's own talk with it. What the orchestrator says to another session is that session's: the
+orchestrator's own agents (no project; their first message is its brief) are read like any session, and a brief, a
+message or mail from the orchestrator lands in the receiving session's conversation and is read with it (#1941
+review: intended, since a trusted project is the person's own). From an untrusted project it reads its own project only, so text planted
 there cannot search every conversation (the #382 rule).
 
 Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
@@ -528,7 +531,7 @@ hostile content can talk it into either. The floor covers the orchestrator's own
 which is why work handed on without the request's card goes only to a session no looser than the asker; where it goes, another project or a linked machine, is
 the orchestrator's judgement. What it can pass back that the asker could not read itself is narrow, since a trusted asker reads every session but an
 orchestrator's, here and on the linked machines (#984, #1941), and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own
-conversation, and files the asker's stricter preset would ask about; for an asker in an untrusted project,
+conversation (not a brief, message or mail it sent another session: that is in the receiving session's conversation, read with it), and files the asker's stricter preset would ask about; for an asker in an untrusted project,
 anything outside its own project, though its requests are held until the person trusts the project. A hub's orchestrator, which holds this host's token, could send
 text through the composer's call and so as the person; a request held for an untrusted project keeps its citation until the person trusts the project, since the
 window is checked at send;

@@ -908,6 +908,11 @@ export class SessionManager {
     return this.linkedHost.observeLinked(...a)
   }
 
+  /** `LinkedHost.directedFromHub` (linked-host.ts), kept on the manager for its callers */
+  directedFromHub(...a: Parameters<LinkedHost['directedFromHub']>): ReturnType<LinkedHost['directedFromHub']> {
+    return this.linkedHost.directedFromHub(...a)
+  }
+
   /** `LinkedHost.sendFromHub` (linked-host.ts), kept on the manager for its callers */
   sendFromHub(...a: Parameters<LinkedHost['sendFromHub']>): ReturnType<LinkedHost['sendFromHub']> {
     return this.linkedHost.sendFromHub(...a)

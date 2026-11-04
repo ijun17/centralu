@@ -34,7 +34,7 @@ function machine(answers: Record<string, unknown>, o: { reachable?: boolean; wai
     },
     lastKnown: (kind) => (o.mirror?.[kind] as unknown[] | undefined) ?? null,
     observe: () => {},
-    hides: (s) => typeof s === 'object' && s !== null && (s as { kind?: string }).kind === 'orchestrator',
+    hides: (s) => typeof s === 'object' && s !== null && ['orchestrator', 'coordinator'].includes(String((s as { kind?: string }).kind)),
   }
 }
 
@@ -52,13 +52,24 @@ async function listText(m: RoutedMachine): Promise<string> {
 describe('reading a linked machine for the hub’s orchestrator', () => {
   it('says the orchestrator is the one changing a machine’s session settings (#659)', async () => {
     const calls: [string, unknown][] = []
-    const reader = linkedSessions(() => [machine({})], async (method, params) => {
+    const reader = linkedSessions(() => [machine({ 'sessions.list': [{ id: 'w1', kind: 'worker' }] })], async (method, params) => {
       calls.push([method, params])
       return { id: 'm1.w1', applied: 'saved' }
     })
     await reader.updateSettings('m1.w1', { model: 'opus' })
     // The machine broadcasts the change as the orchestrator's, so the hub's window still raises its toast
     expect(calls).toEqual([['agents.updateSettings', expect.objectContaining({ model: 'opus', by: 'orchestrator' })]])
+  })
+
+  it("changes no setting of a session the machine hides, though the machine would (#1941 review)", async () => {
+    const calls: string[] = []
+    const rows = [{ id: 'orch', kind: 'orchestrator' }, { id: 'coord', kind: 'coordinator' }]
+    const reader = linkedSessions(() => [machine({ 'sessions.list': rows })], async (method) => {
+      calls.push(method)
+      return { id: 'm1.orch', applied: 'saved' }
+    })
+    for (const id of ['m1.orch', 'm1.coord']) expect(await reader.updateSettings(id, { model: 'opus' })).toEqual({ ok: false, error: `Not a session Box shares: ${id}` })
+    expect(calls).toEqual([])
   })
 
   it('keeps a linked project with no default agent and refuses creation with a clear reason', async () => {

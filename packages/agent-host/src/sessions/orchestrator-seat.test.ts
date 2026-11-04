@@ -174,6 +174,21 @@ describe('the scope of a seat', () => {
     expect(read).not.toHaveBeenCalled()
   })
 
+  it("an orchestrator's row with a project is read by none of that project's sessions, trusted or not (#1941)", async () => {
+    wideWorld()
+    // A project orchestrator restored from before the central one: still marked an orchestrator, in a project
+    meta.set('old1', session('old1', { kind: 'orchestrator', projectId: 'p1' }))
+    meta.set('old2', session('old2', { kind: 'orchestrator', projectId: 'p2' }))
+    meta.set('c2', session('c2', { projectId: 'p2' }))
+    for (const [readerId, own] of [['a', 'old1'], ['c2', 'old2']] as const) {
+      const reader = orchestratorToolsFor(host, readerId, undefined, true)
+      const listed = (await reader.listSessions()).map((s) => s.sessionId)
+      expect(listed, readerId).not.toContain('old1')
+      expect(listed, readerId).not.toContain('old2')
+      expect((await reader.readSession(own)).ok, `${readerId} reads ${own}`).toBe(false)
+    }
+  })
+
   it('a coordinator reads its members only, and never a linked machine', async () => {
     const { read } = wideWorld()
     const lead = orchestratorToolsFor(host, 'orch', ['a2'])

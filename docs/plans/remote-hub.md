@@ -1286,9 +1286,9 @@ and its tools stay there).
   #984) and treats one past it as away. A machine that is away contributes its mirrored sessions with
   "not reachable right now" (list) or its name under "Not searched" (recall), and is not asked; one that predates step
   1 answers "Unknown method" and is named as needing Centralu updated there. The central orchestrator reads through
-  it, and since #984 so does an ordinary session of a trusted project, which sees only a machine's ordinary sessions
-  that the headers mirror holds (not an app's; a project there nobody trusted is marked) (`readerFacts`); a lead keeps
-  its members.
+  it, and since #984 so does an ordinary session of a trusted project, which sees every session of a machine but its
+  orchestrator (#1941): those the headers mirror holds, and a coordinator the window does not show as the link last
+  heard it (`readerFacts`, `unshown`); a project there nobody trusted is marked. A lead keeps its members.
 - **Hits from several machines** are taken in turns, one from each machine's own ranked list (`takeInTurns`): ranks
   from two stores do not compare, and appending would let the first list fill the limit before the others are heard.
 - **Text.** A row is `- <name> [m1.<id>] · project <project> on <machine> · <tool> · <state>`, with `· <why>` when the

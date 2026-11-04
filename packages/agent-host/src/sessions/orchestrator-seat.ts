@@ -174,7 +174,8 @@ export function orchestratorToolsFor(
     const own = ownProjectId()
     return !!ownProject && own !== null && trustedIds().has(own)
   }
-  const readable = (s: SessionInfo) => inScope(s) || (wide() && s.kind !== 'orchestrator')
+  /** An orchestrator's row is never read, even one with a project (a project orchestrator restored from before #1941) */
+  const readable = (s: SessionInfo) => s.kind !== 'orchestrator' && (inScope(s) || wide())
   /** The links a read reaches: the central orchestrator's, and a trusted reader's (#984); acting reaches them from the centre only */
   const readLinks = () => (central || wide() ? host.linkedReader() : null)
   /** A machine's session as a reader may see it: null when it may not, else whether to mark it untrusted */

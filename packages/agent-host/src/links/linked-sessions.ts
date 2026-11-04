@@ -331,7 +331,11 @@ export function linkedSessions(
     },
 
     updateSettings(sessionId, s) {
-      return viaSession(sessionId, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
+      return viaSession(sessionId, async (m) => {
+        // Not a session the machine hides from the hub (its orchestrator, a coordinator): a machine from before it refuses one too would change it
+        if (m.hides(await rowOf(m, m.q.strip(sessionId, 'The session')))) throw new Error(`Not a session ${m.name} shares: ${sessionId}`)
+        return { info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }
+      })
     },
 
     projects: everyProject,
