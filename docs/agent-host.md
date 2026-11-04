@@ -2180,7 +2180,13 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by
-   `scripts/acp-record.mts`, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5 and §10).
+   `scripts/frames-record.mts`, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5 and §10). Claude Code's are made the
+   same way (`pnpm exec tsx scripts/frames-record.mts claude`, on its smallest model with no settings file read, in a
+   temporary folder and data folder) and kept in `adapters/claude/recordings/claude-code-<version>/`. The CLI's process
+   is tapped, so a recording holds its stream-json as the SDK read and wrote it, and `claude/replay.test.ts` plays it
+   through the real SDK and adapter (`streamJsonCodec`). A test that reads one message takes it from a recording
+   (`claude/recorded.test-helpers.ts`); a hand-written message stays only for what no real run sends or cheaply can
+   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

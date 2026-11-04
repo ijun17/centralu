@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
+import type { PermissionPreset } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess } from '../contract.js'
-import { replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
+import { callOrder, of, replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { agyRecording, driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, sentFrames, sessionOpts, tempData, turnEnded } from './agent-files.test-helpers.js'
 
@@ -39,24 +39,6 @@ function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
   return { adapter, profile, state, peers, sent, notes, ...driven() }
 }
 
-/** Every call announced ends once, after it was announced */
-function callOrder(events: readonly NormalizedEvent[]): string[] {
-  const wrong: string[] = []
-  const called = new Set<string>()
-  const results = new Map<string, number>()
-  for (const e of events) {
-    if (e.type === 'tool_call') {
-      if (called.has(e.callId)) wrong.push(`${e.callId}: announced twice`)
-      called.add(e.callId)
-    }
-    if (e.type !== 'tool_result') continue
-    if (!called.has(e.callId)) wrong.push(`${e.callId}: a result before its call`)
-    results.set(e.callId, (results.get(e.callId) ?? 0) + 1)
-  }
-  for (const id of called) if (results.get(id) !== 1) wrong.push(`${id}: ${results.get(id) ?? 0} results`)
-  return wrong
-}
-
 /** One turn: every card answered `decide`, until the turn ends */
 async function turn(w: ReturnType<typeof world>, handle: Awaited<ReturnType<AntigravityAdapter['createSession']>>, text: string, decide: 'allow' | 'deny') {
   const from = w.events.length
@@ -73,8 +55,6 @@ async function turn(w: ReturnType<typeof world>, handle: Awaited<ReturnType<Anti
 async function open(w: ReturnType<typeof world>, preset: PermissionPreset = 'normal', resume?: string) {
   return w.adapter.createSession(sessionOpts('agy-replay', preset, resume ? { resumeExternalId: resume } : {}), w.emit)
 }
-
-const of = <T extends NormalizedEvent['type']>(events: readonly NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 describe('Antigravity in the registry', () => {
   it('is registered for everyone: the screens for its install and sign-in exist (#59)', async () => {

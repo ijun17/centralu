@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isInTurn, STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 import type { CanUseTool, QueryOptions } from './claude-sdk-fake.test-helpers.js'
+import { recordedWhere } from './recorded.test-helpers.js'
 
 /**
  * What Stop leaves behind (#168). The CLI closes an interrupted turn with an
@@ -68,12 +69,10 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 
 const tick = () => new Promise((r) => setTimeout(r, 5))
-const delta = (text: string) => ({
-  type: 'stream_event',
-  parent_tool_use_id: null,
-  event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
-})
-const interrupted = { type: 'result', subtype: 'error_during_execution', is_error: true, modelUsage: {} }
+// What the CLI sent (recordings/*/interrupt*.jsonl): a streamed piece of text, and the ending of a turn that was stopped
+const [recordedDelta] = recordedWhere('interrupt', (m) => m.type === 'stream_event' && (m.event as { delta?: { type?: string } }).delta?.type === 'text_delta') as unknown as { event: { delta: object } }[]
+const delta = (text: string) => ({ ...recordedDelta, event: { ...recordedDelta!.event, delta: { type: 'text_delta', text } } })
+const [interrupted] = recordedWhere('interrupt-tool', (m) => m.type === 'result' && m.subtype === 'error_during_execution')
 
 /** The session's state after these events, from idle, through the shared state machine; an illegal move is a failure */
 const stateOf = (events: NormalizedEvent[]): SessionState => {
