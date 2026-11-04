@@ -595,7 +595,8 @@ export class SessionManager {
     const requesterOf = (s: SessionInfo) => [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
     for (const s of stoppedByQuit) {
       const requester = requesterOf(s)
-      if (requester) this.quitNotices.push({ sessionId: s.id, requester, turn: cutTurns.get(s.id) })
+      // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
+      if (requester) this.quitNotices.push({ sessionId: s.id, requester, turn: marks.has(s.id) ? undefined : cutTurns.get(s.id) })
     }
     // Who is told that the update cut the turn and it goes on (#1618): the same one a quit's notice would go to
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
@@ -608,6 +609,8 @@ export class SessionManager {
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     // A turn that ended while the old host let go is told as such (#1186), once the start is done, as a quit's is
     for (const m of this.children.restoreReports(this.meta, goingOn)) this.quitNotices.push({ sessionId: m.sessionId, requester: m.callerSessionId, swapped: true })
+    // Whose the turn of each kept session still in one is, owed a report or not (#1946)
+    for (const id of keeperOpts.keptSessions ?? []) if (inTurn(this.meta.get(id)?.state ?? 'idle') && !this.children.awaitingReport.has(id)) this.children.adoptStarter(id)
     this.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()

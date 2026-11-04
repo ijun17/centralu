@@ -620,8 +620,14 @@ export class ChildOwnership {
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)
     if (paused) this.paused.set(sessionId, paused)
-    // The turn it was in when the last host stopped (#1377): the person's is not reported when it ends here
-    const stored = readTurn(this.store.settings.appSetting(reportTurnKey(sessionId)))
+    this.adoptStarter(sessionId)
+  }
+  /**
+   * The turn a kept session was in when the last host stopped (#1377), owed a report or not (#1946): the person's is reported to nobody
+   * when it ends here, nor told to its asker when it ends cut
+   */
+  adoptStarter(sessionId: string): void {
+    const stored = this.recordedTurn(sessionId)
     if (stored) this.starters.set(sessionId, stored)
   }
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
@@ -761,9 +767,13 @@ export class ChildOwnership {
   processGone(sessionId: string): TurnStarter {
     this.dropInputOrigins(sessionId)
     this.noteTurnEnd(sessionId)
-    const turn = readTurn(this.store.settings.appSetting(reportTurnKey(sessionId))) ?? { by: 'work' }
+    const turn = this.recordedTurn(sessionId) ?? { by: 'work' }
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     return turn
+  }
+  /** Whose the turn running is, as the store keeps it (`persistTurn`): what a host that did not see it begin reads (#1946) */
+  private recordedTurn(sessionId: string): TurnStarter | null {
+    return readTurn(this.store.settings.appSetting(reportTurnKey(sessionId)))
   }
   /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
@@ -987,7 +997,8 @@ export class ChildOwnership {
   /** Kept for a host that takes the session over mid-turn, and for the next start when a quit cuts the turn (#1946) */
   private persistTurn(sessionId: string): void {
     const s = this.starters.get(sessionId)
-    if (s) this.store.settings.setAppSetting(reportTurnKey(sessionId), JSON.stringify(s))
+    const value = s && JSON.stringify(s)
+    if (value && this.store.settings.appSetting(reportTurnKey(sessionId)) !== value) this.store.settings.setAppSetting(reportTurnKey(sessionId), value)
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {

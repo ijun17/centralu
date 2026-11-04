@@ -669,6 +669,15 @@ describe('whose a turn is', () => {
     expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
   })
 
+  it("a kept session's turn is taken over from the store, owed a report or not (#1946): the person's stays theirs after a swap", () => {
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    const next = new ChildOwnership(store)
+    next.adoptStarter('s')
+    expect(next.turnEnded('s', null, true)).toEqual({ by: 'person' })
+    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
+  })
+
   it("two messages before the turn that the tool runs as one (it names the last): the work's if either is", () => {
     own.noteMessage('s', 'person', false, true, false, 'a1')
     own.noteMessage('s', 'work', false, true, false, 'a2')
