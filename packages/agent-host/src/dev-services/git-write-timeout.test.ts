@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 /** The bound a call gets when it names none: a read's. Shortened here so a hook can outlast it in seconds, not 10 s */
 const READ_BOUND_MS = 1000 * SLOW
@@ -44,7 +43,6 @@ function sleepingHook(repo: string, name: string): void {
  */
 describe('a write outlasts the bound of a read (#980)', () => {
   let root: string
-  afterEach(() => removeTree(root))
 
   it('commits through a pre-commit hook that takes longer than a read may', { timeout: 30_000 * SLOW }, async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-git-write-'))

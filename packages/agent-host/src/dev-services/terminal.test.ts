@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, afterEach, onTestFinished } from 'vitest'
+import { describe, expect, it, vi, onTestFinished } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +9,6 @@ import { TerminalService, commandShell, interactiveShell, shellPath, type PtyMod
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -19,16 +18,7 @@ import { removeTree } from '../temp-dir.test-helpers.js'
  * plus how it behaves when a shell dies or fails to launch.
  */
 
-const dirs: string[] = []
-const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), 'cc-term-'))
-  dirs.push(d)
-  return d
-}
-
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
-})
+const tmp = () => mkdtempSync(join(tmpdir(), 'cc-term-'))
 
 /** Checks only the rules, without launching a real shell — what is under test is the grouping logic, not the shell */
 function fakePty() {
@@ -221,7 +211,6 @@ describe('multiple terminals', () => {
       // kill ends it with the shell, and the pid file names what it planted since, which `pids` does not hold (#1644)
       svc.disposeAll()
       await cleanUp([...new Set([...pids, ...treePids(pidFile)])], test)
-      await removeTree(dir)
     })
     const t = svc.create(dir, 120, 30)
     expect(shells).toHaveLength(1)
@@ -247,7 +236,6 @@ describe('multiple terminals', () => {
     const ptyModule = createRequire(import.meta.url)('node-pty') as PtyModule
     const before = consoleHosts()
     let started: number[] = []
-    onTestFinished(() => removeTree(dir))
     const svc = new TerminalService(() => {}, ptyModule)
     const t = svc.create(dir, 120, 30)
     await settle(() => t.history(), (h) => /PS .*>/.test(h), 60_000)

@@ -2,7 +2,7 @@
  * SessionManager through RPC with an in-memory adapter: worktree sessions.
  * Shared fakes and the world each test starts from are in manager.test-helpers.ts.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
@@ -34,7 +34,6 @@ import { createRpcHandler } from '../rpc.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { CwdFiledAdapter, FakeAdapter, managerWorld } from './manager.test-helpers.js'
 import { itSymlink, linkDir } from '../link.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -77,14 +76,6 @@ describe('worktree sessions', () => {
     // A worktree is only made in a trusted project (#407)
     await wtRpc('projects.setTrusted', { projectId: project.id, trusted: true })
   })
-
-  /*
-   * Retried, and asynchronously: a manager starts git in the repository on its own when it comes up (merge detection,
-   * #69) and does not wait for it, and the tests that start a second manager end before that work does. Windows will
-   * not delete a folder a process is working in, so the first try can meet EBUSY there (#14). rmSync's own retries
-   * block the event loop that work needs to finish, and failed the same way every time.
-   */
-  afterEach(() => removeTree(root))
 
   const create = (worktree: boolean) =>
     wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree }) as Promise<SessionInfo>

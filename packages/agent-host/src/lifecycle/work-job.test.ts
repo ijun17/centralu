@@ -9,7 +9,6 @@ import { settle } from '../dev-services/process-tree.test-helpers.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 import { WORK_JOB_LIMITS, joinWorkJob, workJobLine, workJobWanted } from './work-job.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 /*
  * #1067 (#840 item 7, option b): on Windows the host joins a job object that ends what it started when it ends.
@@ -106,8 +105,6 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
     own.end(started.splice(0))
     // By its handle: Node sends nothing once the child has exited
     host?.kill()
-    await new Promise((r) => setTimeout(r, 500))
-    await removeTree(dir)
   })
 
   async function standIn(): Promise<{ pid: (name: string) => number; job: { state: string; handle?: number; broker?: number } }> {

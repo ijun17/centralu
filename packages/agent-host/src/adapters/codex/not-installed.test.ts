@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CodexAdapter } from './index.js'
-import { removeTree } from '../../temp-dir.test-helpers.js'
 
 /*
  * #838: with codex not on PATH, the adapter spawned the bare name `codex` in the project's folder, and Windows looks a
@@ -15,7 +14,6 @@ describe.skipIf(process.platform !== 'win32')('codex that is not installed', () 
   let root = ''
   afterEach(async () => {
     vi.unstubAllEnvs()
-    await removeTree(root)
   })
 
   it('fails to start, and the codex.exe in the project never runs', async () => {

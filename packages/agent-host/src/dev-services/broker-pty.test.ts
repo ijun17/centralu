@@ -8,7 +8,6 @@ import { PtyBroker, brokerPath, brokerPtyModule, openForPerson, parseBrokerEvent
 import type { Pty, PtyModule } from './pty-slot.js'
 import { TerminalService } from './terminal.js'
 import { cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /*
@@ -69,10 +68,7 @@ function follow(p: Pty) {
 describe('a pty through the broker', () => {
   let dir = ''
   let broker: PtyBroker | undefined
-  afterEach(() => {
-    broker?.close()
-    return removeTree(dir)
-  })
+  afterEach(() => broker?.close())
 
   function fake(): PtyModule {
     dir = mkdtempSync(join(tmpdir(), 'cc-broker-'))
@@ -230,7 +226,6 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     onTestFinished(async (test) => {
       broker.close()
       await cleanUp(pids, test)
-      await removeTree(dir)
     })
     const exits: (number | null)[] = []
     const svc = new TerminalService((e) => {

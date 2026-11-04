@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import reportServerDeaths, { deathLines, readDeaths } from '../e2e/web-server-report.js'
-import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /*
  * The e2e dev servers' keeper (scripts/e2e-web-server.mjs, #651). Playwright starts a `webServer` once, so a vite
@@ -18,14 +17,12 @@ import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 const root = fileURLToPath(new URL('..', import.meta.url))
 const SCRIPT = join(root, 'scripts', 'e2e-web-server.mjs')
 
-const dirs: string[] = []
 const running: ChildProcess[] = []
 const urls: string[] = []
 afterEach(async () => {
   for (const c of running.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
   // The stand-in outlives a killed keeper (a shell stands between them): asked to die, it ends with nobody to restart it
   for (const u of urls.splice(0)) await fetch(`${u}/die`).catch(() => {})
-  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 /** A server that answers with its life number, and exits with 134 (an abort's code) when asked for /die */
@@ -70,7 +67,6 @@ const node = `"${process.execPath}"`
 describe('the e2e dev server keeper (#651)', () => {
   it('starts a server that died mid-run again, and says how it died', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-e2e-web-'))
-    dirs.push(dir)
     const port = await freePort()
     const url = `http://127.0.0.1:${port}`
     urls.push(url)
@@ -89,7 +85,6 @@ describe('the e2e dev server keeper (#651)', () => {
 
   it('ends with the server, not in a loop, when it ends before it ever answered', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-e2e-web-'))
-    dirs.push(dir)
     const port = await freePort()
     const s = supervise(['--url', `http://127.0.0.1:${port}`, '--', node, `"${standIn(dir)}"`, String(port), `"${join(dir, 'lives')}"`, 'never'])
     expect(await s.exited).toBe(7)
@@ -98,7 +93,6 @@ describe('the e2e dev server keeper (#651)', () => {
 
   it('gives up after its restarts, so a server that keeps dying still fails the run', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-e2e-web-'))
-    dirs.push(dir)
     const port = await freePort()
     const url = `http://127.0.0.1:${port}`
     const s = supervise(['--url', url, '--restarts', '0', '--', node, `"${standIn(dir)}"`, String(port), `"${join(dir, 'lives')}"`])
@@ -133,7 +127,6 @@ describe('the report of dev servers that died, after the run (#651)', () => {
 
   it('prints each recorded death once, from the runner, and says nothing when there was none', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-e2e-web-'))
-    dirs.push(dir)
     const file = join(dir, 'events.jsonl')
     writeFileSync(file, `${JSON.stringify(death)}\n`)
     vi.stubEnv('E2E_WEB_SERVER_EVENTS', file)

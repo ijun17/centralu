@@ -264,7 +264,6 @@ function wholeCommand(o: {
   }, 120_000 * SLOW)
   afterAll(async () => {
     await reg?.close()
-    await removeTree(root)
   })
   afterEach(async () => {
     await removeTree(join(home, '.centralu'))

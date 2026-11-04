@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +7,6 @@ import { WINDOWS_INLINE_MAX } from './tunnel.js'
 import { fakeExe } from '../fake-exe.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The probe the Add machine dialog runs when the person picks a host (#514), against a fake `ssh`
@@ -50,7 +49,6 @@ beforeEach(() => {
   log = join(dir, 'ssh.log')
   ssh = fakeExe(dir, 'ssh', FAKE_SSH)
 })
-afterEach(() => removeTree(dir))
 
 const probe = (as: string, registry: unknown = {}, timeoutMs?: number) =>
   probeTarget('win-pc', { ssh, env: { ...process.env, FAKE_SSH_LOG: log, FAKE_AS: as, FAKE_REGISTRY: JSON.stringify(registry) }, ...(timeoutMs ? { timeoutMs } : {}) })

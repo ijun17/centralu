@@ -1,26 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { ensureLauncher } from '../packaging/npm/centralu/bin/serve.mjs'
-import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * `<data>\bin\centralu.cmd`, the launcher `centralu serve` writes for ssh, run the way ssh's default shell runs it: by
  * cmd.exe, with a PATH that has nothing on it. The file is UTF-8 and cmd.exe reads it in the console's code page (949 on
  * a Korean Windows, 437 on CI), so a profile folder named in Korean sent node to a path that was not there (#849).
  */
-const dirs: string[] = []
-afterEach(async () => {
-  await Promise.all(dirs.splice(0).map(removeTree))
-})
-
 describe.skipIf(process.platform !== 'win32')('the Windows launcher in a folder named in Korean', () => {
   it('runs the CLI by its Korean path, on the console code page it had, and leaves that page set', () => {
     const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-launcher-')))
-    dirs.push(base)
     const profile = join(base, '사용자')
     const data = join(profile, '.centralu')
     const cli = join(profile, 'npm', 'centralu.mjs')

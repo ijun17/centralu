@@ -10,14 +10,11 @@ import { mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { removeTree } from '../temp-dir.test-helpers.js'
 import { Store } from './store.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
-const dirs: string[] = []
 function storeFile(): string {
   const d = mkdtempSync(join(tmpdir(), 'cc-store-durable-'))
-  dirs.push(d)
   const file = join(d, 'store.db')
   const s = new Store(file)
   s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
@@ -26,7 +23,6 @@ function storeFile(): string {
 }
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 function raw<T>(file: string, f: (db: Database.Database) => T): T {

@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { removeWithin } from '../../../tooling/remove-tree.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -181,16 +181,15 @@ export function insideOf(base: string, dir: string): boolean {
 }
 
 /**
- * Removes a test's folder without blocking the event loop, and briefly: 3 retries, about 3 s on Windows (measured: Node's
- * backoff makes 10 retries last close to a minute on a held folder), inside a hook's time limit. On Windows a folder something still holds (a process whose working
- * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the removal of the test file's
- * temporary folder when the file ends (`tooling/vitest-data-dir.ts`, which retries longer and fails the file if it still
- * cannot) instead of failing the test that used it, when it is inside the temporary folder (#1346, #1312). Anywhere
- * else, or on another platform, the error stands.
+ * Removes a test's folder without blocking the event loop, and briefly: it tries for 3 s. On Windows a folder something
+ * still holds (a process whose working directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is
+ * left to the removal of the test file's temporary folder when the file ends (`tooling/vitest-data-dir.ts`, which tries
+ * longer and fails the file if it still cannot) instead of failing the test that used it, when it is inside the temporary
+ * folder (#1346, #1312). Anywhere else, or on another platform, the error stands.
  */
 export async function removeFakeDir(dir: string, os: { platform: NodeJS.Platform; tmp: string } = { platform: process.platform, tmp: tmpdir() }): Promise<void> {
   try {
-    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+    await removeWithin(dir, 3000)
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code ?? ''
     if (os.platform !== 'win32' || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code) || !insideOf(os.tmp, dir)) throw e

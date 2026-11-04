@@ -39,22 +39,15 @@ import {
   SERVE_STATE_FILE,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
-import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLI = join(ROOT, 'packaging/npm/centralu/bin/centralu.mjs')
 const SOURCE_HOST = join(ROOT, 'packages/agent-host/src/main.ts')
 
-const dirs: string[] = []
 const closers: (() => Promise<unknown>)[] = []
-const tempDir = () => {
-  const d = realpathSync(mkdtempSync(join(tmpdir(), 'cc-keys-')))
-  dirs.push(d)
-  return d
-}
+const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), 'cc-keys-')))
 afterEach(async () => {
   for (const c of closers.splice(0)) await c()
-  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 /** A hub's public key, as slice 4's key file will hold one */

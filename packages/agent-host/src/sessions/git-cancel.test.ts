@@ -10,7 +10,6 @@ import { settle } from '../dev-services/process-tree.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -25,7 +24,6 @@ describe('git.cancel (#1007)', () => {
   let store: Store
   afterEach(async () => {
     store.close()
-    await removeTree(root)
   })
 
   it('ends the commit running for the project, which answers cancelled', { timeout: 30_000 * SLOW }, async () => {

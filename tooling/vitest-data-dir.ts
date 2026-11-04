@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync } from 'node:fs'
-import { rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll } from 'vitest'
+import { removeTree } from './remove-tree.js'
 
 /*
  * **Each test file gets a temporary folder of its own, and its data folder is in it** (#368).
@@ -46,12 +46,5 @@ process.env.CC_DATA_DIR = dir
 process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-config')
 
 // Last of the file's afterAll hooks (they run in reverse order of registration)
-afterAll(async () => {
-  try {
-    // Windows will not remove a folder a process still works in, which the last test's processes may be ending
-    await rm(own, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 5, retryDelay: 100 })
-  } catch (e) {
-    const left = await readdir(own).catch(() => [])
-    throw new Error(`the test file's temporary folder ${own} could not be removed (${e instanceof Error ? e.message : String(e)}); left in it: ${left.join(', ') || 'nothing seen'}`)
-  }
-})
+// A folder a test's process still works in fails the file naming what is left (`removeTree`)
+afterAll(() => removeTree(own))

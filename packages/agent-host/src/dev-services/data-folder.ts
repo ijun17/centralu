@@ -29,8 +29,8 @@ export async function removeData(path: string): Promise<void> {
 }
 
 /**
- * `removeData` without an await, for a write that must not yield (`writeHandoffNoteSync`). `recursive` is what makes
- * Node honour `maxRetries` at all: without it the option is ignored.
+ * `removeData` without an await, for a write that must not yield (`writeHandoffNoteSync`). Node 20 and 22 do not retry
+ * a held folder in the synchronous call (the EBUSY of a running app's folder is thrown on the first try); Node 24 does.
  */
 export function removeDataSync(path: string): void {
   rmSync(path, { recursive: true, force: true, maxRetries: 3 })

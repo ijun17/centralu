@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -114,7 +114,6 @@ afterEach(async () => {
   await rt?.dispose()
   await server?.close()
   store?.close()
-  rmSync(fixture, { recursive: true, force: true })
 })
 
 describe('the view document is what the runtime read from the app', () => {

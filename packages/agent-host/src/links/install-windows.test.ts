@@ -60,7 +60,6 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   }, 120_000 * SLOW)
   afterAll(async () => {
     await reg.close()
-    await removeTree(root)
   })
   afterEach(() => removeTree(join(home, '.centralu')))
 

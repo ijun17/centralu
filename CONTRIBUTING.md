@@ -501,10 +501,10 @@ running, possibly the very session doing the work.
   `~/.centralu`. When a host is started with `--db`, set `CC_DATA_DIR` too, or user-folder
   apps, attachments and worktrees still land in the real folder.
 - **Tests leave nothing in the temporary folder.** Each test file runs with a temporary folder of its own as its
-  `tmpdir()`, removed when the file ends, and the run fails if one cannot be removed (`tooling/vitest-data-dir.ts`,
-  #1957). Make folders under `tmpdir()` as before; remove a folder inside a test with `removeTree`
-  (`packages/agent-host/src/temp-dir.test-helpers.ts`), never `rmSync` with `maxRetries`: on Node 20 and 22 it does not
-  retry the EBUSY of a held folder.
+  `tmpdir()`, removed when the file ends, and the run fails, naming what is left, if one cannot be removed
+  (`tooling/vitest-data-dir.ts`, #1957). Make folders under `tmpdir()` and leave them to that; remove one inside a test only
+  when the test needs it gone, with `removeTree` (`tooling/remove-tree.ts`), never `rmSync` with `maxRetries`: Node 20 and 22
+  do not retry the EBUSY of a held folder in it, and `rm`'s retries multiply with the depth of the tree.
 - **Never stop what you did not start.** Signal only process ids you started yourself. No
   `pkill`/`killall` by name: the installed app, its keeper and its host match the same names.
 - **One `pnpm e2e` per machine at a time**; parallel runs share ports and fail each other. `pnpm e2e`, `ux`, `perf` and

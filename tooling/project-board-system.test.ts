@@ -7,7 +7,6 @@ import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js
 // @ts-expect-error -- a plain .mjs of tooling without types
 import { inProcessGh as untypedInProcessGh } from './fake-gh-in-process.mjs'
 import { SLOW, eventually } from './test-timing.js'
-import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * The board app's door to the OS for starting programs (.centralu/apps/project-board/system.mjs, #1599): what the merge
@@ -58,7 +57,6 @@ let root = ''
 let gh: FakeGh
 afterEach(async () => {
   vi.unstubAllEnvs()
-  await removeTree(root)
 })
 afterAll(() => {
   endLeftoverFakes()

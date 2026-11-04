@@ -10,13 +10,12 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { FsFile, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { managerWorld } from './manager.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 let root = ''
 let repo = ''
@@ -51,9 +50,6 @@ beforeEach(async () => {
   // A worktree is only made in a trusted project (#407)
   await rpc('projects.setTrusted', { projectId, trusted: true })
 })
-
-// Retried: a manager starts git in the repository on its own and Windows will not delete a folder in use (#14)
-afterEach(() => removeTree(root))
 
 describe("a session's files (#1209)", () => {
   it("reads a worktree session's file from its worktree, and the project's without the session", async () => {

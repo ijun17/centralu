@@ -6,7 +6,6 @@ import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 
 /**
@@ -53,7 +52,6 @@ describe('gh stopped by an abort (#368)', () => {
     own = ownProcesses()
     vi.unstubAllEnvs()
     __forgetPrograms()
-    await removeTree(root)
   })
 
   // Starting a Node binary as gh, which then starts another, takes seconds on a loaded machine: the bound is that wait's
@@ -193,7 +191,6 @@ describe('a gh that is a batch file', () => {
   afterEach(async () => {
     vi.unstubAllEnvs()
     __forgetPrograms()
-    await removeTree(root)
   })
 
   /*
@@ -250,7 +247,6 @@ describe('a gh lookup that fails (#841)', () => {
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     __forgetPrograms()
-    await removeTree(root)
   })
 
   function ghSaying(stderr: string): string {

@@ -7,7 +7,6 @@ import { CLOCK_TICK_MS, collectOrphansWindows, killTargets, leftoverOs, killTree
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -239,7 +238,6 @@ describe.runIf(process.platform === 'win32')('stopTree and killTree — a real t
   afterEach(async (test) => {
     await cleanUp(pids, test)
     pids = []
-    await removeTree(dir)
   })
 
   async function plant(): Promise<{ root: ChildProcess; exited: () => boolean; handle: { pid?: number; kill: (s?: string) => void } }> {
