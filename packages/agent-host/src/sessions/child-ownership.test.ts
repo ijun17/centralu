@@ -834,10 +834,10 @@ describe('where the last turn that ended began', () => {
     own.noteInputOrigin('s', 'task', note)
   }
 
-  it('is kept for the turns of a session a hub gave messages, and for no other', () => {
-    own.noteTurnStart('other', 4)
-    expect(store.settings.appSetting('turn_span:other')).toBeNull()
+  it('is kept for the turns of every session, a hub following it or not: a stop notice reads the stopped turn by it (#1946)', () => {
     expect(own.turnRows('other')).toBeUndefined()
+    own.noteTurnStart('other', 4)
+    expect(own.turnRows('other')).toEqual({ after: 4 })
     followed()
     own.noteTurnStart('s', 4)
     expect(own.turnRows('s')).toEqual({ after: 4 })

@@ -494,6 +494,28 @@ describe("the person's own turn a quit cut (#1946)", () => {
   })
 })
 
+/*
+ * #1946 (2026-11-03): the notice for a turn a quit cut quoted the turn before's last answer as its "Last response", though the
+ * cut turn had written nothing. A cut turn's words are those it said, or none (#1604)
+ */
+describe('the words of a turn a quit cut (#1946)', () => {
+  it("are that turn's own: none, never the turn before's answer", async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('indent fixed in the sidebar')
+    await eventually(() => reportsTo(parent, child).length === 1)
+    await eventually(() => info(a, parent).state === 'working')
+    a.claude.handles.get(parent)!.answer('noted')
+    // The child's CLI opens a turn of its own, says nothing, and the app quits
+    a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'working' })
+    host()
+    const cut = () => reportsTo(parent, child).find((t) => t.includes('Centralu quit or restarted during its turn'))
+    await eventually(() => cut() !== undefined)
+    expect(cut()).not.toContain('indent fixed in the sidebar')
+    expect(cut()).toContain('(no content)')
+  })
+})
+
 describe("a turn a linked hub's update cut (#1618)", () => {
   /** What went into the session's process since it was continued: Centralu's note, never a message of the person's */
   const sentTo = (h: ReturnType<typeof host>, id: string) => h.claude.handles.get(id)?.sent ?? []

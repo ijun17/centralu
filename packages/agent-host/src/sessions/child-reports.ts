@@ -15,7 +15,7 @@ import type { ReportWork } from './linked-reports.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
-import { clipPreview, lastResponseSeq } from './turn-answer.js'
+import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
 import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
@@ -406,7 +406,12 @@ export class ChildReports {
     if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
-    await this.deliverReport(asker, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, this.answerSeq(sessionId))
+    // The stopped turn's words, those said so far or none, never the turn before's (#1604, #1946); a turn not seen to begin reads as the last response
+    const span = this.host.children.turnRows(sessionId)
+    const rows = span ? this.host.store.messages.loadMessages(sessionId, 200) : []
+    const preview = span ? clipPreview(lastResponse(rows, span), 600) : previewOf(this.host.store.messages, sessionId, 600)
+    const seq = span ? (lastResponseSeq(rows, span) ?? undefined) : this.answerSeq(sessionId)
+    await this.deliverReport(asker, sessionId, name, project, preview, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)
   }
 
   /**
