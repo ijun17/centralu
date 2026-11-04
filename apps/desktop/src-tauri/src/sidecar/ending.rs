@@ -30,14 +30,18 @@ impl Supervisor {
             }
             return;
         }
-        let line = match what {
-            EndSession::Cancelled => SYSTEM_ENDING_CANCELLED_LINE,
-            EndSession::Ending { logoff: true } => SYSTEM_ENDING_LOGOFF_LINE,
-            EndSession::Ending { logoff: false } => SYSTEM_ENDING_LINE,
-        };
-        if let Err(e) = self.direct.send_line(line) {
+        if let Err(e) = self.direct.send_line(line_of(what)) {
             eprintln!("[system-ending] the host was not told: {e}");
         }
+    }
+}
+
+/// The control line the host takes for a notice
+fn line_of(what: EndSession) -> &'static str {
+    match what {
+        EndSession::Cancelled => SYSTEM_ENDING_CANCELLED_LINE,
+        EndSession::Ending { logoff: true } => SYSTEM_ENDING_LOGOFF_LINE,
+        EndSession::Ending { logoff: false } => SYSTEM_ENDING_LINE,
     }
 }
 
@@ -52,6 +56,9 @@ pub(crate) enum EndSession {
 
 const WM_QUERYENDSESSION: u32 = 0x0011;
 const WM_ENDSESSION: u32 = 0x0016;
+/// How long the confirmed end waits for the notice to be written before it lets the system go on
+#[cfg_attr(not(windows), allow(dead_code))]
+const CONFIRMED_END_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 /// `lParam` of both: the Restart Manager closes this program to replace a file it holds, which is no end of the system
 const ENDSESSION_CLOSEAPP: u32 = 0x1;
 /// `lParam` of both: a sign-out, not a shutdown or a restart
@@ -71,18 +78,52 @@ pub(crate) fn end_session_message(msg: u32, wparam: usize, lparam: isize) -> Opt
 }
 
 /// Tells the host on a thread of its own, in the order it was told: a write to a host that stopped reading, or a keeper that is slow to
-/// answer, must not hold the window's thread (the Windows message loop, the main thread on macOS)
-fn notifier(app: AppHandle) -> std::sync::mpsc::Sender<EndSession> {
-    use tauri::Manager;
-    let (tx, rx) = std::sync::mpsc::channel::<EndSession>();
-    std::thread::spawn(move || {
-        for what in rx {
-            if let Some(sup) = app.try_state::<Supervisor>() {
-                sup.system_ending(what);
+/// answer, must not hold the window's thread (the Windows message loop, the main thread on macOS). `flush` is for the one moment the
+/// process may go right after (Windows' confirmed end), when what was queued has to be written first
+pub(crate) struct Notifier {
+    tx: std::sync::mpsc::Sender<EndSession>,
+    queued: std::sync::atomic::AtomicU64,
+    handled: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+}
+
+impl Notifier {
+    pub(crate) fn new(mut handle: impl FnMut(EndSession) + Send + 'static) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<EndSession>();
+        let handled = std::sync::Arc::new((std::sync::Mutex::new(0u64), std::sync::Condvar::new()));
+        let seen = handled.clone();
+        std::thread::spawn(move || {
+            for what in rx {
+                handle(what);
+                if let Ok(mut n) = seen.0.lock() {
+                    *n += 1;
+                    seen.1.notify_all();
+                }
             }
+        });
+        Self { tx, queued: std::sync::atomic::AtomicU64::new(0), handled }
+    }
+
+    pub(crate) fn send(&self, what: EndSession) {
+        self.queued.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = self.tx.send(what);
+    }
+
+    /// Waits up to `limit` for everything sent so far to have been handled; whether it was
+    #[cfg_attr(not(windows), allow(dead_code))] // the Windows window procedure's; tested everywhere
+    pub(crate) fn flush(&self, limit: std::time::Duration) -> bool {
+        let want = self.queued.load(std::sync::atomic::Ordering::SeqCst);
+        let Ok(n) = self.handled.0.lock() else { return false };
+        self.handled.1.wait_timeout_while(n, limit, |n| *n < want).map(|(_, r)| !r.timed_out()).unwrap_or(false)
+    }
+}
+
+fn notifier(app: AppHandle) -> Notifier {
+    use tauri::Manager;
+    Notifier::new(move |what| {
+        if let Some(sup) = app.try_state::<Supervisor>() {
+            sup.system_ending(what);
         }
-    });
-    tx
+    })
 }
 
 /// Starts listening for the system ending, once the main window exists. Where the OS offers no notice there is nothing to listen to
@@ -103,7 +144,7 @@ pub(crate) fn install(app: &AppHandle) {
 
 /// Puts the end-session messages of `hwnd` through `subclass_proc`, for the life of the process (the leaked sender to the notifier is its data)
 #[cfg(windows)]
-fn subclass(hwnd: windows_sys::Win32::Foundation::HWND, tell: std::sync::mpsc::Sender<EndSession>) {
+fn subclass(hwnd: windows_sys::Win32::Foundation::HWND, tell: Notifier) {
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
     let data = Box::into_raw(Box::new(tell)) as usize;
     // SAFETY: called on the thread that made the window (the setup closure); `data` lives for the rest of the process
@@ -127,8 +168,12 @@ unsafe extern "system" fn subclass_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     if let Some(what) = end_session_message(msg, wparam, lparam) {
         // SAFETY: `data` is the leaked sender `subclass` passed
-        let tell = unsafe { &*(data as *const std::sync::mpsc::Sender<EndSession>) };
-        let _ = tell.send(what);
+        let tell = unsafe { &*(data as *const Notifier) };
+        tell.send(what);
+        // The confirmed end: the process may be ended right after this returns, so what is queued is written first, within a bound
+        if msg == WM_ENDSESSION && what != EndSession::Cancelled {
+            tell.flush(CONFIRMED_END_WAIT);
+        }
     }
     // The answer is the program's own, as it was: the window never refuses the end
     // SAFETY: the next procedure of the chain, with the message as it came
@@ -138,20 +183,13 @@ unsafe extern "system" fn subclass_proc(
 /// `NSWorkspaceWillPowerOffNotification` is posted for a shutdown, a restart and a log out alike, before any program is asked to quit.
 /// There is no notice for it being called off: the host calls an end it outlives off by itself
 #[cfg(target_os = "macos")]
-fn observe_power_off(tell: std::sync::mpsc::Sender<EndSession>) {
+fn observe_power_off(tell: Notifier) {
     use block2::RcBlock;
     use objc2_app_kit::{NSWorkspace, NSWorkspaceWillPowerOffNotification};
     use objc2_foundation::NSNotification;
     use std::ptr::NonNull;
-    use std::sync::Mutex;
-
-    // The block runs on the main thread and only hands the notice over (a `Sender` is `Send` but not `Sync`)
-    let tell = Mutex::new(tell);
-    let block = RcBlock::new(move |_note: NonNull<NSNotification>| {
-        if let Ok(tell) = tell.lock() {
-            let _ = tell.send(EndSession::Ending { logoff: false });
-        }
-    });
+    // The block runs on the main thread and only hands the notice over
+    let block = RcBlock::new(move |_note: NonNull<NSNotification>| tell.send(EndSession::Ending { logoff: false }));
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
     // SAFETY: the name is a constant of AppKit, no object or queue is named (the block runs on the posting thread), and the block
     // owns what it captures and is `Send` (an `AppHandle`)
@@ -201,5 +239,39 @@ mod tests {
         for msg in [0x0010, 0x0012, 0x000F, 0x0000] {
             assert_eq!(end_session_message(msg, 1, 0), None, "{msg:#x}");
         }
+    }
+
+    #[test]
+    fn each_notice_is_the_line_the_host_takes() {
+        use centralu_keeper_core::host_proc::*;
+        assert_eq!(line_of(EndSession::Ending { logoff: false }), SYSTEM_ENDING_LINE);
+        assert_eq!(line_of(EndSession::Ending { logoff: true }), SYSTEM_ENDING_LOGOFF_LINE);
+        assert_eq!(line_of(EndSession::Cancelled), SYSTEM_ENDING_CANCELLED_LINE);
+    }
+
+    /// M1: the confirmed end waits for what was queued, within a bound, and says whether it was written
+    #[test]
+    fn a_flush_waits_for_the_notices_sent_and_gives_up_on_a_stuck_one() {
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::Duration;
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let w = written.clone();
+        let n = Notifier::new(move |what| {
+            std::thread::sleep(Duration::from_millis(50));
+            w.lock().unwrap().push(what);
+        });
+        assert!(n.flush(Duration::from_millis(10)), "nothing queued is written already");
+        n.send(EndSession::Ending { logoff: false });
+        n.send(EndSession::Cancelled);
+        assert!(n.flush(Duration::from_secs(10)));
+        assert_eq!(*written.lock().unwrap(), vec![EndSession::Ending { logoff: false }, EndSession::Cancelled]);
+
+        let (release, held) = mpsc::channel::<()>();
+        let stuck = Notifier::new(move |_| {
+            let _ = held.recv();
+        });
+        stuck.send(EndSession::Ending { logoff: false });
+        assert!(!stuck.flush(Duration::from_millis(50)), "a host that stops reading does not hold the system");
+        drop(release);
     }
 }

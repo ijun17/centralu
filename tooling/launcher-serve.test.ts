@@ -1818,6 +1818,26 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     }
   })
 
+  it('keeps the call-off behind a notice that waits to probe the host (#1970)', async () => {
+    const { d, state } = await folder()
+    const calls: unknown[] = []
+    const server = await hostOn(state, 'interactive', d, async (_method, params) => {
+      calls.push(params)
+      return { ok: true }
+    })
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      // A sign-out probes the host's logon first; the call-off right behind it must not be sent before it
+      w.stdin.write('{"op":"system-ending","logoff":true}\n{"op":"system-ending","cancelled":true}\n')
+      await vi.waitFor(() => expect(calls).toEqual([{}, { cancelled: true }]))
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
   it('leaves a sign-out unsaid to a host in a network logon, which it does not end, and says a shutdown to it (#1970)', async () => {
     const { d, state } = await folder()
     const calls: unknown[] = []
