@@ -197,8 +197,8 @@ export function orchestratorToolsFor(
   }
   // A stale id (deleted, replaced) says what it was and which live session now carries its name (stale-session-id.ts)
   const readError = (id: string) =>
-    (ownProject && wide() ? `Not a session you can read: ${id}` : scopeText(id)) + staleSessionHint(host, id, readable, central)
-  const scopeError = (id: string) => scopeText(id) + staleSessionHint(host, id, inScope, central)
+    (ownProject && wide() ? `Not a session you can read: ${id}` : scopeText(id)) + staleSessionHint(host, id, readable, central, 'read')
+  const scopeError = (id: string, doing: 'send' | 'act' = 'act') => scopeText(id) + staleSessionHint(host, id, inScope, central, doing)
   const scopeText = (id: string) =>
     scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
     : ownProject ? `Not a session in this project: ${id}`
@@ -667,7 +667,7 @@ export function orchestratorToolsFor(
         return sendLinked(remote, sessionId, text, reportBack)
       }
       const target = host.meta.get(sessionId)
-      if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+      if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId, 'send') }
       // §7.4: work given with a report asked is a delegation, the mailbox's to refuse before anything is sent, queued or forked
       if (reportBack) {
         const refused = host.refusesDelegation(orchestratorId, { sessionId, projectId: target.projectId }, { tool: 'send_to_session', target: target.name || target.id, text })

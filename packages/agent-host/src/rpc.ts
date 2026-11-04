@@ -257,7 +257,10 @@ export function createRpcHandler(
       requireTerminals().close(RpcMethods['terminal.close'].params.parse(p).terminalId)
       return { ok: true as const }
     },
-    'themes.remove': async (p: unknown) => ({ removed: await requireThemes().remove(RpcMethods['themes.remove'].params.parse(p).id) }),
+    'themes.remove': async (p: unknown) => {
+      const keptAt = await requireThemes().remove(RpcMethods['themes.remove'].params.parse(p).id)
+      return { removed: keptAt !== null, keptAt }
+    },
     'themes.import': async (p: unknown) => requireThemes().importFrom(RpcMethods['themes.import'].params.parse(p).path),
     'themes.resolve': async (p: unknown) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
     'machines.add': async (p: unknown) => {

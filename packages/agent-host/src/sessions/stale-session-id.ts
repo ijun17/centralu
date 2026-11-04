@@ -1,11 +1,15 @@
 import type { SessionInfo } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
+import { liveHeirOf } from './handoff-notes.js'
+import { plainQuoted } from './tool-answers.js'
 
 /**
  * What to add to a "not a session" refusal when the id is not a live session (a caller kept it in memory past a deletion or a
- * handoff): was it deleted (the archive keeps the row), and which live session of the same project now carries its name, so
- * the caller can resend at once. Only names the candidates; nothing is ever sent to one for the caller. Every tool that takes
- * a session id to send to or read goes through this (orchestrator-seat's scope and read errors, agent_session's).
+ * handoff): was it deleted (the archive keeps the row), which live session took over from it by a handoff (the same generation
+ * walk as the delete's, `liveHeirOf`), and which live sessions of the same project now carry its name, so the caller can retry
+ * at once. Only names the candidates; nothing is ever done to one for the caller. Every tool that takes a session id to send to
+ * or read goes through this (orchestrator-seat's scope and read errors, agent_session's). Names are another session's text, so
+ * they are quoted as plain text.
  */
 export function staleSessionHint(
   host: { store: Store; meta: ReadonlyMap<string, SessionInfo> },
@@ -14,6 +18,8 @@ export function staleSessionHint(
   visible: (s: SessionInfo) => boolean,
   /** The caller sees every project (the central orchestrator, which lists the archive anyway); else only those of the sessions it can name */
   seesAll = false,
+  /** What the caller was doing, for the closing sentence */
+  doing: 'send' | 'read' | 'act' = 'act',
 ): string {
   // A live session that is out of this caller's view is not a stale id: say nothing that would tell it more
   if (host.meta.has(id)) return ''
@@ -21,19 +27,21 @@ export function staleSessionHint(
   // An archived session of a project the caller cannot see is refused as a missing one: its name is not for it
   const found = host.store.trash.trashedSession(id)
   const trashed = found && (seesAll || live.some((s) => s.projectId === found.record.projectId)) ? found : null
-  const heirs = host.store.handoffs.handoffHeirs(id).filter((h) => !h.trashed).map((h) => host.meta.get(h.sessionId)).filter((s): s is SessionInfo => !!s && visible(s))
-  const named = trashed
-    ? live.filter((s) => s.name === trashed.session.name && s.projectId === trashed.record.projectId && !heirs.includes(s))
-    : []
-  const label = (s: SessionInfo) => `"${s.name}" (id ${s.id})`
+  const heirId = liveHeirOf(host.store, id, (h) => {
+    const s = host.meta.get(h)
+    return !!s && s.kind !== 'orchestrator' && visible(s)
+  })
+  const heir = heirId ? host.meta.get(heirId) : undefined
   // Not in the archive and no heir: nothing is known of the id, so nothing is added
-  if (!trashed && !heirs.length) return ''
+  if (!trashed && !heir) return ''
+  const named = trashed ? live.filter((s) => s.name === trashed.session.name && s.projectId === trashed.record.projectId && s !== heir) : []
+  const label = (s: SessionInfo) => `${plainQuoted(s.name, 80)} (id ${s.id})`
   const parts: string[] = []
-  if (trashed) parts.push(`That id was the session "${trashed.session.name}", deleted since (it is in the archive).`)
+  if (trashed) parts.push(`That id was the session ${plainQuoted(trashed.session.name, 80)}, deleted since (it is in the archive).`)
   else parts.push('That id was a session that has been replaced by a handoff.')
-  if (heirs.length) parts.push(`Taken over by: ${heirs.map(label).join(', ')}.`)
+  if (heir) parts.push(`The live session that took over from it: ${label(heir)}.`)
   if (named.length) parts.push(`Live in the same project with the same name: ${named.map(label).join(', ')}.`)
-  if (heirs.length + named.length) parts.push('Nothing was sent; resend to the one you meant, by its id.')
-  else parts.push('No live session carries its name; list the sessions to find the one you meant.')
+  const then = doing === 'send' ? 'Nothing was sent; send to' : doing === 'read' ? 'Nothing was read; read' : 'Nothing was done; use'
+  parts.push(heir || named.length ? `${then} the one you meant, by its id.` : 'No live session carries its name; list the sessions to find the one you meant.')
   return ' ' + parts.join(' ')
 }

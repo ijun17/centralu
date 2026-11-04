@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -21,6 +21,9 @@ type ThemeChoice = { id: string; name: string; base: 'dark' | 'light'; file: boo
 const UPDATE_CARD =
   'Turn on "Automatic updates"? From then on this computer checks for a newer Centralu, installs it by itself as soon as one is published, ' +
   'and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
+
+/** The reader refuses a theme file bigger than this (themes.ts) */
+const THEME_FILE_MAX_BYTES = 256 * 1024
 
 /** The most groups `UiPreferences.foldedGroups` holds (the window drops the oldest fold past it) */
 const FOLDED_GROUPS_MAX = 500
@@ -130,24 +133,21 @@ export class PreferencesFlow {
     let theme: ThemeChoice | null = null
     const done: string[] = []
     const failed: string[] = []
-    // A theme file is written before a theme is picked, so one call can make a theme and show it
+    /*
+     * Every check comes first and the theme file is written last, so a refused call leaves nothing behind. A theme named in
+     * the same call as the file that makes it cannot be looked up yet: it is looked up after the write (a miss then is a
+     * partial success, said so).
+     */
     const file = changes.themeFile
     if (file !== undefined) {
       const bad = themeFileRefusal(file)
       if (bad) return { ok: false, error: bad }
-      try {
-        const saved = await callWindow(rpc, 'themes.save', { id: file.id?.trim() || null, content: { name: file.name.trim(), base: file.base, tokens: file.tokens } })
-        done.push(themeFileWritten(saved))
-      } catch (e) {
-        return { ok: false, error: `Nothing changed: ${errorMessage(e)}` }
-      }
     }
     if (changes.theme !== undefined) {
       const found = await this.theme(rpc, changes.theme)
-      if (typeof found === 'string') return { ok: false, error: file ? `${done.join(' ')} But the theme was not picked: ${found}` : found }
-      theme = found
-      patch.themeMode = found.base
-      patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
+      const wanted = changes.theme.trim().toLowerCase()
+      const madeHere = file !== undefined && (file.name.trim().toLowerCase() === wanted || file.id?.trim().toLowerCase() === wanted)
+      if (typeof found === 'string' && !madeHere) return { ok: false, error: found }
     }
     if (changes.textSize !== undefined) {
       if (!Number.isFinite(changes.textSize)) return { ok: false, error: `textSize is a number: one of ${TEXT_SIZES.join(', ')}.` }
@@ -178,6 +178,28 @@ export class PreferencesFlow {
       return { ok: false, error: `idleSleepMinutes is ${SLEEP_CHOICES}.` }
     }
 
+    if (file !== undefined) {
+      try {
+        const saved = await callWindow(rpc, 'themes.save', { id: file.id?.trim() || null, content: { name: file.name.trim(), base: file.base, tokens: file.tokens } })
+        done.push(themeFileWritten(saved))
+      } catch (e) {
+        return { ok: false, error: errorMessage(e) }
+      }
+    }
+    let toApply = parsed.data
+    if (changes.theme !== undefined) {
+      const found = await this.theme(rpc, changes.theme)
+      if (typeof found === 'string') failed.push(`Theme: not picked. ${found}`)
+      else {
+        theme = found
+        patch.themeMode = found.base
+        patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
+        const again = UiPreferencesPatch.safeParse(patch)
+        if (!again.success) return { ok: false, error: `${issuesOf(again.error)}.` }
+        toApply = again.data
+      }
+    }
+
     const attempt = async (what: string, run: () => Promise<string>) => {
       try {
         done.push(await run())
@@ -188,7 +210,7 @@ export class PreferencesFlow {
 
     if (Object.keys(patch).length) {
       await attempt('Appearance', async () => {
-        const now = await callWindow(rpc, 'prefs.set', { patch: parsed.data })
+        const now = await callWindow(rpc, 'prefs.set', { patch: toApply })
         return appearanceText(now, patch, theme)
       })
     }
@@ -315,7 +337,7 @@ export class PreferencesFlow {
       const id = changes.deleteThemeFile.trim()
       await attempt('Theme file', async () => {
         if (!ThemeId.safeParse(id).success) throw new Error(`${plainQuoted(id)} is not a theme file id; get_preferences lists them.`)
-        const { removed } = await callWindow(rpc, 'themes.remove', { id })
+        const { removed, keptAt } = await callWindow(rpc, 'themes.remove', { id })
         if (!removed) throw new Error(`No theme file [${id}]; get_preferences lists them.`)
         // A side that showed it goes back to its preset, as Settings does
         const now = await callWindow(rpc, 'prefs.get', {})
@@ -323,7 +345,7 @@ export class PreferencesFlow {
         if (now.themeDark === id) back.themeDark = 'dark'
         if (now.themeLight === id) back.themeLight = 'light'
         if (Object.keys(back).length) await callWindow(rpc, 'prefs.set', { patch: back })
-        return `Removed the theme file [${id}] (kept in the themes folder's .removed).${Object.keys(back).length ? ' A side that showed it is back on its preset.' : ''}`
+        return `Removed the theme file [${id}]; it is kept at ${plainQuoted(keptAt ?? '', 300)} (move it back to restore it).${Object.keys(back).length ? ' A side that showed it is back on its preset.' : ''}`
       })
     }
 
@@ -352,21 +374,41 @@ export class PreferencesFlow {
     return [...kept, ...add].slice(-FOLDED_GROUPS_MAX)
   }
 
-  /** The saved models with this call's changes merged in (the patch carries the whole map), or the sentence that says what is wrong */
+  /**
+   * The saved models with this call's changes merged in (the patch carries the whole map), or the sentence that says what is
+   * wrong. The map steers every difficulty-based start_agent in every project, so what Settings' picker offers is the limit: a
+   * tool that is known on this computer, and a model and effort from that tool's own list when it gives one (`agent_models`;
+   * Claude lists its models only while a session runs, and then, as the picker's "Other…", any plain text goes). Clearing a
+   * difficulty that was never set changes nothing and leaves no empty entry.
+   */
   private async mergedAgentModels(rpc: WindowRpc, change: NonNullable<PreferenceChanges['agentModels']>): Promise<Record<string, Record<string, unknown>> | string> {
     const now = (await callWindow(rpc, 'prefs.get', {})).agentModels ?? {}
+    const known = (await callWindow(rpc, 'agents.detect', {})).map((s) => s.name)
     const out: Record<string, Record<string, unknown>> = { ...now }
     for (const [tool, levels] of Object.entries(change)) {
-      if (!tool.trim() || HIDDEN.test(tool)) return 'agentModels is keyed by a tool name such as claude or codex.'
+      if (!known.includes(tool)) return `agentModels: ${plainQuoted(tool, 80)} is not an agent CLI on this computer; agent_status lists them (${known.join(', ') || 'none'}).`
       const own: Record<string, unknown> = { ...out[tool] }
+      let catalog: { id: string; efforts: string[] }[] | null | undefined
       for (const [level, choice] of Object.entries(levels)) {
         if (choice === null) delete own[level]
         else if (choice !== undefined) {
-          if (HIDDEN.test(choice.model) || HIDDEN.test(choice.effort ?? '')) return 'agentModels has a control or formatting character in a model or effort; give plain text.'
-          own[level] = choice.effort ? { model: choice.model.trim(), effort: choice.effort.trim() } : { model: choice.model.trim() }
+          const model = choice.model.trim()
+          const effort = choice.effort?.trim()
+          if (HIDDEN.test(model) || HIDDEN.test(effort ?? '')) return 'agentModels has a control or formatting character in a model or effort; give plain text.'
+          if (catalog === undefined) {
+            const r = await callWindow(rpc, 'agents.models', { tool }).catch(() => null)
+            catalog = r?.supported && r.models.length ? r.models : null
+          }
+          if (catalog) {
+            const m = catalog.find((x) => x.id === model)
+            if (!m) return `agentModels: ${plainQuoted(model, 200)} is not a model ${plainQuoted(tool, 80)} offers. agent_models shows them: ${catalog.slice(0, 15).map((x) => plainQuoted(x.id, 80)).join(', ')}.`
+            if (effort && m.efforts.length && !m.efforts.includes(effort)) return `agentModels: ${plainQuoted(effort, 80)} is not an effort of ${plainQuoted(model, 200)}: ${m.efforts.map((e) => plainQuoted(e, 40)).join(', ')}.`
+          }
+          own[level] = effort ? { model, effort } : { model }
         }
       }
-      out[tool] = own
+      if (Object.keys(own).length) out[tool] = own
+      else delete out[tool]
     }
     return out
   }
@@ -418,10 +460,11 @@ function themeFileRefusal(file: NonNullable<PreferenceChanges['themeFile']>): st
     return `themeFile.id ${plainQuoted(file.id)} is not a theme id: lowercase letters, digits and dashes, up to 60. Leave it out for a new file.`
   }
   const content = ThemeFileContent.safeParse({ name: file.name.trim(), base: file.base, tokens: file.tokens })
-  if (!content.success) return `Nothing changed: themeFile: ${issuesOf(content.error)}.`
+  if (!content.success) return `themeFile: ${issuesOf(content.error)}.`
   if (HIDDEN.test(file.name) || Object.entries(file.tokens).some(([k, v]) => HIDDEN.test(k) || HIDDEN.test(v))) {
     return 'themeFile has a control or formatting character in its name or tokens; give plain text.'
   }
+  if (Buffer.byteLength(formatThemeFile(content.data)) > THEME_FILE_MAX_BYTES) return 'themeFile is too large to be a theme file; leave out the tokens you do not change.'
   return null
 }
 

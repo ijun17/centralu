@@ -211,6 +211,26 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       expect((await tools.sendToSession('never-existed', 'hi')).error).toBe('Not a session this app manages: never-existed')
     })
 
+    it('follows a chain of handoffs past a deleted middle session to the live one that now carries the work', async () => {
+      const { p, tools } = await setup()
+      const make = async (name: string) => {
+        const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+        await rpc('sessions.rename', { sessionId: s.id, name })
+        return s.id
+      }
+      const [a, b, c] = [await make('Step one'), await make('Step two'), await make('Step three')]
+      const handoffFrom = (id: string, from: string) =>
+        store.messages.appendMessages([{ sessionId: id, seq: 101, role: 'system', kind: 'marker', payload: { type: 'handoff', sessionId: id, seq: 101, from: 'x', note: 'n', fromSessionId: from }, ts: 1 }])
+      handoffFrom(b, a)
+      handoffFrom(c, b)
+      await rpc('agents.deleteSession', { sessionId: a })
+      await rpc('agents.deleteSession', { sessionId: b })
+      const r = await tools.sendToSession(a, 'hi')
+      expect(r.error).toContain('The live session that took over from it: "Step three" (id ' + c + ')')
+      expect(r.error).toContain('Nothing was sent; send to the one you meant, by its id.')
+      expect((await tools.readSession(a)).error).toContain('Nothing was read; read the one you meant')
+    })
+
     it('read_session gives the same help', async () => {
       const { old, now, tools } = await staleWorld()
       const r = await tools.readSession(old)

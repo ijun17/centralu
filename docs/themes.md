@@ -4,7 +4,7 @@ The screen's colours, shadows and scrollbar come from tokens (`packages/ui/src/s
 A **theme** is a set of values for those tokens. Settings → Appearance chooses which theme shows;
 a **custom theme** is a JSON file anyone — a person, an editor, an agent — can write (#312). The orchestrator writes, lists and removes theme files through `set_preferences` / `get_preferences`
 (`themeFile`, `deleteThemeFile`), by the same host code as Settings (`themes.save`, `themes.remove`); a removed file moves
-to `themes/.removed/` rather than being destroyed (#1978).
+to `themes/.removed/` under a name of its own rather than being destroyed (#1978).
 The same section sets the text: its size, the body and code fonts, and the line height ([below](#text-size-fonts-and-line-height)).
 
 ## Choosing

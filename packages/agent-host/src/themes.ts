@@ -116,23 +116,32 @@ export class ThemeFiles {
 
   /** Writes a theme. `id` null makes a new file named after the theme (`My theme` → `my-theme.json`). */
   async save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry> {
+    const text = formatThemeFile(content)
+    // The reader refuses a bigger file (read), so writing one would list a theme that never applies
+    if (Buffer.byteLength(text) > MAX_FILE_BYTES) throw rpcError('The theme is too large to be a theme file.')
     const target = id ?? (await this.freeId(content.name))
     await mkdir(this.dir, { recursive: true })
-    writeFileWhole(realOs().files, this.pathOf(target), formatThemeFile(content))
+    // On a filesystem that ignores case, `paper` would overwrite a hand-written Paper.json the list does not show
+    const names = await readdir(this.dir).catch(() => [] as string[])
+    const clash = names.find((n) => n !== `${target}.json` && n.toLowerCase() === `${target}.json`)
+    if (clash) throw rpcError(`The themes folder has ${clash}, which the list does not show (ids are lowercase); rename or remove it first.`)
+    writeFileWhole(realOs().files, this.pathOf(target), text)
     return this.read(target)
   }
 
   /**
-   * Takes a theme file out of the list without destroying it: it moves to `.removed/<id>-<time>.json`, a place the list does not
-   * look, so a mistaken removal is one move back. False when there was no such file.
+   * Takes a theme file out of the list without destroying it: it moves to `.removed/<id>-<time>-<random>.json`, a place the list
+   * does not look, so a mistaken removal is one move back. The host has no OS trash (Settings' button reaches it through the
+   * shell), so these stay until the person clears the folder. Where it went is returned; null when there was no such file.
    */
-  async remove(id: string): Promise<boolean> {
+  async remove(id: string): Promise<string | null> {
     const from = this.pathOf(id)
-    if (!(await stat(from).then(() => true, () => false))) return false
+    if (!(await stat(from).then(() => true, () => false))) return null
     const kept = join(this.dir, REMOVED_DIR)
     await mkdir(kept, { recursive: true })
-    await rename(from, join(kept, `${id}-${Date.now()}.json`))
-    return true
+    const to = join(kept, `${id}-${Date.now()}-${randomBytes(3).toString('hex')}.json`)
+    await rename(from, to)
+    return to
   }
 
   /** Copies a file from elsewhere in, under a fresh id if its name is taken. Refuses what does not read as a theme. */

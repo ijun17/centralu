@@ -15,7 +15,7 @@ export const settingsResults = {
   'themes.list': z.array(ThemeFileEntry),
   'themes.save': ThemeFileEntry,
   'themes.import': ThemeFileEntry,
-  'themes.remove': z.object({ removed: z.boolean() }),
+  'themes.remove': z.object({ removed: z.boolean(), keptAt: z.string().nullable() }),
   'themes.resolve': z.object({ path: z.string() }),
   'approvals.rules': z.array(
     z.object({

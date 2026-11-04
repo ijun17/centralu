@@ -31,6 +31,7 @@ let rpc: (method: string, params: unknown) => Promise<unknown>
 let updates: ReturnType<typeof fakeUpdates>
 let sleeper: ReturnType<typeof fakeSleeper>
 let versions: ReturnType<typeof fakeVersions>
+let claude: CrossAdapter
 
 function fakeUpdates() {
   const calls: string[] = []
@@ -92,7 +93,8 @@ function fakeVersions() {
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-prefs-')))
   store = new Store()
-  const adapters = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]])
+  claude = new CrossAdapter('claude')
+  const adapters = new Map<ToolName, CrossAdapter>([['claude', claude]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
   announced = []
   mgr = new SessionManager(store, agents, (e) => announced.push(e.type))
@@ -789,7 +791,7 @@ describe('theme files and the models for started agents (#1978)', () => {
     const orc = await mgr.orchestrator()
     await run(orc.id, 'set_preferences', { themeFile: { name: 'Gone', base: 'dark', tokens: {} }, theme: 'gone' })
     const r = await run(orc.id, 'set_preferences', { deleteThemeFile: 'gone' })
-    expect(r.text).toContain('Removed the theme file [gone]')
+    expect(r.text).toMatch(/Removed the theme file \[gone\]; it is kept at .*\.removed/)
     expect(await rpc('themes.list', {})).toEqual([])
     expect(await prefs()).toMatchObject({ themeDark: 'dark' })
     expect(readdirSync(join(themesDir(), '.removed')).some((f) => f.startsWith('gone-'))).toBe(true)
@@ -801,12 +803,60 @@ describe('theme files and the models for started agents (#1978)', () => {
   it('sets the model for a difficulty, merges with what is saved, and clears one with null', async () => {
     const orc = await mgr.orchestrator()
     await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'high' } } } })
-    const r = await run(orc.id, 'set_preferences', { agentModels: { claude: { light: { model: 'haiku' } }, codex: { standard: { model: 'gpt-5' } } } })
+    const r = await run(orc.id, 'set_preferences', { agentModels: { claude: { light: { model: 'haiku' } } } })
     expect(r.text).toContain('"claude" heavy: "opus" ("high")')
-    expect(await prefs()).toMatchObject({
-      agentModels: { claude: { heavy: { model: 'opus', effort: 'high' }, light: { model: 'haiku' } }, codex: { standard: { model: 'gpt-5' } } },
-    })
+    expect(await prefs()).toMatchObject({ agentModels: { claude: { heavy: { model: 'opus', effort: 'high' }, light: { model: 'haiku' } } } })
     await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: null } } })
     expect(((await prefs()) as { agentModels: { claude: object } }).agentModels.claude).toEqual({ light: { model: 'haiku' } })
+  })
+
+  it('refuses a tool that is not on this computer, and a model or effort the tool does not offer; clearing what was never set leaves no entry', async () => {
+    const orc = await mgr.orchestrator()
+    const unknown = await run(orc.id, 'set_preferences', { agentModels: { codex: { standard: { model: 'gpt-5' } } } })
+    expect(unknown.isError).toBe(true)
+    expect(unknown.text).toContain('"codex" is not an agent CLI on this computer')
+    claude.listModels = async () => [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'], defaultEffort: null, tiers: [] }]
+    const badModel = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'gpt-5' } } } })
+    expect(badModel.text).toContain('"gpt-5" is not a model "claude" offers')
+    expect(badModel.text).toContain('"opus"')
+    const badEffort = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'max' } } } })
+    expect(badEffort.text).toContain('"max" is not an effort of "opus": "low", "high"')
+    expect((await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'low' } } } })).isError).toBeFalsy()
+    await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: null } } })
+    expect((await prefs()).agentModels).toEqual({})
+    await run(orc.id, 'set_preferences', { agentModels: { claude: { light: null } }, textSize: 1.1 })
+    expect((await prefs()).agentModels).toEqual({})
+  })
+
+  it('a refused call leaves no theme file behind, whichever check refuses it', async () => {
+    const orc = await mgr.orchestrator()
+    const file = { name: 'Kept out', base: 'dark', tokens: {} }
+    expect((await run(orc.id, 'set_preferences', { themeFile: file, bodyFont: 'x‮' })).isError).toBe(true)
+    expect((await run(orc.id, 'set_preferences', { themeFile: file, foldedGroups: { fold: ['../x'] } })).isError).toBe(true)
+    const noTheme = await run(orc.id, 'set_preferences', { themeFile: file, theme: 'nope' })
+    expect(noTheme.isError).toBe(true)
+    expect(noTheme.text).toContain('No theme is called "nope"')
+    expect(noTheme.text).not.toContain('Wrote the theme file')
+    expect(await rpc('themes.list', {})).toEqual([])
+  })
+
+  it('a theme that cannot be found after the file is written is a partial success, said so', async () => {
+    const orc = await mgr.orchestrator()
+    await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'dark', tokens: {} } })
+    const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'light', tokens: {} }, theme: 'twin peaks', textSize: 1.1 })
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Wrote the theme file "Twin Peaks" [twin-peaks-2]')
+    expect(r.text).toMatch(/Not changed: Theme: not picked\. Several themes are called "twin peaks"/)
+    expect(await prefs()).toMatchObject({ textSize: 1.1, themeDark: 'dark' })
+  })
+
+  it('refuses a theme file the reader would not read (too large) before writing', async () => {
+    const orc = await mgr.orchestrator()
+    const tokens = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => ['t' + i, 'x'.repeat(390)]))
+    const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Huge', base: 'dark', tokens } })
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/^Nothing changed: themeFile is too large/)
+    expect(r.text).not.toMatch(/Nothing changed: Nothing changed/)
+    expect(await rpc('themes.list', {})).toEqual([])
   })
 })
