@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, durationsFromReports, formatDurations, osSelector, parseDurations, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -174,7 +174,7 @@ describe('the allowlist', () => {
       const renames = renamesSince(ROOT, base)
       expect(renames, `the renames since ${base}`).not.toBeNull()
       expect(
-        grown(main, allowlist, renames ?? []),
+        grown(main, allowlist, renames ?? [], splitFilesAt(base)),
         `${layer.OS_ALLOWLIST} lists more than main's: put the new code behind the OS layer instead (docs/plans/os-layer.md)`,
       ).toEqual([])
     },
@@ -232,6 +232,77 @@ describe('the allowlist', () => {
     ])
   })
 
+  describe('hands the line of a removed file to the pieces it was split into, and to no other new file', () => {
+    const dir = 'packages/agent-host/src/links/'
+    const text = (n: number) => 'x\n'.repeat(n)
+    const old = `${dir}install-windows.test.ts`
+    const main = [old, `${dir}other.test.ts`]
+    const pieces = [`${dir}install-windows-install.test.ts`, `${dir}install-windows-update.test.ts`, `${dir}install-windows.test-helpers.ts`]
+    const base: Record<string, string> = { [old]: text(500), [`${dir}other.test.ts`]: text(5) }
+    /** The files as `now` has them (the removed file is not there); the base has only what it had */
+    const over = (now: Record<string, string>) => ({ base: (f: string) => base[f] ?? null, now: (f: string) => now[f] ?? null })
+    const split: Record<string, string> = { [`${dir}other.test.ts`]: text(5), [pieces[0] as string]: text(200), [pieces[1] as string]: text(200), [pieces[2] as string]: text(150) }
+    const listed = [...pieces, `${dir}other.test.ts`]
+
+    it('takes the pieces, in the list and in tightening', () => {
+      expect(grown(main, listed, [], over(split))).toEqual([])
+      const offenders = new Set(listed)
+      expect(tightened(`# h\n${main.join('\n')}\n`, offenders, [], over(split))).toBe(`# h\n${[...listed].sort().join('\n')}\n`)
+      // Without the split files given, tightening adds nothing: the pieces are new offenders
+      expect(tightened(`# h\n${main.join('\n')}\n`, offenders)).toBe(`# h\n${dir}other.test.ts\n`)
+    })
+
+    it('refuses a brand-new file of another name, a name that only begins like the stem, and one in another folder', () => {
+      const stranger = `${dir}brand-new.test.ts`
+      expect(grown(main, [...listed, stranger], [], over({ ...split, [stranger]: text(10) }))).toEqual([stranger])
+      const near = [`${dir}install-windowsX.test.ts`, 'packages/agent-host/src/install-windows-update.test.ts']
+      expect(grown(main, [...listed, ...near], [], over({ ...split, [near[0] as string]: text(10), [near[1] as string]: text(10) }))).toEqual(near)
+      // A file still there lends nothing
+      expect(grown(main, listed, [], over({ ...split, [old]: text(500) }))).toEqual(pieces)
+    })
+
+    it('(A) hands nothing to a file that was there before, such as shipped code with the same stem', () => {
+      const away = [`packages/agent-host/src/links/away.test.ts`, `packages/agent-host/src/links/away.ts`]
+      const files = { base: (f: string) => (f === away[0] || f === away[1] ? text(100) : null), now: (f: string) => (f === away[1] ? text(100) : null) }
+      expect(grown(away, [away[1] as string], [], files)).toEqual([])
+      // Even when the shipped file is new on the list of a main that did not have it
+      expect(grown([away[0] as string], [away[1] as string], [], files)).toEqual([away[1]])
+    })
+
+    it('(B) does not let the allowance grow with the number of pieces, and caps them', () => {
+      const many = Array.from({ length: 10 }, (_, i) => `${dir}install-windows-p${i}.test.ts`)
+      const now = Object.fromEntries(many.map((f) => [f, text(79)]))
+      expect(grown(main, [...many, `${dir}other.test.ts`], [], over({ ...now, [`${dir}other.test.ts`]: text(5) }))).toEqual(many)
+      const five = many.slice(0, 5)
+      expect(grown(main, [...five, `${dir}other.test.ts`], [], over({ ...Object.fromEntries(five.map((f) => [f, text(100)])), [`${dir}other.test.ts`]: text(5) }))).toEqual([])
+      expect(grown(main, [...five, `${dir}other.test.ts`], [], over({ ...Object.fromEntries(five.map((f) => [f, text(140)])), [`${dir}other.test.ts`]: text(5) }))).toEqual(five)
+    })
+
+    it('hands nothing to a file that existed at the base and not on the list, though it reaches the OS now', () => {
+      const x = `${dir}x.test.ts`
+      const other = `${dir}x-other.test.ts`
+      const files = { base: (f: string) => (f === x || f === other ? text(100) : null), now: (f: string) => (f === other ? text(100) : null) }
+      expect(grown([x], [other], [], files)).toEqual([other])
+      // The same file, new at the base, is a piece
+      expect(grown([x], [other], [], { ...files, base: (f: string) => (f === x ? text(100) : null) })).toEqual([])
+    })
+
+    it('caps the pieces at five, though six small ones are within the line budget', () => {
+      const six = Array.from({ length: 6 }, (_, i) => `${dir}install-windows-q${i}.test.ts`)
+      const small = (fs: string[]) => over(Object.fromEntries([...fs.map((f) => [f, text(10)]), [`${dir}other.test.ts`, text(5)]]))
+      expect(grown(main, [...six, `${dir}other.test.ts`], [], small(six))).toEqual(six)
+      expect(grown(main, [...six.slice(0, 5), `${dir}other.test.ts`], [], small(six.slice(0, 5)))).toEqual([])
+    })
+
+    it('(C) hands a test no line for shipped code, nor the other way round', () => {
+      const code = `${dir}install-windows-extra.ts`
+      expect(grown(main, [code, `${dir}other.test.ts`], [], over({ [code]: text(400), [`${dir}other.test.ts`]: text(5) }))).toEqual([code])
+      const src = `${dir}link.ts`
+      const files = { base: (f: string) => (f === src ? text(100) : null), now: (f: string) => (f === `${dir}link-new.test.ts` ? text(50) : null) }
+      expect(grown([src], [`${dir}link-new.test.ts`], [], files)).toEqual([`${dir}link-new.test.ts`])
+    })
+  })
+
   it('is tightened from the code (pnpm os:tighten): lines no longer needed go, comments stay, nothing is added', () => {
     const text = '# header\npackages/agent-host/src/a.ts\npackages/agent-host/src/b.ts\npackages/agent-host/src/c.ts\n'
     // Two changes took out b and c, which sit next to each other: git conflicts on them; the merged tree does not
@@ -281,12 +352,15 @@ function mainList(base: string): string[] | null {
   }
 }
 
-/** The lines `current` has that main's list, carried along this change's renames, has not */
-function grown(main: readonly string[], current: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>): string[] {
+/** The lines `current` has that main's list, carried along this change's renames and its split files (`splitPieces`), has not */
+function grown(main: readonly string[], current: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>, files?: SplitFiles): string[] {
   const expected = new Set(main)
   for (const { to } of renames) expected.delete(to)
   for (const { from, to } of renames) if (main.includes(from)) expected.add(to)
-  return current.filter((f) => !expected.has(f))
+  const added = current.filter((f) => !expected.has(f))
+  if (!files) return added
+  const claimed = new Set([...splitPieces(main, current, added, files).values()].flat())
+  return added.filter((f) => !claimed.has(f))
 }
 
 describe('the tests that run on every OS', () => {
@@ -349,6 +423,31 @@ describe('the tests that run on every OS', () => {
     expect(pick({ ...app, 'tooling/x.test.ts': "import { git } from '../.centralu/apps/x/git.mjs'\nexport const a = git\n" }, 'tooling/x.test.ts')).toBe('imports .centralu/apps/x/git.mjs')
     const helper = { 'tooling/x-helper.ts': "import { spawnSync } from 'node:child_process'\nexport const run = spawnSync\n" }
     expect(pick({ ...helper, 'tooling/x.test.ts': "import { run } from './x-helper.js'\nexport const a = run\n" }, 'tooling/x.test.ts')).toBeNull()
+  })
+
+  it("adds to the macOS job's full run the tests that make folders in the OS temp folder, and only those", async () => {
+    const T = 'tooling/x.test.ts'
+    const select = (files: Record<string, string>) => osSelector(new Map(Object.entries(files)))
+    const code = (...body: string[]) => ({ [T]: body.join('\n') + '\n' })
+    expect(await select(code("import { it } from 'vitest'", "it('x', () => {})")).selectMacTests([T])).toEqual([])
+    for (const files of [
+      code("import { mkdtempSync } from 'node:fs'", "mkdtempSync('x')"),
+      code("import os from 'node:os'", 'os.tmpdir()'),
+      code("import { realpathSync } from 'node:fs'", "realpathSync('.')"),
+      code("import fs from 'node:fs'", "fs.realpathSync.native('.')"),
+      code("import { realpathSync } from 'node:fs'", "realpathSync.native('.')"),
+      code("export const t = process.env.TMPDIR"),
+      code("export const t = process.env['TEMP']"),
+    ]) {
+      // Tooling tests do not count their own OS imports, so the Windows rule leaves them to Linux
+      expect(await select(files).selectTests([T]), files[T]).toEqual([])
+      expect(await select(files).selectMacTests([T]), files[T]).toEqual([T])
+    }
+    // A module it imports does: the script a test checks makes its temp folder
+    const helper = { 'tooling/x-helper.mjs': "import { mkdtempSync } from 'node:fs'; export const h = () => mkdtempSync('x')", [T]: "import { h } from './x-helper.mjs'; export const a = h" }
+    expect(await select(helper).selectMacTests([T])).toEqual([T])
+    // Reading a file of the repository is not it
+    expect(await select(code("import { readFileSync } from 'node:fs'", "readFileSync('x')")).selectMacTests([T])).toEqual([])
   })
 
   it('refuses to guess past an import it cannot follow', () => {
