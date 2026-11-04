@@ -41,6 +41,12 @@ class Machine {
   readonly fromHub: string[] = []
   sends = 0
   hold: Promise<void> | null = null
+  /** Reads of the session's state so far, what runs at the start of each (a turn that opens between two reads), and a gate each waits at */
+  reads = 0
+  onRead: ((n: number) => void) | null = null
+  readGate: Promise<void> | null = null
+  /** The error the hub's send gets, as a link that dropped as it went */
+  sendError: string | null = null
   private seq = 0
   private cards = 0
 
@@ -99,7 +105,11 @@ class Machine {
   reader(): LinkedSessions {
     const lastOf = (role: Msg['role']) => [...this.transcript].reverse().find((m) => m.role === role)
     return {
-      read: async () => (this.reachable ? { ok: true, state: this.state, lines: [] } : { ok: false, error: 'not reachable' }),
+      read: async () => {
+        this.onRead?.(++this.reads)
+        if (this.readGate) await this.readGate
+        return this.reachable ? { ok: true, state: this.state, lines: [] } : { ok: false, error: 'not reachable' }
+      },
       list: async () => [{ sessionId: CHILD, name: 'Child', project: 'app', state: this.state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
       machineWaitsForPerson: () => false,
@@ -118,6 +128,7 @@ class Machine {
       },
       send: async (_s: string, text: string) => {
         this.sends++
+        if (this.sendError) return { ok: false, error: this.sendError }
         if (!this.reachable) return { ok: false, error: 'not reachable' }
         if (this.hold) await this.hold
         this.fromHub.push(text)
@@ -141,6 +152,8 @@ class Hub {
   reports!: LinkedReports
   agents!: RemoteAgents
   readonly told: string[] = []
+  /** What the model of the caller reads of each */
+  readonly toldModel: string[] = []
   readonly delivered: string[] = []
   readonly results: ChildRunResult[] = []
 
@@ -172,7 +185,7 @@ class Hub {
       meta: new Map([[caller.id, caller]]),
       settleLinkedTurn: (id: string) => this.reports.observe({ type: 'turn_complete', sessionId: id }),
       linkedTasksRunning: (id: string) => this.reports.ownTasksRunning(id),
-      tellSession: async (_to: string, text: string) => void this.told.push(text),
+      tellSession: async (_to: string, text: string, _ref: unknown, _quiet: unknown, forModel?: string) => void (this.told.push(text), this.toldModel.push(forModel ?? text)),
       autoBoundaryOpen: () => false,
       emit: () => {},
       uiPreferences: () => ({}),
@@ -618,6 +631,194 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
     expect(JSON.stringify(r)).not.toContain('the person may be using it')
     expect(notes()).toHaveLength(0)
+  })
+
+  /*
+   * #1682: the work's last turn was reported finished, so nothing is owed of the turn the child's tool starts after it. That turn
+   * is not tied to the assignment (nothing on its start names one), and a note is not put into it: with `ifBusy: "queue"` the hub
+   * holds the note and sends it as new work once the child is at rest, as a local child's queue does
+   */
+  describe('a note held for a child busy with a turn that is not the caller\'s (#1682)', () => {
+    const queue = { text: note.text, ifBusy: 'queue' }
+    /** The work's turns are reported finished, and the tool starts another by itself */
+    async function reportedThenBusy(): Promise<void> {
+      await paused()
+      await followUp()
+      machine.selfTurnEnds()
+      await flush()
+      expect(hub.delivered).toHaveLength(2)
+      expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+      machine.selfStarts()
+      await flush()
+    }
+
+    it('refuses a note into that turn, and says a queue holds it', async () => {
+      await reportedThenBusy()
+      const r = await hub.act('send', note)
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
+      expect((r as { error: string }).error).toContain('ifBusy "queue"')
+      expect(notes()).toHaveLength(0)
+    })
+
+    it('holds a queued note, and sends it as new work the caller owns once the child is at rest', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued', position: 1 })
+      // The same words again are the one held
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued', position: 1 })
+      await flush()
+      expect(notes()).toHaveLength(0)
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(1)
+      expect(machine.turn).toBe('hub')
+      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+      machine.callerTurnEnds()
+      await flush()
+      expect(hub.delivered).toHaveLength(3)
+      expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    })
+
+    it('keeps it across a hub restart and a link that dropped while the turn ended, and sends it once the link is back', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      // The host that held it has tried once and found the child in a turn
+      await flush()
+      linkDown()
+      hub.boot()
+      machine.selfTurnEnds()
+      await linkUp()
+      expect(notes()).toHaveLength(1)
+      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    })
+
+    it("holds it behind the person's turn there too, and nothing of their turn reaches the caller", async () => {
+      await started()
+      machine.callerTurnEnds()
+      await flush()
+      machine.personSays()
+      await flush()
+      hub.mark()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      machine.personTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(1)
+      expect(JSON.stringify(hub.seen())).not.toContain(PERSON.words)
+    })
+
+    it("is dropped by the caller's stop", async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      expect(await hub.act('stop')).toMatchObject({ ok: true, state: 'stopped' })
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
+
+    const gotten = () => machine.fromHub.filter((t) => /first note|second note|third note|C-note/.test(t)).map((t) => /first|second|third|C-note/.exec(t)![0])
+    const queueNote = async (text: string) => {
+      const r = await hub.act('send', { text, ifBusy: 'queue' })
+      expect(r).toMatchObject({ ok: true, state: 'queued' })
+      return r
+    }
+
+    it('keeps the order of held notes when a turn opens between the read that found the child at rest and the send', async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      await queueNote('second note')
+      await flush()
+      machine.reads = 0
+      // The read the send itself used to make is the second: a turn opens as it starts
+      machine.onRead = (n) => {
+        if (n === 2) machine.selfStarts()
+      }
+      machine.selfTurnEnds()
+      await flush()
+      machine.onRead = null
+      machine.callerTurnEnds()
+      await flush()
+      machine.callerTurnEnds()
+      await flush()
+      expect(gotten()).toEqual(['first', 'second'])
+    })
+
+    it("does not send a held note the caller's stop dropped while the child was being read", async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      await flush()
+      let release!: () => void
+      machine.readGate = new Promise<void>((resolve) => (release = resolve))
+      machine.selfTurnEnds()
+      await flush()
+      expect(await hub.act('stop')).toMatchObject({ ok: true, state: 'stopped' })
+      machine.readGate = null
+      release()
+      await flush()
+      expect(gotten()).toEqual([])
+    })
+
+    it('keeps the note when the machine cannot be reached as it goes, and sends it once the link is back', async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      await flush()
+      machine.sendError = 'Box is not reachable right now'
+      machine.selfTurnEnds()
+      await flush()
+      expect(hub.told).toEqual([])
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toHaveLength(1)
+      machine.sendError = null
+      await linkUp()
+      expect(gotten()).toEqual(['first'])
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toBeUndefined()
+    })
+
+    it('keeps the note in the record while it is being sent, so a restart in the middle loses none', async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      await flush()
+      let release!: () => void
+      machine.hold = new Promise<void>((resolve) => (release = resolve))
+      machine.selfTurnEnds()
+      await flush()
+      expect(machine.sends).toBeGreaterThan(0)
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toHaveLength(1)
+      machine.hold = null
+      release()
+      await flush()
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toBeUndefined()
+    })
+
+    it("puts a send right after the turn's end behind the held note, or refuses it", async () => {
+      await reportedThenBusy()
+      await queueNote('first note')
+      await flush()
+      machine.selfTurnEnds()
+      const jump = await hub.act('send', { text: 'C-note' })
+      expect(jump).toMatchObject({ ok: false, error: expect.stringContaining('are still to be sent') })
+      expect(await queueNote('C-note')).toMatchObject({ ok: true, state: 'queued', position: 2 })
+      await flush()
+      machine.callerTurnEnds()
+      await flush()
+      expect(gotten()).toEqual(['first', 'C-note'])
+    })
+
+    it('tells the caller when a held note is refused at the time it would go, and holds nothing more', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      // What a send rests on is read again at delivery
+      store.projects.setProjectTrusted('p1', false)
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+      expect(hub.told.join(' ')).toContain('Your queued request to another session was not delivered.')
+      // The model reads the kind of the reason, not its words
+      expect(hub.toldModel.join(' ')).toContain('Reason, by kind:')
+      expect(hub.toldModel.join(' ')).not.toContain('trusted')
+      store.projects.setProjectTrusted('p1', true)
+      machine.selfStarts()
+      machine.selfTurnEnds()
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
   })
 })
 

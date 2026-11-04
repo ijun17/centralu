@@ -2767,6 +2767,32 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(reports()).toBe(before + 1)
   })
 
+  // #1682: a turn on the machine that is not the caller's is not put a note into; a queue holds it there for the child to be at rest
+  it("holds a note queued for a child busy with a turn that is not the caller's, and sends it once the child is at rest", async () => {
+    const { remote, answer, start, agent, told } = await rig()
+    const call = start()
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    // Someone at that machine starts a turn of their own, which stays open
+    await remote.mgr.send(id, 'a long job: by hand')
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'working')
+    const note = 'use the staging data'
+    await eventually(async () => {
+      const refused = await agent(r.sessionId, 'send', note, undefined, 'note')
+      return !refused.ok && refused.error.includes('ifBusy "queue"')
+    })
+    expect(await agent(r.sessionId, 'send', note, undefined, 'queue')).toMatchObject({ ok: true, state: 'queued', position: 1 })
+    const noted = () => remote.store.messages.loadMessages(id, 50).filter((m) => (m.payload as { text?: string }).text?.includes(note))
+    expect(noted()).toHaveLength(0)
+    ;(remote.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!.finish('done by hand')
+    // The turn ended: the note goes in as new work the caller owns, and its end is reported to the caller
+    await eventually(() => noted().length === 1)
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished') && t.includes(`echo: `)))
+    expect(told().join(' ')).not.toContain('done by hand')
+  })
+
   describe('a note the child ran as a turn of its own after the turn it was sent into (#1604)', () => {
     /**
      * The child's first turn waits on a question; the caller's `queue` goes into it, and the tool does not read it there:

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -7,6 +7,7 @@ import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
+import { errorKind } from './error-kind.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } from './ask-project.js'
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
@@ -65,6 +66,12 @@ export type RemoteAgent = {
    * caller's too, and the turns of the notes before it are still to come (the gap between a turn's end and the next)
    */
   given?: number[]
+  /**
+   * Notes its caller asked to send once it is at rest (#1682, `ifBusy: "queue"`), oldest first. The child's machine holds no queue
+   * (a turn there that is not the caller's is not put a note into), so they wait here, in the record, and a restart or a link's loss
+   * loses none. Each goes as new work (`drain`)
+   */
+  queued?: { id: string; text: string }[]
 }
 
 /**
@@ -230,6 +237,8 @@ export class RemoteAgents {
   private readonly personHeld = new Set<string>()
   /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
   private readonly lastSeq = new Map<string, number>()
+  /** Children whose held note is being sent now (`drain`): one at a time */
+  private readonly draining = new Set<string>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -635,7 +644,8 @@ export class RemoteAgents {
            */
           const g = await this.gate(rec, reader)
           if (!g.live) {
-            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with ${this.otherTurn(rec, g)}. A queue or a fork does not reach another machine: try again once it is at rest.` }
+            if (opts.ifBusy === 'queue') return this.hold(rec, text)
+            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with ${this.otherTurn(rec, g)}. A fork does not reach another machine, and a note goes only into a turn you gave it: send with ifBusy "queue" to have it sent once it is at rest.` }
           }
           const refused = this.gateError(callerId)
           if (refused) return { ok: false, error: refused }
@@ -660,34 +670,24 @@ export class RemoteAgents {
           if (!came || this.whoseOf(rec) !== 'caller') return this.wentElsewhere(rec)
           return this.working(rec, this.reportArmed(rec) || this.endOwed.has(rec.sessionId))
         }
-        const refused = this.gateError(callerId)
-        if (refused) return { ok: false, error: refused }
-        // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
-        const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
-        if (full) return { ok: false, error: full }
-        // A new turn: its cards are new cards (#676), and whose it is, the machine's record of this instruction says
-        const framed = agentNoteFrame(label, text)
-        this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
-        this.notesSent.delete(rec.sessionId)
-        this.whose.set(rec.sessionId, 'unknown')
-        this.personHeld.delete(rec.sessionId)
-        this.pending.add(rec.sessionId)
-        this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
-        const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
-        this.pending.delete(rec.sessionId)
-        if (!sent.ok) {
-          if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-          return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+        // Notes held for it go first (#1682), as a local queue's do: this one waits behind them, or is refused
+        if (this.of(rec.sessionId)?.queued?.length) {
+          if (opts.ifBusy === 'queue') return this.hold(rec, text)
+          return { ok: false, error: `Notes you queued for "${rec.name}" on ${rec.machine} are still to be sent: send with ifBusy "queue" to have this one sent after them.` }
         }
-        return this.unclaimed(rec, undefined) ?? this.working(rec, true)
+        return this.sendAtRest(rec, callerId, text, label, reader)
       }
       case 'stop': {
         // Stopped by the one it would report to: nothing more is owed. Taken down first, as the stopped turn's end can
         // reach the hub before the machine's answer does; put back if the stop does not go
         const owed = this.host.children.linkedReports.get(rec.sessionId)
         if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+        // The stopped turn's end must not send what was held for it
+        const held = rec.queued
+        this.setQueued(rec.sessionId, [])
         const r = await reader.interrupt(rec.sessionId)
         if (!r.ok) {
+          if (held) this.setQueued(rec.sessionId, held)
           if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
           return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
         }
@@ -996,7 +996,99 @@ export class RemoteAgents {
       this.busy.delete(sessionId)
       // Read before the linked reports are, which send and drop it now
       if (this.reportArmed(rec)) this.endOwed.add(sessionId)
+      if (rec.queued?.length) this.scheduleDrain(sessionId)
     }
+  }
+
+  /** New work for a child at rest: a turn of its own, the caller's, with its end owed (`taken`: the machine has the text, so a held note leaves its record) */
+  private async sendAtRest(rec: RemoteAgent, callerId: string, text: string, label: string, reader: LinkedSessions, taken?: () => void): Promise<ChildRunResult> {
+    const refused = this.gateError(callerId)
+    if (refused) return { ok: false, error: refused }
+    // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
+    const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
+    if (full) return { ok: false, error: full }
+    // A new turn: its cards are new cards (#676), and whose it is, the machine's record of this instruction says
+    const framed = agentNoteFrame(label, text)
+    this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
+    this.notesSent.delete(rec.sessionId)
+    this.whose.set(rec.sessionId, 'unknown')
+    this.personHeld.delete(rec.sessionId)
+    this.pending.add(rec.sessionId)
+    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
+    const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
+    this.pending.delete(rec.sessionId)
+    if (!sent.ok) {
+      if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+      return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+    }
+    taken?.()
+    return this.unclaimed(rec, undefined) ?? this.working(rec, true)
+  }
+
+  /** Holds the caller's note until the child is at rest (#1682); the same words again are the one held, as a local queue has it */
+  private hold(rec: RemoteAgent, text: string): ChildRunResult {
+    const held = this.of(rec.sessionId)?.queued ?? []
+    const same = held.find((q) => q.text === text)
+    const entry = same ?? { id: `qr-${randomUUID()}`, text }
+    if (!same) this.setQueued(rec.sessionId, [...held, entry])
+    // The turn may have ended while the caller chose
+    this.scheduleDrain(rec.sessionId)
+    return { ok: true, tool: rec.tool, state: 'queued', sessionId: rec.sessionId, sessionName: rec.name, queueId: entry.id, position: (same ? held.indexOf(same) : held.length) + 1 }
+  }
+
+  private setQueued(sessionId: string, queued: { id: string; text: string }[]): void {
+    if (!queued.length && !this.of(sessionId)?.queued) return
+    this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...r, queued: queued.length ? queued : undefined } : r)))
+  }
+
+  /** After the event that freed the child has run its course (the reports, the waits), its oldest held note goes in */
+  private scheduleDrain(sessionId: string): void {
+    setImmediate(() => void this.drain(sessionId))
+  }
+
+  /**
+   * Sends the oldest held note as new work (#1682), as the caller's send at rest does, once the child is in no turn and its machine can
+   * be read; the next waits for that turn's end. The note stays in the record until the machine has it, so a link that drops as it goes, or a
+   * restart in the middle, loses none: it goes when the link is back (a restart in the middle of a send may send it twice, as a local
+   * queue's does). A note the send refuses (what it rests on is read again) is told to the caller, not kept
+   */
+  private async drain(sessionId: string): Promise<void> {
+    const reader = this.host.linkedReader
+    const head = this.of(sessionId)?.queued?.[0]
+    const machineId = this.of(sessionId)?.machineId
+    if (!head || !reader || machineId === undefined || this.draining.has(sessionId) || !reader.machineLinked(machineId)) return
+    this.draining.add(sessionId)
+    try {
+      const now = await reader.read(sessionId, 1)
+      // A stop, a handoff or a deletion during the read: what is first now, and whose child it is now, decide
+      const rec = this.of(sessionId)
+      if (rec?.queued?.[0]?.id !== head.id) return
+      const caller = this.host.meta.get(rec.callerId)
+      if (!caller) return this.setQueued(sessionId, [])
+      // Not readable now, or in a turn: the next turn's end, or the link's return, tries again
+      if (!now.ok || isInTurn(now.state) || this.busy.has(sessionId)) return
+      const taken = () => this.setQueued(sessionId, (this.of(sessionId)?.queued ?? []).filter((q) => q.id !== head.id))
+      const sent = await this.sendAtRest(rec, rec.callerId, head.text, labelOf(this.host.store.messages, caller), reader, taken)
+      if (sent.ok) return
+      // The machine could not be reached: the note stays for the link's return
+      if (sent.error.includes(NOT_REACHABLE) || sent.error.includes(NOT_CONNECTED_PHRASE)) return
+      taken()
+      void this.tellQueuedFailed(rec, sent.error)
+    } finally {
+      this.draining.delete(sessionId)
+    }
+  }
+
+  /** A held note could not be sent: said in the caller's session as a local queued request's failure is (`QueuedRequests.tellQueuedFailed`); the model reads the error's kind, not its words (#1186) */
+  private tellQueuedFailed(rec: RemoteAgent, why: string): Promise<boolean> {
+    const { sessionId, name } = rec
+    return this.host.tellSession(
+      rec.callerId,
+      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
+      { sessionId, name },
+      true,
+      `[Centralu] Your queued request to another session was not delivered.\nid: ${sessionId}\n\nReason, by kind: ${errorKind(why)} (its words are an error's, kept in this notice on the person's screen).`,
+    )
   }
 
   /** A message of the caller's was stored on the machine as row `seq`: if the tool runs a turn for it after another's, that turn names it (`given`) */
@@ -1317,6 +1409,7 @@ export class RemoteAgents {
         this.forget(rec.sessionId)
         continue
       }
+      if (rec.queued?.length) this.scheduleDrain(rec.sessionId)
       const missed = this.toldDown.delete(rec.sessionId)
       const held = this.deferred.delete(rec.sessionId)
       if (this.whoseOf(rec) === 'unknown' && !this.pending.has(rec.sessionId)) await this.verify(rec, reader)
@@ -1408,6 +1501,7 @@ export class RemoteAgents {
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)
+    this.draining.delete(sessionId)
     this.endOwed.delete(sessionId)
     this.personHeld.delete(sessionId)
     this.lastSeq.delete(sessionId)
