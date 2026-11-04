@@ -17,7 +17,7 @@ const STREAM_ERROR = /message="stream error".* session\.id=(\S+) small=false .*e
 const NO_RETRY = /usage limit|quota|credits|billing/i
 
 /** Words that say the limit lifts soon (Gemini words a per-minute limit as a quota: "Please retry in 41s"): the tool's retry answers */
-const LIFTS = /retry in|retry after|try again in|per.?minute|requests_per|RPM|TPM/i
+const LIFTS = /retry in|retry after|try again in|per.?minute|requests_per|\bRPM\b|\bTPM\b/i
 
 /** The provider's words for a refusal of `conversation`'s own request (not a sub-agent's, nor the title's), or null */
 export function openCodeRefusal(line: string, conversation: string): string | null {
