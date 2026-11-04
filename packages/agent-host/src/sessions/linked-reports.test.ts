@@ -118,7 +118,7 @@ describe('whom a turn end is reported to', () => {
   it('carries the cut the machine says of the turn that ended, once, and no later turn', async () => {
     ask('m1.w1')
     reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
-    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } } as LinkedEvent)
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
     await flush()
     expect(delivered.map((d) => d.part)).toEqual([{ cut: true }])
     ask('m1.w1')

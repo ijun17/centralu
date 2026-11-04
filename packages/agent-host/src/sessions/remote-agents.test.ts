@@ -43,6 +43,8 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
     lastUserMessage: async () => ({ ok: true, message: lastUser }),
     continuesCutTurns: () => continues,
+    // An older machine host and hello still name the continued turns; a hub must tell nobody of them (#1966)
+    continuedAfterUpdate: () => 5_000,
   } as unknown as LinkedSessions
   const host = {
     children,

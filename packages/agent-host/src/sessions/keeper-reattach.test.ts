@@ -301,7 +301,7 @@ describe('a host restart under the keeper', () => {
       if (signal === 'SIGTERM') setTimeout(() => { old.exited = true; old.emit('exit', 0, null) }, 50)
       return true
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old as unknown as AgentProcess }])
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
     expect(resumedBeforeExit).toBe(false)
     expect(old.kills).toEqual(['SIGTERM'])
     expect(b.claude.last.sent).toHaveLength(1)
@@ -318,7 +318,7 @@ describe('a host restart under the keeper', () => {
       if (opts.processSource?.adopt) throw new Error('the process is gone')
       return create(opts, emit)
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old as unknown as AgentProcess }])
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
     expect(old.kills).toEqual(['SIGTERM', 'SIGKILL'])
     expect(b.claude.last.sent).toHaveLength(1)
   })
