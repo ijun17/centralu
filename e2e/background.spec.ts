@@ -8,24 +8,6 @@ import { test, expect } from '@playwright/test'
  * screen: it is off by default, it says what it costs, and what it saves is what the platform holds.
  * The quit question's buttons in each mode are e2e/quit-dialog.spec.ts.
  */
-// #1466: on the serve host there is no switch (the host outlives the window), so the page says so instead
-test('on the serve host the switch is replaced by a line saying agents keep running and how to stop them', async ({ page }) => {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.evaluate(() => {
-    const mock = (window as any).__mock
-    mock.background = undefined
-    mock.capabilities.servesHost = true
-    ;(window as any).__store.getState().toggleSettings(true)
-  })
-  await page.getByTestId('settings-tab-background').click()
-  await expect(page.getByTestId('settings-background-toggle')).toHaveCount(0)
-  const line = page.getByTestId('settings-background-serve')
-  await expect(line).toContainText('closing the window leaves agents running')
-  await expect(line).toContainText('centralu serve')
-  await expect(line).toContainText('Quit completely stops it')
-})
-
 test('background mode is off by default, says what it keeps running, and saves through the platform', async ({ page }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()

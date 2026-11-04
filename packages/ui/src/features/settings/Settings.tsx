@@ -300,12 +300,6 @@ export function Settings() {
               >
                 <SettingsGroup title="Agents">
                   {platform.background && <BackgroundSection port={platform.background} />}
-                  {!platform.background && platform.capabilities.servesHost && (
-                    <SettingsEmpty testId="settings-background-serve">
-                      On this computer, closing the window leaves agents running: the host runs as centralu serve. Quit
-                      completely stops it, with the link a hub has to this computer.
-                    </SettingsEmpty>
-                  )}
                   <SleepSection first={!platform.background} />
                 </SettingsGroup>
                 <UpdatesSection />
