@@ -9,6 +9,7 @@ import { TerminalService, commandShell, interactiveShell, shellPath, type PtyMod
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -220,7 +221,7 @@ describe('multiple terminals', () => {
       // kill ends it with the shell, and the pid file names what it planted since, which `pids` does not hold (#1644)
       svc.disposeAll()
       await cleanUp([...new Set([...pids, ...treePids(pidFile)])], test)
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      await removeTree(dir)
     })
     const t = svc.create(dir, 120, 30)
     expect(shells).toHaveLength(1)
@@ -246,7 +247,7 @@ describe('multiple terminals', () => {
     const ptyModule = createRequire(import.meta.url)('node-pty') as PtyModule
     const before = consoleHosts()
     let started: number[] = []
-    onTestFinished(() => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }))
+    onTestFinished(() => removeTree(dir))
     const svc = new TerminalService(() => {}, ptyModule)
     const t = svc.create(dir, 120, 30)
     await settle(() => t.history(), (h) => /PS .*>/.test(h), 60_000)

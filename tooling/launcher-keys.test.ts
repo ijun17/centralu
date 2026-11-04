@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync, existsSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -39,6 +39,7 @@ import {
   SERVE_STATE_FILE,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLI = join(ROOT, 'packaging/npm/centralu/bin/centralu.mjs')
@@ -53,7 +54,7 @@ const tempDir = () => {
 }
 afterEach(async () => {
   for (const c of closers.splice(0)) await c()
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 /** A hub's public key, as slice 4's key file will hold one */

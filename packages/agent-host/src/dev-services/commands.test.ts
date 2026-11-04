@@ -8,6 +8,7 @@ import { CommandRunner } from './commands.js'
 import { alive, cleanUp, consoleHosts, plantTreeScript, processCounters, settle, treePids } from './process-tree.test-helpers.js'
 import type { PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The contract for the frequently used command runner (#60):
@@ -256,7 +257,7 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
   afterEach(async (test) => {
     await cleanUp(pids, test)
     pids = []
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    await removeTree(dir)
   })
 
   /** Runs the tree as a project command; returns the runner, the pids of cmd.exe and the tree, and whether the run has ended */

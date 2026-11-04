@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { insideOf, removeFakeDir } from './fake-exe.test-helpers.js'
 import { alive } from './process.test-helpers.js'
 import { SLOW } from '../../../tooling/test-timing.js'
+import { removeTree } from './temp-dir.test-helpers.js'
 
 /**
  * A test's cleanup of its folder (#1346): on Windows a folder a process still holds cannot be removed, and the board
@@ -22,7 +23,7 @@ afterEach(async () => {
     if (alive(c.pid)) process.kill(c.pid)
     await c.exited
   }
-  for (const dir of made.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  for (const dir of made.splice(0)) await removeTree(dir)
 })
 
 /**

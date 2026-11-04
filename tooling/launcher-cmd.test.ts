@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { ensureLauncher } from '../packaging/npm/centralu/bin/serve.mjs'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * `<data>\bin\centralu.cmd`, the launcher `centralu serve` writes for ssh, run the way ssh's default shell runs it: by
@@ -12,8 +13,8 @@ import { ensureLauncher } from '../packaging/npm/centralu/bin/serve.mjs'
  * a Korean Windows, 437 on CI), so a profile folder named in Korean sent node to a path that was not there (#849).
  */
 const dirs: string[] = []
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 5 })
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 describe.skipIf(process.platform !== 'win32')('the Windows launcher in a folder named in Korean', () => {

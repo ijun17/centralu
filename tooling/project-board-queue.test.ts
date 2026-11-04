@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fakeExe, gitWrapper, removeFakeDir, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { fakeExe, gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -34,6 +34,7 @@ import { GitError, isAncestor, isNetworkFailure, remoteHas, showFile } from '../
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -500,11 +501,11 @@ describe('what the merge queue decides for one poll', () => {
       await sweep(base, base)
       expect(readdirSync(base)).toEqual(['unrelated'])
     } finally {
-      rmFakeDir(base)
+      await removeTree(base)
     }
   })
 
-  it('lets one driver hold the queue at a time, until it lets go or goes quiet', () => {
+  it('lets one driver hold the queue at a time, until it lets go or goes quiet', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-queue-lease-'))
     try {
       expect(takeLease(dir, 'server:1', NOW)).toBe(true)
@@ -525,7 +526,7 @@ describe('what the merge queue decides for one poll', () => {
         expect(takeLease(dir, 'watch:4', NOW)).toBe(false)
       }
     } finally {
-      rmFakeDir(dir)
+      await removeTree(dir)
     }
   })
 })
@@ -2251,7 +2252,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await rt!.dispose({ awaitTree: true })
     rt = null
     // A failed check that is not the duplicate's (another workflow's) still keeps it waiting
-    rmFakeDir(join(root, 'data'))
+    await removeTree(join(root, 'data'))
     mkdirSync(join(root, 'data'))
     const base = twoRuns()
     runtime({ ...base, checks: { [SHA]: [...base.checks[SHA], { ...ghCheck('lint pr title', 'failure', 31, '2026-10-17T08:02:00Z'), check_suite: { id: 7000 } }] } })

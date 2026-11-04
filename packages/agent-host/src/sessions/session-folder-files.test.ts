@@ -17,6 +17,7 @@ import type { AgentAdapter } from '../adapters/contract.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { managerWorld } from './manager.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 let root = ''
 let repo = ''
@@ -53,7 +54,7 @@ beforeEach(async () => {
 })
 
 // Retried: a manager starts git in the repository on its own and Windows will not delete a folder in use (#14)
-afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }))
+afterEach(() => removeTree(root))
 
 describe("a session's files (#1209)", () => {
   it("reads a worktree session's file from its worktree, and the project's without the session", async () => {

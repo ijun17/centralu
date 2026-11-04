@@ -163,14 +163,6 @@ export function fakeExe(dir: string, name: string, source: string): string {
 }
 
 /**
- * Removes a folder with fake programs in it. Windows keeps an `.exe` locked until the process that
- * ran it is gone, and a test that has just killed one gets EPERM on the first try.
- */
-export function rmFakeDir(dir: string): void {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
-}
-
-/**
  * Whether `dir` is strictly inside `base`, both as their real paths: on GitHub's Windows runners the temporary folder
  * is named with its short name (`C:\Users\RUNNER~1\…`) while a test's folder is often its real path
  * (`realpathSync.native`, `C:\Users\runneradmin\…`), and comparing the two as written never matched. A path on

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,7 @@ import { settle } from '../dev-services/process-tree.test-helpers.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 import { WORK_JOB_LIMITS, joinWorkJob, workJobLine, workJobWanted } from './work-job.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /*
  * #1067 (#840 item 7, option b): on Windows the host joins a job object that ends what it started when it ends.
@@ -106,7 +107,7 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
     // By its handle: Node sends nothing once the child has exited
     host?.kill()
     await new Promise((r) => setTimeout(r, 500))
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    await removeTree(dir)
   })
 
   async function standIn(): Promise<{ pid: (name: string) => number; job: { state: string; handle?: number; broker?: number } }> {

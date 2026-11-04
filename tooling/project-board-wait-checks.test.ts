@@ -4,17 +4,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { fakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const SCRIPT = join(ROOT, '.centralu/apps/project-board/bin/wait-checks.mjs')
 const SHA = 'abc1234' + '0'.repeat(33)
 let dir = ''
 
-afterEach(() => {
-  if (dir) rmFakeDir(dir)
+afterEach(async () => {
+  if (dir) await removeTree(dir)
   dir = ''
 })
 

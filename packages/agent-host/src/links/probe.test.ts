@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseProbe, probeCommand, probeTarget } from './probe.js'
 import { WINDOWS_INLINE_MAX } from './tunnel.js'
-import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
+import { fakeExe } from '../fake-exe.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The probe the Add machine dialog runs when the person picks a host (#514), against a fake `ssh`
@@ -49,7 +50,7 @@ beforeEach(() => {
   log = join(dir, 'ssh.log')
   ssh = fakeExe(dir, 'ssh', FAKE_SSH)
 })
-afterEach(() => rmFakeDir(dir))
+afterEach(() => removeTree(dir))
 
 const probe = (as: string, registry: unknown = {}, timeoutMs?: number) =>
   probeTarget('win-pc', { ssh, env: { ...process.env, FAKE_SSH_LOG: log, FAKE_AS: as, FAKE_REGISTRY: JSON.stringify(registry) }, ...(timeoutMs ? { timeoutMs } : {}) })

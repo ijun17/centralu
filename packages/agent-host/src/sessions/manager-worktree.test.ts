@@ -35,6 +35,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { CwdFiledAdapter, FakeAdapter, managerWorld } from './manager.test-helpers.js'
 import { itSymlink, linkDir } from '../link.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -84,7 +85,7 @@ describe('worktree sessions', () => {
    * not delete a folder a process is working in, so the first try can meet EBUSY there (#14). rmSync's own retries
    * block the event loop that work needs to finish, and failed the same way every time.
    */
-  afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }))
+  afterEach(() => removeTree(root))
 
   const create = (worktree: boolean) =>
     wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree }) as Promise<SessionInfo>

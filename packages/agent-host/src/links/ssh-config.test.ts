@@ -3,8 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
+import { fakeExe } from '../fake-exe.test-helpers.js'
 import { expandGlob, isConcreteAlias, listSshHosts, MAX_HOSTS, parseSshG, readSshConfig, resolveAlias, splitConfigLine, type ResolvedHost } from './ssh-config.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The ssh config the Add machine dialog lists (#514): read the way OpenSSH reads it, in a temporary
@@ -17,7 +18,7 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cc-sshcfg-'))
   mkdirSync(join(home, '.ssh'))
 })
-afterEach(() => rmFakeDir(home))
+afterEach(() => removeTree(home))
 
 const write = (rel: string, text: string) => {
   const p = join(home, rel)

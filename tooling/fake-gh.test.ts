@@ -4,9 +4,9 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 const { readState } = createRequire(import.meta.url)('./fake-gh-state.cjs') as { readState: (path: string, options?: { pause?: () => void; now?: () => number }) => unknown }
 
@@ -18,7 +18,7 @@ if (args[0] === 'spin') for (let i = 0; i < 200; i++) { st.n = i; st.pad = 'x'.r
 
 let root = ''
 let gh: FakeGh
-afterEach(() => rmFakeDir(root))
+afterEach(() => removeTree(root))
 
 function make() {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-fake-gh-')))

@@ -6,6 +6,7 @@ import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 
 /**
@@ -45,14 +46,14 @@ describe('gh stopped by an abort (#368)', () => {
   // What a test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
   let own = ownProcesses()
   const alive = (pid: number) => own.alive(pid)
-  afterEach(() => {
+  afterEach(async () => {
     // It can end between the last look and the kill (ESRCH failed this cleanup on Linux CI, #368): `end` ignores that
     if (childPid !== undefined) own.end([childPid], { signal: 'SIGTERM' })
     childPid = undefined
     own = ownProcesses()
     vi.unstubAllEnvs()
     __forgetPrograms()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+    await removeTree(root)
   })
 
   // Starting a Node binary as gh, which then starts another, takes seconds on a loaded machine: the bound is that wait's
@@ -189,10 +190,10 @@ describe('gh stopped by an abort (#368)', () => {
  */
 describe('a gh that is a batch file', () => {
   let root = ''
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
     __forgetPrograms()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+    await removeTree(root)
   })
 
   /*
@@ -245,11 +246,11 @@ describe('a gh that is a batch file', () => {
  */
 describe('a gh lookup that fails (#841)', () => {
   let root: string
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     __forgetPrograms()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+    await removeTree(root)
   })
 
   function ghSaying(stderr: string): string {

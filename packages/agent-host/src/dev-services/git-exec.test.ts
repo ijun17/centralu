@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitArgv, gitFilterListings, runGit } from './git-exec.js'
 import { __forgetPrograms } from '../tool-launch.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 // That no other file starts git itself is the lint rule `guard/git-start` (tooling/eslint-guards.js, #1606)
 
@@ -106,10 +107,10 @@ describe('one listing of the filter drivers for one operation (#368)', () => {
  */
 describe.skipIf(process.platform !== 'win32')('git that is not installed', () => {
   let root = ''
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
     __forgetPrograms()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+    await removeTree(root)
   })
 
   it('is reported missing, and the git.exe in the project never runs', async () => {

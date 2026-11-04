@@ -3,11 +3,11 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 // @ts-expect-error -- a plain .mjs of tooling without types
 import { inProcessGh as untypedInProcessGh } from './fake-gh-in-process.mjs'
 import { SLOW, eventually } from './test-timing.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /**
  * The board app's door to the OS for starting programs (.centralu/apps/project-board/system.mjs, #1599): what the merge
@@ -56,9 +56,9 @@ process.stdout.write(JSON.stringify({ args, stdin, n: st.n, prompt: process.env.
 
 let root = ''
 let gh: FakeGh
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs()
-  rmFakeDir(root)
+  await removeTree(root)
 })
 afterAll(() => {
   endLeftoverFakes()

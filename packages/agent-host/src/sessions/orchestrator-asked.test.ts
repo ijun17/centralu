@@ -6,7 +6,7 @@
  * asking session. A turn that is not a session's request is as it was.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ORCHESTRATOR_CHANGE, type ApprovalDetail, type ProjectInfo, type SessionInfo } from '@cc/protocol'
@@ -18,6 +18,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { commandsFor } from './orchestrator-tools.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 let w: ReturnType<typeof managerWorld>
 let m: HostMail
@@ -51,7 +52,7 @@ afterEach(async () => {
   m.delivery.stop()
   await w.mgr.disposeAll()
   w.store.close()
-  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5 })
+  await Promise.all(dirs.map((d) => removeTree(d)))
 })
 
 async function project(label: string, trusted: boolean): Promise<ProjectInfo> {

@@ -6,10 +6,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { removeTree } from '../temp-dir.test-helpers.js'
 import { Store } from './store.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -23,9 +24,9 @@ function storeFile(): string {
   s.close()
   return file
 }
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 function raw<T>(file: string, f: (db: Database.Database) => T): T {

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { GitWriteRuns, gitCommit, gitPush, gitStage } from './git-write.js'
 import { settle } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -18,7 +19,7 @@ function git(cwd: string, ...args: string[]): string {
  */
 describe('a git write the person cancels (#1007)', () => {
   let root: string
-  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
+  afterEach(() => removeTree(root))
 
   /** A repository with a staged change, whose pre-commit hook sleeps far longer than the test waits */
   function slowCommit(): string {

@@ -8,9 +8,9 @@ import { fakeRegistry, fakeServe, tarGz, type FakeRegistry } from './fake-regist
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { connectionCommand, SshTunnel, SwitchUnderWay, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 import { readSwitchStatus, rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
-import { rmFakeDir } from '../fake-exe.test-helpers.js'
 import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath, clixmlErrors, execThroughSilentDeath, remoteScriptText, nodeWithoutEnv } from './windows-remote.test-helpers.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * This computer as the Windows machine a hub installs on and updates (plan §10.2, §10.5): the
@@ -60,9 +60,9 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   }, 120_000 * SLOW)
   afterAll(async () => {
     await reg.close()
-    rmFakeDir(root)
+    await removeTree(root)
   })
-  afterEach(() => rmFakeDir(join(home, '.centralu')))
+  afterEach(() => removeTree(join(home, '.centralu')))
 
   /*
    * What each command the hub ran there answered, printed when a test fails (#845). On loaded windows-2022 runners a
@@ -518,7 +518,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
         // The folder the ssh session names (its CC_DATA_DIR) was not touched
         expect(existsSync(data())).toBe(false)
       } finally {
-        rmFakeDir(other)
+        await removeTree(other)
       }
     }, 180_000 * SLOW)
 

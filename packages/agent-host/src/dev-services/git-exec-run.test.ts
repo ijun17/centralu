@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorMessage } from '@cc/protocol'
 import { execFailure } from './exec-error.js'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runGit, streamGit, stopGitChildren } from './git-exec.js'
@@ -10,6 +10,7 @@ import { cloneFailure } from './project-clone.js'
 import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -26,9 +27,9 @@ const shPath = (p: string) => JSON.stringify(p.replace(/\\/g, '/'))
  */
 describe("git's messages untranslated, text still UTF-8 (#982)", () => {
   let root: string
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    await removeTree(root)
   })
 
   const german = () => {
@@ -78,11 +79,11 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
   // The wait below sees the child end; a number seen ended is not signalled afterwards (#1308)
   let own = ownProcesses()
   const alive = (pid: number) => own.alive(pid)
-  afterEach(() => {
+  afterEach(async () => {
     if (childPid !== undefined) own.end([childPid])
     childPid = undefined
     own = ownProcesses()
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    await removeTree(root)
   })
 
   it("ends the hook's child and settles", { timeout: 30_000 * SLOW }, async () => {
@@ -124,7 +125,7 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
  */
 describe('a git that runs past its time reports the bound, not its own words (#1842)', () => {
   let root: string
-  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
+  afterEach(() => removeTree(root))
 
   /** A repository whose hook (or fsmonitor) program prints to stderr, says so in a file, and then waits */
   function talkative(): { repo: string; said: string } {
@@ -188,7 +189,7 @@ ${shPath(process.execPath)} ${shPath(program)}
  */
 describe('a git that is stopped takes its lock away (#982)', () => {
   let root: string
-  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
+  afterEach(() => removeTree(root))
 
   /** A repository with a change, whose pre-commit hook sleeps for `seconds` */
   function slowCommit(seconds: number): string {

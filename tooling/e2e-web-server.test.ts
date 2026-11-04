@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import reportServerDeaths, { deathLines, readDeaths } from '../e2e/web-server-report.js'
+import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 
 /*
  * The e2e dev servers' keeper (scripts/e2e-web-server.mjs, #651). Playwright starts a `webServer` once, so a vite
@@ -24,7 +25,7 @@ afterEach(async () => {
   for (const c of running.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
   // The stand-in outlives a killed keeper (a shell stands between them): asked to die, it ends with nobody to restart it
   for (const u of urls.splice(0)) await fetch(`${u}/die`).catch(() => {})
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 /** A server that answers with its life number, and exits with 134 (an abort's code) when asked for /die */

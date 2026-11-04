@@ -24,8 +24,11 @@ export function tempRoot(prefix: string): string {
  *
  * Windows will not delete a folder a process is still working in (EBUSY), and a process a test started (an app, a
  * detached `git maintenance`, a manager's merge detection) can still be ending when the test does: `lifecycle.test.ts`
- * met it in 7 of 105 Windows CI runs. The wait is asynchronous because `rmSync`'s own retries block the event loop
- * that in-process work needs in order to finish, and failed the same way every time (`manager.test.ts`, #14).
+ * met it in 7 of 105 Windows CI runs. Every test removes its folders through this, never `rmSync` with `maxRetries`:
+ * Node 20 and 22 (measured on 20.19.0, 22.14.0 and 22.23.4) do not retry the EBUSY of a held folder in the synchronous
+ * call (its `rimrafSync` retries only files and non-empty folders), so it throws after 1 ms whatever the options say;
+ * Node 24's native one does, but blocks the event loop that in-process work needs in order to finish (`manager.test.ts`,
+ * #14). The asynchronous `rm` retries the same errors, waiting 100 ms longer each time (20 tries: about 21 s at most).
  */
 export function removeTree(dir: string): Promise<void> {
   return rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
