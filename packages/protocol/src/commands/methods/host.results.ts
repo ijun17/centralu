@@ -82,5 +82,6 @@ export const hostResults = {
     z.object({ ok: z.literal(false), busy: HostActivity, calls: z.number().int() }),
   ]),
   'host.handover': z.object({ ok: z.literal(true) }),
+  'host.systemEnding': z.object({ ok: z.literal(true) }),
   'host.hubOffer': z.object({ ok: z.literal(true) }),
 } as const

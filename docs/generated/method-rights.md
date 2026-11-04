@@ -87,6 +87,7 @@ With the limited credential: runs.
 - `host.activity`
 - `host.handover`
 - `host.stop`
+- `host.systemEnding`
 - `machines.activity`
 - `machines.askConsents`
 - `machines.cancelUpdate`

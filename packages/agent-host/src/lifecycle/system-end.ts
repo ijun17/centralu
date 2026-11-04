@@ -84,7 +84,7 @@ export const systemEndText = (end: SystemEnd): string => `${JSON.stringify({ v: 
 
 /**
  * How long before the notice an agent's exit is still the system's. Where the system ends every process at once (Linux's SIGTERM to
- * the whole session) the agent may exit, and the host write it, before the host's own signal is read
+ * the whole session) the agent may exit, and the host writes it, before the host's own signal is read
  */
 export const SYSTEM_END_LEAD_MS = 30_000
 /**
@@ -168,6 +168,6 @@ export function askSystemStopping(
     }
     setTimeout(() => resolve(false), timeoutMs).unref()
   })
-  void stopping.then(end)
+  stopping.finally(end).catch(() => {})
   return { stopping, end }
 }

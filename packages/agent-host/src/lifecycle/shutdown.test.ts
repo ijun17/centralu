@@ -247,6 +247,18 @@ describe('leaving, once (HO8)', () => {
     expect(sync).toEqual(['terminals'])
   })
 
+  it('a step before the leave that throws does not keep the leave from beginning (#1970)', async () => {
+    const ran: string[] = []
+    const t = shutdown(
+      () => [{ name: 'terminals', run: () => void ran.push('terminals') }],
+      () => {
+        throw new Error('no notice')
+      },
+    )
+    await t.s.leave('stop', false)
+    expect({ ran, leaving: t.s.leaving, exits: t.exits }).toEqual({ ran: ['terminals'], leaving: 'stop', exits: [0] })
+  })
+
   it('a second ending changes nothing: the services stop once and the process exits once', async () => {
     let planned = 0
     const t = shutdown(() => (planned++, [{ name: 'server', run: async () => {} }]))

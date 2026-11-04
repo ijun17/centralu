@@ -181,6 +181,11 @@ impl KeeperLink {
         super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev))
     }
 
+    /// The system is ending (macOS), or is not after all: the keeper tells the host on its stdin (#1970)
+    pub fn system_ending(&self, cancelled: bool) -> Result<(), String> {
+        client::system_ending(&self.sock, cancelled)
+    }
+
     pub fn announce_relaunch(&self) -> Result<u64, String> {
         client::relaunching(&self.sock)
     }

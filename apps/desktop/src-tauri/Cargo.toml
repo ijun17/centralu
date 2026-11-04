@@ -97,10 +97,16 @@ libc = "0.2"
 # in Cargo.lock.
 sha2 = "0.10"
 
-# Used only to position the traffic light buttons (macOS only).
+# The window hears the system end (src/sidecar/ending.rs): `WM_QUERYENDSESSION` through a window subclass. **Not a new dependency**:
+# the same windows-sys 0.61 tauri's platform crates already build (Cargo.lock), with only the features used.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# Used only to position the traffic light buttons and to hear the power-off notice (macOS only).
 # **Not a new dependency** — the objc2 family is already pulled in by tauri, tao and wry
 # (17 entries in Cargo.lock); this just declares that we are using what is already built.
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
