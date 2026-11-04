@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -20,6 +20,7 @@ import { ViewHost } from './views/view-host.js'
 import { withDragRelay } from './views/drag-relay.js'
 import { SLOW } from '../../../tooling/test-timing.js'
 import { alive } from './process.test-helpers.js'
+import { removeTree } from './temp-dir.test-helpers.js'
 
 /**
  * The seam between app views and the external app runtime (M4 B-3 ↔ A) — the exact
@@ -113,7 +114,6 @@ afterEach(async () => {
   await rt?.dispose()
   await server?.close()
   store?.close()
-  rmSync(fixture, { recursive: true, force: true })
 })
 
 describe('the view document is what the runtime read from the app', () => {
@@ -238,7 +238,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     const pid = await servingPid(appId)
     await rt.restart(ref(appId))
     await until(() => alive(pid), (a) => a === false, 5_000)
-    rmSync(join(appsDir(), appId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    await removeTree(join(appsDir(), appId))
     rt.refresh()
   }
 

@@ -3,8 +3,7 @@ import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { describe, expect, it } from 'vitest'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
@@ -18,7 +17,6 @@ if (args[0] === 'spin') for (let i = 0; i < 200; i++) { st.n = i; st.pad = 'x'.r
 
 let root = ''
 let gh: FakeGh
-afterEach(() => rmFakeDir(root))
 
 function make() {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-fake-gh-')))

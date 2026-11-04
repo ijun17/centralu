@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -105,8 +105,6 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
     own.end(started.splice(0))
     // By its handle: Node sends nothing once the child has exited
     host?.kill()
-    await new Promise((r) => setTimeout(r, 500))
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   })
 
   async function standIn(): Promise<{ pid: (name: string) => number; job: { state: string; handle?: number; broker?: number } }> {

@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -238,7 +238,6 @@ describe.runIf(process.platform === 'win32')('stopTree and killTree — a real t
   afterEach(async (test) => {
     await cleanUp(pids, test)
     pids = []
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   async function plant(): Promise<{ root: ChildProcess; exited: () => boolean; handle: { pid?: number; kill: (s?: string) => void } }> {

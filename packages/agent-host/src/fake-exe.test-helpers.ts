@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { removeWithin } from '../../../tooling/remove-tree.js'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -107,12 +107,12 @@ static class Launcher {
 
 let launcherCache: string | undefined
 
-/** The compiled launcher, built once per machine and source in the temp folder */
+/** The compiled launcher, built once per test run and source in the run's temporary folder (`tooling/vitest-tmp-root.ts`) */
 function launcher(): string {
   if (launcherCache) return launcherCache
   const windir = process.env.SystemRoot || 'C:\\Windows'
   const csc = join(windir, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
-  const folder = join(tmpdir(), `cc-fake-exe-${createHash('sha256').update(LAUNCHER_CS).digest('hex').slice(0, 12)}`)
+  const folder = join(process.env.CC_TEST_RUN_TMP ?? tmpdir(), `cc-fake-exe-${createHash('sha256').update(LAUNCHER_CS).digest('hex').slice(0, 12)}`)
   const exe = join(folder, 'launcher.exe')
   if (!existsSync(exe)) {
     mkdirSync(folder, { recursive: true })
@@ -163,14 +163,6 @@ export function fakeExe(dir: string, name: string, source: string): string {
 }
 
 /**
- * Removes a folder with fake programs in it. Windows keeps an `.exe` locked until the process that
- * ran it is gone, and a test that has just killed one gets EPERM on the first try.
- */
-export function rmFakeDir(dir: string): void {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
-}
-
-/**
  * Whether `dir` is strictly inside `base`, both as their real paths: on GitHub's Windows runners the temporary folder
  * is named with its short name (`C:\Users\RUNNER~1\…`) while a test's folder is often its real path
  * (`realpathSync.native`, `C:\Users\runneradmin\…`), and comparing the two as written never matched. A path on
@@ -189,15 +181,15 @@ export function insideOf(base: string, dir: string): boolean {
 }
 
 /**
- * Removes a test's folder without blocking the event loop, and briefly: 3 retries, about 3 s on Windows (measured: Node's
- * backoff makes 10 retries last close to a minute on a held folder), inside a hook's time limit. On Windows a folder something still holds (a process whose working
- * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the system's cleanup of the
- * temporary folder instead of failing the test that used it, when it is inside that folder (#1346, #1312). Anywhere
- * else, or on another platform, the error stands.
+ * Removes a test's folder without blocking the event loop, and briefly: it tries for 3 s. On Windows a folder something
+ * still holds (a process whose working directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is
+ * left to the removal of the test file's temporary folder when the file ends (`tooling/vitest-data-dir.ts`, which tries
+ * longer and fails the file if it still cannot) instead of failing the test that used it, when it is inside the temporary
+ * folder (#1346, #1312). Anywhere else, or on another platform, the error stands.
  */
 export async function removeFakeDir(dir: string, os: { platform: NodeJS.Platform; tmp: string } = { platform: process.platform, tmp: tmpdir() }): Promise<void> {
   try {
-    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+    await removeWithin(dir, 3000)
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code ?? ''
     if (os.platform !== 'win32' || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code) || !insideOf(os.tmp, dir)) throw e

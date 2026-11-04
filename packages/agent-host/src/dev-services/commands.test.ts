@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -256,7 +256,6 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
   afterEach(async (test) => {
     await cleanUp(pids, test)
     pids = []
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   })
 
   /** Runs the tree as a project command; returns the runner, the pids of cmd.exe and the tree, and whether the run has ended */

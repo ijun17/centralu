@@ -6,26 +6,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Store } from './store.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
-const dirs: string[] = []
 function storeFile(): string {
   const d = mkdtempSync(join(tmpdir(), 'cc-store-durable-'))
-  dirs.push(d)
   const file = join(d, 'store.db')
   const s = new Store(file)
   s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.close()
   return file
 }
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function raw<T>(file: string, f: (db: Database.Database) => T): T {

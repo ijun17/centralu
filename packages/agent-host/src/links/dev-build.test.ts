@@ -5,9 +5,9 @@ import Module from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { removeTree } from '../temp-dir.test-helpers.js'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { rmFakeDir } from '../fake-exe.test-helpers.js'
 import { isDevVersion } from './dev-build.js'
 import { fakeRegistry, fakeServe, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
@@ -264,11 +264,10 @@ function wholeCommand(o: {
   }, 120_000 * SLOW)
   afterAll(async () => {
     await reg?.close()
-    rmFakeDir(root)
   })
-  afterEach(() => {
-    rmFakeDir(join(home, '.centralu'))
-    rmFakeDir(join(root, 'repo'))
+  afterEach(async () => {
+    await removeTree(join(home, '.centralu'))
+    await removeTree(join(root, 'repo'))
   })
 
   const data = (...p: string[]) => join(home, '.centralu', ...p)
@@ -383,7 +382,7 @@ function wholeCommand(o: {
     await releaseRunning()
     const { repo } = fakeRepo(root)
     const hub = join(root, 'hub-copy')
-    rmFakeDir(hub)
+    await removeTree(hub)
     execFileSync('git', ['clone', '-q', repo, hub])
     git(hub, 'commit', '-q', '--allow-empty', '-m', 'a commit the machine does not have checked out')
     const elsewhere = remoteDev({ machine: 'box', ref: 'HEAD', repo, cwd: hub, dataDir: join(root, 'hub'), ssh: { ssh: ctx.ssh, env: ctx.env() } })
@@ -393,7 +392,7 @@ function wholeCommand(o: {
     expect(running()).toBe(BASE)
     expect(readFileSync(remote('current'), 'utf8')).toBe(`${BASE} ${node()}\n`)
     expect(readdirSync(remote('versions'))).toEqual([BASE])
-    rmFakeDir(hub)
+    await removeTree(hub)
   }, 180_000 * SLOW)
 
   it('checks the commit’s protocol against the hub’s own, not against what the machine’s release says', async () => {

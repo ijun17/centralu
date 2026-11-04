@@ -3,7 +3,6 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 // @ts-expect-error -- a plain .mjs of tooling without types
 import { inProcessGh as untypedInProcessGh } from './fake-gh-in-process.mjs'
@@ -56,9 +55,8 @@ process.stdout.write(JSON.stringify({ args, stdin, n: st.n, prompt: process.env.
 
 let root = ''
 let gh: FakeGh
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs()
-  rmFakeDir(root)
 })
 afterAll(() => {
   endLeftoverFakes()

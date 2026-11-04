@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,12 +12,13 @@ import { SLOW } from './test-timing.js'
  * keeper on a local socket. The scripts themselves need the real keeper binary and run in CI's keeper job.
  */
 
-const dirs: string[] = []
 const servers: Server[] = []
 afterEach(async () => {
   for (const s of servers.splice(0)) await new Promise((r) => s.close(r))
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
+
+/** What a socket path may be on macOS (`sun_path`); Linux allows 107. Why: `docs/runtime-lessons.md` LK7. */
+const SOCKET_PATH_MAX = 103
 
 /** A keeper socket that answers each line with `answer(request, socket)`; a socket file in `dir`, a named pipe on Windows */
 async function fakeKeeper(dir: string, name: string, answer: (req: Record<string, unknown>, c: Socket) => void): Promise<string> {
@@ -33,16 +34,14 @@ async function fakeKeeper(dir: string, name: string, answer: (req: Record<string
     })
     c.on('error', () => {})
   })
+  if (process.platform !== 'win32' && path.length > SOCKET_PATH_MAX) throw new Error(`the socket path ${path} is ${path.length} characters; macOS allows ${SOCKET_PATH_MAX}, and the test run's temporary folder (tooling/vitest-tmp-root.ts) is part of it`)
   servers.push(server)
   await new Promise<void>((r) => server.listen(path, r))
   return path
 }
 
-const tempDir = () => {
-  const d = mkdtempSync(join(tmpdir(), 'cc-keeper-test-'))
-  dirs.push(d)
-  return d
-}
+// Removed with the test file's temporary folder; a short name, for the socket path in it
+const tempDir = () => mkdtempSync(join(tmpdir(), 'kt-'))
 
 describe('keeper integration helpers', () => {
   // keeper-integration.mjs gave up after 5 s while the other scripts waited 8 s; a keeper busy with a host start or a
