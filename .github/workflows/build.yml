@@ -626,7 +626,7 @@ jobs:
         if: needs.changes.outputs.host_tests == 'true'
         run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"
 
-      - name: pnpm test (host, protocol, launcher: the tests that touch the OS)
+      - name: 'pnpm test (host, protocol, launcher: the tests that touch the OS)'
         id: full
         if: needs.changes.outputs.host_tests == 'true'
         env:
