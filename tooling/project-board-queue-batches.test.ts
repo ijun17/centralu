@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { gitWrapper } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart } from '../.centralu/apps/project-board/notice-acks.mjs'
@@ -192,6 +192,77 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(batchesOnDisk()).toHaveLength(1)
     expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
     expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
+  })
+
+  // #1961: the answer to POST /merges was lost after GitHub merged the member. Counted as refused, it stayed in the branch,
+  // and the batch went on with a tree the member was in and CI's verdict covered, landing the rest from a tree no run saw
+  describe('when the answer to a write on the batch branch is lost (#1961)', () => {
+    // A second run in one test: a new fake GitHub and a new queue file
+    const fresh = async (state: Gh) => {
+      await rt?.dispose({ awaitTree: true })
+      forgetApp()
+      await removeFakeDir(join(root, 'data'))
+      mkdirSync(join(root, 'data'))
+      runtime(state)
+    }
+    const landsBoth = async () => {
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+      await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end')
+    }
+
+    it('counts the member merged when the branch moved, and builds, tests and lands the batch with it', async () => {
+      runtime(batchState({ intoLost: [A] }))
+      await landsBoth()
+      expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1'])
+      expect(batchesOnDisk()[0].steps).toEqual([
+        { pr: 77, head: A, sha: `batch-${A}`, tree: `tree-${A}` },
+        { pr: 78, head: B, sha: `batch-${B}`, tree: `tree-${B}` },
+      ])
+      expect(batchEvents().filter((t) => t.includes('would not merge'))).toEqual([])
+      expect(batchEvents().at(-1)).toBe('Batch queue/batch-1: landed #77, #78; main at main-78 is the tree CI tested.')
+      // The head of the branch was read once, for the one lost answer
+      expect(gh().headReads).toBe(1)
+    })
+
+    it('drops the batch when the branch cannot be read afterwards, and goes on with none of it', async () => {
+      runtime(batchState({ intoLost: [A], headLost: { n: 1 } }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      // Nothing after the unknown merge was built on the branch, nothing was started on it, and nobody was blamed
+      expect(writes().map(short2).slice(0, 3)).toEqual(['branch queue/batch-1', `merge-into ${A}`, 'delete queue/batch-1'])
+      expect(batchEvents().find((t) => t.includes('was lost'))).toMatch(/GitHub's answer to merging #77 into it was lost .*, and the branch could not be read afterwards/)
+      expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
+      // No new batch for a few minutes, so a GitHub that keeps failing is not built against in a loop
+      expect(queueOnDisk().batchOff.reason).toContain('EOF')
+      await morePolls(6)
+      expect(batchesOnDisk()).toHaveLength(1)
+    })
+
+    it('drops the batch, blaming no one, when the branch did not move (the answer was lost before GitHub merged it, or GitHub is still at it)', async () => {
+      runtime(batchState({ intoDropped: [B] }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
+      expect(queueOnDisk().items.some((i: any) => i.batchless)).toBe(false)
+      expect(batchEvents().find((t) => t.includes('was lost'))).toContain("GitHub's answer to merging #78 into it was lost")
+      expect(gh().headReads).toBe(1)
+      // The same failure again does not rebuild the batch within that time: one branch made, one merge tried, no more
+      await morePolls(6)
+      expect(batchesOnDisk()).toHaveLength(1)
+      expect(writes().filter((w) => w[0] === 'branch')).toHaveLength(1)
+      expect(queueOnDisk().batchOff.until > new Date().toISOString()).toBe(true)
+      // A refusal GitHub answered (a 404) is not read back: it said no, and the member is kept out of a batch on that head
+      await fresh(batchState({ mergeErrors: [B] }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await call('queue_merge', { pr: 78, owner: 'tester' })
+      await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
+      expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
+      expect(gh().headReads ?? 0).toBe(0)
+    })
   })
 
   it("does not batch a fork's pull request", async () => {

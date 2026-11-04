@@ -95,16 +95,31 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (st.mainError) fail('Not Found (HTTP 404)')
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
   out({ sha: m.sha, commit: { tree: { sha: m.tree } } })
+} else if (path && path.startsWith(R + '/commits/queue%2F')) {
+  // A batch branch's head: where the merges left it (headLost: reads that fail on the connection first)
+  st.headReads = (st.headReads ?? 0) + 1
+  save()
+  if (st.headLost && st.headLost.n > 0) { st.headLost.n--; save(); fail('Get "https://api.github.com/' + path + '": EOF') }
+  const head = (st.heads ?? {})[decodeURIComponent(path.slice((R + '/commits/').length))]
+  if (!head) fail('Not Found (HTTP 404)')
+  out({ sha: head.sha, commit: { tree: { sha: head.tree } } })
 } else if (path === R + '/git/refs' && args.includes('POST')) {
   const body = JSON.parse(stdin)
   if ((st.refs ?? []).includes(body.ref)) fail('Reference already exists (HTTP 422)')
   write(['branch', body.ref.replace('refs/heads/', ''), body.sha])
+  st.heads = { ...st.heads, [body.ref.replace('refs/heads/', '')]: st.main ?? { sha: 'main0', tree: 'tree-main0' } }
+  save()
   out({ ref: body.ref })
 } else if (path === R + '/merges') {
   const body = JSON.parse(stdin)
   write(['merge-into', body.head, body.base])
   if ((st.conflicts ?? []).includes(body.head)) fail('Merge conflict (HTTP 409)')
   if ((st.mergeErrors ?? []).includes(body.head)) fail('Not Found (HTTP 404)')
+  // The connection dropped before GitHub did it (intoDropped), or after (intoLost): the branch moves only in the second
+  if ((st.intoDropped ?? []).includes(body.head)) fail('Post "https://api.github.com/' + R + '/merges": EOF')
+  st.heads = { ...st.heads, [body.base]: { sha: 'batch-' + body.head, tree: 'tree-' + body.head } }
+  save()
+  if ((st.intoLost ?? []).includes(body.head)) fail('Post "https://api.github.com/' + R + '/merges": EOF')
   out({ sha: 'batch-' + body.head, commit: { tree: { sha: 'tree-' + body.head } } })
 } else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
   const body = JSON.parse(stdin)
