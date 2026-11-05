@@ -550,12 +550,16 @@ describe('closing a chain a session works on, and its state, as on main (owner d
   it('a turn on another chain is not working on this one, and closing this one tells nobody', () => {
     const w = ready(hostWorld())
     w.live.add('b')
-    working(w)
+    const task = working(w)
     const q = w.mail.send(B, { to: [PERSON], text: 'Unrelated question?', needsReply: true }).message
     expect(rowOf(w, q.id)).toMatchObject({ state: 'open', working: false })
     w.person.close(q.id)
     expect(w.told).toEqual([])
     expect(notices(w, B)).toEqual([])
+    // Its own chain is the one it is told about
+    w.person.close(task.id)
+    expect(w.told).toMatchObject([{ sessionId: 'b' }])
+    expect(notices(w, B)).toMatchObject([{ facts: { chainClosed: { root: task.id } } }])
   })
 
   it('a turn on a reply deep in the chain is working on the chain, and a close on a later message tells it and stops nothing', () => {
