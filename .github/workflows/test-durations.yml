@@ -3,13 +3,20 @@
 # build.yml splits the Windows unit tests into two shards by each file's measured time. The times go stale as
 # tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against 1769 s), and refreshing
 # them by hand (`tsx tooling/os-tests.ts --refresh-durations`) was forgotten. The Windows shards upload their vitest
-# JSON report as `windows-test-times-<shard>`; this takes those of the latest green push run of build.yml on main.
+# JSON report as `windows-test-times-<shard>`; this takes those of the newest green push run of build.yml on main
+# that still has them.
+#
+# That run is often behind main (a push run is cancelled by the next landing). So the file written holds exactly the
+# test files of this checkout (`refreshDurations` in tooling/os-tests.ts): a time of the run for a file it timed, the
+# current entry for one it did not, the median for a new one, nothing for a file that is gone. The summary says how
+# far behind main the run is.
 #
 # Two jobs, as lint-tighten.yml: no code from the dependencies runs where a write token is.
 #   refresh  reads only: downloads the two reports, runs the refresh, hands the file on as an artifact.
 #   open     writes only: no install; puts the file on a fresh checkout of main and pushes it to one branch,
-#            `test-durations/weekly`, opening its pull request only when none is open.
-# A pull request a workflow opens with its own token runs no workflows itself: start its CI when queueing.
+#            `test-durations/weekly`. It opens no pull request: the repository does not let GITHUB_TOKEN do that
+#            (#1983), and allowing it would widen the token. The job summary names the branch and the `gh pr create`
+#            line for a person to run.
 name: test durations
 
 on:
@@ -31,6 +38,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      run: ${{ steps.times.outputs.run }}
+      behind: ${{ steps.times.outputs.behind }}
+      age_days: ${{ steps.times.outputs.age_days }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,17 +51,28 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The latest green push run of build.yml on main that still has both reports (artifacts last 30 days)
+      # The newest green push run of build.yml on main that still has both reports (artifacts last 30 days)
       - name: Download the Windows test times
+        id: times
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/times"
-          for run in $(gh run list --workflow build.yml --branch main --event push --status success --limit 30 --json databaseId --jq '.[].databaseId'); do
+          gh run list --workflow build.yml --branch main --event push --status success --limit 30 --json databaseId,headSha,createdAt > "$RUNNER_TEMP/runs.json"
+          for run in $(jq -r '.[].databaseId' "$RUNNER_TEMP/runs.json"); do
             rm -rf "$RUNNER_TEMP/times"/*
             if gh run download "$run" -n windows-test-times-1 -D "$RUNNER_TEMP/times/1" && gh run download "$run" -n windows-test-times-2 -D "$RUNNER_TEMP/times/2"; then
-              echo "Times of run $run."
-              echo "$run" > "$RUNNER_TEMP/times/run"
+              sha=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .headSha' "$RUNNER_TEMP/runs.json")
+              created=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .createdAt' "$RUNNER_TEMP/runs.json")
+              # How many commits main has that the run's head has not; the run's age in days
+              behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq '.ahead_by' || echo unknown)
+              age_days=$(( ($(date +%s) - $(date -d "$created" +%s)) / 86400 ))
+              echo "Times of run $run, $behind commits and $age_days days behind this checkout."
+              {
+                echo "run=$run"
+                echo "behind=$behind"
+                echo "age_days=$age_days"
+              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
@@ -73,9 +95,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write
     steps:
-      # Only git and gh run here: nothing installed, nothing from the repository executed
+      # Only git runs here: nothing installed, nothing from the repository executed
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -83,12 +104,15 @@ jobs:
           name: test-durations
           path: tooling
 
-      - name: Push it, and open the pull request if none is open
+      - name: Push it, and say how to open the pull request
         env:
-          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ needs.refresh.outputs.run }}
+          BEHIND: ${{ needs.refresh.outputs.behind }}
+          AGE_DAYS: ${{ needs.refresh.outputs.age_days }}
         run: |
           if [ -z "$(git status --porcelain -- tooling/test-durations.json)" ]; then
-            echo "The times are as fresh as the latest run; nothing to push."
+            echo "::notice::The times are as fresh as the latest run; nothing pushed."
+            echo "The times are as fresh as the newest green run (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}); nothing pushed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           branch='test-durations/weekly'
@@ -98,15 +122,21 @@ jobs:
           git add -- tooling/test-durations.json
           git commit -m 'chore(test): refresh the Windows shard times'
           git push --force origin "$branch"
-          open=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')
-          if [ -n "$open" ]; then
-            echo "Updated the open pull request #$open."
-            exit 0
+          behind="the run is ${BEHIND} commits and ${AGE_DAYS} days behind main"
+          if [ "$BEHIND" = unknown ] || [ "$BEHIND" -gt 20 ] || [ "$AGE_DAYS" -gt 7 ]; then
+            behind="WARNING: $behind (more than 20 commits or 7 days), so its times may be old"
           fi
-          gh pr create --base main --head "$branch" \
-            --title 'chore(test): refresh the Windows shard times' \
-            --body "$(printf '%s\n' \
-              '## Why' '' 'The weekly refresh of tooling/test-durations.json (.github/workflows/test-durations.yml): the Windows shards are split by these times.' '' \
-              '## What changed' '' 'Only `tooling/test-durations.json`, from the `windows-test-times-*` reports of the latest green main run. A later week updates this pull request while it is open.' '' \
-              '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Its CI does not start by itself (a workflow's own token): start it when queueing." '' \
-              '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the refresh run above.' '' '## Closes' '' 'n/a')"
+          title='chore(test): refresh the Windows shard times'
+          body="Weekly refresh of tooling/test-durations.json (.github/workflows/test-durations.yml), from the windows-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}; ${behind}. The file holds the test files of main only: a file the run did not time keeps its entry or gets the median, a deleted file is dropped."
+          {
+            echo "### Times pushed to \`$branch\`"
+            echo
+            echo "No pull request is open: the repository does not let this workflow create one. Open it, and start its CI when queueing:"
+            echo
+            echo '```sh'
+            echo "gh pr create --base main --head $branch --title '$title' --body '$body'"
+            echo '```'
+            echo
+            echo "Source run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}. $behind."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Pushed $branch. Open its pull request: gh pr create --base main --head $branch. ${behind}."

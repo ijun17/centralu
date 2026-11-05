@@ -25,7 +25,8 @@
  *   tsx tooling/os-tests.ts --tighten                    takes off the allowlist every line the code no longer needs
  *                                                        (`pnpm os:tighten`); never adds one
  *   tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...
- *                                                        rewrites tooling/test-durations.json from the reports
+ *                                                        rewrites tooling/test-durations.json from the reports, for the
+ *                                                        tests this checkout selects (`refreshDurations`)
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -291,14 +292,19 @@ export function parseDurations(text: string): Durations {
 
 export const readDurations = (): Durations => parseDurations(readFileSync(`${ROOT}${DURATIONS}`, 'utf8'))
 
+/** What a test with no measured time weighs: the median of those of `tests` that have one, and at least a second */
+function fallbackWeight(tests: readonly string[], durations: Durations): number {
+  const known = tests.map((t) => durations[t]).filter((d): d is number => d !== undefined).sort((a, b) => a - b)
+  return Math.max(1, known[Math.floor(known.length / 2)] ?? 1)
+}
+
 /**
  * Splits tests into `shards` lists of about equal measured time: longest first, each to the lightest list so far, ties
  * by path, so that every shard computes the same split. A file with no measured time weighs the median of those that
  * have one, and at least a second: a new test is usually an ordinary one.
  */
 export function balance(tests: readonly string[], durations: Durations, shards: number): string[][] {
-  const known = tests.map((t) => durations[t]).filter((d): d is number => d !== undefined).sort((a, b) => a - b)
-  const fallback = Math.max(1, known[Math.floor(known.length / 2)] ?? 1)
+  const fallback = fallbackWeight(tests, durations)
   const weight = (t: string) => durations[t] ?? fallback
   const order = [...tests].sort((a, b) => weight(b) - weight(a) || (a < b ? -1 : a > b ? 1 : 0))
   const lists = Array.from({ length: shards }, () => ({ files: [] as string[], secs: 0 }))
@@ -332,6 +338,24 @@ export function durationsFromReports(reports: readonly unknown[]): Durations {
     }
   }
   return out
+}
+
+/**
+ * The file `--refresh-durations` writes: exactly the `tests` this checkout selects (they exist here), each with
+ * - the run's time when the run timed it;
+ * - else its entry in `current`, so a file the run did not cover (the run predates it, or skipped it) keeps its time;
+ * - else the median of those two kinds (`balance`'s own rule): a file that is new, such as a piece of a split.
+ * A file the run or `current` names that is not in `tests` (deleted, renamed, or no longer run on Windows) is dropped.
+ * The run may come from an older tree than `tests`, so its names are never trusted to exist.
+ */
+export function refreshDurations(current: Durations, run: Durations, tests: readonly string[]): Durations {
+  const timed: Durations = {}
+  for (const t of tests) {
+    const secs = run[t] ?? current[t]
+    if (secs !== undefined) timed[t] = secs
+  }
+  const fallback = fallbackWeight(tests, timed)
+  return Object.fromEntries(tests.map((t) => [t, timed[t] ?? fallback]))
 }
 
 /** tooling/test-durations.json's text: sorted, one file per line */
@@ -462,7 +486,15 @@ async function main(argv: string[]) {
   if (argv.includes('--refresh-durations')) {
     const reports = argv.filter((a) => !a.startsWith('--'))
     if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
-    const durations = durationsFromReports(reports.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
+    const run = durationsFromReports(reports.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
+    const current = readDurations()
+    const tests = await repo.selectTests(await vitestFiles())
+    const durations = refreshDurations(current, run, tests)
+    const count = (pick: (t: string) => boolean) => tests.filter(pick).length
+    console.error(
+      `${count((t) => t in run)} files timed by the run, ${count((t) => !(t in run) && t in current)} kept, ${count((t) => !(t in run) && !(t in current))} new (the median), ` +
+        `${Object.keys({ ...run, ...current }).filter((t) => !tests.includes(t)).length} dropped (gone, or not run on Windows)`,
+    )
     const source = `the Windows unit shards' vitest JSON reports, refreshed ${new Date().toISOString().slice(0, 10)}`
     writeFileSync(`${ROOT}${DURATIONS}`, formatDurations(durations, source))
     console.error(`${DURATIONS}: ${Object.keys(durations).length} files`)

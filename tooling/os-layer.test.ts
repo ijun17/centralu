@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -541,6 +541,29 @@ describe("the Windows shards, split by each file's measured time", () => {
       ]),
     ).toEqual({ 'packages/agent-host/src/os.test.ts': 1.2, 'tooling/launcher-cmd.test.ts': 0.1 })
     expect(() => durationsFromReports([{ not: 'a report' }])).toThrow(/testResults/)
+  })
+
+  it('refreshes from a run that predates a split and a delete: the files on this checkout, never the ones the run knew', () => {
+    // The run is from before install-windows.test.ts became three files and before gone.test.ts was deleted. The
+    // file now holds one piece (update) and none of the others (#1983).
+    const run = durationsFromReports([
+      { testResults: [{ name: '/w/tooling/links/install-windows.test.ts', startTime: 0, endTime: 368_900 }, { name: '/w/tooling/gone.test.ts', startTime: 0, endTime: 5000 }, { name: '/w/tooling/a.test.ts', startTime: 0, endTime: 10_000 }] },
+      { testResults: [{ name: '/w/tooling/b.test.ts', startTime: 0, endTime: 2000 }] },
+    ])
+    const current = { 'tooling/a.test.ts': 4, 'tooling/b.test.ts': 6, 'tooling/c.test.ts': 8, 'tooling/links/install-windows-update.test.ts': 6 }
+    const tests = ['tooling/a.test.ts', 'tooling/b.test.ts', 'tooling/c.test.ts', 'tooling/links/install-windows-install.test.ts', 'tooling/links/install-windows-switch.test.ts', 'tooling/links/install-windows-update.test.ts']
+    // The reports alone, which is all the first refresh wrote, name the old file and miss the pieces
+    expect(Object.keys(run)).toContain('tooling/links/install-windows.test.ts')
+    expect(Object.keys(run)).not.toContain('tooling/links/install-windows-switch.test.ts')
+    // Timed by the run (a, b); kept (c, update); the median of those four, 2, 6, 8 and 10 -> 8, for the two new pieces
+    expect(refreshDurations(current, run, tests)).toEqual({
+      'tooling/a.test.ts': 10,
+      'tooling/b.test.ts': 2,
+      'tooling/c.test.ts': 8,
+      'tooling/links/install-windows-install.test.ts': 8,
+      'tooling/links/install-windows-switch.test.ts': 8,
+      'tooling/links/install-windows-update.test.ts': 6,
+    })
   })
 
   it(`keeps ${DURATIONS} as --refresh-durations writes it, with a time for most tests Windows runs`, async () => {
