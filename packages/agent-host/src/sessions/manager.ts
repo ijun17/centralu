@@ -12,7 +12,7 @@ import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
-import type { HandedOverMessage } from '../mail/messages.js'
+import type { HandedOverMessage, StopWhy } from '../mail/messages.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -102,6 +102,8 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /** A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): the senders of the questions it left unanswered are told once. Quiet: wakes no one */
+  stopped?(sessionId: string, why: StopWhy, opts?: { quiet?: boolean; told?: readonly string[] }): void
   /**
    * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
@@ -975,6 +977,23 @@ export class SessionManager {
     return this.children.oldOwes(ownerId, childId)
   }
 
+  /** The sessions the older report paths tell of a turn that stopped: the owner of a report, the caller of a delegation, the session that started it. Not for the person's own turn (#1377) */
+  toldByReports(sessionId: string, caller: string | undefined): string[] {
+    const ids = [this.children.awaitingReport.get(sessionId), caller, this.meta.get(sessionId)?.askedBy ?? undefined]
+    return ids.flatMap((id) => (id && id !== sessionId ? [id] : []))
+  }
+
+  /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
+  mailStopped(sessionId: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[] } = {}): void {
+    // A host that is leaving writes nothing: its sessions are cut by the leaving, and the next host continues them or finds them marked (§4.1)
+    if (this.disposing || this.handingOver) return
+    try {
+      this.mailHooks?.stopped?.(sessionId, why, opts)
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to the senders (${errorMessage(e)})`)
+    }
+  }
+
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
@@ -1173,6 +1192,8 @@ export class SessionManager {
    * and the report it owed goes now, rather than naming a later turn
    */
   private turnLostInSwap(m: SessionInfo): void {
+    // Centralu cut this turn and could not continue it: the senders of the questions it left unanswered are told (§4.1)
+    this.mailStopped(m.id, 'uncontinued', { told: this.toldByReports(m.id, this.children.turnOwners.get(m.id)?.callerId) })
     // The same statement the window gets, through the same rules (#428)
     const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
     this.events.applyStateHint(change, m)
@@ -2186,6 +2207,7 @@ export class SessionManager {
           console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
         }
       },
+      mailStopped: (id, why, caller, personTurn) => self.mailStopped(id, why, personTurn ? {} : { told: self.toldByReports(id, caller) }),
       mailEvent: (e, ended) => {
         try {
           self.mailHooks?.sessionEvent?.(e, ended)

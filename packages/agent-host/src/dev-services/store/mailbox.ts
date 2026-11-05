@@ -20,7 +20,12 @@ export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
 export type MailKind = (typeof MAIL_KINDS)[number]
 export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
 export type Settled = (typeof SETTLED)[number]
-export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost'] as const
+/**
+ * Why Centralu stopped watching a row. `stopped` to `uncontinued` after `waiting` are the stops of a session (docs/plans/turn-owned-by-no-one.md §4.1):
+ * the person's Stop, an error, a usage limit, the network, the tool's own interrupt, a quit or a shutdown, and a cut turn Centralu could not continue.
+ * A build that does not know a word reads it as null
+ */
+export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost', 'limit', 'network', 'interrupted', 'quit', 'shutdown', 'uncontinued'] as const
 export type ReleaseWhy = (typeof RELEASE_WHY)[number]
 
 /** What only Centralu writes about a message (§5.4). Every key optional; a key a newer build added is kept */

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createListeners } from '@cc/common'
-import { errorMessage, oneLineText } from '@cc/protocol'
+import { SHUTDOWN_WORDS, errorMessage, oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import {
   HIDDEN_HOLDS,
@@ -174,6 +174,8 @@ export class MessageService {
       calls?: (sessionAddress: string) => MailCalls
       /** The newest message the person typed in this session (`MessageRecords.newestPersonMessage`); none cites anything when absent */
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
+      /** Whether the session runs no turn now: a stop notice wakes only a sender that is at rest (docs/plans/turn-owned-by-no-one.md §4.1, Q1). At rest when absent */
+      atRest?: (sessionAddress: string) => boolean
     },
   ) {
     this.now = opts.now ?? Date.now
@@ -800,6 +802,38 @@ export class MessageService {
   }
 
   /**
+   * A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): an error, a usage limit, the network, its tool's interrupt, a Stop,
+   * a quit or shutdown of Centralu, or a cut turn Centralu could not continue. Each question delivered to it and not answered (a `needsReply` message,
+   * the person's too) is released with the cause, and each sender is told once, in one notice. The rows stay open, so a reply that comes after the person
+   * continues the session still answers them. A task is not released here: the old report path tells its owner until requests decide reports.
+   *
+   * `quiet`: the notice is written to be read at the sender's next turn and wakes no one (a quit: a restart must not wake every sender that waits).
+   * Otherwise it wakes a sender that is at rest, and waits quietly for the next turn of one that is not. The person's notice goes to the Inbox and wakes
+   * nothing. `told`: senders the older report paths tell of this same stop (the owner of a task, the session that started it); their rows are released
+   * and marked told, with no second notice. Returns how many rows were released
+   */
+  sessionStopped(address: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[] } = {}): number {
+    let released = 0
+    this.releaseAndTell(
+      (now, senders) => {
+        for (const row of this.records.watchedTo(address)) {
+          if (row.releasedAt !== null || row.deliveredAt === null || row.answerId !== null) continue
+          const m = this.records.message(row.messageId)
+          // A request to the orchestrator is answered by its own turn's end (§4.2), and a task by the report; neither is told twice
+          if (!m || m.kind === 'task' || !m.needsReply || m.sender === address || this.isRequest(m, address)) continue
+          if (this.records.markReleased(row.messageId, address, now, why)) {
+            released++
+            if (opts.told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
+            else senders.add(m.sender)
+          }
+        }
+      },
+      (sender) => opts.quiet === true || (parseAddress(sender)?.kind === 'session' && this.opts.atRest?.(sender) === false),
+    )
+    return released
+  }
+
+  /**
    * Turns the last host left that nothing continues, closed `lost` at this start (#1916): a crash or a plain restart cut them, or a kept process's
    * turn ended while no host was there to record it. The questions delivered in them that were not answered were read, so no delivery gives them
    * again: each is released `lost`, and each sender is told once for all of them (D25), so it can ask again. A task is not: the old report path
@@ -819,11 +853,12 @@ export class MessageService {
   }
 
   /** One write: `release` releases rows and adds each released question's sender to `senders`; then each sender is told once, in one notice (D25) */
-  private releaseAndTell(release: (now: number, senders: Set<string>) => void): void {
+  private releaseAndTell(release: (now: number, senders: Set<string>) => void, quiet: (sender: string) => boolean = () => false): void {
     this.run(() => {
       const senders = new Set<string>()
-      release(this.now(), senders)
-      for (const sender of senders) this.tellUnanswered(sender)
+      const now = this.now()
+      release(now, senders)
+      for (const sender of senders) this.tellUnanswered(sender, quiet(sender), now)
     })
   }
 
@@ -983,15 +1018,20 @@ export class MessageService {
     })
   }
 
-  /** The sender's released and untold rows, gathered in one notice (D25, S3); the row's `told_at` is set so it is listed once. The person is not told */
-  private tellUnanswered(sender: string): void {
-    const rows = this.records.releasedUntold(sender)
-    if (rows.length === 0 || parseAddress(sender)?.kind !== 'session') return
+  /**
+   * The sender's released and untold rows, gathered in one notice (D25, S3); the row's `told_at` is set so it is listed once. The person is told in
+   * the Inbox, and only for what was released at `since`: the rows older builds released without telling the person are not listed all at once.
+   * `quiet`: the notice wakes no one
+   */
+  private tellUnanswered(sender: string, quiet: boolean, since: number): void {
+    const kind = parseAddress(sender)?.kind
+    const rows = this.records.releasedUntold(sender).filter((r) => kind !== 'person' || (r.releasedAt ?? 0) >= since)
+    if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
     this.centralu(sender, {
       kind: 'notice',
-      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.reach.labelOf(u.recipient) }))),
-      facts: { unanswered },
+      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.reach.labelOf(u.recipient) })), kind === 'person'),
+      facts: { unanswered, ...(quiet ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
     this.records.markTold(rows, this.now())
@@ -1127,18 +1167,58 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   error: 'that session stopped with an error',
   gone: 'that session is gone',
   lost: 'its turn on your message ended while Centralu restarted, before it answered, so ask again if you still need the answer',
+  // A session's stops are worded as sentences by `STOP_WORDS`; these are the table's words for them
+  limit: 'that session reached its usage limit',
+  network: 'that session lost the network',
+  interrupted: 'its tool interrupted that session',
+  quit: 'Centralu quit while that session worked',
+  shutdown: 'the computer ended while that session worked',
+  uncontinued: 'Centralu could not continue that session',
 }
 
+/** Why a session stopped, the words of `sessionStopped` */
+export type StopWhy = 'stopped' | 'error' | 'limit' | 'network' | 'interrupted' | 'quit' | 'shutdown' | 'uncontinued'
+
+/**
+ * What a sender reads of a stop (docs/plans/turn-owned-by-no-one.md §4.1): what happened, to which of its messages, and what it can do. Never the tool's
+ * own words (#120): a session's error text can carry what a repository put there
+ */
+const STOP_WORDS: Record<StopWhy, (name: string, ids: string, person: boolean) => string> = {
+  error: (n, ids) => `${n} stopped with an error before it answered ${ids}. It keeps its conversation; send it a message to go on.`,
+  limit: (n, ids) => `${n} reached its usage limit before it answered ${ids}. It can go on after the limit resets; send it a message then.`,
+  network: (n, ids) => `${n} lost the network before it answered ${ids}. Send it a message once the network is back to go on.`,
+  interrupted: (n, ids) => `${n}'s tool interrupted its turn before it answered ${ids}. Send it a message to go on.`,
+  stopped: (n, ids, person) => `${n} was stopped before it answered ${ids}. Send it a message to go on${person ? '.' : ', or ask another session.'}`,
+  quit: (n, ids, person) => `Centralu quit while ${n} worked on ${ids}, so it did not answer. ${person ? 'Send it a message when you want it to go on.' : 'The person decides whether it goes on; ask again later if you still need the answer.'}`,
+  shutdown: (n, ids, person) => `${n} did not answer ${ids}: ${SHUTDOWN_WORDS} while it worked. ${person ? 'Send it a message when you want it to go on.' : 'The person decides whether it goes on; ask again later if you still need the answer.'}`,
+  uncontinued: (n, ids) => `Centralu could not continue ${n} after an update or restart, so it did not answer ${ids}. Send it a message to go on.`,
+}
+const isStop = (why: ReleaseWhy | null): why is StopWhy => why !== null && Object.hasOwn(STOP_WORDS, why)
+
 /** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */
-function unansweredText(rows: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string }[]): string {
+function unansweredText(all: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string }[], person = false): string {
+  const rows = all.filter((r) => !isStop(r.why))
+  // A session's stop is one sentence per session and cause, naming the messages it left unanswered
+  const sentences = new Map<string, { why: StopWhy; name: string; ids: string[] }>()
+  for (const r of all) {
+    if (!isStop(r.why)) continue
+    const kept = sentences.get(`${r.why}/${r.recipient}`) ?? { why: r.why, name: r.name, ids: [] }
+    kept.ids.push(r.id)
+    sentences.set(`${r.why}/${r.recipient}`, kept)
+  }
+  const stopLines = [...sentences.values()].map((s) => STOP_WORDS[s.why](s.name, s.ids.join(', '), person))
+  if (rows.length === 0) return stopLines.join('\n')
   const lines = rows.map((r) => `- ${r.id} to ${r.name} (${r.recipient}): ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
+  // The person is not told what an agent is: no advice to go on without answers, and no reminders to speak of
+  if (person) return [`${rows.length} of your messages went unanswered:`, ...lines, ...stopLines].join('\n')
   return [
     `${rows.length} of your messages are no longer watched, and Centralu will not remind their receivers again:`,
     ...lines,
     ...(later ? ['Those still working or waiting may answer later; the answer reaches you as mail.'] : []),
     // A `lost` line says to ask again: a notice of only those has no others, and the question was one whose answer was needed
     ...(rows.some((r) => r.why !== 'lost') ? ['For the others, go on without the answers, ask another session, or ask the person. Next time, send needsReply=false when you need no answer.'] : []),
+    ...stopLines,
   ].join('\n')
 }
 

@@ -1,4 +1,6 @@
 import { errorMessage, type SessionInfo } from '@cc/protocol'
+import { inTurn } from '../idle.js'
+import { wentWithItsProcess } from '../sessions/interruptions.js'
 import type { Store } from '../dev-services/store.js'
 import type { MailHooks, SessionManager } from '../sessions/manager.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
@@ -113,6 +115,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return mailCalls(1, party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
+    // A stop notice wakes a sender at rest; one in a turn reads it with its other mail (§4.1)
+    atRest: (address) => {
+      const party = parseAddress(address)
+      const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
+      // Not one a quit cut either: it waits for the person's Continue, and a notice would start a turn with nobody there
+      return !s || (!inTurn(s.state) && !wentWithItsProcess(s.interruption))
+    },
   })
   box.turns = new MailTurns(store.mailbox, {
     ...(opts.now ? { now: opts.now } : {}),
@@ -168,6 +177,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, mailTurns, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
+    stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}) }),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -208,6 +218,16 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id), oldOwes: (o, c) => sessions.oldOwes(o, c) })
       } catch (e) {
         console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
+      }
+      try {
+        // A turn a quit or the system's end cut, found cut at this start (§4.1): the questions it left unanswered are released and their senders told, quietly,
+        // so a restart wakes none of them. Released once; a start that finds the same mark again finds nothing to release
+        for (const s of sessions.listSessions()) {
+          const why = s.interruption?.reason
+          if (why === 'quit' || why === 'shutdown') service.sessionStopped(addressOf(s.id), why, { quiet: true })
+        }
+      } catch (e) {
+        console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
       }
       delivery.start()
     },

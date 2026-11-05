@@ -10,6 +10,8 @@ import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest } from '../mail/delivery.js'
+import type { StopWhy } from '../mail/messages.js'
+import { stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
 import { scriptMessageFrame } from './script-messages.js'
@@ -61,6 +63,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailPoke: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
+    /** A turn ended without finishing, and why: the senders of the questions it left unanswered are told once (`MessageService.sessionStopped`). Never throws */
+    mailStopped: (sessionId: string, why: StopWhy, caller: string | undefined, personTurn: boolean) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
@@ -325,6 +329,12 @@ export class SessionEvents {
     if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
       this.host.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
     }
+    /*
+     * A turn that ends without finishing leaves the questions delivered to the session unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
+     * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
+     */
+    const stopWhy = endedTurn && e.sessionId && !this.host.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
+    if (stopWhy && e.sessionId) this.host.mailStopped(e.sessionId, stopWhy, delegation?.callerId, turnBy?.by === 'person')
     // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
     const owed = endedTurn && !!e.sessionId && (this.host.children.awaitingReport.has(e.sessionId) || waited)
     /*
