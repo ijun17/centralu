@@ -1680,6 +1680,31 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(q.queue[0].reason.kind).toMatch(/failed|failing/)
   })
 
+  // 2026-11-05 (#2004, job 127240544856, queue/batch-429): `tauri build` got a 504 fetching AppRun for the AppImage. The
+  // annotation is only "Process completed with exit code 1.", so the log's line is what tells the network from the commit
+  const bundleFailed = (error: string) => {
+    const log = ['##[group]Run pnpm --filter @cc/desktop exec tauri build', ' Downloading https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-aarch64', `failed to bundle project: \`${error}\``, `       Error failed to bundle project: \`${error}\``, '##[error]Process completed with exit code 1.'].join('\n')
+    return shutDown({
+      jobs: { 900: [{ id: 12, name: 'linux-arm64', conclusion: 'failure', steps: [{ name: 'Build bundle', conclusion: 'failure' }] }] },
+      annotations: { '12': [{ message: 'Process completed with exit code 1.' }] },
+      logs: { '12': log },
+      on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } },
+    })
+  }
+  it('reruns once a bundle that failed fetching a tool it builds with, and not one that failed for another reason', async () => {
+    runtime(bundleFailed('http status: 504'))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
+  })
+  it.each(['http status: 404', 'failed to run linuxdeploy'])('does not rerun a bundle that failed with `%s`', async (error) => {
+    runtime(bundleFailed(error))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention')
+    await morePolls()
+    expect(writes()).toEqual([])
+  })
+
   // The job carries only the runner's cancellation note, so jobNotes reads the log; each log below has a line that looks
   // like the runner's and is not, and each of the three rules (start of line, exact case, cancellation after it) is the
   // only thing that tells it apart

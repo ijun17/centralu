@@ -69,7 +69,7 @@ import { GitError, isNetworkFailure } from './git.mjs'
 import { noteReadied, openedBy, readOpened } from './opened.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
 import { judgeHead, labelReason } from './queue-integrate.mjs'
-import { classifyRun } from './run-failure.mjs'
+import { classifyRun, isFetchStep } from './run-failure.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
@@ -258,7 +258,11 @@ export async function runFailures(repo, runs, known = {}) {
       continue
     }
     const jobs = await runJobSteps(repo, run.id)
-    for (const j of jobs) j.notes = j.conclusion && !OK_RUN.has(j.conclusion) && j.id != null ? await jobNotes(repo, j.id) : []
+    for (const j of jobs.filter((x) => x.conclusion && !OK_RUN.has(x.conclusion) && x.id != null)) {
+      j.notes = await jobNotes(repo, j.id)
+      // A step that fetches (an install, tauri's bundling) is the runner's when its log's line names the network (#2004)
+      if (isFetchStep(j.steps?.find((x) => x.conclusion === 'failure')?.name)) j.log = await failingLine(repo, j)
+    }
     out[run.id] = classifyRun(run, jobs, { flaky: QUEUE.flakyJobs })
   }
   return out

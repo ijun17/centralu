@@ -39,9 +39,11 @@ const SETUP_STEP = [
  * (`if-no-files-found: error`, to fail a build that bundled nothing) is not named so: its failure is the commit's.
  */
 const STORE_STEP = [/^Upload /i, /^Post /i]
-/** A step that fetches packages: a setup step only when the failure names the network or a package source */
-const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
-const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
+/** A step that fetches what it needs, packages or the tools tauri downloads to bundle (#2004): a setup step only when the failure names the network or a package source */
+const FETCH_STEP = /^(?:Run (?:pnpm|npm|yarn) (?:install|ci|i)\b|Build bundle$)/i
+/** Whether a failing step is one whose log line `jobFailure` needs to read (its `log`) */
+export const isFetchStep = (name) => FETCH_STEP.test(String(name ?? ''))
+const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)|failed to bundle project: `(?:http status: 5\d\d|timeout: |host not found|connection failed|io: Connection (?:reset|refused))/i
 
 /**
  * What the text of a failing step says when the network or a package source is what failed (#1450 review): a refused or
@@ -63,7 +65,7 @@ const NETWORK_LINE = [
 export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test(String(text ?? '')))
 
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
-export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
+export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (isFetchStep(name) && FETCH_NOTE.test(notes))
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
 const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
 const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi

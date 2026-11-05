@@ -248,6 +248,9 @@ jobs:
         shell: bash
         run: node scripts/stamp-version.mjs "$(node scripts/app-version.mjs --fallback)"
 
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/tauri-tools
+
       - name: Build bundle
         if: runner.os != 'macOS'
         env:

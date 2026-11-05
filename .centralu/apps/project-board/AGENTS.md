@@ -333,6 +333,7 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   a job whose first failed step only stored results (cause `storage`, 2026-11-03: `Upload the test times`
   could not reach the artifact service after every test passed; a step named `Upload ...` or `Post ...`;
   an upload that checks the commit, `if-no-files-found: error`, is left unnamed so it stays the commit's);
+  a `Build bundle` step whose log line is tauri's ``failed to bundle project: `http status: 5xx` `` (or its timeout, host-not-found or lost-connection wording) for a tool it downloads, cause `setup` (#2004: AppRun answered 504; `isFetchStep`, whose log line the queue and the main guard read, as for `pnpm install`);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
   failure beside any of these makes the run real.
 - **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
