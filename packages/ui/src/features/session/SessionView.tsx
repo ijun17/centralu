@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { CSSProperties, DragEvent, ReactNode, RefObject } from 'react'
+import type { DragEvent, ReactNode, RefObject } from 'react'
 import { isInTurn, shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
@@ -494,7 +494,7 @@ export function SessionPane({
                     'translate-y-0 shadow-(--shadow-dock-raised)'
                   : /*
                      * At rest, **a sliver of the card remains**: FOLDED_SLIVER (32px), set by
-                     * the translate below from that one constant.
+                     * the inline translate below from that one constant (the raised state is `translate-y-0`).
                      *
                      * It showed 26px at first, then 16 (reported by a user on 2026-09-11:
                      * "the input is not visible"): the card's pt-1 (4px) plus the form's py-3
@@ -544,11 +544,11 @@ export function SessionPane({
                      * blur concentrates the same ink into a narrower band and darkens that
                      * point, so the alpha is lowered every time to bring it back to 12.
                      */
-                    'translate-y-[calc(100%_-_var(--folded-sliver))] shadow-(--shadow-dock)'
+                    'shadow-(--shadow-dock)'
               }`
             : undefined
         }
-        style={fold ? ({ '--folded-sliver': `${FOLDED_SLIVER}px` } as CSSProperties) : undefined}
+        style={fold && !composerUp ? { translate: `0 calc(100% - ${FOLDED_SLIVER}px)` } : undefined}
         ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}
