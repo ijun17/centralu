@@ -45,13 +45,15 @@ const BUSY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
  * `retry`: Windows only, `renameWaitsForReaders`). With `retry` off, and for any other error, it is one try. Backs off 10, 20, 40 ... 200 ms between tries; the last
  * error is thrown when the budget is spent. The budget is the time it waited, not the clock's: a process the system
  * held for a while (a loaded runner, a laptop going to sleep) holds the reader up as long, and the clock would have
- * spent the whole budget on that pause and given up on the first refusal after it, before the reader could let go.
+ * spent the whole budget on that pause and given up on the first refusal after it, before the reader could let go. The clock still ends it at three times the budget: a rename that itself blocks (a slow
+ * virus scanner or filter driver) would otherwise get every try, each as slow as the first.
  *
  * `mayTry`, when given, is asked before every try, the first too, and a false answer ends it with its error (#1405
  * review): a writer under a lock checks there that the lock is still its own, so a retry seconds later cannot land a
  * write after another writer took the lock over.
  */
-export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, mayTry = null } = {}) {
+export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, now = Date.now, mayTry = null } = {}) {
+  const t0 = now()
   let waited = 0
   for (let delay = 10; ; delay = Math.min(delay * 2, 200)) {
     const refusal = mayTry?.()
@@ -59,7 +61,7 @@ export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rena
     try {
       return rename(from, to)
     } catch (e) {
-      if (!retry || !BUSY_CODES.has(e?.code) || waited + delay > budgetMs) throw e
+      if (!retry || !BUSY_CODES.has(e?.code) || waited + delay > budgetMs || now() - t0 > 3 * budgetMs) throw e
     }
     sleep(delay)
     waited += delay
