@@ -495,7 +495,7 @@ describe('replacing a file that a reader holds open (#1041)', () => {
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(500)
   })
 
-  // The CI job that failed (windows tests 1/2, 2026-11-05) stalled for 36 s at a time (the test pauses 10 s, past the 5 s budget and under its ceiling); a clock ran on while the reader waited too
+  // The CI job that failed (windows tests 1/2, 2026-11-05) stalled for 36 s at a time; a clock ran on while the reader waited too
   it('does not count a pause of the whole process as time it waited', () => {
     let clock = 0
     let calls = 0
@@ -504,7 +504,7 @@ describe('replacing a file that a reader holds open (#1041)', () => {
       if (++calls < 3) throw busy('EPERM')
     }
     const sleep = (ms: number) => {
-      clock += calls === 1 ? 10_000 : ms
+      clock += calls === 1 ? 60_000 : ms
     }
     // `now` is the clock the budget used to read (it is no longer an option): given, it makes the old code give up after two tries
     renameRetrying('a', 'b', { retry: true, rename, sleep, now: () => clock })
@@ -512,7 +512,7 @@ describe('replacing a file that a reader holds open (#1041)', () => {
   })
 
   // A scanner or filter driver that makes every rename itself slow: the sleeps alone would let all ~29 tries run, each that slow
-  it('stops at three times its budget by the clock, when each try itself takes long', () => {
+  it('stops once the renames themselves have blocked twice its budget, when each try takes long', () => {
     let clock = 0
     let calls = 0
     const rename = () => {
@@ -524,8 +524,19 @@ describe('replacing a file that a reader holds open (#1041)', () => {
       clock += ms
     }
     expect(() => renameRetrying('a', 'b', { retry: true, rename, sleep, now: () => clock })).toThrow(/EPERM/)
-    expect(clock).toBeLessThanOrEqual(3 * 5_000 + 1_000 + 200)
-    expect(calls).toBeLessThan(20)
+    expect(calls).toBe(11)
+  })
+
+  it('ends after one rename that itself took longer than that', () => {
+    let clock = 0
+    let calls = 0
+    const rename = () => {
+      calls++
+      clock += 12_000
+      throw busy('EPERM')
+    }
+    expect(() => renameRetrying('a', 'b', { retry: true, rename, sleep: (ms: number) => (clock += ms), now: () => clock })).toThrow(/EPERM/)
+    expect(calls).toBe(1)
   })
 
   it('does not retry anywhere else, nor an error that is not a busy file', () => {

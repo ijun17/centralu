@@ -45,23 +45,29 @@ const BUSY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
  * `retry`: Windows only, `renameWaitsForReaders`). With `retry` off, and for any other error, it is one try. Backs off 10, 20, 40 ... 200 ms between tries; the last
  * error is thrown when the budget is spent. The budget is the time it waited, not the clock's: a process the system
  * held for a while (a loaded runner, a laptop going to sleep) holds the reader up as long, and the clock would have
- * spent the whole budget on that pause and given up on the first refusal after it, before the reader could let go. The clock still ends it at three times the budget: a rename that itself blocks (a slow
- * virus scanner or filter driver) would otherwise get every try, each as slow as the first.
+ * spent the whole budget on that pause and given up on the first refusal after it, before the reader could let go. The time the renames themselves blocked is counted by the clock, apart, and ends it at twice the budget: a
+ * rename that blocks (a slow virus scanner or filter driver) would otherwise get every try, each as slow as the first. A
+ * pause during a sleep is in neither count.
  *
  * `mayTry`, when given, is asked before every try, the first too, and a false answer ends it with its error (#1405
  * review): a writer under a lock checks there that the lock is still its own, so a retry seconds later cannot land a
  * write after another writer took the lock over.
  */
 export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, now = Date.now, mayTry = null } = {}) {
-  const t0 = now()
   let waited = 0
+  let blocked = 0
   for (let delay = 10; ; delay = Math.min(delay * 2, 200)) {
     const refusal = mayTry?.()
     if (refusal) throw refusal
     try {
-      return rename(from, to)
+      const t0 = now()
+      try {
+        return rename(from, to)
+      } finally {
+        blocked += now() - t0
+      }
     } catch (e) {
-      if (!retry || !BUSY_CODES.has(e?.code) || waited + delay > budgetMs || now() - t0 > 3 * budgetMs) throw e
+      if (!retry || !BUSY_CODES.has(e?.code) || waited + delay > budgetMs || blocked > 2 * budgetMs) throw e
     }
     sleep(delay)
     waited += delay
