@@ -515,29 +515,19 @@ export class SessionManager {
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
     this.overloadRetry = new OverloadRetry({
-      settings: store.settings,
       meta: this.meta,
       leaving: () => this.handingOver || this.disposing,
       compactTurn: (id) => this.selfCompaction.compactTurn(id),
+      running: (id) => this.handles.has(id),
       note: (e) => this.events.onEvent(e),
-      send: async (id, text) => {
-        // A host that has no process for it yet (a swap that kept none) wakes it for the note, and the turn stays the turn it was (as an update's continue does)
-        const wake = !this.handles.has(id)
-        if (wake) this.restartPolicy.continuingTurns.add(id)
-        try {
-          await this.events.deliverMail(
-            id,
-            { text, quiet: false, line: '', label: 'retry', skipLine: () => true },
-            { leaving: () => this.handingOver || this.disposing, atRest: () => inTurn(this.meta.get(id)?.state ?? 'idle') },
-          )
-        } catch (e) {
-          // The person stopped the turn while it woke: nothing was sent and nothing failed
-          if (e instanceof MailNotAtRest) return
-          throw e
-        } finally {
-          if (wake) this.restartPolicy.continuingTurns.delete(id)
-        }
-      },
+      // Through Centralu's channel, as an update's continue: sent only while the retry still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
+      send: (id, text, live) =>
+        this.events
+          .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, { leaving: () => this.handingOver || this.disposing, atRest: () => live() && inTurn(this.meta.get(id)?.state ?? 'idle') })
+          // Stopped or taken over while it waited: nothing was sent, and nothing failed
+          .catch((err: unknown) => {
+            if (!(err instanceof MailNotAtRest)) throw err
+          }),
     })
     const compactSetting = () => autoCompactOf(this.uiPreferences())
     const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
@@ -606,9 +596,7 @@ export class SessionManager {
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
        * there.
        */
-      // A turn waiting to be retried (#1693) is no cut turn: it stays `working` with no process, as a kept one does, and the wait goes on (`restore`)
-      const retrying = turnCut(s) && this.overloadRetry.pending(s.id)
-      const cut = turnCut(s) && !retrying && !keeperOpts.keptSessions?.has(s.id)
+      const cut = turnCut(s) && !keeperOpts.keptSessions?.has(s.id)
       /*
        * And where a linked hub's update cut the turn (#1618): the turn goes on, in a new process, as a kept session's
        * does in its old one. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
@@ -646,7 +634,6 @@ export class SessionManager {
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
       if (stopped) stoppedBy.set(s.id, stopped)
-      if (retrying) this.overloadRetry.restore(s.id)
       if (goesOn) {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
         store.sessions.upsertSession(fixed)
@@ -2811,7 +2798,7 @@ export class SessionManager {
   private leaveHost(why: string): void {
     // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
     this.interruptions.stopAll()
-    // A retry waiting for the provider's capacity is stored, and the host after this one waits out what is left of it (#1693)
+    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693)
     this.overloadRetry.stopAll()
     // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
     // mark; handing over, the wait is the next host's, which starts it again on adoption

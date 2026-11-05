@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
-import { isUpdateContinueNote, UPDATE_CONTINUE_TEXT } from '../adapters/input-receipts.js'
+import { isCentraluNote, UPDATE_CONTINUE_TEXT } from '../adapters/input-receipts.js'
 import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 import { parseUpdateResume, recordUpdateCut, UpdateResumeLists } from './update-resume.js'
 import { readStopped, stoppedAtUpdate, updateNote } from './update-stopped.js'
@@ -102,7 +102,7 @@ describe("Centralu's note after an update (#1902)", () => {
   })
 
   it("every form of it reads back as Centralu's own, never as a message of the person (the catch-up anchors after it)", () => {
-    for (const text of [updateNote(true, null), updateNote(true, stopped), updateNote(false, stopped)]) expect(isUpdateContinueNote(text)).toBe(true)
-    expect(isUpdateContinueNote('Centralu on this machine was updated')).toBe(false)
+    for (const text of [updateNote(true, null), updateNote(true, stopped), updateNote(false, stopped)]) expect(isCentraluNote(text)).toBe(true)
+    expect(isCentraluNote('Centralu on this machine was updated')).toBe(false)
   })
 })

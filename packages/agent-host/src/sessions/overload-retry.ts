@@ -1,7 +1,7 @@
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import { RETRY_NOTE } from '../adapters/input-receipts.js'
 import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { inTurn } from '../idle.js'
-import { asObj } from '../json-value.js'
 
 /**
  * The turn a provider ends because its servers are at capacity is retried by the host (#1693, owner decision 2026-10-28:
@@ -21,41 +21,30 @@ import { asObj } from '../json-value.js'
  * word and fails again cannot loop. When the tries are spent the error ends the turn as it does today, saying how often it was retried.
  *
  * **What cancels it.** The person's Stop (`cancel`), a message into the session (`deliver` calls `cancel`: it carries the work
- * on itself), or any other end of the turn: the event that says so (`observe`) takes the wait away.
+ * on itself), or any other end of the turn: the event that says so (`observe`) takes the wait away. A cancel is honoured
+ * until the note is handed to the tool: the entry stays while it is being sent, and the send is gated on it (`live`).
  *
- * **A host swap.** The wait is stored (`overload_retry:<session>`, an app setting that an older build never reads) with
- * when it is due. A leaving host drops its timer and keeps the record; the host that starts finds the session still
- * `working`, takes the record and arms a timer for what is left (`restore`). Whichever host's timer fires first takes the
- * record in one transaction (`takeAppSetting`), so it is never sent twice. A host that took it and found itself leaving puts it back.
+ * **The host leaving.** The wait lives in this host only. The turn's end was the error, which this host swallowed and no host
+ * after it is told again (a kept process does not replay it), so a leaving host ends the turn with that error now
+ * (`stopAll`), as it ended before this retry: the person sends a message to go on. Nothing is stored.
  */
 
 /** The wait before each retry, in order: how many retries there are is how many entries there are */
 export const DELAYS_MS = [30_000, 120_000, 300_000, 600_000] as const
 
-/** What the agent is told when the turn is continued */
-export const RETRY_NOTE = "[Centralu] The model provider's servers were at capacity, which ended your last turn. Nothing you did caused it. Continue where you left off."
-
-const KEY = 'overload_retry:'
-
-/** How long after its time a stored retry is still sent: a start later than this finds the person gone and does not continue their turn */
-const LATE_MS = 10 * 60_000
-
-/** What is stored for a wait that has not fired */
-type Waiting = { attempt: number; dueAt: number; message: string }
-
 /** What the retry reaches of the host */
 export type OverloadRetryHost = {
-  settings: { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void; takeAppSetting(key: string): string | null; deleteAppSetting(key: string): void }
   meta: ReadonlyMap<string, SessionInfo>
-  /** The host is leaving (a quit or a swap): nothing is sent from it */
+  /** The host is leaving (a quit or a swap) */
   leaving(): boolean
   /** The running turn is one Centralu started to compact the conversation: that one is not retried */
   compactTurn(sessionId: string): boolean
-  /** Continues the turn through Centralu's channel; throws when the tool does not take it */
-  send(sessionId: string, text: string): Promise<void>
+  /** Whether the session has a process to continue the turn in */
+  running(sessionId: string): boolean
+  /** Continues the turn through Centralu's channel; sends nothing when `live` is false by then; throws when the tool does not take it */
+  send(sessionId: string, text: string, live: () => boolean): Promise<void>
   /** An event of the session, as if its tool had said it */
   note(e: NormalizedEvent): void
-  now?: () => number
   delays?: readonly number[]
 }
 
@@ -63,18 +52,18 @@ export function waitWords(ms: number): string {
   return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`
 }
 
+/** A retry that waits for its time (`timer`) or is being sent (`sending`): the error it stands in for, to say if the turn ends without it */
+type Wait = { timer: ReturnType<typeof setTimeout> | null; message: string; sending: boolean }
+
 export class OverloadRetry {
-  /** Retries used by the work in each session since it last flowed */
+  /** Retries used by the work in each session since it was done */
   private readonly used = new Map<string, number>()
-  private readonly waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; record: Waiting }>()
+  private readonly waiting = new Map<string, Wait>()
 
   constructor(private readonly host: OverloadRetryHost) {}
 
   private get delays(): readonly number[] {
     return this.host.delays ?? DELAYS_MS
-  }
-  private now(): number {
-    return this.host.now?.() ?? Date.now()
   }
 
   /**
@@ -87,15 +76,20 @@ export class OverloadRetry {
     const data = e.error.data
     if (!id || typeof data !== 'object' || data === null || (data as { reason?: unknown }).reason !== SERVER_OVERLOADED) return e
     const m = this.host.meta.get(id)
-    if (!m || !inTurn(m.state) || this.host.leaving() || this.host.compactTurn(id) || this.waiting.has(id)) return e
+    // One that is being sent is past: a turn the note started that fails at once is a failure of its own
+    if (!m || !inTurn(m.state) || this.host.leaving() || this.host.compactTurn(id) || this.waiting.get(id)?.sending === false) return e
     const tries = this.used.get(id) ?? 0
     if (tries >= this.delays.length) {
       this.used.delete(id)
+      this.waiting.delete(id)
       return { ...e, error: { ...e.error, message: `${e.error.message}\n${spentWords(tries)}` } }
     }
     const wait = this.delays[tries] ?? 0
     this.used.set(id, tries + 1)
-    this.arm(id, { attempt: tries + 1, dueAt: this.now() + wait, message: e.error.message })
+    const entry: Wait = { timer: null, message: e.error.message, sending: false }
+    entry.timer = setTimeout(() => void this.fire(id, entry), wait)
+    entry.timer.unref?.()
+    this.waiting.set(id, entry)
     return {
       type: 'notice',
       sessionId: id,
@@ -110,104 +104,66 @@ export class OverloadRetry {
   observe(e: NormalizedEvent): void {
     const id = e.sessionId
     if (!id) return
-    // The turn is done, ended some other way, or the person took over: nothing is left to continue, and the next failure counts from none
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancel(id)
   }
 
-  /** Takes a pending retry away, for the person's Stop or an end of the turn: whether one was waiting */
+  /** Takes a pending retry away, for the person's Stop, a message of theirs or an end of the turn: whether one was waiting or being sent */
   cancel(sessionId: string): boolean {
     this.used.delete(sessionId)
     const w = this.waiting.get(sessionId)
     if (!w) return false
-    clearTimeout(w.timer)
+    if (w.timer) clearTimeout(w.timer)
     this.waiting.delete(sessionId)
-    this.host.settings.deleteAppSetting(KEY + sessionId)
     return true
   }
 
   /**
-   * Whether a retry is stored for the session and still worth waiting for (a start asks, to leave the turn it was waiting in as
-   * it is). One that fell due long before (Centralu stayed closed past its time) is dropped: the person left, and the turn is
-   * one a quit cut, with the line and the Continue that has
+   * A message into the session takes the retry away (`SessionEvents.deliver`): the error it stood in for, or null when none stood.
+   * Same as `cancel`, with the error handed back for the case that the message does not go in (`lost`)
    */
-  pending(sessionId: string): boolean {
-    const raw = this.host.settings.appSetting(KEY + sessionId)
-    if (raw === null) return false
-    const record = parse(raw)
-    if (record && this.now() - record.dueAt <= LATE_MS) return true
-    this.host.settings.deleteAppSetting(KEY + sessionId)
-    return false
+  supersede(sessionId: string): string | null {
+    const message = this.waiting.get(sessionId)?.message ?? null
+    this.cancel(sessionId)
+    return message
   }
 
-  /**
-   * The start of a host that found the session in the turn the last host left waiting: the wait goes on for what is left of it.
-   * A record of a session that is not in a turn is stale and goes
-   */
-  restore(sessionId: string): void {
-    const raw = this.host.settings.appSetting(KEY + sessionId)
-    if (raw === null) return
-    const record = parse(raw)
-    const m = this.host.meta.get(sessionId)
-    if (!record || !m || !inTurn(m.state)) {
-      this.host.settings.deleteAppSetting(KEY + sessionId)
+  /** The message that took the retry away was refused: the turn is over, ended by the error the retry stood in for */
+  lost(sessionId: string, message: string): void {
+    if (!inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) return
+    this.host.note(failure(sessionId, `${message}\nCentralu was going to retry this turn, but a message to the session came first and was not delivered. Send a message to go on.`))
+  }
+
+  /** The host is leaving: the turns that wait end with the error they stood in for, which no later host would hear again */
+  stopAll(): void {
+    for (const [id, w] of [...this.waiting]) {
+      this.cancel(id)
+      this.host.note(failure(id, `${w.message}\nCentralu was going to retry this turn, but it restarted first. Send a message to go on.`))
+    }
+  }
+
+  private async fire(id: string, w: Wait): Promise<void> {
+    if (this.waiting.get(id) !== w) return
+    w.sending = true
+    const live = () => this.waiting.get(id) === w
+    try {
+      if (!this.host.running(id)) throw new Error('the session has no process left to continue it in')
+      await this.host.send(id, RETRY_NOTE, live)
+    } catch (err) {
+      // Cancelled meanwhile (a Stop, a message, another end): nothing is owed
+      if (!live()) return
+      this.cancel(id)
+      this.host.note(failure(id, `${w.message}\nCentralu could not retry the turn: ${err instanceof Error ? err.message : String(err)}`))
       return
     }
-    this.used.set(sessionId, record.attempt)
-    this.arm(sessionId, record, false)
+    if (live()) this.waiting.delete(id)
   }
+}
 
-  /** The host is leaving: no timer of it fires, and the records stay for the host that starts next */
-  stopAll(): void {
-    for (const w of this.waiting.values()) clearTimeout(w.timer)
-    this.waiting.clear()
-  }
-
-  private arm(id: string, record: Waiting, persist = true): void {
-    if (persist) this.host.settings.setAppSetting(KEY + id, JSON.stringify(record))
-    const timer = setTimeout(() => void this.fire(id), Math.max(0, record.dueAt - this.now()))
-    timer.unref?.()
-    this.waiting.set(id, { timer, record })
-  }
-
-  private async fire(id: string): Promise<void> {
-    const w = this.waiting.get(id)
-    if (!w) return
-    this.waiting.delete(id)
-    // Taken in one step: the host that gets here first sends it, the other (a swap's two hosts) finds nothing
-    if (this.host.settings.takeAppSetting(KEY + id) === null) return
-    const m = this.host.meta.get(id)
-    if (!m || !inTurn(m.state)) return
-    try {
-      await this.host.send(id, RETRY_NOTE)
-    } catch (err) {
-      const now = this.host.meta.get(id)
-      if (!now || !inTurn(now.state)) return
-      if (this.host.leaving()) {
-        // Not sent, and the host is going: the one after it tries again
-        this.host.settings.setAppSetting(KEY + id, JSON.stringify(w.record))
-        return
-      }
-      this.used.delete(id)
-      const why = err instanceof Error ? err.message : String(err)
-      this.host.note({
-        type: 'error',
-        sessionId: id,
-        error: { code: 'internal', message: `${w.record.message}\nCentralu could not retry the turn: ${why}`, retryable: true },
-      })
-    }
-  }
+/** The turn's end, as the provider's error said it (without the marker, which would hold it again) */
+function failure(sessionId: string, message: string): NormalizedEvent {
+  return { type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }
 }
 
 function spentWords(tries: number): string {
   return `Centralu retried this turn ${tries} ${tries === 1 ? 'time' : 'times'} and the servers stayed at capacity. This is not a usage limit: try again later or pick another model.`
-}
-
-function parse(raw: string): Waiting | null {
-  try {
-    const v = asObj(JSON.parse(raw))
-    if (typeof v.attempt === 'number' && typeof v.dueAt === 'number' && typeof v.message === 'string') return { attempt: v.attempt, dueAt: v.dueAt, message: v.message }
-  } catch {
-    // A record that does not read is stale
-  }
-  return null
 }

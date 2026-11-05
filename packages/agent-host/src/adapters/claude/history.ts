@@ -6,7 +6,7 @@ import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { blocksOf, type AssistantBody } from './json.js'
 import { assistantEvents, userEvents } from './model-messages.js'
 import { toolResultEvent } from '../tool-result.js'
-import { isCentraluInputId, isUpdateContinueNote } from '../input-receipts.js'
+import { isCentraluInputId, isCentraluNote } from '../input-receipts.js'
 
 /**
  * Reads past sessions Claude Code has kept.
@@ -226,7 +226,7 @@ function userLines(message: AssistantBody, agents: ReadonlySet<string>, sent: bo
    * Centralu's own Continue note is known by its exact text too, where the line lacks the id (another CLI version, a
    * transcript a crash left without it): never the person's message (#1626 review). The log says why it is known by its text
    */
-  const note = isUpdateContinueNote(text)
+  const note = isCentraluNote(text)
   if (note && !sent) console.error("[claude] Centralu's Continue note is in the transcript without the input id Centralu gave it: this CLI does not keep it. The catch-up recognises the note by its text")
   const out: HistoryMessage[] = text ? [{ role: 'user', text, ...(sent || note ? { sent: true as const } : {}) }] : []
   const events = userEvents({ message }, HISTORY_SESSION)

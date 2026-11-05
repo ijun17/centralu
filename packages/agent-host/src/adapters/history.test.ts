@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { centraluInputId, isCentraluInputId, UPDATE_CONTINUE_TEXT } from './input-receipts.js'
+import { centraluInputId, isCentraluInputId, RETRY_NOTE, UPDATE_CONTINUE_TEXT } from './input-receipts.js'
 import {
   __setSessionApiForTest,
   AGENT_REPORT_NOT_RECORDED,
@@ -182,6 +182,11 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
   it("knows Centralu's Continue note in a Codex thread by its text, as that tool keeps no id of ours (#1626 review)", () => {
     const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: UPDATE_CONTINUE_TEXT }] }] }], 10)
     expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
+  })
+
+  it("knows the host's retry note after a turn the provider ended for capacity by its text too, in a Codex thread (#1693)", () => {
+    const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: RETRY_NOTE }] }] }], 10)
+    expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: RETRY_NOTE, sent: true }])
   })
 
   it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {

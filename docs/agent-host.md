@@ -2098,10 +2098,16 @@ Implementation rules:
   channel (`deliverMail`: no message of the person's, as an update's continue). The waits are 30 s, 2, 5 and 10 minutes. A
   fifth failure ends the turn as before, with "Centralu retried this turn 4 times" added. The count starts over when the turn
   finishes, the person sends a message or stops it, or it ends any other way. **Stop** cancels the wait and ends the turn as
-  a Stop does, with or without a process. **A host swap**: the wait is stored (`overload_retry:<session>`); the leaving host
-  drops its timer, the next one finds the session still `working`, arms what is left, and takes the record in one
-  transaction when it fires, so two hosts send it once. A start more than 10 minutes after the time it fell due (Centralu
-  stayed closed) does not continue it: the turn is one a quit cut. **Claude** is not covered: its CLI retries a 529 itself
+  a Stop does, also while the note is on its way (it is handed to the tool only if the retry still stands). **A message of the
+  person's** takes it away before anything else, so theirs goes in and the note does not; if theirs is refused, the error the
+  retry stood in for ends the turn. The note asks the agent to check what already happened before repeating a step, and is
+  Centralu's own in the history read-back (`isCentraluNote`: the catch-up never stores it as the person's message). **The
+  host leaving** (a quit or a swap): the wait lives in that host only and nothing is stored. The turn's end was the error the
+  host swallowed, which a kept process does not replay, so the leaving host ends the turn with that error now ("Centralu was
+  going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. A session with
+  no process when the time comes ends the same way. Known gap: a hub's `ask_project` task marks its depth for the input
+  (`hub_ask_depth:`), and Codex fails the tracked input when the turn fails, before the host sees the error, which takes the
+  mark down; the continued turn then runs at depth 0 (#2015). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.

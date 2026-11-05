@@ -560,6 +560,23 @@ export class SessionEvents {
   }
 
   /**
+   * What goes into a session's conversation (`deliverNow`), after the retry of a turn the provider ended for want of capacity (#1693) is
+   * taken away: a message into the session carries the work on itself, and wins over a retry note on its way (a restart waited out
+   * while it is sent). Taken away first, before any wait: the retry's own send checks it right before it hands the note to the tool.
+   * If the message is then refused, the turn it was meant to carry on is over, and the error the retry stood in for ends it.
+   */
+  async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
+    const sessionId = args[0]
+    const held = this.host.overloadRetry.supersede(sessionId)
+    try {
+      await this.deliverNow(...args)
+    } catch (e) {
+      if (held !== null) this.host.overloadRetry.lost(sessionId, held)
+      throw e
+    }
+  }
+
+  /**
    * The body of send() — takes one more flag for **whether this is an instruction or a relay** (#120).
    *
    * While the gate only looked at the sender's profile, a report from a manager or coordinator just
@@ -569,7 +586,7 @@ export class SessionEvents {
    * exposed on send(), which anything else can call — a boundary that can be flipped on by accident
    * is not a boundary.
    */
-  async deliver(
+  async deliverNow(
     sessionId: string,
     text: string,
     attachments: Attachment[] | undefined,
@@ -714,8 +731,6 @@ export class SessionEvents {
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
-    // A message into a turn that waits for the provider's capacity carries the work on itself: the retry is not sent on top of it (#1693)
-    this.host.overloadRetry.cancel(sessionId)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)

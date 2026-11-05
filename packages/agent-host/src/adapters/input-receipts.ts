@@ -40,13 +40,24 @@ export const UPDATE_CONTINUE_TEXT =
   'Continue where you stopped. Check what already happened before repeating a step.'
 
 /**
- * Whether a line read back is Centralu's own note after an update (#1618, #1902), by the words it begins with: Centralu's own, which the
- * person does not type. The note can go on with what else the update stopped (`updateNote`), so it is not matched whole. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
+ * What a session whose turn the provider ended for want of capacity is sent when the host retries it (#1693): through Centralu's
+ * channel, never as the person's message. Like the update's note it asks the agent to check what already happened.
+ */
+export const RETRY_NOTE_HEAD = "[Centralu] The model provider's servers were at capacity"
+export const RETRY_NOTE =
+  `${RETRY_NOTE_HEAD}, which ended your last turn. Nothing you did caused it. ` +
+  'Continue where you stopped. Check what already happened before repeating a step.'
+
+/**
+ * Whether a line read back is one of Centralu's own notes (the update's, #1618, #1902, or the retry's, #1693), by the words it begins
+ * with: Centralu's own, which the person does not type. The update's note can go on with what else the update stopped (`updateNote`), so
+ * a note is not matched whole. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
  * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
  * catch-up anchors after it and never stores it as the person's message (#1626 review).
  */
-export function isUpdateContinueNote(text: string): boolean {
-  return text.trim().startsWith(UPDATE_NOTE_HEAD)
+export function isCentraluNote(text: string): boolean {
+  const t = text.trim()
+  return t.startsWith(UPDATE_NOTE_HEAD) || t.startsWith(RETRY_NOTE_HEAD)
 }
 
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
