@@ -62,8 +62,9 @@ export function ToolMark({
         <>
           {base}
           {note && ` · ${note.summary}`}
-          {note?.running.map((line) => (
-            <span key={line} className="block">
+          {note?.running.map((line, i) => (
+            // By place: two tasks can carry the same description
+            <span key={i} className="block">
               {line}
             </span>
           ))}

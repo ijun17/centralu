@@ -135,6 +135,8 @@ export function backgroundTasksTests(): void {
       expect(look.shadow).toContain(look.side)
       // When the last task ends the dot leaves with a fade, and the row is the same height as with it
       await page.evaluate((sid) => (window as any).__mock.emit({ type: 'background_tasks', sessionId: sid, live: [] }), id)
+      // It leaves with a fade (usePresence keeps it for the exit), not at once
+      await expect(dot).toHaveAttribute('data-leaving', 'true')
       await expect(dot).toHaveCount(0)
       const without = { row: (await row.boundingBox())!, mark: (await mark.boundingBox())! }
       expect(without.row.height).toBe(withDot.row.height)

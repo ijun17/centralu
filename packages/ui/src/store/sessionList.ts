@@ -43,7 +43,7 @@ export function liveFactsOf(
     unreachable: s.unreachable === true,
     // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
     interruption: s.interruption ?? null,
-    // Started from a linked computer (#1273): its row and header show its preset. Taken with every row, as `machine` is
+    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not, 2026-11-05). Taken with every row, as `machine` is
     startedFromHub: s.startedFromHub === true,
   }
 }

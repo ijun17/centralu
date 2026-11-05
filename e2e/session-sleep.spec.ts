@@ -140,7 +140,7 @@ test('a session kept awake by a /loop wake-up says why on its background mark', 
   )
   // The sidebar row's tool mark carries it: a dot on the mark, and its words in the mark's label
   await expect(page.getByTestId(`background-mark-${id}`)).toBeVisible()
-  await expect(page.getByTestId('tool-mark-claude').first()).toHaveAttribute(
+  await expect(page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-claude')).toHaveAttribute(
     'aria-label',
     /1 background task running \(keeps the session awake\)\n· Wakes itself at 14:05 \(\/loop\): poll CI/,
   )

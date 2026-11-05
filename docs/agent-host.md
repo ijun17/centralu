@@ -3015,7 +3015,7 @@ asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {sto
 `CronDelete` names it, a `CronList` answer omits it, or it auto-expires after seven days (a one-shot job is kept as
 long, conservatively). The adapter looks again a second after the next one is due. A process adopted from a previous
 host reads them back from its conversation's last 400 messages (the transcript has no structured results, so a
-wake-up counts its asked delay from the adoption). The background mark's tooltip lists them and says the session stays
+wake-up counts its asked delay from the adoption). The tool mark's tooltip on the sidebar row lists them (its dot says that some run) and says the session stays
 awake until they end. A Codex session is never put to sleep, so its own scheduling needs nothing here.
 
 Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.
