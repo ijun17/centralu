@@ -3,7 +3,7 @@
  * §6.2, §6.3, M1).
  *
  * The v64 build is this build's `Store` with the steps after 64 left out: its schema, and its thread mail written by
- * the statements its `MailRecords` ran (this build's copy, and plain SQL where this build no longer has them). So a test here that reads with the v64
+ * the statements its `MailRecords` ran (`store/mail-v64.test-helpers.ts`, and plain SQL here). So a test here that reads with the v64
  * build after v65 ran is the swap and the rollback: an older host serving a store a newer one migrated.
  */
 import { describe, expect, it } from 'vitest'
@@ -13,6 +13,7 @@ import { sessionAddress } from '../mail/address.js'
 import { Store } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
 import { legacyChain, movePendingThreadMail } from './store/mailbox-adopt.js'
+import { V64Mail } from './store/mail-v64.test-helpers.js'
 
 const HOST = 'hub-aaaaaaaa'
 const NOW = 1_800_000_000_000
@@ -31,6 +32,9 @@ let newest = 65
  * host or a rollback does
  */
 class Versioned extends Store {
+  /** The v64 build's thread mail statements (`MailRecords`), on this connection */
+  readonly mail = new V64Mail(this.db)
+
   protected override migrationSteps(): MigrationStep[] {
     return super.migrationSteps().filter((s) => s.to <= newest)
   }
@@ -153,7 +157,7 @@ describe('v65 on a store the v64 build served', () => {
     const store = v64Store()
     const ids = v64Mail(store)
     const view = () => ({
-      pending: [S1, S2, S3].map((x) => store.mail.pendingFor(x, NOW).map((p) => p.message.id)),
+      pending: [S1, S2, S3].map((x) => store.mail.pendingIds(x, NOW)),
       receipts: Object.values(ids).map((id) => store.mail.receiptsOf(id)),
       thread: store.mail.messagesTail(ids.thread ?? '', 50),
       held: store.mail.heldReceipts(),
@@ -162,7 +166,7 @@ describe('v65 on a store the v64 build served', () => {
     store.upgrade()
     try {
       expect(view()).toEqual(was)
-      // The v64 build's statements go on working: posting, turns, sessions, retention
+      // The v64 build's statements go on working: posting, turns, sessions
       const next = `${HOST}.m_next`
       store.mail.insertMessage({ id: next, threadId: ids.thread ?? '', sender: S1, kind: 'note', urgent: false, needsOwner: false, wake: null, replyTo: null, body: 'still here', facts: {}, dedupeKey: null, createdAt: NOW })
       for (const x of [S2, S3]) store.mail.insertReceipt(next, x, NOW)
@@ -179,7 +183,6 @@ describe('v65 on a store the v64 build served', () => {
         importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
       })
       expect(store.sessions.listSessions().map((x) => x.name)).toEqual(['nine'])
-      expect(store.mail.sweep(NOW)).toMatchObject({ threads: 0 })
     } finally {
       store.close()
     }
@@ -218,7 +221,7 @@ describe('movePendingThreadMail', () => {
     // And what was not moved is as it was
     expect(receipts(db).find((r) => r.message_id === ids.old)).toMatchObject({ handled_at: null, delivered_at: null })
     // The v64 build serving again delivers none of it
-    expect([S1, S2, S3].flatMap((x) => store.mail.pendingFor(x, NOW).map((p) => p.message.id))).toEqual([ids.old])
+    expect([S1, S2, S3].flatMap((x) => store.mail.pendingIds(x, NOW))).toEqual([ids.old])
     store.close()
   })
 
@@ -331,6 +334,38 @@ describe('movePendingThreadMail', () => {
     const { store, db, ids } = upgraded()
     expect(legacyChain(db, ids.thread ?? '', undefined, 50).map((m) => m.id)).toEqual([ids.q, ids.a, ids.n])
     expect(legacyChain(db, ids.thread ?? '', 3, 1).map((m) => m.id)).toEqual([ids.a])
+    store.close()
+  })
+
+  /** A row as a newer build, or a bad write, could leave it: a kind, a wake and a facts this build cannot read (docs/stored-shapes.md) */
+  const spoil = (db: Database.Database, ids: Record<string, string>) => {
+    db.prepare(`UPDATE mail_messages SET kind = 'from_a_newer_build' WHERE id = ?`).run(ids.n)
+    db.prepare(`UPDATE mail_messages SET wake = 'maybe' WHERE id = ?`).run(ids.a)
+    db.prepare(`UPDATE mail_messages SET facts = '{not json' WHERE id = ?`).run(ids.q)
+    db.prepare(`UPDATE mail_messages SET facts = '[1,2]' WHERE id = ?`).run(ids.t)
+  }
+
+  it('a kind, a wake or a facts it cannot read reads as a default, not as an error (each default is checked on its own)', () => {
+    const { store, db, ids } = upgraded()
+    spoil(db, ids)
+    const [q, a, n] = legacyChain(db, ids.thread ?? '', undefined, 50)
+    expect(n).toMatchObject({ id: ids.n, kind: 'note' })
+    expect(a).toMatchObject({ id: ids.a, wake: null })
+    expect(q).toMatchObject({ id: ids.q, kind: 'question', facts: {} })
+    // A word it does know is left as it is, and so is a facts object
+    expect(q?.wake).toBeNull()
+    expect(legacyChain(db, `${HOST}.t_work`, undefined, 50).find((m) => m.id === ids.rep)).toMatchObject({ wake: 'no', facts: { outcome: 'paused' } })
+    expect(legacyChain(db, `${HOST}.t_work`, undefined, 50).find((m) => m.id === ids.t)?.facts).toEqual({})
+    store.close()
+  })
+
+  it('the move does not fail on such a row: it moves as a message with the kind it was written with, and facts that are not an object as {}', () => {
+    const { store, db, ids } = upgraded()
+    spoil(db, ids)
+    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
+    expect(store.mailbox.message(ids.n ?? '')).toMatchObject({ kind: 'message', needsReply: false, facts: { legacyKind: 'from_a_newer_build' } })
+    expect(store.mailbox.message(ids.q ?? '')).toMatchObject({ kind: 'message', needsReply: true, facts: { legacyKind: 'question' } })
+    expect(store.mailbox.message(ids.t ?? '')).toMatchObject({ kind: 'task', facts: { legacyKind: 'assign' } })
     store.close()
   })
 })

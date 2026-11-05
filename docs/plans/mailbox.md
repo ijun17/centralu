@@ -1743,7 +1743,7 @@ state), `thread`, `kind`, `subject`, `state`, `outcome`, `next`, `blocker`, `unb
 
 ### 11.2 The orchestrator
 
-The orchestrator runs `mail` as a command behind `centralu_run`, as today (`frame.ts` `COMMAND_CALLS`). The calls it is
+The orchestrator runs `mail` as a command behind `centralu_run`, as today (the `command` form of `mailCalls` in `frame.ts`). The calls it is
 told of take that form. Its instruction line (`tool-definitions.ts:999`) becomes S10.
 
 ### 11.3 Sessions started before the switch (until M7)
@@ -2294,7 +2294,7 @@ calls `MessageService` except its tests.
 
 1. Every method above exists with these signatures and is covered by a test.
 2. No product file imports `messages.ts` or `reach.ts` yet.
-3. The frame's header lines are byte-identical to today's (a test compares them with `buildMailFrame`'s).
+3. The frame's header lines are byte-identical to today's (`frame-messages.test.ts` holds the text byte for byte; the old builder it was first compared with, `buildMailFrame`, is gone, #1996).
 4. Every constant of this design is in `mail/rules.ts` and nowhere else.
 
 **Design questions** (found while building M2; none changes a decision of §1, so each has the choice made, to be confirmed
@@ -2395,8 +2395,8 @@ and passes on its own; the stack lands together.
   `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
   its root; `mail.reassign` and `mail.unblock` retired with the window's controls (Q-M3a-34). The five methods of §12.2 and
   `mail.resume { messageId }` come with M6's screen, which calls them.
-- **`mail/frame.ts`.** `COMMAND_CALLS` and `PLAIN_CALLS` come from `mailCalls(1, form)`; the delivery uses
-  `buildMessageFrame`.
+- **`mail/frame.ts`.** The calls come from `mailCalls(1, form)` (the `COMMAND_CALLS` and `PLAIN_CALLS` constants and
+  `buildMailFrame` are gone, #1996); the delivery uses `buildMessageFrame`.
 - **`sessions/manager.ts`.**
   - `oldOwes(ownerId, childId)` (§9.5), passed to `MessageService` users that need it (`waitingOn`,
     `takeOverFromEarlierBuild`).
@@ -2419,7 +2419,7 @@ export type MailToolHost = {
   caller(sessionId: string): { address: string; askedBy: string | null; projectId: string | null; host: string } | undefined
   sessions(callerId: string, project?: string): { id: string; name: string; project: string | null; tool: string; state: SessionState; asleep: boolean; pendingCard: boolean; canReadMail: boolean; isOrchestrator: boolean }[]
   byName(word: string): { id: string; name: string; project: string | null }[]   // §11.1 name resolution, sessions here, not in the trash
-  mailArgs(sessionId: string): 1 | 2                                              // 1 everywhere in M3a
+  mailArgs(sessionId: string): 1 | 2                                              // 1 everywhere in M3a; the stub is gone (#1996): the tool calls `mailCalls(1, form)`, and the `sessions.mail_args` column stays
   orchestratorId(): string | null
 }
 ```
@@ -2614,6 +2614,10 @@ and the receiver answers with `send id=`. An adopted session from before the sli
   `orchestrator-ask.test.ts` one-open cases, `rules.test.ts` thread cases, thread cases in `tool.test.ts`).
 
 **Must not change.** Behaviour: `pnpm verify` and the M3a and M3b tests pass unchanged.
+
+**Left after M3c, removed in #1996 (#1948 A1 to A4), because only tests called them:** `store/mail.ts` (`MailRecords`) and
+`store/mail-retention.ts` (the live row types moved to `store/mail-types.ts`; the tables and migrations stay), `buildMailFrame`
+with `COMMAND_CALLS` and `PLAIN_CALLS`, `holdsInbound` with `mail/policy.ts`, and the `mailArgs` stub.
 
 **Acceptance.** No product file imports the deleted modules. The line counts of §17's "after M3c" column hold within
 10 %.

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
+import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, filesRunMs, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
@@ -22,8 +23,11 @@ import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, filesRu
  */
 afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
 
-const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', LC_ALL: 'C' }
-const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', env: GIT_ENV }).trim()
+// No automatic maintenance: a commit starts a detached `git maintenance run --auto` that holds objects/maintenance.lock after the
+// commit returns, and the copy of a template made right then (cpSync) meets the lock vanishing: ENOENT on its .git/objects
+const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', LC_ALL: 'C', ...NO_GIT_MAINTENANCE }
+const gitIn = (env: NodeJS.ProcessEnv, cwd: string, args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', env }).trim()
+const git = (cwd: string, ...args: string[]) => gitIn(GIT_ENV, cwd, args)
 
 type Report = { testResults: { name: string; assertionResults: { ancestorTitles: string[]; title: string; status: string }[] }[] }
 type Pass = { report: Report | null; timedOut: boolean }
@@ -347,6 +351,33 @@ describe('what pre-pr reads', () => {
     expect(() => parseArgs(['--skip'])).toThrow(/Unknown argument --skip/)
     expect(() => parseArgs(['--exempt', 'revert'])).toThrow(/Unknown argument --exempt/)
     expect(() => parseArgs(['--cleanup', '../x'])).toThrow(/--cleanup takes a run id/)
+  })
+})
+
+/*
+ * The templates below are copied right after their last commit. Since git 2.29 a commit starts `git maintenance run --auto`,
+ * detached in newer versions: it takes .git/objects/maintenance.lock before it detaches and gives it up a moment after the
+ * commit has returned, so a copy that lists .git/objects in that moment finds the file gone (macOS runs of this file, jobs
+ * 127139809160 and 127151555492: `ENOENT ... .git/objects` from cpSync in a beforeEach, in the first test after a template
+ * was built). git's trace shows the start whether or not the maintenance had anything to do, so this does not wait for the race.
+ */
+describe('the repositories this file builds', () => {
+  it('start no background git maintenance when they commit', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-maintenance-'))
+    try {
+      const repo = join(dir, 'repo')
+      mkdirSync(repo)
+      git(repo, 'init', '-q', '-b', 'main')
+      writeFileSync(join(repo, 'a.txt'), 'a\n')
+      git(repo, 'add', '-A')
+      const trace = join(dir, 'trace.json')
+      gitIn({ ...GIT_ENV, GIT_TRACE2_EVENT: trace }, repo, ['commit', '-q', '-m', 'main'])
+      const started = readFileSync(trace, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { event: string; argv?: string[] })
+        .filter((e) => e.event === 'child_start').map((e) => (e.argv ?? []).join(' '))
+      expect(started.filter((a) => a.includes('maintenance'))).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

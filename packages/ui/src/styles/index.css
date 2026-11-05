@@ -62,8 +62,9 @@
  * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
  * too, or themes cannot reach it (a unit test checks the two lists agree).
  *
- * The default theme is fully achromatic. There is not a single hue in the chrome, so hierarchy is
- * built entirely by brightness. So the rule holds literally:
+ * The default theme's chrome is a warm near-neutral: every surface, line and ink leans a little
+ * toward orange (chroma around 0.01) and none carries a hue of its own, so hierarchy
+ * is built entirely by brightness. So the rule holds literally:
  *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
  *
  * Urgency is told by brightness, kind by shape (reads the same for color-blind viewers and on a
@@ -76,11 +77,11 @@
    * Surfaces — what things sit on, named by position. In the default theme they climb in
    * brightness from the floor up.
    */
-  --color-surface-floor: #0f0f0f; /* the app floor */
-  --color-surface-side: #0f0f0f; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone parts them from the conversation */
-  --color-surface-raised: #242424; /* what floats: cards, menus, dialogs, inputs */
-  --color-surface-selected: #353535; /* a picked tab or option, and the quiet hover on a raised card */
-  --color-surface-hover: #424242; /* hover and pressed; also my own message bubble */
+  --color-surface-floor: #120e0a; /* the app floor */
+  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone parts them from the conversation */
+  --color-surface-raised: #282320; /* what floats: cards, menus, dialogs, inputs */
+  --color-surface-selected: #393430; /* a picked tab or option, and the quiet hover on a raised card */
+  --color-surface-hover: #46413d; /* hover and pressed; also my own message bubble */
   /*
    * The control tower's floor — the plate the panels sit on.
    *
@@ -93,22 +94,22 @@
    * outside look the same, it's confusing"). What is actually visible is only the gaps between
    * panels and the edges, so it does not brighten a large area.
    */
-  --color-surface-deck: #2b2b2b; /* the grid's and the project screen's floor */
+  --color-surface-deck: #2f2a27; /* the grid's and the project screen's floor */
   /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
-  --color-surface-reading: #0f0f0f;
-  --color-surface-reading-raised: #242424;
+  --color-surface-reading: #120e0a;
+  --color-surface-reading-raised: #282320;
 
   /* Lines */
-  --color-line: #363636; /* hairline: borders, dividers, meter tracks */
-  --color-line-strong: #4d4d4d; /* a border that has to show: focused inputs, checkboxes, graph lanes */
+  --color-line: #3a3531; /* hairline: borders, dividers, meter tracks */
+  --color-line-strong: #514c48; /* a border that has to show: focused inputs, checkboxes, graph lanes */
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
-  --color-ink: #ededed; /* body text */
-  --color-ink-muted: #a8a8a8; /* secondary */
-  --color-ink-faint: #707070; /* background information */
-  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a4a4a4`, light its inverse; the high-contrast presets take a fill the letter stays readable on */
-  --color-mark-waiting: #a4a4a4;
+  --color-ink: #f0ecea; /* body text */
+  --color-ink-muted: #aca7a3; /* secondary */
+  --color-ink-faint: #756f6b; /* background information */
+  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a8a39f`, light its inverse; the high-contrast presets take a fill the letter stays readable on */
+  --color-mark-waiting: #a8a39f;
 
   /*
    * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
@@ -119,10 +120,10 @@
    * Instead, it never leaves the body of the diff — state and urgency are still spoken by
    * brightness alone.
    */
-  --color-diff-add: #8ff59a;
-  --color-diff-add-bg: #0f2f1c;
-  --color-diff-del: #ff9b91;
-  --color-diff-del-bg: #38171a;
+  --color-diff-add: #b1f085;
+  --color-diff-add-bg: #192e16;
+  --color-diff-del: #fb9e86;
+  --color-diff-del-bg: #371816;
   /*
    * Danger — what is about to destroy something (deleting a project with its folder, purging
    * the trash) and an action that failed (a quit or a switch that did not go through). It
@@ -131,23 +132,23 @@
    * the two answer different questions: a theme may want the diff's red softer for reading while
    * keeping a warning loud.
    */
-  --color-danger: #ff9b91;
-  --color-danger-bg: #38171a;
+  --color-danger: #fb9e86;
+  --color-danger-bg: #371816;
 
   /*
    * Interaction. Focus is the keyboard focus ring and the inset line that marks a drop target —
    * both say "this is where it goes". Selection is translucent, see ::selection below.
    */
-  --color-focus: #b4b4b4;
-  --color-selection: rgb(255 255 255 / 0.24);
+  --color-focus: #b8b3af;
+  --color-selection: rgb(240 236 234 / 0.24);
   /*
    * The scrollbar is part of the theme: its colours and its shape. The thumb is drawn inset from
    * its 10px track by a transparent border, which is what makes it read as a thin pill rather
    * than a bar.
    */
   --color-scrollbar-track: transparent;
-  --color-scrollbar-thumb: #3c3c3c;
-  --color-scrollbar-thumb-hover: #4d4d4d;
+  --color-scrollbar-thumb: #403b37;
+  --color-scrollbar-thumb-hover: #514c48;
   --scrollbar-size: 10px;
   --scrollbar-thumb-inset: 3px;
   --scrollbar-radius: 999px;
@@ -160,9 +161,9 @@
   --color-scrim-thin: color-mix(in oklab, #000 50%, transparent);
 
   /* The keycap's face and rim, see .keycap */
-  --color-keycap-top: #2a2a2a;
-  --color-keycap-bottom: #181818;
-  --color-keycap-border: #0a0a0a;
+  --color-keycap-top: #2e2926;
+  --color-keycap-bottom: #1b1815;
+  --color-keycap-border: #0e0905;
   /* The light around the signal, see .signal */
   --color-signal-glow: rgb(255 255 255 / 0.45);
 
@@ -170,31 +171,31 @@
   /*
    * The terminal (xterm). xterm paints with its own theme object, read from these when a terminal
    * opens (components/terminalTheme.ts). The shell sits on the side surface with a visible cursor;
-   * a command's log sits on a raised surface. The 16 ANSI colours are xterm's own defaults, written
+   * a command's log sits on a raised surface. The 16 ANSI colours are xterm's own defaults (Dark warms its four greys), written
    * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
    * colour away from a program's output.
    */
-  --color-term-bg: #1d1d1d;
-  --color-term-log-bg: #242424;
-  --color-term-fg: #ededed;
-  --color-term-cursor: #ededed;
-  --color-term-selection: #424242;
-  --color-term-black: #2e3436;
+  --color-term-bg: #201c1a;
+  --color-term-log-bg: #282320;
+  --color-term-fg: #f0ecea;
+  --color-term-cursor: #f0ecea;
+  --color-term-selection: #46413d;
+  --color-term-black: #37322e;
   --color-term-red: #cc0000;
   --color-term-green: #4e9a06;
   --color-term-yellow: #c4a000;
   --color-term-blue: #3465a4;
   --color-term-magenta: #75507b;
   --color-term-cyan: #06989a;
-  --color-term-white: #d3d7cf;
-  --color-term-bright-black: #555753;
+  --color-term-white: #d8d5d2;
+  --color-term-bright-black: #5b5551;
   --color-term-bright-red: #ef2929;
   --color-term-bright-green: #8ae234;
   --color-term-bright-yellow: #fce94f;
   --color-term-bright-blue: #729fcf;
   --color-term-bright-magenta: #ad7fa8;
   --color-term-bright-cyan: #34e2e2;
-  --color-term-bright-white: #eeeeec;
+  --color-term-bright-white: #f1edeb;
 
   /*
    * Shadows. Used as `shadow-(--shadow-modal)`, not `shadow-modal`: Tailwind copies a theme
@@ -264,7 +265,7 @@
    *   sm      3px   small marks: checkboxes, inline code
    *   md      4px   controls, keycaps, tool tiles, a session's mark
    *   lg      8px   panels, menus, dialogs, tool cards
-   *   field  10px   what is typed into or picked from: the top bar's search field, a question's options and its
+   *   field  10px   what is typed into or picked from: the sidebar's search field, a question's options and its
    *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
    *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
    *                 approval and question cards, and the conversation's own cards (a new session's past
@@ -328,15 +329,15 @@
  *
  * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
  * what the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #0f0f0f, conversation #0f0f0f: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
- *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#363636)
+ *   Dark   sidebar #120e0a, conversation #120e0a: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
+ *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#3a3531)
  *          alone parts them now.
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 9.9 above the floor in Dark (#242424 on #0f0f0f) and 4.2 in Light
+ * signal. Raised sits ΔL* 10.0 above the floor in Dark (#282320 on #120e0a) and 4.2 in Light
  * (#f4f4f4 on #e8e8e8). Dark's wider steps (#725) put it above what the lifted conversation gave
  * its cards (6.3), which is the point of the change: the composer and the cards read apart from
  * the conversation without leaning on their border. The card's `line` border (ΔL* 18.3 and 7.1
@@ -344,8 +345,8 @@
  * ink keeps the highest contrast on every surface (app/theme.ts `urgencyBreaks`, checked for
  * every preset).
  *
- * Dark's inks measure against the floor #0f0f0f: body 16.4:1, muted 8.1:1, faint 3.9:1, and
- * the signal 19.2:1. On raised (#242424) the three are 13.3, 6.5 and 3.1:1. The order holds on
+ * Dark's inks measure against the floor #120e0a: body 16.4:1, muted 8.1:1, faint 3.9:1, and
+ * the signal 19.2:1. On raised (#282320) the three are 13.2, 6.5 and 3.1:1. The order holds on
  * every surface, which is what the urgency test checks.
  */
 [data-testid='session-view'] {
@@ -494,6 +495,11 @@
   --color-term-fg: #f0f0f0;
   --color-term-cursor: #ffffff;
   --color-term-selection: #4a4a4a;
+  /* The four ANSI greys Dark moved to its warm tones; this preset stays neutral */
+  --color-term-black: #2e3436;
+  --color-term-white: #d3d7cf;
+  --color-term-bright-black: #555753;
+  --color-term-bright-white: #eeeeec;
 }
 
 [data-theme='hc-light'] {
@@ -705,7 +711,7 @@
     opacity: 0.6;
   }
   /*
-   * The selection highlight is translucent white.
+   * The selection highlight is translucent near-white.
    *
    * It used to be solid #353535, but my own message bubble's background is the same colour,
    * so selecting text on it produced no visible change (caught in dogfooding). Using alpha
