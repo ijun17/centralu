@@ -3,7 +3,9 @@ import type { ChatItem } from '../../../store/store.js'
 import { dayBreaksOnPage, foldIsOpen, foldKey, foldRuns, foldSummary, liveStep } from './foldRuns.js'
 
 let n = 0
-const row = <T extends ChatItem>(item: Omit<T, 'seq'> & { seq?: number }): ChatItem => ({ ...item, seq: item.seq ?? ++n }) as ChatItem
+// A row without its render key, whichever kind: the key is numbered here
+type Draft = ChatItem extends infer T ? (T extends unknown ? Omit<T, 'seq'> & { seq?: number } : never) : never
+const row = (item: Draft): ChatItem => ({ ...item, seq: item.seq ?? ++n })
 const user = () => row({ kind: 'user', text: 'q' })
 const said = () => row({ kind: 'assistant', text: 'a' })
 const thought = (over: Partial<Extract<ChatItem, { kind: 'reasoning' }>> = {}) => row({ kind: 'reasoning', text: 't', ...over })

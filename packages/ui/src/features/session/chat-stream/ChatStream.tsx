@@ -148,8 +148,6 @@ export function ChatStream({
    */
   const views = useStore((s) => s.inlineViews[sessionId])
   const opened = useStore((s) => s.foldOpen[sessionId])
-  const setFoldOpen = useStore((s) => s.setFoldOpen)
-  const clearSearchTarget = useStore((s) => s.clearSearchTarget)
   const hit = useMemo(() => (searchTarget ? chat.findIndex((c) => c.storedSeq === searchTarget.seq) : -1), [chat, searchTarget])
   const { runs, runOf } = useMemo(() => foldRuns(chat, (id) => !!views?.[id]), [chat, views])
   const folds = useMemo(() => {
@@ -166,8 +164,8 @@ export function ChatStream({
   useEffect(() => {
     const head = hit < 0 ? -1 : (runOf[hit] ?? -1)
     const run = head < 0 ? undefined : folds.heads.get(head)?.fold
-    if (run && !run.keys.some((k) => opened?.[k])) setFoldOpen(sessionId, run.keys, true)
-  }, [hit, runOf, folds, opened, sessionId, setFoldOpen])
+    if (run && !run.keys.some((k) => opened?.[k])) useStore.getState().setFoldOpen(sessionId, run.keys, true)
+  }, [hit, runOf, folds, opened, sessionId])
   /*
    * A run opens with a fade of its rows (`cc-fade`) and closes with one (`cc-fade-out`, then the rows go): a short
    * change of brightness, no travel, and under reduced motion the same rule the other fades follow (index.css). The
@@ -181,16 +179,16 @@ export function ChatStream({
     if (motion?.kind === 'out') return
     clearTimeout(motionTimer.current)
     if (!open) {
-      setFoldOpen(sessionId, fold.keys, true)
+      useStore.getState().setFoldOpen(sessionId, fold.keys, true)
       setMotion({ first: fold.first, kind: 'in' })
       motionTimer.current = setTimeout(() => setMotion(null), FOLD_FADE_MS + 50)
       return
     }
     // A run held open by the search hit in it closes the hit with it, or it would open again
-    if (searchTarget && hit >= fold.first && hit <= fold.last) clearSearchTarget(sessionId, searchTarget.at)
+    if (searchTarget && hit >= fold.first && hit <= fold.last) useStore.getState().clearSearchTarget(sessionId, searchTarget.at)
     setMotion({ first: fold.first, kind: 'out' })
     motionTimer.current = setTimeout(() => {
-      setFoldOpen(sessionId, fold.keys, false)
+      useStore.getState().setFoldOpen(sessionId, fold.keys, false)
       setMotion(null)
     }, FOLD_FADE_MS)
   }
