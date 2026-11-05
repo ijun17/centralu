@@ -9,7 +9,7 @@ import { emitEvent, newSession, setup } from './fixtures/control.js'
 const LONG_NAME = '무한모드 정산 잔여 E2E 검증과 릴리스 전 마지막 점검 항목 모두 정리하기'
 const LONG_PATH = `Read: /tmp/alpha/${'very-long-directory-name/'.repeat(8)}file.ts`
 
-for (const width of [1280, 900, 480]) {
+for (const width of [1280, 900, 480, 360]) {
   test(`a long target or title keeps the chevron on the card's first line at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 })
     await setup(page, { projects: ['/tmp/alpha'] })
@@ -25,6 +25,7 @@ for (const width of [1280, 900, 480]) {
     })
     await emitEvent(page, 1, { type: 'tool_result', callId: 'a1', ok: true, summary: 'ok' })
     await emitEvent(page, 1, { type: 'tool_call', callId: 'a2', summary: { tool: 'mcp__a_server_with_a_very_long_name__and_a_long_tool_name', title: LONG_PATH, paths: [] } })
+    await emitEvent(page, 1, { type: 'tool_result', callId: 'a2', ok: false, summary: 'exit 1' })
     await emitEvent(page, 1, { type: 'tool_call', callId: 'a3', summary: { tool: 'Read', title: LONG_PATH, paths: ['/tmp/alpha/x'] } })
 
     const cards = page.getByTestId('tool-card')

@@ -114,8 +114,8 @@ export function CentraluCallHeader({
   const reason = item.ok === false ? failureReason(item.result) : null
   return (
     /*
-     * One line, never wrapped: the chevron stays at the right end however long the words or the session's name are
-     * (owner, 2026-11-06). What gives way is the long part: the words and the chip's name are cut with an ellipsis, the
+     * One row, never wrapped: the chevron stays at the right end however long the words or the session's name are
+     * (owner, 2026-11-06); inside the words, the Failed capsule may still drop under a long label. What gives way is the long part: the words and the chip's name are cut with an ellipsis, the
      * chip taking at most 30% of the row so the words keep their room in a narrow card (#1544), and the whole text stays
      * in the tooltip (`title`).
      */
@@ -136,7 +136,7 @@ export function CentraluCallHeader({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-1.5">
-            {/* A project's name is the person's own and may be long, and a narrow card has little room: the words give way before the mark and the session chip do */}
+            {/* A project's name is the person's own and may be long, and a narrow card has little room: the words are cut with an ellipsis before the mark and the chevron give way */}
             <span
               className="max-w-full min-w-0 truncate text-sm font-medium text-ink"
               title={label}
