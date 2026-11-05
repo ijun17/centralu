@@ -222,6 +222,14 @@ describe('what the merge queue decides for one poll', () => {
       'Installing playwright 2.403.1',
       'Unpacking foo_1.429-1_amd64.deb',
       'Error: Installation process exited with code: 100',
+      // Every line of a step whose apt answered 404 for a package it asked for, as the guard reads it: none is the network
+      [
+        'Err:7 http://archive.ubuntu.com/ubuntu noble/universe amd64 libwebkit2gtk-9.9-0 amd64 9.9.1',
+        '  404  Not Found [IP: 91.189.91.82 80]',
+        'E: Failed to fetch http://archive.ubuntu.com/ubuntu/pool/universe/w/webkit2gtk/libwebkit2gtk-9.9-0_9.9.1_amd64.deb  404  Not Found [IP: 91.189.91.82 80]',
+        'Failed to install browsers',
+        '##[error]Process completed with exit code 1.',
+      ].join('\n'),
       '',
     ])
       expect(looksLikeNetworkError(text), text).toBe(false)
@@ -959,6 +967,8 @@ describe('a batch stopped because main moved is batched again, not sent to its o
       b = made
     }
     expect(again(q, b)).toBeNull()
+    // The count stays on the item: a pull request past the cap that lost it would get fresh restarts on the same head
+    expect(q.items[0].moved).toEqual({ head: A, n: MOVED_CAP })
     expect(q.items[0]).toMatchObject({ batchless: A, alone: { head: A, tier: 'quick' } })
     expect(q.items[0].batch).toBeUndefined()
     expect(q.items[0].alone.text).toContain('stopped before #1')

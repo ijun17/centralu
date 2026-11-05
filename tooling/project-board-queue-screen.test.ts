@@ -73,6 +73,20 @@ describe('the judge of whether a batch changes the screen (queue-screen.mjs)', (
     expect(await judge()).toEqual({ tier: 'full', why: 'it changes the screen (packages/ui/src/App.tsx)' })
   })
 
+  it('runs the heavy jobs when the judge is not on the default branch, and says so', async () => {
+    tempAt(root)
+    hoisted.judge = null
+    expect(await judge()).toEqual({ tier: 'full', why: '.github/scripts/ci-changes.mjs is not on main, so it cannot be told whether it changes the screen' })
+  })
+
+  it('runs the heavy jobs when the changed files are not known', async () => {
+    tempAt(root)
+    hoisted.files = null
+    const r = await judge()
+    expect(r.tier).toBe('full')
+    expect(r.why).toContain('the files it changes are not known')
+  })
+
   it('answers from a plain temporary folder', async () => {
     tempAt(root)
     expect(await judge()).toEqual({ tier: 'quick', why: 'it changes nothing the UI scenarios see (1 file)' })
