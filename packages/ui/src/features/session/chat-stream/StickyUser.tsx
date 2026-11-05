@@ -10,14 +10,20 @@ import { isRelayed, mineBubbleAttrs, mineBubbleLook } from '../chat-rows/bubbleL
  * `stickyIndex` and `stickyText` to hide the original row; its scroll handler calls `syncSticky`.
  */
 
+/** How long the pinned copy takes to leave or come back when the pane folds (design-system §9, the 150-200 ms layers) */
+export const STICKY_FOLD_MS = 180
+
 export function useStickyUser({
   scrollRef,
   chat,
   virtualizer,
+  folded = false,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
   virtualizer: Virtualizer<HTMLDivElement, Element>
+  /** The pane has folded its composer (a short grid or project panel): the pinned copy leaves the screen, upward */
+  folded?: boolean
 }) {
   /*
    * The **most recent message I sent** that has now scrolled past the top of the screen.
@@ -91,6 +97,29 @@ export function useStickyUser({
     setStickyReturning(false)
     wasStickyObscured.current = false
   }, [stickyIndex])
+
+  /*
+   * While the pane is folded the copy is **out of view, above the top edge** (owner, 2026-11-06), so the original row
+   * has to show again or the message would be nowhere. The two swap at the end of the exit, not at its start: the
+   * original stays hidden until the copy has left (`STICKY_FOLD_MS`), and hides again the moment the copy starts back,
+   * so the message is never drawn twice. A pane that mounts folded starts with the copy already gone: nothing leaves,
+   * nothing flashes.
+   */
+  const [stickyGone, setStickyGone] = useState(folded)
+  useEffect(() => {
+    if (!folded) {
+      setStickyGone(false)
+      return
+    }
+    const t = setTimeout(() => {
+      setStickyGone(true)
+      // Closed once it is out of sight: the expanded card fades out with the copy, it does not snap away
+      setStickyOpen(false)
+    }, STICKY_FOLD_MS)
+    return () => clearTimeout(t)
+  }, [folded])
+  /** Whether the pinned copy stands in for the original row, which is hidden meanwhile (ChatStream) */
+  const stickyCovers = stickyText !== null && !stickyGone
 
   /*
    * If the next user message comes in under the pinned banner, one of the two has to disappear.
@@ -169,13 +198,16 @@ export function useStickyUser({
     setStickyOpen,
     stickyObscured,
     stickyReturning,
+    stickyFolded: folded,
+    stickyCovers,
   }
 }
 
 export type StickyUserState = ReturnType<typeof useStickyUser>
 
 export function StickyUser({ sticky }: { sticky: StickyUserState }) {
-  const { stickyText, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning } = sticky
+  const { stickyText, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning, stickyFolded } =
+    sticky
   if (stickyText === null) return null
   return (
     /*
@@ -197,9 +229,19 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
       corners on all four sides and a complete border, like a message bubble).
     */
     <div
-      className={`sticky -top-[10px] z-10 -mx-4 mb-1 flex justify-end px-4 ${
-        stickyObscured ? 'pointer-events-none' : ''
-      }`}
+      /*
+        Folded (a short panel, owner 2026-11-06): the copy slides up past the top edge and fades, and slides back down
+        when the pane opens. It is a transition on this wrapper, not an animation on the card inside, so it composes
+        with the card's own steps aside and back (`cc-hang-out-up`, `cc-hang-in-down`) and a pane that mounts folded
+        simply starts out of view. It keeps its place in the flow (a collapsed height would move every coordinate of
+        the virtual list), and `inert` hands clicks and focus to what lies under it for the whole exit. Under
+        reduced motion it only fades.
+      */
+      className={`sticky -top-[10px] z-10 -mx-4 mb-1 flex justify-end px-4 transition-[translate,opacity] duration-[180ms] ease-out motion-reduce:transition-[opacity] ${
+        stickyFolded ? '-translate-y-[calc(100%+12px)] opacity-0 motion-reduce:translate-y-0' : 'translate-y-0 opacity-100'
+      } ${stickyObscured || stickyFolded ? 'pointer-events-none' : ''}`}
+      inert={stickyFolded}
+      data-folded={stickyFolded ? 'true' : undefined}
       data-testid="sticky-user"
     >
       {/*

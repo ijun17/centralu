@@ -57,7 +57,8 @@ export function ChatStream({
   activity: SessionSummary['activity']
   /**
    * A collapsed composer covers a bit of the bottom — this reserves margin so the last line is
-   * never permanently hidden under it
+   * never permanently hidden under it. It also says the pane is folded: the pinned copy of the last user
+   * message leaves the screen while it holds (StickyUser)
    */
   bottomPeek?: boolean
   /**
@@ -176,8 +177,8 @@ export function ChatStream({
    * The banner is asked first because the scroll handler moves it. Neither hook's effects read
    * what the other's write, so their order between the two does not matter (#428).
    */
-  const sticky = useStickyUser({ scrollRef, chat, virtualizer })
-  const { stickyIndex, stickyText } = sticky
+  const sticky = useStickyUser({ scrollRef, chat, virtualizer, folded: bottomPeek })
+  const { stickyIndex } = sticky
   const { onScroll, endLanding, noteInput, held, settling } = useChatScroll({
     sessionId,
     scrollRef,
@@ -314,7 +315,7 @@ export function ChatStream({
                   : joinsNext(bubbleOf(chat, v.index))
                     ? ''
                     : 'pb-3'
-              } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
+              } ${v.index === stickyIndex && sticky.stickyCovers ? 'invisible' : ''} ${
                 chat[v.index]?.storedSeq === searchTarget?.seq
                   ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
                   : ''

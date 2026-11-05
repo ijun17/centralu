@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { DragEvent, ReactNode, RefObject } from 'react'
+import type { CSSProperties, DragEvent, ReactNode, RefObject } from 'react'
 import { isInTurn, shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
@@ -17,13 +17,7 @@ import { SessionHeader } from './SessionHeader.jsx'
 import { AwayNote, DormantNote, ErrorNote, InterruptedNote } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
-
-/**
- * The detection zone (in px, measured up from the bottom of the pane) that makes a collapsed
- * composer rise up. The exposed card's header (14px) plus 40px of slack for the hand to aim at
- * — it does not rise while the hand is in the middle of the conversation.
- */
-const COMPOSER_REACH = 54
+import { COMPOSER_REACH, FOLDED_SLIVER } from './foldedComposer.js'
 
 /**
  * When a grid or project-screen panel folds its composer (owner, 2026-10-20): once the open composer, at its resting
@@ -33,7 +27,8 @@ const COMPOSER_REACH = 54
  *
  * Unfolding waits until it would take under 32%, so a panel dragged slowly across the line does not flip at every pixel.
  * The folded card also measures a few pixels taller than the open one (its own border and padding), which widens that
- * band a little: with the usual composer, a panel folds below about 285px and opens again above about 312px.
+ * band a little: with the usual composer, a panel folds below about 285px and opens again above about 312px. How much
+ * of the folded card shows (`FOLDED_SLIVER`) moves the card without resizing it, so it is not part of these numbers.
  */
 const FOLD_SHARE = 1 / 3
 const UNFOLD_SHARE = 0.32
@@ -312,9 +307,9 @@ export function SessionPane({
       /*
        * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
        * a fake element** — laying down a transparent detection plate would take that much area
-       * away from selecting conversation text or clicking links. The zone reaches 40px above
-       * the strip (14px): easy to aim for, while not triggering while passing through the
-       * middle of the conversation.
+       * away from selecting conversation text or clicking links. The zone reaches 22px above
+       * the sliver (FOLDED_SLIVER): easy to aim for, while not triggering while passing
+       * through the middle of the conversation.
        */
       onMouseMove={
         fold
@@ -498,35 +493,34 @@ export function SessionPane({
                      */
                     'translate-y-0 shadow-(--shadow-dock-raised)'
                   : /*
-                     * At rest, **only the top edge remains** (reported by a user on 2026-09-11:
-                     * "the input is not visible").
+                     * At rest, **a sliver of the card remains**: FOLDED_SLIVER (32px), set by
+                     * the translate below from that one constant.
                      *
-                     * This used to show 26px. Measured, that height also revealed the top 9px
-                     * of the input field itself — a resting card read as "an empty input field".
-                     * The surface with nothing happening on it was saying the most on screen.
+                     * It showed 26px at first, then 16 (reported by a user on 2026-09-11:
+                     * "the input is not visible"): the card's pt-1 (4px) plus the form's py-3
+                     * (12px), the most that still hid the input field, whose top border is the
+                     * very next line. The owner chose to show more on 2026-11-06, so the 32px
+                     * shown now also reveals the top 16px of the input field: a resting card
+                     * reads as a place to write, not only as an edge. The rule "must hide the
+                     * input field" no longer holds, and nothing here depends on it.
                      *
-                     * The 16px shown now is **the entire margin from the card's top edge to the
-                     * input field**, and exactly that much (specified by a user on 2026-09-11):
-                     * the card's pt-1 (4px) plus the form's py-3 (12px). The very next line is
-                     * the input field's top border, so this value is **the maximum that can be
-                     * shown while still hiding the input field** — raising it by even 1px brings
-                     * that border above the threshold (measured). If either margin changes,
-                     * this number has to change along with it.
+                     * The card is moved, not resized, so what reads its height is untouched: the
+                     * space reserved under the conversation (composerH), and the fold and unfold
+                     * shares, which are taken from the open composer's resting height.
                      *
-                     * This height is also why bg-surface-raised could be restored on the input field —
-                     * the bright strip that used to peek out and look like a hole in the pane's
-                     * floor is gone now.
+                     * bg-surface-raised stays on the input field, so the part of it that shows
+                     * is a field, not a hole in the pane's floor.
                      *
                      * This does not make the height hard to reach — what triggers the rise is
-                     * not the card but the pane's 54px bottom strip (COMPOSER_REACH), so even as
-                     * the visible sliver gets thinner, a hand summons the card from the same
-                     * spot as before.
+                     * not the card but the pane's bottom strip (COMPOSER_REACH, 54px: larger
+                     * than the sliver), so a hand summons the card from the same spot as
+                     * before.
                      *
                      * The background is still the same color as the pane's floor, and the
                      * card's border is darker too (line is darker than the pane's line-strong). It
                      * is shape, not brightness, that says the card is there. A shadow is still
                      * cast here too (reported by a user on 2026-09-11). Cast short, but not
-                     * faint — with only a 16px sliver showing, brightness alone cannot say it,
+                     * faint — with only a sliver showing, brightness alone cannot say it,
                      * so this shadow alone is what says the card is **resting on** the pane.
                      *
                      * The darkness was tuned with a ruler, not by eye: the pane's floor was
@@ -550,10 +544,11 @@ export function SessionPane({
                      * blur concentrates the same ink into a narrower band and darkens that
                      * point, so the alpha is lowered every time to bring it back to 12.
                      */
-                    'translate-y-[calc(100%_-_16px)] shadow-(--shadow-dock)'
+                    'translate-y-[calc(100%_-_var(--folded-sliver))] shadow-(--shadow-dock)'
               }`
             : undefined
         }
+        style={fold ? ({ '--folded-sliver': `${FOLDED_SLIVER}px` } as CSSProperties) : undefined}
         ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}
