@@ -147,12 +147,13 @@ export const ChatRow = memo(function ChatRow({
      * A reasoning summary (#58). It is the path to the body, not the body itself, so it is
      * dimmed one step to ink-muted — following the ink rule exactly, where brightness signals
      * importance. Codex's summary arrives as **bold heading** markdown, so this is still
-     * rendered through Markdown, just left quiet with no background color.
+     * rendered through Markdown, just left quiet with no background color. The tone is Markdown's
+     * own: its root sets the ink of the body, so a colour put on this wrapper never reached it.
      */
     return (
-      <div className="min-w-0 text-md text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
+      <div className="min-w-0" data-testid="msg-reasoning">
         {/* A row stored before the host kept two reasoning items apart has their headings run together (#1464) */}
-        <Markdown text={splitRunTogetherHeadings(item.text)} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} />
+        <Markdown text={splitRunTogetherHeadings(item.text)} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} tone="muted" />
       </div>
     )
   }

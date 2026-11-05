@@ -187,3 +187,48 @@ test('a heading that opens a bubble piece has its room inside the bubble and lea
     )
     .toEqual({ gap: 0, roomAtLeast12: true })
 })
+
+/**
+ * A reasoning row is dimmed to ink-muted all the way down (#58). `Markdown`'s root sets its own ink, so a colour
+ * put on the row around it never reached the words, and thinking read in the answer's ink. The ink of the body and of
+ * what `.cc-md` colours by itself (bold, a link, a heading) is compared with the muted ink, and with the answer's.
+ */
+test('a reasoning row is drawn in ink-muted, bold, links and headings included, and not in the answer ink', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const md = '## Heading\n\nPlain words with **bold**, a [link](https://example.com) and `code`.'
+  await page.evaluate(
+    ([s, text]) => {
+      const store = (window as any).__store
+      const items = [
+        { kind: 'user', seq: 1, text: 'question' },
+        { kind: 'reasoning', seq: 2, text },
+        { kind: 'assistant', seq: 3, text },
+      ]
+      store.setState({ chat: { ...store.getState().chat, [s]: items } })
+    },
+    [sid, md],
+  )
+  const reasoning = page.getByTestId('msg-reasoning')
+  const answer = page.getByTestId('msg-assistant')
+  await expect(reasoning).toContainText('Plain words')
+
+  // The tokens' own value, as the browser resolves it, whatever the theme is
+  const muted = await page.evaluate(() => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--color-ink-muted)'
+    document.body.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  })
+  const colors = (row: import('@playwright/test').Locator) =>
+    row.evaluate((el) => {
+      const ink = (selector: string) => getComputedStyle(el.querySelector(selector)!).color
+      return { body: ink('[data-testid=markdown]'), strong: ink('strong'), link: ink('a'), heading: ink('h2'), code: ink('code') }
+    })
+  const dimmed = await colors(reasoning)
+  expect(dimmed).toEqual({ body: muted, strong: muted, link: muted, heading: muted, code: muted })
+  // The answer is still its own, brighter ink
+  expect((await colors(answer)).body).not.toBe(muted)
+})

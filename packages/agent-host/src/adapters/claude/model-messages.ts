@@ -47,11 +47,12 @@ export function streamEventEvents(m: Pick<SDKPartialAssistantMessage, 'event'>, 
       out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d.text) })
     }
     /*
-     * Thinking (measured in #58, 2026-08-26): the whole body arrives encrypted, so `thinking`
-     * is always "" and only `estimated_tokens` (an increment) comes through. So this can only
-     * emit **the fact of progress** — "thinking, ~N tokens" — rather than the text; it never
-     * pretends content exists that is not there. If the CLI ever starts sending readable text
-     * here, the `text` field just flows through as-is.
+     * Thinking (measured in #58, 2026-08-26): for the model measured then, the whole body arrived
+     * encrypted, so `thinking` was "" and only `estimated_tokens` (an increment) came through. That
+     * is not true of every model: one that sends plain thinking text (seen 2026-11-05) fills `thinking`
+     * with readable words. Both cases go out as a `reasoning_delta`: with `text` it is stored and shown
+     * as a reasoning row (dimmed, in the conversation), with only `estTokens` it is **the fact of
+     * progress** — "thinking, ~N tokens" — and never pretends content exists that is not there.
      */
     if (d?.type === 'thinking_delta') {
       const text = str(d.thinking)
