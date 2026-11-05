@@ -55,12 +55,14 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
   it('a session with a parent that mails "orchestrator" is told once that it went there, not to the parent; the mail is not rerouted', () => {
     const w = world()
     const first = w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 1' })
-    expect(first.text).toContain('It went to the orchestrator, not to your parent "alpha". To write to your parent, use to: "parent".')
+    expect(first.text).toContain('It went to the orchestrator, not to your parent "alpha". If you meant your parent, use to: "parent".')
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
     expect(w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
     // To the parent, or from a session with none, there is nothing to say
     expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')
     expect(world().run('b', { action: 'send', to: 'orchestrator', text: 'help' }).text).not.toContain('not to your parent')
+    // A child the orchestrator started has it for its parent: nothing to correct
+    expect(world().run('o', { action: 'send', to: 'orchestrator', text: 'done' }).text).not.toContain('not to your parent')
   })
 
   it('from an untrusted project to another project it is held, and the answer says so', () => {

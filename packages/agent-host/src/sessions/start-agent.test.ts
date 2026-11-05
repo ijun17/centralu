@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
@@ -64,9 +64,20 @@ describe('the frame a child gets (#729)', () => {
   })
 
   // #1984: a child told to share checkpoints with "the parent" mailed the orchestrator; nothing it saw named the address
-  it('names the address that reaches the parent, in the task and in a later note', () => {
-    expect(agentFrame('parent', 'run the tests').split('\n')[0]).toContain('call mail with `to: "parent"`')
-    expect(agentNoteFrame('parent', 'use Chromium').split('\n')[0]).toContain('call mail with `to: "parent"`')
+  it('names the address that reaches the parent, in the task and in a later note, when the child can mail it', () => {
+    expect(agentFrame('parent', 'run the tests', [], '', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
+    expect(agentNoteFrame('parent', 'use Chromium', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
+    // A child on a linked machine, or one that cannot mail its parent, is not told to
+    expect(agentFrame('parent', 'run the tests')).not.toContain('call mail')
+    expect(agentNoteFrame('parent', 'use Chromium')).not.toContain('call mail')
+    expect(remoteAgentFrame('parent', 'run the tests')).not.toContain('call mail')
+  })
+
+  it('can mail its parent only when that session started it and it is in a project (a fork of the orchestrator has no parent, an orchestrator child no mail tool)', () => {
+    expect(canMailParent({ askedBy: 'p', projectId: 'proj' }, 'p')).toBe(true)
+    expect(canMailParent({ askedBy: null, projectId: 'proj' }, 'p')).toBe(false)
+    expect(canMailParent({ askedBy: 'other', projectId: 'proj' }, 'p')).toBe(false)
+    expect(canMailParent({ askedBy: 'p', projectId: null }, 'p')).toBe(false)
   })
 
   it("keeps the parent's name on the frame's line: a name cannot add a line to it (#428)", () => {

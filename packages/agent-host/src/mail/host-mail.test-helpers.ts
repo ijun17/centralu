@@ -16,6 +16,7 @@ const SESSIONS: Record<string, Sess> = {
   x: { name: 'xi', projectId: 'px' },
   orc: { name: 'orchestrator', projectId: null, kind: 'orchestrator' },
   w: { name: 'worker', projectId: 'p1', askedBy: 'a' },
+  o: { name: 'orchestrated', projectId: 'p1', askedBy: 'orc' },
 }
 
 /**

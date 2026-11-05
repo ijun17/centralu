@@ -51,10 +51,10 @@ export function taskLine(task: string, max = 160): string {
  * A name is one line (`frameField`) written as a JSON string (#1186 review), so a `"` or a `\` in it cannot close the
  * quote and go on as Centralu's words on the frame's line.
  */
-export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string }): string {
+export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string; mailable?: boolean }): string {
   const who = asker ? ` It is the session ${JSON.stringify(frameField(asker.name))}${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
   // #1984: this session is not the asker's child, so `parent` does not resolve for it; the asker is reached by its session id (a bare id `mail` accepts)
-  const reach = asker?.sessionId ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\`.` : ''
+  const reach = asker?.sessionId && asker.mailable !== false ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\`.` : ''
   return [
     `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
       `Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path.${reach}]`,

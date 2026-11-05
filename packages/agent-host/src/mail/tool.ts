@@ -154,7 +154,7 @@ export class MailTool {
   private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
     if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.orchestratorId() || this.hinted.has(sessionId)) return ''
     this.hinted.add(sessionId)
-    return ` It went to the orchestrator, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. To write to your parent, use to: "parent".`
+    return ` It went to the orchestrator, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */
