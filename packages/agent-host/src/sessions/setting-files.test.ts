@@ -234,7 +234,7 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
   return new Promise<string>((resolve, reject) => {
     mgr
       .appSessions.runAppAgent(
-        { app: { projectId: appProjectId, appId }, appName: `App ${appId}`, tool, prompt: 'look around', origin: { kind: 'view', app: { projectId: appProjectId, appId } } },
+        { app: { projectId: appProjectId, appId }, appName: `App ${appId}`, tool, prompt: 'look around', callers: [{ kind: 'person' }] },
         { signal: new AbortController().signal, progress: () => {}, onSession: resolve },
       )
       .catch(reject)

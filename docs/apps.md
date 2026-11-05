@@ -1061,10 +1061,12 @@ gate happens in one place, the broker desk (`desk.ts`).
 - **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
   app: a project app's in its project (working folder: the project root), a user-folder app's like
   a coordinator (no project, the orchestrator's empty folder). The preset is `auto`, the default
-  every new session gets, never above the session whose call started the chain: a `safe` caller's
-  agent is `safe`, a `normal` one's `normal`; the app's screen (the person) gets `auto`, and a chain
-  that can no longer be followed `safe` (owner decision 2026-11-05; it was always `safe`, so writes
-  and commands stopped at an approval card). Nothing it does waits for the
+  every new session gets, never above the lowest preset among the sessions with a call open into
+  the app now, whatever run id the app cites: while a `safe` session's call is open (directly, through
+  `call_app`, or from a view inline in its conversation) every agent the app starts is `safe`. Only a
+  view opened in the window, with no session's call open, gives `auto`; a chain that can no longer be
+  followed gives `safe` (owner decision 2026-11-05; it was always `safe`, so writes and commands
+  stopped at an approval card). Nothing it does waits for the
   person, though its text is the app's; the person may lower its preset in the session. Settings files: a project app's agent follows the
   project's trust like a worker; a user-folder app's agent reads only the person's own settings,
   never the orchestrator folder's files. The tool is `tool` if declared, else the default (the

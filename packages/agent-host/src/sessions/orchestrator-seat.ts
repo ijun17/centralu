@@ -6,6 +6,7 @@ import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
+import type { Asker } from '../mail/asked-by.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
@@ -25,14 +26,17 @@ import { LINE_WINDOW_CHARS, asPredecessor, budgetOf, fitLines, lineText, session
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
- * The preset of a session create_session makes: the one named, or the default a new session gets in that project
- * (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one, owner decision 2026-11-05), and never
- * more than the seat's own permissions (#838). A default above the seat is held to the seat; a preset named above it is
- * refused (null), as a child never runs above its caller. It used to be `normal` at most whatever was asked.
+ * The preset of a session create_session makes (owner decision 2026-11-05): the one named, or the default a new session
+ * gets in that project (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one). Never more than
+ * the seat's own permissions (#838), and never above `normal` in an untrusted project, named or not. In a turn a
+ * session's request started (`asker`), the default is also held to that session's preset, so the work handed on is no
+ * looser than the asking session and takes no card (#1739). A default above a cap is held to it; a preset named above
+ * one is refused (null). It used to be `normal` at most whatever was asked.
  */
-export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset): PermissionPreset | null {
-  if (named !== undefined) return presetWithin(named, seat) ? named : null
-  return lowestPreset(defaultPresetFor(project), seat)
+export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset, asker?: PermissionPreset): PermissionPreset | null {
+  const cap = project.trusted ? seat : lowestPreset('normal', seat)
+  if (named !== undefined) return presetWithin(named, cap) ? named : null
+  return lowestPreset(defaultPresetFor(project), cap, ...(asker ? [asker] : []))
 }
 
 /**
@@ -65,6 +69,8 @@ export type OrchestratorSeatHost = Pick<DelegationForks, 'forkFor'> &
   ): Promise<SessionInfo & { applied: SettingsApplied }>
   createSession(params: { projectId: string; cwd: string; tool: ToolName | null; permissionPreset: PermissionPreset }): Promise<SessionInfo>
   firstTool(preferred?: ToolName | null): ToolName | null
+  /** The session whose request the orchestrator's turn is answering, if one (#1739, `AskedGateHost.askedBy`); absent where it is not wired */
+  askedBy?(orchestratorId: string): Asker | null
   rename(sessionId: string, name: string): void
   send(sessionId: string, text: string, attachments?: Attachment[], from?: { sessionId: string; name: string }): Promise<void>
   routedCards(sessionId: string, callerId: string): RoutedCard[]
@@ -382,9 +388,16 @@ export function orchestratorToolsFor(
       const seat = host.meta.get(orchestratorId)
       const own = seat?.permissionPreset ?? 'safe'
       const target = remote[0] ?? local[0]
-      const preset = createdPreset(own, { trusted: target?.trusted === true }, opts.preset)
+      const trusted = target?.trusted === true
+      const asker = host.askedBy?.(orchestratorId)
+      const preset = createdPreset(own, { trusted }, opts.preset, asker ? host.meta.get(asker.sessionId)?.permissionPreset ?? 'safe' : undefined)
       if (preset === null) {
-        return { ok: false, error: `This session runs under ${own}, so it cannot create a session under ${opts.preset}. Name ${own} or lower, or ask the person to raise this session's preset.` }
+        return {
+          ok: false,
+          error: trusted
+            ? `This session runs under ${own}, so it cannot create a session under ${opts.preset}. Name ${own} or lower, or ask the person to raise this session's preset.`
+            : `${target?.name ?? 'That project'} is not trusted, so a session there runs under normal at most. Name normal or lower, or ask the person to trust the project.`,
+        }
       }
       const sender = { sessionId: orchestratorId, name: seat?.name ?? 'Orchestrator' }
       /*

@@ -362,7 +362,7 @@ export class AppSessions {
    *             orchestrator's own empty folder with no project, the same as a coordinator session.
    *             The session's app slot (`appId`) is set to that app.
    *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), but never
-   *             above the session whose call started the chain (`appAgentPreset`); it was always
+   *             above any session with a call open into the app (`appAgentPreset`); it was always
    *             `safe` before (see the comment where the session is made).
    *   Text      Sent as the app's own text, not the person's — recorded in the conversation as a
    *             message the app sent (`fromApp`), and reaches the agent wrapped in the same frame as
@@ -421,10 +421,12 @@ export class AppSessions {
     }
 
     /*
-     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the session
-     * whose call started the chain** (`appAgentPreset`): a `safe` session's call reaches a `safe` agent, a `normal` one's a
-     * `normal` one, so no session gains through an app what its own preset withholds. The app's screen is the person's
-     * own reach, so a chain it started gets `auto`; a chain that can no longer be followed gets `safe`.
+     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the lowest
+     * preset among the sessions with a call open into the app now** (`appAgentPreset`, `AppCalls.agentCallers`), whatever
+     * run id the app cites: while a `safe` session's call is open, every agent the app starts is `safe`, so no session
+     * gains through an app what its own preset withholds. An inline view counts as its conversation's session; through
+     * `call_app` an app is held as its caller is. Only calls from a screen opened in the window, with no session's call
+     * open, give `auto`; a call whose chain can no longer be followed, or nothing open at all, gives `safe`.
      *
      * It was always `safe` before (and `normal` before that, the plan's decision 6), because this prompt was never written
      * by the person: the app's code sent it, and data the app pulled in from outside can be mixed into it (a prompt
@@ -436,7 +438,7 @@ export class AppSessions {
       projectId: req.app.projectId,
       cwd,
       tool: req.tool,
-      permissionPreset: appAgentPreset(req.origin, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset),
+      permissionPreset: appAgentPreset(req.callers, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset),
       appId: req.app.appId,
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })
@@ -636,12 +638,11 @@ export async function gitStatusForApp(
 
 /**
  * The preset an app's agent starts under (owner decision 2026-11-05): `auto`, the default every new session gets, held to
- * the preset of the session whose call started the chain, as a child never runs above its caller (`presetWithin`). A
- * chain the app's screen started is the person's own, so `auto`. One that can no longer be followed (its call ended), or
- * whose session is gone, gets `safe`: nothing says who asked.
+ * the lowest preset among the calls open into the app (`AgentRunRequest.callers`), as a child never runs above its caller
+ * (`presetWithin`). A screen opened in the window adds nothing below `auto`; a session that is gone, a chain that can no
+ * longer be followed, or no open call at all gives `safe`: nothing says who asked.
  */
-export function appAgentPreset(origin: AgentRunRequest['origin'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
-  if (origin?.kind === 'view') return 'auto'
-  if (origin?.kind === 'session') return lowestPreset('auto', presetOf(origin.sessionId) ?? 'safe')
-  return 'safe'
+export function appAgentPreset(callers: AgentRunRequest['callers'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
+  if (callers.length === 0) return 'safe'
+  return lowestPreset(...callers.map((c): PermissionPreset => (c.kind === 'person' ? 'auto' : c.kind === 'session' ? (presetOf(c.sessionId) ?? 'safe') : 'safe')))
 }

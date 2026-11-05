@@ -578,11 +578,14 @@ orchestrator's.
 
 **`create_session`** (#838) starts the session under the preset it names, or else under the default a new session
 gets (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one, owner decision 2026-11-05), never
-above the orchestrator's own preset: a default above it is held to it, and a preset named above it is refused with
-nothing made (`createdPreset`). There is no card for it, as there was none before: the cap is the rule. So an `auto`
-orchestrator may create `auto` sessions, and a `safe` one only `safe` ones. On a linked machine the request carries
-`normal` at most, and an `auto` one goes as the caller's preset (`fromHub`), so it runs `auto` there only while that
-machine's own "Allow auto from a linked computer" switch is on, as `start_agent`'s child there. Its first message is
+above the orchestrator's own preset and never above `normal` in an untrusted project, named or not: a default above a
+cap is held to it, and a preset named above one is refused with nothing made (`createdPreset`). In a turn a session's
+request started (#1739), the default is also held to the asking session's preset, so the work it hands on takes no
+request card; a preset named above the asker's still does. There is no card for the caps, as there was none before:
+the cap is the rule. So an `auto` orchestrator may create `auto` sessions in trusted projects, and a `safe` one only
+`safe` ones. On a linked machine the request carries `normal` at most, and an `auto` one goes as the caller's preset
+(`fromHub`), so it runs `auto` there only while that machine's own "Allow auto from a linked computer" switch is on
+and the project there is trusted (`presetFromHub` reads its trust), as `start_agent`'s child there. Its first message is
 stored and shown as the orchestrator's (`from`), not the person's. It was `normal` at most whatever was asked (and
 before #838 `normal` whatever the orchestrator ran under, with the instruction recorded as the person's, so a `safe`
 orchestrator that read a planted instruction could start a `normal` session carrying it without a card).
@@ -609,6 +612,11 @@ the machine has answered, so the card states the preset the child will get; the 
 (a caller lowered while it stood starts nothing) and once the machine has made the child (one made above the caller as
 it is then is given no task and goes to that machine's session archive); and `agent_session send` refuses work to a child whose
 preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's row and header show its preset on both machines (`SessionInfo.startedFromHub`).
+**Turning the switch on asks nothing** (owner decision 2026-11-05, #1988): neither `prefs.set` here nor
+`machines.hubAuto` for a linked machine raises a card, with the limited credential too. So an `auto` agent on the hub
+can turn a linked machine's switch on and then start `auto` sessions there through `start_agent` with no card. The
+caller's preset still holds: only an `auto` caller's child runs `auto` there, never above the caller, and only in a
+project that machine trusts (`presetFromHub`).
 **Residual:** the hub holds the machine's token, so the switch is the person's say over what Centralu's own
 start_agent carries, not a wall against a hub that is not Centralu. An `auto` child there runs as `auto` runs on that
 computer (Codex's `auto` is `danger-full-access` there), with that computer's logins, and an `auto` caller's starts
@@ -870,15 +878,20 @@ Rows that differ by session:
   the person's global choice applies to every session that runs under `normal`, and someone who wants
   a card from the orchestrator has `safe`.
 - **An agent an app started** (`run_agent`, `AppSessions.runAppAgent`) runs under `auto`, the default
-  every new session gets, **never above the session whose call started the chain** (`appAgentPreset`, owner
-  decision 2026-11-05; it was always `safe`, so everything but a read asked). A `safe` session's call reaches a
-  `safe` agent and a `normal` one's a `normal` agent, so no session gains through an app what its own preset
-  withholds; a chain the app's screen started is the person's own reach, so `auto`; a chain that can no longer
-  be followed (its call ended), or whose session is gone, gets `safe`. It still has no Centralu server and no
+  every new session gets, **never above the lowest preset among the sessions with a call open into the app now** (`appAgentPreset`,
+  `AppCalls.agentCallers`, owner decision 2026-11-05; it was always `safe`, so everything but a read asked), whatever
+  run id the app cites: while a `safe` session's call is open into the app, directly or through `call_app` (an app
+  another app calls is held to all of that app's open calls), every agent the app starts is `safe`, so no session
+  gains through an app what its own preset withholds. A view inline in a conversation is rooted at that session
+  (`apps.invoke` names it, `InlineViews.owner`). Only calls from a view opened in the window, with no session's call
+  open into the app, give `auto`; a call whose chain can no longer be followed, a session that is gone, or nothing
+  open gives `safe`. It still has no Centralu server and no
   apps, cannot apply Centralu updates, reads its project's files only as the project's trust allows, and no
   other session answers a card raised in it (`answersApproval`). **Residual:** its text is the app's, which may
-  carry data the app pulled in from outside, and under `auto` (the screen's chain, or an `auto` caller's)
-  nothing it does waits for the person; on Codex that is `danger-full-access`. The person may lower its preset
+  carry data the app pulled in from outside. A window view's call is not proof of a person's gesture: the frame
+  relays the app's own calls (`AppFrame.oncalltool`) and the home tool runs by itself on open or layout restore, so
+  while no session's call is open the app's own code can start an `auto` agent, under which nothing waits for the
+  person (on Codex `danger-full-access`); an `auto` caller's call does the same. The person may lower its preset
   in the session's settings.
 - **A session `ask_project` addresses** already exists and keeps its own preset, tool and project
   trust. The caller's `auto` skips host consent; it does not raise the target's permissions, which
@@ -2184,8 +2197,8 @@ then who may call it:
   requests never run (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
   `host-data.test.ts`, `call-app.test.ts`).
 - An agent an app asks for runs in a new session the person can see, under `auto`, the default
-  every new session gets, never above the session whose call started the chain (owner decision
-  2026-11-05; it was `safe`), with no apps attached, and receives the prompt framed as the app's text ("Text an app
+  every new session gets, never above any session with a call open into the app (owner decision
+  2026-11-05; it was `safe`; the rule and its residual under "An agent an app started" above), with no apps attached, and receives the prompt framed as the app's text ("Text an app
   sends"; `app-agents.test.ts` "the agent stands up under auto, the default every new session gets
   (owner decision 2026-11-05), the app's text is framed as the app's text, and the session that
   hands back an answer goes idle"). Its text may carry what the app fetched from elsewhere, and
@@ -2228,7 +2241,7 @@ Limits:
   which can include that project's files or conversation. "Always for this pair" covers every app
   the other project shares, including ones shared later.
 - A permission is per capability, not per request: once an app may run an agent, the app decides
-  what to ask it. The agent runs under `auto` held to the calling session's preset (owner decision
+  what to ask it. The agent runs under `auto` held to every session with a call open into the app (owner decision
   2026-11-05; its writes and commands stopped at an approval card under `safe` before), and what it may read is whatever its session can read.
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message. It never lists a session in the session archive (FR-22), and no app capability or

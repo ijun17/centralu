@@ -545,10 +545,15 @@ describe('a session the orchestrator creates', () => {
     }
   })
 
-  it('an auto seat may name auto, in an untrusted project too; a preset named above the seat is refused and nothing is made', async () => {
+  it('an auto seat may name auto in a trusted project only; in an untrusted one, or above the seat, it is refused and nothing is made', async () => {
     seatUnder('auto')
-    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', preset: 'auto' })).toMatchObject({ ok: true })
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'auto' })).toMatchObject({ ok: true })
     expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'auto' }))
+    const before = vi.mocked(host.createSession).mock.calls.length
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', preset: 'auto' })).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted') })
+    expect(vi.mocked(host.createSession).mock.calls.length).toBe(before)
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', preset: 'normal' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'normal' }))
     seatUnder('normal')
     const calls = vi.mocked(host.createSession).mock.calls.length
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'auto' })).toMatchObject({ ok: false, error: expect.stringContaining('runs under normal') })
@@ -574,6 +579,27 @@ describe('a session the orchestrator creates', () => {
     linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: true }], away: [] }), createSession, send: vi.fn() } as unknown as LinkedSessions
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far' })).toMatchObject({ ok: true })
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'normal', callerPreset: 'auto' }))
+  })
+
+  it("an auto seat's session on an untrusted linked project carries no auto, and naming auto there is refused", async () => {
+    seatUnder('auto')
+    const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
+    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: false }], away: [] }), createSession, send: vi.fn() } as unknown as LinkedSessions
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far' })).toMatchObject({ ok: true })
+    expect(createSession).toHaveBeenLastCalledWith(expect.anything(), { tool: undefined, name: undefined, preset: 'normal' })
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far', preset: 'auto' })).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted') })
+    expect(createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("in a turn a session's request started, the default is held to that session's preset too", async () => {
+    seatUnder('auto')
+    meta.set('asker', { ...session('asker'), permissionPreset: 'normal' })
+    host.askedBy = vi.fn(() => ({ messageId: 'm', sessionId: 'asker', turn: 1, name: 'Asker', project: null, trusted: true }) as never)
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'normal' }))
+    // A preset named is the orchestrator's choice: #1739's card is what weighs it then
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'auto' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'auto' }))
   })
 })
 
