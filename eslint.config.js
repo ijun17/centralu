@@ -3,6 +3,7 @@ import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
+import { join } from 'node:path'
 import { IGNORES } from './tooling/eslint-ignores.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
@@ -118,15 +119,19 @@ export default tseslint.config(
     plugins: { boundaries },
     settings: {
       'boundaries/include': ['packages/**/*', 'apps/**/*'],
+      // What an import resolves to is tooling/eslint-alias-resolver.cjs (#1847)
+      'import/resolver': { [join(import.meta.dirname, 'tooling/eslint-alias-resolver.cjs')]: {} },
       'boundaries/elements': [
-        { type: 'protocol', pattern: 'packages/protocol/src/**/*' },
-        { type: 'common', pattern: 'packages/common/src/**/*' },
-        { type: 'core', pattern: 'packages/core/src/**/*' },
-        { type: 'ports', pattern: 'packages/platform/src/ports/**/*' },
-        { type: 'platform-impl', pattern: 'packages/platform/src/(web|tauri|mock)/**/*' },
-        { type: 'ui', pattern: 'packages/ui/src/**/*' },
-        { type: 'agent-host', pattern: 'packages/agent-host/src/**/*' },
-        { type: 'app', pattern: 'apps/**/*' },
+        { type: 'protocol', mode: 'full', pattern: 'packages/protocol/src/**/*' },
+        { type: 'common', mode: 'full', pattern: 'packages/common/src/**/*' },
+        { type: 'core', mode: 'full', pattern: 'packages/core/src/**/*' },
+        { type: 'ports', mode: 'full', pattern: 'packages/platform/src/ports/**/*' },
+        { type: 'platform-impl', mode: 'full', pattern: 'packages/platform/src/(web|tauri|mock)/**/*' },
+        // Listed before `ui`: the first element a file matches is its type. Tests take the mock platform (docs/platform-abstraction.md §6)
+        { type: 'ui-test', mode: 'full', pattern: 'packages/ui/src/**/*.test.{ts,tsx}' },
+        { type: 'ui', mode: 'full', pattern: 'packages/ui/src/**/*' },
+        { type: 'agent-host', mode: 'full', pattern: 'packages/agent-host/src/**/*' },
+        { type: 'app', mode: 'full', pattern: 'apps/**/*' },
       ],
     },
     rules: {
@@ -140,6 +145,7 @@ export default tseslint.config(
             { from: 'core', allow: ['core', 'common', 'protocol'] },
             { from: 'ports', allow: ['ports', 'protocol'] },
             { from: 'platform-impl', allow: ['platform-impl', 'ports', 'common', 'protocol'] },
+            { from: 'ui-test', allow: ['ui-test', 'ui', 'core', 'common', 'ports', 'platform-impl', 'protocol'] },
             { from: 'ui', allow: ['ui', 'core', 'common', 'ports', 'protocol'] },
             { from: 'agent-host', allow: ['agent-host', 'common', 'protocol'] },
             { from: 'app', allow: ['app', 'ui', 'core', 'common', 'ports', 'platform-impl', 'protocol'] },

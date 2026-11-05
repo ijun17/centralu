@@ -96,3 +96,49 @@ describe('common layer boundary', () => {
     expect(ruleIds(react)).toContain('no-restricted-imports')
   })
 })
+
+/*
+ * `boundaries/element-types` is the table of docs/architecture.md §2, one allow-list per layer. It judges an import by what
+ * it resolves to (tooling/eslint-alias-resolver.cjs), and for a long time resolved none of the `@cc/*` imports the packages
+ * use, so it judged nothing (#1847). Each row is an import and whether the table allows it.
+ */
+describe('layer table (boundaries/element-types)', () => {
+  const refused = async (filePath: string, from: string) =>
+    ruleIds(await lint(filePath, `import { a } from '${from}'\nexport const b = a`)).includes('boundaries/element-types')
+
+  it.each([
+    ['packages/protocol/src/x.ts', '@cc/core'],
+    ['packages/protocol/src/x.ts', '@cc/common'],
+    ['packages/common/src/x.ts', '@cc/core'],
+    ['packages/common/src/x.ts', '@cc/protocol'],
+    ['packages/core/src/x.ts', '@cc/platform/ports'],
+    ['packages/platform/src/ports/x.ts', '@cc/common'],
+    ['packages/platform/src/web/x.ts', '@cc/core'],
+    ['packages/ui/src/x.tsx', '@cc/platform/mock'],
+    ['packages/agent-host/src/x.ts', '@cc/core'],
+    ['packages/agent-host/src/x.ts', '@cc/ui'],
+    // a path into another layer's folder is the same import
+    ['packages/protocol/src/x.ts', '../../core/src/index.js'],
+  ])('refuses %s importing %s', async (filePath, from) => {
+    expect(await refused(filePath, from)).toBe(true)
+  })
+
+  it.each([
+    ['packages/core/src/x.ts', '@cc/common'],
+    ['packages/core/src/x.ts', '@cc/protocol'],
+    ['packages/platform/src/web/x.ts', '@cc/common'],
+    ['packages/platform/src/web/x.ts', '@cc/platform/ports'],
+    ['packages/ui/src/x.tsx', '@cc/core'],
+    ['packages/ui/src/x.tsx', '@cc/platform/ports'],
+    ['packages/agent-host/src/x.ts', '@cc/common'],
+    ['apps/web/src/x.ts', '@cc/platform/web'],
+    // a test takes the mock platform (docs/platform-abstraction.md §6)
+    ['packages/ui/src/x.test.tsx', '@cc/platform/mock'],
+    // what lies in a folder named `apps` below a package is not the apps layer
+    ['packages/agent-host/src/adapters/x.ts', '../../apps/contract.js'],
+    ['packages/protocol/src/x.ts', './other.js'],
+    ['packages/protocol/src/x.ts', 'zod'],
+  ])('allows %s importing %s', async (filePath, from) => {
+    expect(await refused(filePath, from)).toBe(false)
+  })
+})
