@@ -336,6 +336,38 @@ describe('movePendingThreadMail', () => {
     expect(legacyChain(db, ids.thread ?? '', 3, 1).map((m) => m.id)).toEqual([ids.a])
     store.close()
   })
+
+  /** A row as a newer build, or a bad write, could leave it: a kind, a wake and a facts this build cannot read (docs/stored-shapes.md) */
+  const spoil = (db: Database.Database, ids: Record<string, string>) => {
+    db.prepare(`UPDATE mail_messages SET kind = 'from_a_newer_build' WHERE id = ?`).run(ids.n)
+    db.prepare(`UPDATE mail_messages SET wake = 'maybe' WHERE id = ?`).run(ids.a)
+    db.prepare(`UPDATE mail_messages SET facts = '{not json' WHERE id = ?`).run(ids.q)
+    db.prepare(`UPDATE mail_messages SET facts = '[1,2]' WHERE id = ?`).run(ids.t)
+  }
+
+  it('a kind, a wake or a facts it cannot read reads as a default, not as an error (each default is checked on its own)', () => {
+    const { store, db, ids } = upgraded()
+    spoil(db, ids)
+    const [q, a, n] = legacyChain(db, ids.thread ?? '', undefined, 50)
+    expect(n).toMatchObject({ id: ids.n, kind: 'note' })
+    expect(a).toMatchObject({ id: ids.a, wake: null })
+    expect(q).toMatchObject({ id: ids.q, kind: 'question', facts: {} })
+    // A word it does know is left as it is, and so is a facts object
+    expect(q?.wake).toBeNull()
+    expect(legacyChain(db, `${HOST}.t_work`, undefined, 50).find((m) => m.id === ids.rep)).toMatchObject({ wake: 'no', facts: { outcome: 'paused' } })
+    expect(legacyChain(db, `${HOST}.t_work`, undefined, 50).find((m) => m.id === ids.t)?.facts).toEqual({})
+    store.close()
+  })
+
+  it('the move does not fail on such a row: it moves as a message with the kind it was written with, and facts that are not an object as {}', () => {
+    const { store, db, ids } = upgraded()
+    spoil(db, ids)
+    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
+    expect(store.mailbox.message(ids.n ?? '')).toMatchObject({ kind: 'message', needsReply: false, facts: { legacyKind: 'from_a_newer_build' } })
+    expect(store.mailbox.message(ids.q ?? '')).toMatchObject({ kind: 'message', needsReply: true, facts: { legacyKind: 'question' } })
+    expect(store.mailbox.message(ids.t ?? '')).toMatchObject({ kind: 'task', facts: { legacyKind: 'assign' } })
+    store.close()
+  })
 })
 
 /** A small seeded generator, so a failing case can be run again from its seed */
