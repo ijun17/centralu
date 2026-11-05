@@ -611,12 +611,13 @@ machine's session archive. The child is never above its caller (#1273 review): t
 the machine has answered, so the card states the preset the child will get; the caller is read again after the card
 (a caller lowered while it stood starts nothing) and once the machine has made the child (one made above the caller as
 it is then is given no task and goes to that machine's session archive); and `agent_session send` refuses work to a child whose
-preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's row and header show its preset on both machines (`SessionInfo.startedFromHub`).
+preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's session header shows its preset on both machines (`SessionInfo.startedFromHub`).
 **Turning the switch on asks nothing** (owner decision 2026-11-05, #1988): neither `prefs.set` here nor
 `machines.hubAuto` for a linked machine raises a card, with the limited credential too. So an `auto` agent on the hub
 can turn a linked machine's switch on and then start `auto` sessions there through `start_agent` with no card. The
 caller's preset still holds: only an `auto` caller's child runs `auto` there, never above the caller, and only in a
-project that machine trusts (`presetFromHub`).
+project that machine trusts (`presetFromHub`; the hub asks the machine about `auto` only for a project it lists as
+trusted, and otherwise starts a `normal` child behind the card).
 **Residual:** the hub holds the machine's token, so the switch is the person's say over what Centralu's own
 start_agent carries, not a wall against a hub that is not Centralu. An `auto` child there runs as `auto` runs on that
 computer (Codex's `auto` is `danger-full-access` there), with that computer's logins, and an `auto` caller's starts

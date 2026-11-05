@@ -2620,7 +2620,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   async function rig(o: { remote?: { immediate?: boolean; queueBehind?: boolean; holdNext?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-other', path: checkout('git@github.com:me/other.git'), name: 'other' })
-    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout' })
+    // Trusted there: an `auto` caller's child runs `auto` only in a project the machine trusts (owner decision 2026-11-05)
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout', trusted: true })
     const remote = await remoteHost(0, remoteStore, o.remote ?? {})
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
@@ -2756,6 +2757,17 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         clearInterval(watch)
       }
     }
+
+    it("in a project the machine does not trust, it is a normal child behind the card, the machine's switch on", async () => {
+      const { remote, hub, card, answer } = await rig()
+      await remote.mgr.setProjectTrusted('p-app', false)
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const r = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box' })
+      await eventually(() => !!card())
+      expect(card()!.detail).toMatchObject({ kind: 'agent_start', preset: 'normal' })
+      await answer('deny')
+      expect(await r).toMatchObject({ ok: false })
+    })
 
     it('runs it under auto there, starts it without a card, and both machines show its preset', async () => {
       const { remote, hub, card, start } = await rig()
@@ -3145,6 +3157,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   it('starts it in a new worktree there on the branch asked for', async () => {
     const { remote, answer, start } = await rig()
     // That machine's own rule: a worktree is made only in a project trusted there
+    await remote.mgr.setProjectTrusted('p-app', false)
     const refused = start({ branch: 'feat-remote' })
     await answer('allow')
     expect(await refused).toMatchObject({ ok: false, error: expect.stringContaining('Worktree sessions need a trusted project') })
