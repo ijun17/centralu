@@ -198,7 +198,7 @@ test('a reasoning row is drawn in ink-muted, bold, links and headings included, 
   const sid = await newSession(page, 'alpha')
   const md = '## Heading\n\nPlain words with **bold**, a [link](https://example.com) and `code`.'
   await page.evaluate(
-    ([s, text]) => {
+    ({ s, text }) => {
       const store = (window as any).__store
       const items = [
         { kind: 'user', seq: 1, text: 'question' },
@@ -207,7 +207,7 @@ test('a reasoning row is drawn in ink-muted, bold, links and headings included, 
       ]
       store.setState({ chat: { ...store.getState().chat, [s]: items } })
     },
-    [sid, md],
+    { s: sid, text: md },
   )
   const reasoning = page.getByTestId('msg-reasoning')
   const answer = page.getByTestId('msg-assistant')
