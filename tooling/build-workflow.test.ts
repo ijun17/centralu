@@ -36,6 +36,23 @@ describe('the workflow is YAML', () => {
   })
 })
 
+describe('the weekly test-times refresh opens no pull request itself (#1983)', () => {
+  const refresh = parseDocument(readFileSync(new URL('../.github/workflows/test-durations.yml', import.meta.url), 'utf8')).toJS() as {
+    jobs: Record<string, { permissions: Record<string, string>; steps: { name?: string; run?: string }[] }>
+  }
+
+  it('pushes the branch and names it in the summary, with no step that creates the pull request and no token to', () => {
+    const open = refresh.jobs.open!
+    // The repository does not let GITHUB_TOKEN create a pull request, and allowing it would widen the token
+    expect(open.permissions).toEqual({ contents: 'write' })
+    const lines = open.steps.flatMap((s) => (s.run ?? '').split(/\r?\n/))
+    expect(lines.filter((l) => /\bgh pr create\b/.test(l) && !/^\s*echo /.test(l))).toEqual([])
+    expect(lines.some((l) => l.includes('GITHUB_STEP_SUMMARY'))).toBe(true)
+    expect(lines.some((l) => l.includes('::notice::Pushed'))).toBe(true)
+    expect(lines.some((l) => l.includes('echo "gh pr create --base main --head $branch '))).toBe(true)
+  })
+})
+
 describe('CI bundles carry the release their commit was cut from (#1501)', () => {
   it('fetches the tags and stamps the resolved version before building, on every platform', () => {
     expect(steps[0]).toMatch(/^uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n(?: {10}#[^\n]*\n)* {10}fetch-depth: 0\n {10}filter: blob:none\n/)

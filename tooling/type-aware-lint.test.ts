@@ -122,9 +122,13 @@ describe('type-aware lint (#1339)', () => {
     // The job with the write token runs nothing installed and nothing from the repository
     expect(open).toMatch(/contents: write/)
     expect(open).not.toMatch(/\bpnpm\b|\bnpm\b|\bnode\b|\btsx\b/)
-    // One branch, one pull request: a week not yet landed is updated, not doubled
+    // One branch: a week not yet landed is updated, not doubled. It opens no pull request (the repository does not
+    // let GITHUB_TOKEN, #1983): the summary gives the line to run, and the job holds no permission for it
     expect(open).toMatch(/branch='lint-tighten\/weekly'/)
-    expect(open).toMatch(/gh pr list --head "\$branch" --state open/)
+    expect(open).not.toMatch(/pull-requests:/)
+    expect(open.split('\n').filter((l) => /\bgh pr create\b/.test(l) && !/^\s*echo /.test(l))).toEqual([])
+    expect(open).toMatch(/echo "gh pr create --base main --head \$branch /)
+    expect(open).toMatch(/GITHUB_STEP_SUMMARY/)
   })
 
   it("is given main's history and made to compare in CI's verify job", () => {
