@@ -967,6 +967,8 @@ describe('a batch stopped because main moved is batched again, not sent to its o
       b = made
     }
     expect(again(q, b)).toBeNull()
+    // The count stays on the item: a pull request past the cap that lost it would get fresh restarts on the same head
+    expect(q.items[0].moved).toEqual({ head: A, n: MOVED_CAP })
     expect(q.items[0]).toMatchObject({ batchless: A, alone: { head: A, tier: 'quick' } })
     expect(q.items[0].batch).toBeUndefined()
     expect(q.items[0].alone.text).toContain('stopped before #1')
