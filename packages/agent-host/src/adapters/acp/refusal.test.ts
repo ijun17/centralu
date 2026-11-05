@@ -168,4 +168,16 @@ describe('a provider refusal that arrives as the turn’s whole answer (Cursor o
     const w = await answered(['Upgrade your plan to continue', ' Done.'])
     expect(w.events.some(isError)).toBe(false)
   })
+
+  it('leaves a turn the person already stopped as stopped', async () => {
+    const w = await start(cursor)
+    w.handle.send('hello')
+    await w.peer().next(isPrompt)
+    w.handle.interrupt()
+    await w.peer().next((m) => m.method === 'session/cancel')
+    say(w, 'Upgrade your plan to continue')
+    w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'error' || e.type === 'turn_complete')
+    expect(w.events.some(isError)).toBe(false)
+  })
 })

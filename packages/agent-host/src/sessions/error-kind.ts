@@ -9,7 +9,7 @@ import { isNetworkFailure } from './interruptions.js'
  */
 export type ErrorKind = 'overloaded' | 'usage limit' | 'network' | 'refused' | 'other'
 
-const USAGE_LIMIT = /usage limit|rate.?limit|\b429\b|quota|limit reached|hit your limit|upgrade your plan/i
+const USAGE_LIMIT = /usage limit|rate.?limit|\b429\b|quota|limit reached|hit your limit|upgrade your plan to continue/i
 const OVERLOADED = /overload|\b529\b|\b503\b|capacity|temporarily unavailable/i
 const REFUSED = /refus|denied|not allowed|forbidden|\b403\b|permission/i
 
