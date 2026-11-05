@@ -244,7 +244,7 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
 const PRESETS: PermissionPreset[] = ['safe', 'normal', 'edits', 'auto']
 // No defaultMode is configured in these fixtures: normal must request manual approvals explicitly (#578).
 const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'default', edits: 'default', auto: 'bypassPermissions' }
-const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', edits: 'from-settings', auto: 'never/workspace-write' }
+const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', edits: 'from-settings', auto: 'never/danger-full-access' }
 /** Codex does not turn off the user's ~/.codex per thread — only the store layer can be turned off, so none and user share the same value */
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
 
@@ -293,8 +293,8 @@ describe.each(['claude', 'codex'] as const)('%s — the session\'s kind decides 
   it.each(kinds)('%s: at creation, and again on every wake across trust × preset', async (kind) => {
     const id = await MAKE[kind](tool)
     await settle()
-    // An agent an app calls stands up as safe — the person's global bypass does not carry over to an app's instruction (runAppAgent)
-    const born: PermissionPreset = kind === 'project-app agent' || kind === 'user-folder-app agent' ? 'safe' : 'normal'
+    // An app's agent and builder start under auto, the default a new session gets (owner decision 2026-11-05); the rest here name normal
+    const born: PermissionPreset = kind.endsWith('app agent') || kind.endsWith('app builder') ? 'auto' : 'normal'
     const seen = [launched(tool, id, born)]
     const want = [expected(tool, kind, trustedNow(), born, 'new')]
     for (const trusted of [false, true]) {

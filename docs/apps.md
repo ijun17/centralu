@@ -738,7 +738,7 @@ and "Send to builder".
   failing to make it does not undo the app). A project app's builder works in the **project root**,
   because file links and history catch-up assume it; a user-folder app's builder
   works in the app folder. The app's rules come as the session's role text, fixed when it is made.
-  Preset `normal`. Tool: the project's default, or the orchestrator's for a user-folder app. It is
+  Preset `auto`, the default every new session gets (owner decision 2026-11-05; `normal` before). Tool: the project's default, or the orchestrator's for a user-folder app. It is
   attached to its own app's tools, and gets one more tool, `check`. Carrying Centralu's own tools
   does not change which files it reads (#152): like any other session of its project, a Claude
   builder in a trusted project loads the project's `.claude/` and `CLAUDE.md` and the person's

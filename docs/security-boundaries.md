@@ -2219,8 +2219,8 @@ Limits:
   which can include that project's files or conversation. "Always for this pair" covers every app
   the other project shares, including ones shared later.
 - A permission is per capability, not per request: once an app may run an agent, the app decides
-  what to ask it. The agent's writes and commands still stop at an approval card (`safe`), but
-  what it may read is whatever its session can read.
+  what to ask it. The agent runs under `auto` (owner decision 2026-11-05; its writes and commands
+  stopped at an approval card under `safe` before), and what it may read is whatever its session can read.
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message. It never lists a session in the session archive (FR-22), and no app capability or
   agent tool restores or deletes one for good — only the person, in Settings.

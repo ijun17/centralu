@@ -442,7 +442,7 @@ child's own preset still apply. Deleting a session without a worktree still requ
 (`askedBy` or `parentSessionId` equals the caller), even under `auto` (#637). Observing an app agent reuses its completion watcher, so
 `run_agent` still receives its answer and the agent keeps its own preset. Cleanup removes an idle worktree and branch even with dirty files or an unproven tip, after setting aside
 local work with the conversation in the session archive (#608). `run_agent`
-app agents stay `safe`, and no session gets a preset above its caller. When auto observes another
+app agents start under `auto` like any new session (owner decision 2026-11-05), and no session gets a preset above its caller. When auto observes another
 caller's unfinished delegation, its wait has its own bound and cancellation and returns
 `reported: false` while working. It does not consume the owner's report, key, waiter count
 or read grants. A stop leaves the owner's failure report and result available, including
