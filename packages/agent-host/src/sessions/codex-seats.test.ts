@@ -11,7 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { ORCHESTRATOR_ROLE, orchestratorRole } from './orchestrator-home.js'
-import { READER_INSTRUCTIONS, codexToolInstructionsFor, instructionsFor } from './orchestrator-tools.js'
+import { codexToolInstructionsFor, instructionsFor, readerInstructions } from './orchestrator-tools.js'
 
 /**
  * A Codex session through the real manager and the real adapter, with only the app-server faked, and faked the way
@@ -161,7 +161,10 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
 
   it("an ordinary session: the reader set's instructions alone, since it has no role (#564)", async () => {
     await rpc('agents.createSession', { projectId, cwd: repo, tool: 'codex' })
-    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBe(codexToolInstructionsFor('reader'))
-    expect(developerInstructions()).toContain(READER_INSTRUCTIONS)
+    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBe(codexToolInstructionsFor('reader', undefined, false, 'spawn_agent'))
+    expect(developerInstructions()).toContain(readerInstructions('spawn_agent'))
+    // #1587: Codex's own subagent tool is spawn_agent, not Claude's Agent
+    expect(developerInstructions()).toContain('start_agent, not your spawn_agent tool, for long work')
+    expect(new CodexAdapter().capabilities.subagentTool).toBe('spawn_agent')
   })
 })

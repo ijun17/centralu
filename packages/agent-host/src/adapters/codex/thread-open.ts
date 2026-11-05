@@ -192,6 +192,9 @@ export function networkAccessOf(res: Record<string, unknown>): boolean | undefin
     : typeof sandbox?.networkAccess === 'boolean' ? sandbox.networkAccess : undefined
 }
 
+/** What Codex calls its own subagent tool (the `multi_agent` feature): the name Centralu's instructions put `start_agent` before (#1587) */
+export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
+
 /**
  * The thread's developer instructions: the session's role, then the instructions of the Centralu tools it gets
  * (#525), which Claude receives from the in-process server and Codex would never show from the bridge's
@@ -205,7 +208,7 @@ export function networkAccessOf(res: Record<string, unknown>): boolean | undefin
 export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
   // An app attached as the thread starts adds the line on repository work (#957, #992 review)
   const apps = (opts.apps?.current().length ?? 0) > 0
-  const tools = opts.orchestratorTools && opts.orchestratorBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'orchestrator', undefined, apps) : undefined
+  const tools = opts.orchestratorTools && opts.orchestratorBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'orchestrator', undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
   const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
   return text ? { developerInstructions: text } : {}
 }

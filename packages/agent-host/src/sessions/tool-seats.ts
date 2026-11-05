@@ -14,9 +14,8 @@ import {
   COMPACT_TOOLS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
-  READER_INSTRUCTIONS,
-  READER_INSTRUCTIONS_WITH_APPS,
   READER_TOOLS,
+  readerInstructions,
   SCOPED_INSTRUCTIONS,
   SCOPED_TOOL_NAMES,
   type AgentToolName,
@@ -269,14 +268,15 @@ export function toolDefsFor(
 
 /**
  * The server instructions for a profile, or undefined for none. In one place so the size test
- * measures the exact text the adapter sends.
+ * measures the exact text the adapter sends. `subagentTool`: what the session's CLI calls its own subagent
+ * tool (`AdapterCapabilities.subagentTool`), which the reader's first line names (#1587).
  */
-export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false): string | undefined {
+export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false, subagentTool?: string): string | undefined {
   switch (profile) {
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
     // With an app attached at the start, the line on repository work (#957, #992 review)
-    case 'reader': return appsAttached ? READER_INSTRUCTIONS_WITH_APPS : READER_INSTRUCTIONS
+    case 'reader': return readerInstructions(subagentTool, appsAttached)
     default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
   }
 }
@@ -292,8 +292,8 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
  * thread's developer instructions. The header says whose they are: Codex shows these tools to the model as
  * `mcp__centralu__<tool>`, and the text names them bare, as Claude Code's section heading (the server's name) does.
  */
-export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false): string | undefined {
-  const text = instructionsFor(profile, tier, appsAttached)
+export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false, subagentTool?: string): string | undefined {
+  const text = instructionsFor(profile, tier, appsAttached, subagentTool)
   return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
@@ -302,8 +302,9 @@ export function toolInstructionsFor(
   profile: ToolProfile,
   channel: 'server' | 'developer',
   tier: RareTier = rareTier,
+  subagentTool?: string,
 ): string | undefined {
-  return channel === 'developer' ? codexToolInstructionsFor(profile, tier) : instructionsFor(profile, tier)
+  return channel === 'developer' ? codexToolInstructionsFor(profile, tier, false, subagentTool) : instructionsFor(profile, tier, false, subagentTool)
 }
 
 /**

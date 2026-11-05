@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { OrchestratorTools } from '../contract.js'
-import { READER_INSTRUCTIONS, SCOPED_INSTRUCTIONS } from '../../sessions/orchestrator-tools.js'
-import { orchestratorMcp } from './orchestrator-mcp.js'
+import { readerInstructions, SCOPED_INSTRUCTIONS } from '../../sessions/orchestrator-tools.js'
+import { ClaudeAdapter } from './index.js'
+import { CLAUDE_SUBAGENT_TOOL, orchestratorMcp } from './orchestrator-mcp.js'
 
 /**
  * What the in-process server registers — read from the SDK's own server, the list `tools/list`
@@ -43,8 +44,15 @@ describe('the Claude in-process server', () => {
         // Compacting at a break (#1451): loaded, its words are the instruction on when to use it
         compact_self: 'loaded',
       },
-      instructions: READER_INSTRUCTIONS,
+      instructions: readerInstructions(CLAUDE_SUBAGENT_TOOL),
     })
+  })
+
+  // #1587: the line names Claude's own subagent tool, and the adapter declares the same one for what the host counts and hashes
+  it("names Claude's own subagent tool in the reader instructions", () => {
+    expect(registered('reader').instructions).toContain('start_agent, not your Agent tool, for long work')
+    expect(new ClaudeAdapter().capabilities.subagentTool).toBe('Agent')
+    expect(CLAUDE_SUBAGENT_TOOL).toBe('Agent')
   })
 
   it('still loads every tool of the directing profiles, with their instructions', () => {

@@ -18,10 +18,7 @@ import {
   ORCHESTRATOR_MCP_NAME,
   ORCHESTRATOR_TOOLS,
   READER_BUDGET_CHARS,
-  READER_FIRST,
-  READER_INSTRUCTIONS_WITH_APPS,
   REPO_WORK_FIRST,
-  READER_INSTRUCTIONS,
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
   TOOL_ARGS,
@@ -30,16 +27,18 @@ import {
   instructionsFor,
   orchestratorToolSchemas,
   profileAllows,
+  readerFirst,
+  readerInstructions,
   runOrchestratorTool,
   toolDefsFor,
   type RareTier,
 } from './orchestrator-tools.js'
-import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
+import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions, servedInstructions } from './tool-cost.js'
 import { commandsFor, commandsSentence, namedCall } from './tool-seats.js'
 import { movedChildrenNote } from './handoff-children.js'
 
-const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
-const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const }
+const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const, subagentTool: 'Agent' }
+const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const, subagentTool: 'spawn_agent' }
 
 /**
  * Text a worker wrote arrives at the orchestrator as a **tool result** (#121).
@@ -246,11 +245,11 @@ describe('the reader set', () => {
       expect(profileAllows('reader', t.name), t.name).toBe(['update_centralu', 'read_session', 'recall', 'app_guide'].includes(t.name))
     }
     // Its instructions (#564): Centralu's tools first unless the person says otherwise, one need per tool, and no role
-    const text = instructionsFor('reader')!
-    expect(text).toBe(READER_INSTRUCTIONS)
+    const text = instructionsFor('reader', undefined, false, 'Agent')!
+    expect(text).toBe(readerInstructions('Agent'))
     expect(text).toContain('Unless the person says otherwise')
     for (const name of ['recall', 'read_session', 'ask_project', 'find_apps']) expect(text, name).toContain(name)
-    for (const line of READER_FIRST) expect(text).toContain(line)
+    for (const line of readerFirst('Agent')) expect(text).toContain(line)
     // Every tool it names is one the seat has
     for (const name of text.match(/\b[a-z]+_[a-z_]+\b/g) ?? []) expect(profileAllows('reader', name), name).toBe(true)
     expect(text).not.toMatch(/send_to_session|create_session|orchestrat/)
@@ -261,9 +260,9 @@ describe('the reader set', () => {
    * names no app and depends on nothing a session has: these instructions are the prompt's cached prefix (#512).
    */
   it('sends repository work to an attached app\'s help first, only where an app is attached at the start', () => {
-    expect(instructionsFor('reader', undefined, true)).toBe(READER_INSTRUCTIONS_WITH_APPS)
-    expect(READER_INSTRUCTIONS_WITH_APPS).toContain(REPO_WORK_FIRST)
-    expect(codexToolInstructionsFor('reader', undefined, true)).toContain(REPO_WORK_FIRST)
+    expect(instructionsFor('reader', undefined, true, 'Agent')).toBe(readerInstructions('Agent', true))
+    expect(readerInstructions('Agent', true)).toContain(REPO_WORK_FIRST)
+    expect(codexToolInstructionsFor('reader', undefined, true, 'spawn_agent')).toContain(REPO_WORK_FIRST)
     // No app, no help to read: the line does not ride in that session's every request
     expect(instructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
     expect(codexToolInstructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
@@ -287,7 +286,21 @@ describe('the reader set', () => {
   })
 
   it('gives Codex the reader instructions in its developer text', () => {
-    expect(codexToolInstructionsFor('reader')).toContain(READER_INSTRUCTIONS)
+    expect(codexToolInstructionsFor('reader', undefined, false, 'spawn_agent')).toContain(readerInstructions('spawn_agent'))
+  })
+
+  // #1587: Codex read "not your Agent tool", Claude's name for it, and chose its own spawn_agent for long work
+  it("names the session's own CLI's subagent tool in the start_agent line, and no other CLI's", () => {
+    const line = (tool?: string) => readerFirst(tool).find((l) => l.startsWith('start_agent'))!
+    expect(line('Agent')).toBe('start_agent, not your Agent tool, for long work, another CLI or a worktree, or work the person will follow')
+    expect(line('spawn_agent')).toBe('start_agent, not your spawn_agent tool, for long work, another CLI or a worktree, or work the person will follow')
+    // A CLI with no subagent tool has none to name
+    expect(line()).toBe('start_agent for long work, another CLI or a worktree, or work the person will follow')
+    // What each CLI is served: the text it is sent and the cost counted for it
+    expect(servedInstructions('reader', DEFERRED_SERVER)).toContain('not your Agent tool')
+    expect(servedInstructions('reader', DEFERRED_SERVER)).not.toContain('spawn_agent')
+    expect(servedInstructions('reader', EAGER_DEVELOPER)).toContain('not your spawn_agent tool')
+    expect(servedInstructions('reader', EAGER_DEVELOPER)).not.toContain('Agent tool')
   })
 
   /*
@@ -295,7 +308,8 @@ describe('the reader set', () => {
    * JSON schema (including the deferred guide and update tool — Codex can load them), plus instructions.
    */
   it(`stays within ${READER_BUDGET_CHARS} characters`, () => {
-    expect(sentChars(READER_TOOLS) + (instructionsFor('reader') ?? '').length).toBeLessThanOrEqual(READER_BUDGET_CHARS)
+    // Each CLI is sent its own tool's name; the longer one (Codex's spawn_agent) is within the ceiling too
+    for (const tool of ['Agent', 'spawn_agent']) expect(sentChars(READER_TOOLS) + (instructionsFor('reader', undefined, false, tool) ?? '').length, tool).toBeLessThanOrEqual(READER_BUDGET_CHARS)
   })
 
   /*

@@ -184,9 +184,10 @@ otherwise, agents running in Centralu use Centralu's own features first. Two sea
 starts with a preamble saying so (`orchestratorRole`; it names `centralu_commands` where the seat has the tier), first
 measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no regression and no gain that held, and on
 since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
-(`READER_INSTRUCTIONS`): one sentence naming which tool answers which need (`READER_FIRST`: `recall` for earlier
+(`readerInstructions`): one sentence naming which tool answers which need (`readerFirst`: `recall` for earlier
 conversations, `read_session` for other sessions, `ask_project` for another project's work,
-`find_apps` for another project's apps, and `start_agent`, not the CLI's own Agent tool, for long work, another CLI
+`find_apps` for another project's apps, and `start_agent`, not the CLI's own subagent tool (Claude's `Agent`, Codex's
+`spawn_agent`: each adapter declares its own as `subagentTool`, #1587), for long work, another CLI
 or a worktree, or work the person will follow; the CLI's own subagents stay the way to hand off short helper work
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states
 in words adds its line there. Before #564 the reader set had no instructions, on the principle that Centralu offered
@@ -1979,6 +1980,7 @@ interface AdapterCapabilities {
   instructionChannel: 'server' | 'developer' // where Centralu's tool instructions reach the model (#525)
   processModel: 'per-session' | 'shared-server' // whether one CLI process owns one or several conversations
   builtInSubagents: boolean     // child-agent events are normalized by this adapter
+  subagentTool?: string         // what the model calls the CLI's own subagent tool; the reader's `start_agent` line names it (#1587)
   peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
   midTurnInput?: boolean         // send accepts a message during a running turn without interrupting it (#592)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1

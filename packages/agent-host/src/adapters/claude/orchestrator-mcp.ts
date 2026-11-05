@@ -32,6 +32,9 @@ import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
  */
 export { ORCHESTRATOR_MCP_NAME }
 
+/** What Claude Code calls its own subagent tool: the name Centralu's instructions put `start_agent` before (#1587) */
+export const CLAUDE_SUBAGENT_TOOL = 'Agent'
+
 export function orchestratorMcp(
   tools: OrchestratorTools,
   profile: ToolProfile = 'orchestrator',
@@ -61,7 +64,7 @@ export function orchestratorMcp(
      */
     alwaysLoad: !someDeferred,
     // None for the reader set (#320): server instructions are where a role would creep in
-    instructions: instructionsFor(profile, undefined, appsAttached),
+    instructions: instructionsFor(profile, undefined, appsAttached, CLAUDE_SUBAGENT_TOOL),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: defs.map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>
