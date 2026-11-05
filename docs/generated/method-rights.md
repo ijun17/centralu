@@ -91,6 +91,7 @@ With the limited credential: runs.
 - `machines.askConsents`
 - `machines.cancelUpdate`
 - `machines.disconnect`
+- `machines.hubAuto`
 - `machines.list`
 - `machines.probe`
 - `machines.reconnect`
@@ -183,10 +184,9 @@ Asks only for some parameters (everyday otherwise):
 - `agents.createSession`, when the preset is above `normal`, or it carries a hub's preset (`fromHub`)
 - `agents.updateSettings`, when it sets a preset other than `safe`
 - `apps.setShared`, when it shares the app
-- `machines.hubAuto`, when it turns the switch on
 - `machines.setAsks`, when it turns the switch on
 - `machines.update`, when `when` is `now`, or the hub's automatic updates are off, or the machine does not run an older release that the update brings to the hub's own version
-- `prefs.set`, when it sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off
+- `prefs.set`, when it sets the agent ceiling or depth, or turns approval notifications or their sound off
 - `updates.apply`, when the person's Automatic updates are off, or something is running (a turn, a card waiting, background work, a terminal or a command)
 - `updates.setAuto`, when it turns automatic updates on
 - `updates.setAutoApply`, when it turns automatic applying on

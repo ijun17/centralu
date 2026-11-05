@@ -121,7 +121,7 @@ afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 describe('creating an app stands up its building session', () => {
   it('a project app: cwd is the project root, the app panel is that app, and the role prompt states the app\'s place and rules', async () => {
     const { app, builder } = await create({ projectId, id: 'notes', name: 'Team notes' })
-    expect(builder).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', name: 'Team notes · builder', autoNamed: false, permissionPreset: 'normal' })
+    expect(builder).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', name: 'Team notes · builder', autoNamed: false, permissionPreset: 'auto' })
     const o = claude.last()
     expect(o.cwd).toBe(repo)
     expect(o.systemPromptAppend).toBe(builder!.roleAppend)

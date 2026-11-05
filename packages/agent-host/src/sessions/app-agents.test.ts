@@ -57,7 +57,7 @@ afterEach(async () => {
 })
 
 describe('run_agent — a fresh session per assignment, owned by that app', () => {
-  it('the agent stands up as safe even when called from an auto-running session (the person\'s global bypass does not carry over to an app\'s instruction), the app\'s text is framed as the app\'s text, and the session that hands back an answer goes idle, then is deleted with its record kept (#378)', async () => {
+  it('the agent stands up under auto, the default every new session gets (owner decision 2026-11-05), the app\'s text is framed as the app\'s text, and the session that hands back an answer goes idle, then is deleted with its record kept (#378)', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
@@ -70,12 +70,12 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(r).toEqual({ isError: false, text: 'The notes say hello.', structured: null })
 
     const [agent] = agentsMade()
-    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'safe' })
+    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'auto' })
     const name = (events.filter((e) => e.type === 'session_title' && e.sessionId === agent!.id).at(-1) as { title: string } | undefined)?.title
     expect(name).toMatch(/^App notes · agent \d\d:\d\d$/)
     const opts = claude.opened.find((o) => o.sessionId === agent!.id)!
     // At the project root, with no tool profile and no apps — an app's agent only works through the one piece of text the app assigned it
-    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'safe', undefined, undefined, undefined])
+    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'auto', undefined, undefined, undefined])
     // The text the agent received = the text left in the conversation. It is recorded as the app's request, not as something the person said
     const h = claude.handles.get(agent!.id)!
     expect(h.sent).toHaveLength(1)
@@ -99,7 +99,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(kept).toMatchObject({ appId: 'notes', appName: 'App notes', sessionId: agent!.id, sessionName: name, status: 'ok' })
   })
 
-  it("auto session control observes an app agent without replacing the app request's completion watcher or raising safe", async () => {
+  it("auto session control observes an app agent without replacing the app request's completion watcher or changing its preset", async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
@@ -107,7 +107,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const request = callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize.' } })
     await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
     const child = agentSessions()[0]!
-    expect(child.permissionPreset).toBe('safe')
+    expect(child.permissionPreset).toBe('auto')
     expect(await mgr.agentSession(caller.id, { sessionId: child.id, action: 'status' })).toMatchObject({ ok: true, state: 'working' })
     const watching = mgr.agentSession(caller.id, { sessionId: child.id, action: 'wait' })
     const h = claude.handles.get(child.id)!
@@ -115,7 +115,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     h.done()
     expect(await watching).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.' })
     expect(brokerSaid(await request)).toMatchObject({ isError: false, text: 'The app still gets its answer.' })
-    expect(h.opts.permissionPreset).toBe('safe')
+    expect(h.opts.permissionPreset).toBe('auto')
   })
 
   it.each(['status', 'wait', 'cancel'] as const)('%s observation never makes an app request belong to its observer', async (action) => {
@@ -143,7 +143,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     h.done()
     if (action === 'wait') expect(await observation).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.', readable: [] })
     expect(brokerSaid(await request)).toMatchObject({ isError: false, text: 'The app still gets its answer.' })
-    expect(h.opts.permissionPreset).toBe('safe')
+    expect(h.opts.permissionPreset).toBe('auto')
   })
 
   it("a cancelled request says it was cancelled, though Claude's interrupt ends the turn at once (#698)", async () => {
@@ -227,7 +227,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const r = brokerSaid(await callFromSession(orchestrator, 'app-timer', { args: { prompt: 'x' } }))
     expect(r).toEqual({ isError: false, text: 'Done.', structured: null })
     const agent = agentsMade()[0]!
-    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'safe' })
+    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'auto' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
   })
 

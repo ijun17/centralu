@@ -56,7 +56,8 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
     undefined,
-    { permissionPreset: 'normal', projectTrusted: true, roleText: true },
+    // A builder starts under `auto` (`AppSessions.createAppBuilder`), the default every new session gets
+    { permissionPreset: 'auto', projectTrusted: true, roleText: true },
   )
   const [name, setName] = useState('')
   /** The value the person entered if they touched the id, otherwise null — the derived id keeps following as the name is edited */

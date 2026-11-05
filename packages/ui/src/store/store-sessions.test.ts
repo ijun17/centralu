@@ -717,11 +717,11 @@ describe('newSessionProjectOf (#529)', () => {
 })
 
 /*
- * The preset a new session starts with (#1525): `edits` in a trusted project, `normal` in an untrusted one, and the
- * person's own choice always wins. The window sends the preset itself, so a client that names none (a script, the
- * limited credential) still gets `normal` from the host.
+ * The preset a new session starts with (owner decision 2026-11-05, before it #1525): `auto` in a trusted project, here or
+ * on a linked machine, `normal` in an untrusted one, and the person's own choice always wins. The window sends the preset
+ * itself, so a client that names none (a script, the limited credential) still gets `normal` from the host.
  */
-describe('the preset a new session starts with (#1525)', () => {
+describe('the preset a new session starts with', () => {
   async function started(trusted: boolean, opts?: { permissionPreset?: 'safe' | 'normal' | 'edits' | 'auto' }, machine?: string) {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/preset-project')
@@ -732,8 +732,8 @@ describe('the preset a new session starts with (#1525)', () => {
     return { sent: useStore.getState().sessions[created.id]!.permissionPreset, shown: created.permissionPreset }
   }
 
-  it('a trusted project starts accepting edits inside the project', async () => {
-    expect(await started(true)).toEqual({ sent: 'edits', shown: 'edits' })
+  it('a trusted project starts under auto', async () => {
+    expect(await started(true)).toEqual({ sent: 'auto', shown: 'auto' })
   })
 
   it('an untrusted project keeps normal', async () => {
@@ -742,12 +742,14 @@ describe('the preset a new session starts with (#1525)', () => {
 
   it('an explicit choice wins in a trusted project, normal included, and is never raised', async () => {
     expect((await started(true, { permissionPreset: 'normal' })).sent).toBe('normal')
+    expect((await started(true, { permissionPreset: 'edits' })).sent).toBe('edits')
     expect((await started(true, { permissionPreset: 'safe' })).sent).toBe('safe')
     expect((await started(false, { permissionPreset: 'edits' })).sent).toBe('edits')
   })
 
-  it('a project on a linked machine keeps normal: that machine may not know edits yet', async () => {
-    expect((await started(true, undefined, 'other-machine')).sent).toBe('normal')
+  it('a trusted project on a linked machine starts under auto too, an untrusted one there under normal', async () => {
+    expect((await started(true, undefined, 'other-machine')).sent).toBe('auto')
+    expect((await started(false, undefined, 'other-machine')).sent).toBe('normal')
   })
 })
 

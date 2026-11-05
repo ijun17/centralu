@@ -688,15 +688,17 @@ would. `normal` keeps its meaning (the person approves each step).
 
 - **Preset, not a hidden default.** A default that made `normal` accept edits in a trusted project would put a word
   on the picker that is not true of the session, and an explicit `normal` could not be told from the default. So the
-  picker lists `edits` ("No card in project"), and the **default** is what changed: the window names the preset when the
-  person starts a session without choosing one, `edits` in a **trusted** project and `normal` in an untrusted one
-  (`defaultPresetFor`, `@cc/core`, read in `createSession` of the store). A preset named in the start, the settings menu,
-  a handoff or a fork always wins and is never raised. The host's own default stays `normal`, so a client that names none
-  (a script, the limited credential, an older window) never gets `edits` unasked, and naming it as the limited credential
-  does asks first (`presetAbove`, `transport/method-rights.ts`). A project on a linked machine keeps `normal` as the
-  default: that machine may run a build from before `edits`, which refuses a value it does not know. The stored and shown
-  preset is the one the session runs under. There is no per-project default preset to override (the "per project" choice
-  of #1525 is the project's trust).
+  picker lists `edits` ("No card in project"). The **default** moved on since (owner decision 2026-11-05): the window
+  names the preset when the person starts a session without choosing one, `auto` in a **trusted** project, on this
+  computer or a linked one, and `normal` in an untrusted one (`defaultPresetFor`, `@cc/core`, read in `createSession` of
+  the store; #1525 made it `edits` in a trusted local project). A preset named in the start, the settings menu, a handoff
+  or a fork always wins and is never raised, and a session that exists keeps its preset. The host's own default for a
+  client that names none stays `normal` (`CreateSessionParams`): the window and a hub always name one, and a script's
+  start with the limited credential runs unasked (owner, 2026-10-21), so it must not get `auto` from a default; naming
+  `auto` or `edits` there asks first (`presetAbove`, `transport/method-rights.ts`). A linked machine's project gets `auto` as well: every linked build knows `auto` (`edits`
+  stays off the link, since a build from before it refuses a value it does not know). The stored and shown preset is the
+  one the session runs under. There is no per-project default preset to override (the per-project choice is the
+  project's trust).
 - **Mapping to Claude.** Not `acceptEdits`. The SDK's mode also approves `rm`, `rmdir`, `mv`, `cp`, `sed`, `mkdir` and
   `touch` inside the working directory (Claude Code's documentation, "acceptEdits"), which would let deletes and
   commands through. `edits` launches exactly as `normal` does (the trusted settings mode, else `default`) and `canUseTool`
@@ -862,8 +864,13 @@ Rows that differ by session:
   and a mode written in the orchestrator's own folder does not count. The direction is decision 1's:
   the person's global choice applies to every session that runs under `normal`, and someone who wants
   a card from the orchestrator has `safe`.
-- **An agent an app started** (`run_agent`, `AppSessions.runAppAgent`) is `safe` whatever the
-  calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
+- **An agent an app started** (`run_agent`, `AppSessions.runAppAgent`) runs under `auto`, the default
+  every new session gets, whatever the calling session uses (owner decision 2026-11-05; it was `safe`, so
+  everything but a read asked). It still has no Centralu server and no apps, cannot apply Centralu updates,
+  reads its project's files only as the project's trust allows, and no other session answers a card raised in
+  it (`answersApproval`). **Residual:** its text is the app's, which may carry data the app pulled in from
+  outside, and under `auto` nothing it does waits for the person; a `safe` session that calls an app reaches
+  an `auto` agent this way. The person may lower its preset in the session's settings.
 - **A session `ask_project` addresses** already exists and keeps its own preset, tool and project
   trust. The caller's `auto` skips host consent; it does not raise the target's permissions, which
   includes answering its approval cards: an `auto` caller may answer them only for a `normal` or `auto`
@@ -1416,7 +1423,7 @@ protocol does not compile until someone classifies it, and a test compares its k
 | Class | With the limited credential | Which methods |
 |---|---|---|
 | everyday | runs | reading, creating and messaging sessions (a preset of `normal` or below), renaming, sleep policy, the trash's list, read and restore, git, files, terminals, commands, stopping a process, app upkeep that keeps what it replaces. What the user could do by hand anyway is not held back |
-| asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating (save the catch-up below), rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update (save the idle one below) or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
+| asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating (save the catch-up below), rolling back, uninstalling a machine, its autostart, its versions, letting it ask here; installing an update (save the idle one below) or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, or turns approval notifications or their sound off. The hub-auto switch, here (`prefs.set`) or on a linked machine (`machines.hubAuto`), turns on and off with no card (owner decision 2026-11-05) |
 | window | refused, never a card | the person's own answers (approval cards, questions, an update's apply and its report, whose ticket every client hears, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
 | link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
 | bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
@@ -2167,15 +2174,14 @@ then who may call it:
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
   requests never run (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
   `host-data.test.ts`, `call-app.test.ts`).
-- An agent an app asks for runs in a new session the person can see, with the `safe` preset
-  whatever the calling session uses and whatever the person's own settings say, with no apps
-  attached, and receives the prompt framed as the app's text ("Text an app sends";
-  `app-agents.test.ts` "the agent stands up as safe even when called from an auto-running session
-  (the person's global bypass does not carry over to an app's instruction), the app's text is
-  framed as the app's text, and the session that hands back an answer goes idle").
-  A person's global bypass is trust in their own instructions, not in instructions an app wrote,
-  which may carry text the app fetched from elsewhere. Reads still run without asking; writes and
-  commands stop at an approval card in that session. Its settings files
+- An agent an app asks for runs in a new session the person can see, under `auto`, the default
+  every new session gets, whatever the calling session uses (owner decision 2026-11-05; it was
+  `safe`), with no apps attached, and receives the prompt framed as the app's text ("Text an app
+  sends"; `app-agents.test.ts` "the agent stands up under auto, the default every new session gets
+  (owner decision 2026-11-05), the app's text is framed as the app's text, and the session that
+  hands back an answer goes idle"). Its text may carry what the app fetched from elsewhere, and
+  under `auto` nothing it does waits for the person (the residual under "An agent an app
+  started" above). Its settings files
   follow the project's trust like a worker's; a user-folder app's agent, which runs in the
   orchestrator's folder, reads only the person's own settings, never that folder's files
   (`settingFilesFor`; `setting-files.test.ts`).

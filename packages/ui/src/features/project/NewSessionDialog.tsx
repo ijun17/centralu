@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import type { ExternalSession, GitBranch } from '@cc/protocol/client'
+import { defaultPresetFor } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
@@ -83,7 +84,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     project?.defaultTool ?? allTools[0]?.name ?? '',
     machine,
-    { permissionPreset: 'normal', projectTrusted: !!project?.trusted },
+    { permissionPreset: defaultPresetFor({ trusted: !!project?.trusted, machine }), projectTrusted: !!project?.trusted },
   )
   const [busy, setBusy] = useState(false)
   /**
