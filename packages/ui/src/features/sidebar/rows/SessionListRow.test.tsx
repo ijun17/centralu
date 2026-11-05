@@ -81,11 +81,31 @@ describe('SessionListRow', () => {
     expect(render(session(), false)).not.toMatch(/handed-off-| on Windows PC/)
   })
 
-  // #1273: a child a linked computer's session started runs under the preset it carried; its row says which
-  it('shows the preset of a session a linked computer started, and of no other', () => {
-    expect(render(session({ permissionPreset: 'auto', startedFromHub: true }), false)).toMatch(/data-testid="session-preset-s1"[^>]*>auto</)
-    expect(render(session({ permissionPreset: 'normal', startedFromHub: true }), false)).toMatch(/data-testid="session-preset-s1"[^>]*>normal</)
-    expect(render(session({ permissionPreset: 'auto' }), false)).not.toContain('session-preset-')
+  // Owner, 2026-11-05: auto is the default now, so the preset of a session a linked computer started is noise on the row (the header still says it)
+  it('shows no preset tag on the row, whichever preset a linked computer started it under', () => {
+    for (const permissionPreset of ['auto', 'normal'] as const) {
+      expect(render(session({ permissionPreset, startedFromHub: true }), false)).not.toContain('session-preset-')
+    }
+  })
+
+  it('names a pull request by its number alone, with its state and address in the tooltip', () => {
+    const html = render(session({ pr: { number: 1998, state: 'open', url: 'https://example.test/pull/1998' } }), false)
+    expect(html).toMatch(/data-testid="pr-badge-s1"[^>]*title="Pull request #1998 — open\nhttps:\/\/example\.test\/pull\/1998"[^>]*>#1998</)
+    expect(html).not.toContain('PR #')
+    expect(render(session({ pr: { number: 7, state: 'closed', url: 'u' } }), false)).toMatch(/data-testid="pr-badge-s1"[^>]*>#7 ✕</)
+  })
+
+  it('draws background work as a dot on the tool mark, not as a chip, and says it in the label of the mark', () => {
+    const task = { id: 'b1', kind: 'shell', description: 'sleep 99', stoppable: true, status: 'running' }
+    const html = render(session({ backgroundTasks: [task, { ...task, id: 'b2', description: 'tail -f log' }] as SessionSummary['backgroundTasks'] }), false)
+    expect(html).not.toMatch(/>\d+ bg</)
+    expect(html).toMatch(/data-testid="background-mark-s1"/)
+    expect(html).toContain(
+      [' · 2 background tasks running (keeps the session awake)', '· sleep 99', '· tail -f log" data-testid="tool-mark-'].join('\n'),
+    )
+    const quiet = render(session(), false)
+    expect(quiet).not.toContain('background-mark-')
+    expect(quiet).not.toContain('background task')
   })
 
   it('keeps each list its own test id and indentation', () => {

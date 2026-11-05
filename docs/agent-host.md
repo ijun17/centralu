@@ -696,7 +696,7 @@ is made over the link (`agents.createSession` there) under the caller's preset c
 over a link, #838) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
 did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
-`startedFromHub`, and its row and header show its preset there and on the hub. It is made with the model, effort and worktree
+`startedFromHub`, and its header shows its preset there and on the hub (its sidebar row stopped showing it: `auto` is the default, so the tag was noise, owner 2026-11-05). It is made with the model, effort and worktree
 branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.

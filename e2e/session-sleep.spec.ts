@@ -138,9 +138,12 @@ test('a session kept awake by a /loop wake-up says why on its background mark', 
       }),
     id,
   )
-  const mark = page.getByTestId(`background-mark-${id}`)
-  await expect(mark).toHaveText('1 bg')
-  await expect(mark).toHaveAttribute('title', /stays awake until it ends\n· Wakes itself at 14:05 \(\/loop\): poll CI/)
+  // The sidebar row's tool mark carries it: a dot on the mark, and its words in the mark's label
+  await expect(page.getByTestId(`background-mark-${id}`)).toBeVisible()
+  await expect(page.getByTestId('tool-mark-claude').first()).toHaveAttribute(
+    'aria-label',
+    /1 background task running \(keeps the session awake\)\n· Wakes itself at 14:05 \(\/loop\): poll CI/,
+  )
 })
 
 test('"Put idle sessions to sleep after" is 15 minutes by default, and saves through the host', async ({ page }) => {

@@ -1,7 +1,9 @@
-import type { Interruption, SessionState, ToolName } from '@cc/protocol/client'
+import type { BackgroundTask, Interruption, SessionState, ToolName } from '@cc/protocol/client'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Tooltip, interruptionLabel, stateLabel } from '../../../components/primitives.jsx'
 import { lookOf } from '../../session/look.js'
+import { backgroundNote } from '../../session/BackgroundTasks.jsx'
+import { usePresence } from '../../../components/presence.js'
 
 /**
  * The session mark — tool and state, in one spot. Without the tool, there would be no way to tell
@@ -16,6 +18,10 @@ import { lookOf } from '../../session/look.js'
  * under `.cc-mark`): a thin grey line at rest, a thick white line while it answers, the same line dashed
  * on grey when the turn broke off, and solid on grey when the person has to act. Nothing moves. The
  * chip's own 1px border is the same in all four, and the exact state is in the tooltip.
+ *
+ * Background work (#290) is a dot on the mark's bottom-right corner, not a chip of its own (owner, 2026-11-05): it
+ * takes no width on the row. The dot is faint on purpose: brightness is this app's urgency signal and the ring states
+ * the turn. The count and what runs are in the tooltip and the label.
  */
 /*
  * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
@@ -23,15 +29,51 @@ import { lookOf } from '../../session/look.js'
  * nothing the person has to act on (using the session wakes it), and a fade would be mistaken for a stalled session
  * (#670). So a finished turn still looks finished and idle still looks idle. `data-asleep` stays for tests.
  */
-export function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0, unread = true }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number; unread?: boolean }) {
+export function ToolMark({
+  tool,
+  state,
+  asleep = false,
+  interruption = null,
+  openQuestions = 0,
+  unread = true,
+  background,
+}: {
+  tool: ToolName
+  state: SessionState
+  asleep?: boolean
+  interruption?: Interruption | null
+  openQuestions?: number
+  unread?: boolean
+  /** The session's background tasks, for the dot (a row in the sidebar); `testId` goes on the dot */
+  background?: { tasks: readonly BackgroundTask[]; testId: string }
+}) {
   const meta = useToolMeta(tool)
-  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
+  const note = background ? backgroundNote(background.tasks) : null
+  // The dot fades in and, when the last task ends, out (usePresence keeps it for its exit)
+  const dot = usePresence(note !== null)
+  const base = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
+  const lines = note ? [`${base} · ${note.summary}`, ...note.running] : [base]
+  const label = lines.join('\n')
   const look = lookOf({ state, interruption, openQuestions, unread })
 
   return (
-    <Tooltip content={label} testId={`tool-mark-tip-${tool}`} className="shrink-0">
+    <Tooltip
+      content={
+        <>
+          {base}
+          {note && ` · ${note.summary}`}
+          {note?.running.map((line) => (
+            <span key={line} className="block">
+              {line}
+            </span>
+          ))}
+        </>
+      }
+      testId={`tool-mark-tip-${tool}`}
+      className="shrink-0"
+    >
       <span
-        className="cc-mark shrink-0 rounded-md"
+        className="cc-mark relative shrink-0 rounded-md"
         data-look={look}
         aria-label={label}
         data-testid={`tool-mark-${tool}`}
@@ -56,6 +98,14 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
         >
           {meta.mark}
         </span>
+        {background && dot.shown && (
+          <span
+            aria-hidden
+            className={`absolute -bottom-px -right-px size-[5px] rounded-full bg-ink-faint ring-[1.5px] ring-surface-side ${dot.leaving ? 'cc-fade-out' : 'cc-fade'}`}
+            data-testid={background.testId}
+            data-leaving={dot.leaving || undefined}
+          />
+        )}
       </span>
     </Tooltip>
   )
