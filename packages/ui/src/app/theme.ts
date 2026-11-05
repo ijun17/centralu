@@ -185,6 +185,32 @@ export function applyCachedTheme(): void {
 }
 
 /**
+ * The custom themes the last run showed, as theme files, for the store's `lastGoodThemes` before any file has been read.
+ * A theme file that is broken when the window starts (half edited, or one the host could not parse) has no clean version
+ * in memory yet; without this the window fell back to the Dark preset and wrote that over the cache, so the custom theme
+ * was gone from the first paint until the file was fixed. The cache is the page's own writing, re-checked like in
+ * `applyCachedTheme`.
+ */
+export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
+  const out: Record<string, ThemeFileEntry> = {}
+  const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
+  const choice = readStored(CACHE_KEY)
+  for (const theme of [field(choice, 'dark'), field(choice, 'light')]) {
+    const id = field(theme, 'id')
+    const base = field(theme, 'base')
+    if (typeof id !== 'string' || THEME_PRESETS.some((p) => p.id === id) || (base !== 'dark' && base !== 'light')) continue
+    const tokens: Record<string, string> = {}
+    for (const token of THEME_TOKENS) {
+      const value = field(field(theme, 'tokens'), token.cssVar)
+      if (typeof value === 'string' && isValidTokenValue(token.key, value)) tokens[token.key] = value
+    }
+    const name = field(theme, 'name')
+    out[id] = { id, path: '', name: typeof name === 'string' ? name : id, base, tokens, problems: [], broken: false }
+  }
+  return out
+}
+
+/**
  * Reads what a preset sets every token to (by theme-file key), with the custom and accent layers
  * lifted for the moment it takes to read. Used to duplicate a preset into a theme file: the copy
  * starts from exactly what that preset puts on screen.

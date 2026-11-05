@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
-import { accentTokens, activeSide, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
+import { usableThemeFiles } from '../store/store.js'
+import { accentTokens, activeSide, cachedThemeFiles, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -100,5 +101,33 @@ describe('the urgency order (contrast is urgency)', () => {
 
   it('measures contrast the WCAG way', () => {
     expect(contrast([0, 0, 0, 1], [255, 255, 255, 1])).toBeCloseTo(21, 5)
+  })
+})
+
+/*
+ * A custom theme whose file is broken when the window starts has no clean version in memory. The last run's cache stands in
+ * for it, so the window keeps the theme's floor instead of falling to Dark and writing Dark over the cache.
+ */
+describe('a custom theme whose file is broken at start', () => {
+  const cache = {
+    mode: 'dark',
+    dark: { id: 'mine', name: 'Mine', base: 'dark', preset: 'dark', tokens: { '--color-surface-floor': '#101820', sparkle: '#fff' }, accent: null },
+    light: { id: 'light', name: 'Light', base: 'light', preset: 'light', tokens: {}, accent: null },
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('is read back from the cache, its known tokens only, and no preset', () => {
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(cache) })
+    expect(cachedThemeFiles()).toEqual({ mine: expect.objectContaining({ id: 'mine', base: 'dark', broken: false, tokens: { 'surface-floor': '#101820' } }) })
+  })
+
+  it('keeps the cached tokens in place of the broken file, and reads nothing when nothing is cached', () => {
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(cache) })
+    const broken = file({ id: 'mine', base: 'dark', broken: true })
+    const lastGoodThemes = cachedThemeFiles()
+    expect(resolveSide('dark', 'mine', usableThemeFiles({ themeFiles: [broken], lastGoodThemes }), null)).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
+    vi.stubGlobal('localStorage', { getItem: () => null })
+    expect(cachedThemeFiles()).toEqual({})
   })
 })

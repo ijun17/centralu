@@ -45,6 +45,13 @@ export function firstPaintTests() {
       expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(240, 240, 240)', scheme: 'light' })
     })
 
+    test('with a custom theme cached, the page is its floor and side before any stylesheet or module loads', async ({ page }) => {
+      await page.emulateMedia({ colorScheme: 'dark' })
+      const paper = { id: 'paper', name: 'Paper', base: 'light', preset: 'light', tokens: { '--color-surface-floor': '#fafaf5' }, accent: null }
+      const shown = await beforeTheBundle(page, { ...LIGHT_CHOICE, mode: 'light', light: paper })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(250, 250, 245)', scheme: 'light' })
+    })
+
     test('a System mode cached by an older build is the dark floor, whatever the OS is set to', async ({ page }) => {
       await page.emulateMedia({ colorScheme: 'light' })
       const shown = await beforeTheBundle(page, { ...LIGHT_CHOICE, mode: 'system' })
