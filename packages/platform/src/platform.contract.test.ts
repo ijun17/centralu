@@ -198,7 +198,7 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   })
   // The person's side of the mailbox over this store (#1347), wired as main.ts wires it; its delivery is not started, so nothing is delivered
   const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => false), { hostId: 'hub-contract' })
-  const mail = new MailPerson(hostMailbox.service, store.mailbox, hostMailbox.delivery, { session: () => undefined, legacyChain: () => [], projectLabel: (id) => id, untrusted: () => false, turnOn: () => undefined, closed: () => {} })
+  const mail = new MailPerson(hostMailbox.service, store.mailbox, hostMailbox.delivery, { session: () => undefined, legacyChain: () => [], projectLabel: (id) => id, untrusted: () => false, turnOn: () => undefined, tellsNow: () => false, tell: async () => {} })
   const server = new HostServer({
     port: 0,
     token: 'contract',

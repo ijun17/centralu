@@ -9,7 +9,7 @@ import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.j
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
-import { MailNotAtRest } from '../mail/delivery.js'
+import { MailNotAtRest, MailWithdrawn } from '../mail/delivery.js'
 import type { StopWhy } from '../mail/messages.js'
 import { stopOf, wentWithItsProcess } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
@@ -728,13 +728,14 @@ export class SessionEvents {
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
     input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean },
-    gate: { leaving(): boolean; atRest(): boolean } = { leaving: () => false, atRest: () => true },
+    gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
     // Asked again after every wait and right before the send: what was true when the delivery began may not be (§4.2, §7.1)
     const clear = () => {
       if (gate.leaving()) throw rpcError('Centralu is restarting: the mail waits for the next host')
       if (!gate.atRest()) throw new MailNotAtRest()
+      if (gate.wanted && !gate.wanted()) throw new MailWithdrawn()
     }
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting

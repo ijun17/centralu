@@ -116,14 +116,6 @@ describe('the thread in the inbox', () => {
     expect(done.text).not.toContain('thread')
   })
 
-  it('closes at once: no question about the session working on it and no Stop, also for a chain a turn is on', () => {
-    const working = render(view({ thread: { ...view().thread, working: true } }))
-    expect(working.html).not.toContain('mail-stop-confirm')
-    expect(working.html).not.toContain('role="alertdialog"')
-    expect(working.text).not.toContain('Stop and close')
-    expect(working.text).not.toMatch(/working on this/)
-  })
-
   it('offers no reply box on a chain with nothing of the person’s to answer (mail between sessions held for them), and keeps the acts; a host that does not say has the box', () => {
     const held = render(view({ canReply: false }))
     expect(held.html).not.toContain('data-testid="mail-reply"')

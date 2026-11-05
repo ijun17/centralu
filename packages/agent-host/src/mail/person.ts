@@ -16,11 +16,11 @@ export type PersonHost = {
   /** Whether the project is not trusted (`MailReach.untrusted`, §7.2) */
   untrusted(projectId: string): boolean
   /** The turn going in the session, from the turn records (`MailTurns.current`, while the session is in a turn): its work message, else its starter */
-  turnOn(sessionId: string): { work: string | null; startedAt: number } | undefined
-  /** Whether the session takes a notice into its running process now, without a wake (a live process of a tool that takes quiet input; `SessionManager.tellsNow`) */
+  turnOn(sessionId: string): { work: string | null } | undefined
+  /** Whether the session takes a notice into its running process now, without a wake (a live process of a tool that takes quiet input; `SessionManager.tellsMailNow`) */
   tellsNow(sessionId: string): boolean
   /** Puts the notice into that process (`tellsNow` said it takes it): the session reads it where it is, in its turn if it is in one. Nothing is stopped */
-  tell(sessionId: string, text: string): void
+  tell(sessionId: string, text: string): Promise<void>
 }
 
 /** How the person closes a chain: Mark done is `finished`, Drop is `dropped` */
@@ -178,14 +178,18 @@ export class MailPerson {
     const root = roots[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
     const now = Date.now()
+    /** The sessions to tell, once each across every chain the id names, with the person's requests withdrawn that they had and where each chain ended */
+    const tell = new Map<string, { address: string; root: string; ids: string[]; ends: string[] }>()
     // Every chain an id names: the window showed them as one thread
     for (const r of roots) {
       const chain = this.chainOf(r)
       // What the person asked in it that is open, by the session that has it
       const asked: { id: string; recipient: string; seen: boolean }[] = []
+      // A request in doubt (in delivery, or delivered and unsure) may be in the session already, so the session is told of it
+
       for (const m of chain) {
         if (m.sender !== PERSON || !(m.needsReply || m.kind === 'task')) continue
-        for (const row of this.records.recipients(m.id)) if (row.settled === null) asked.push({ id: m.id, recipient: row.recipient, seen: row.deliveredAt !== null || row.attemptAt !== null })
+        for (const row of this.records.recipients(m.id)) if (row.settled === null) asked.push({ id: m.id, recipient: row.recipient, seen: row.deliveredAt !== null || row.attemptAt !== null || row.held === 'uncertain' })
       }
       const working = this.workers(chain)
       // What the person reads of it: a row held out of their sight is not theirs to close
@@ -201,36 +205,45 @@ export class MailPerson {
       }
       this.records.markClosed(r, outcome, now)
       // The sessions to tell: the ones working on it, and the ones that were delivered a request of the person's that is withdrawn now (or have it in delivery: it may arrive after this)
-      const tell = new Map<string, { address: string; ids: string[] }>()
-      for (const w of working) tell.set(w.sessionId, { address: w.address, ids: [] })
+      const end = chain.at(-1)?.id ?? r
+      const add = (sessionId: string, address: string, id?: string) => {
+        const kept = tell.get(sessionId) ?? { address, root: r, ids: [], ends: [] }
+        if (id !== undefined && !kept.ids.includes(id)) kept.ids.push(id)
+        if (!kept.ends.includes(end)) kept.ends.push(end)
+        tell.set(sessionId, kept)
+      }
+      for (const w of working) add(w.sessionId, w.address)
       for (const a of withdrawn) {
         const party = parseAddress(a.recipient)
         if (party?.kind !== 'session' || !a.seen || !this.here(a.recipient)) continue
-        const kept = tell.get(party.sessionId) ?? { address: a.recipient, ids: [] }
-        if (!kept.ids.includes(a.id)) kept.ids.push(a.id)
-        tell.set(party.sessionId, kept)
+        add(party.sessionId, a.recipient, a.id)
       }
-      for (const [sessionId, t] of tell) this.tellClosed(r, outcome, chain.length, sessionId, t)
       // The window that has the chain open reads it again
       this.service.announce(r)
     }
+    for (const [sessionId, t] of tell) this.tellClosed(outcome, sessionId, t)
     return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
   }
 
   /**
-   * One notice to a session about a chain closed: its key names the session, the chain and how many messages it had, so a second close of the same
-   * chain tells nothing again, and one after the chain went on (a reply, a new request) does. In the process now when it takes it there, else as mail
+   * One notice to a session about the chain it worked on being closed: its key names the session and the last message of each chain, so a second close of
+   * the same chain tells nothing again, and one after the chain went on (a reply, a new request) does. In the process now when it takes it there, else as
+   * mail. A process that fails to take it leaves the notice as undelivered mail, which goes again with the session's next mail
    */
-  private tellClosed(root: string, outcome: CloseOutcome, size: number, sessionId: string, t: { address: string; ids: string[] }): void {
-    const text = closedWords(root, outcome, t.ids)
+  private tellClosed(outcome: CloseOutcome, sessionId: string, t: { address: string; root: string; ids: string[]; ends: string[] }): void {
+    const text = closedWords(t.root, outcome, t.ids)
     const now = this.host.tellsNow(sessionId)
     const stored = this.service.notice(t.address, {
       body: text,
-      facts: { quiet: true, chainClosed: { root, outcome, withdrawn: t.ids.slice(0, 10) } },
-      dedupeKey: `closed:${t.address}:${root}:${size}`,
+      facts: { quiet: true, chainClosed: { root: t.root, outcome, withdrawn: t.ids.slice(0, 10) } },
+      dedupeKey: `closed:${t.address}:${t.ends.join(',')}`,
       delivered: now,
     })
-    if (stored && now) this.host.tell(sessionId, text)
+    if (!stored || !now) return
+    const at = this.records.recipient(stored.id, t.address)?.deliveredAt
+    this.host.tell(sessionId, text).catch(() => {
+      if (at != null) this.service.deliveryFailedLate(t.address, [stored.id], at)
+    })
   }
 
   /**
@@ -293,7 +306,7 @@ export class MailPerson {
   }
 
   /** The sessions of the chain whose turn going now is on it: the turn records name a message of the chain as that turn's work (or its starter) */
-  private workers(chain: readonly MailRow[]): { sessionId: string; address: string; startedAt: number }[] {
+  private workers(chain: readonly MailRow[]): { sessionId: string; address: string }[] {
     const ids = new Set(chain.map((m) => m.id))
     const sessions = new Map<string, string>()
     for (const m of chain) {
@@ -304,7 +317,7 @@ export class MailPerson {
     }
     return [...sessions].flatMap(([sessionId, address]) => {
       const turn = this.host.turnOn(sessionId)
-      return turn && turn.work !== null && ids.has(turn.work) ? [{ sessionId, address, startedAt: turn.startedAt }] : []
+      return turn && turn.work !== null && ids.has(turn.work) ? [{ sessionId, address }] : []
     })
   }
 

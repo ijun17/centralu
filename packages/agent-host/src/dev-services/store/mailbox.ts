@@ -568,7 +568,7 @@ export class MailboxRecords {
 
   /** The rows held for the person to act on, the earliest due first */
   heldRows(): RecipientRow[] {
-    return this.rows(`${HELD} AND r.read_at IS NULL ORDER BY r.due_at, r.message_id, r.recipient`)
+    return this.rows(`${HELD} AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
   }
 
   /** Every row held `policy`, with its message's `sender_project`: what the person's trust or Dismiss acts on (§7.4) */

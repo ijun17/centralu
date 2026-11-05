@@ -1047,7 +1047,7 @@ export class SessionManager {
           if (other) this.children.clearMailTurn(id, owner)
         }
         try {
-          await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, (e) => {
+          await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready', wanted: () => input.wanted?.() ?? true }, (e) => {
             unmark()
             late?.(e)
           })
@@ -1082,7 +1082,8 @@ export class SessionManager {
     try {
       await this.events.deliverMail(sessionId, { text: `[Centralu] ${text}`, quiet: true, line: '✉ Centralu told it the person closed its work' })
     } catch (e) {
-      console.error(`[mail] could not tell ${sessionId.slice(0, 8)} that the person closed its work (${errorMessage(e)})`)
+      console.error(`[mail] could not tell ${sessionId.slice(0, 8)} that the person closed its work (${errorMessage(e)}); the notice goes with its next mail`)
+      throw e
     }
   }
 

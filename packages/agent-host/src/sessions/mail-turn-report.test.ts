@@ -233,10 +233,10 @@ describe('the person closing a chain whose work is going, over the real manager 
       turnOn: (id) => {
         const s = w.mgr.sessionInfo(id)
         const turn = s && inTurn(s.state) ? m.turns.current(id) : undefined
-        return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+        return turn && { work: turn.messageId ?? turn.starter }
       },
       tellsNow: (id) => w.mgr.tellsMailNow(id),
-      tell: (id, text) => void w.mgr.tellMailNow(id, text),
+      tell: (id, text) => w.mgr.tellMailNow(id, text),
     })
   /** A session at work on the person's task, which the mailbox delivered and started its turn with */
   async function working() {

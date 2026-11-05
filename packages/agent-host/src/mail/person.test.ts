@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
-import { MailPerson, type PersonHost } from './person.js'
+import { MailPerson } from './person.js'
 import { refusedFor } from './messages.test-helpers.js'
 import { oldThread } from './v61.test-helpers.js'
 
@@ -29,6 +29,8 @@ function ready(w: ReturnType<typeof hostWorld>) {
   /** The sessions whose process takes a notice now (a live Claude), and what the host was asked to put into them when the person closed a chain (`SessionManager.tellMailNow`) */
   const live = new Set<string>()
   const told: { sessionId: string; text: string }[] = []
+  let tellFails = false
+  const failTell = () => void (tellFails = true)
   const person = new MailPerson(w.service, w.store.mailbox, w.delivery, {
     // A session named `gone` is no longer kept (trashed or deleted)
     session: (id) => (id === 'gone' ? undefined : { name: id, state: 'idle' }),
@@ -37,12 +39,15 @@ function ready(w: ReturnType<typeof hostWorld>) {
     untrusted: (projectId) => w.reach.untrusted(projectId),
     turnOn: (id) => {
       const turn = w.turns.current(id)
-      return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+      return turn && { work: turn.messageId ?? turn.starter }
     },
     tellsNow: (id) => live.has(id),
-    tell: (sessionId, text) => void told.push({ sessionId, text }),
+    tell: async (sessionId, text) => {
+      if (tellFails) throw new Error('The session is not running')
+      told.push({ sessionId, text })
+    },
   })
-  return { ...w, person, live, told }
+  return { ...w, person, live, told, tellFails: failTell }
 }
 const dbOf = (w: ReturnType<typeof hostWorld>) => (w.store as unknown as { db: Database.Database }).db
 const bodies = (w: ReturnType<typeof hostWorld>, id: string) => w.to(id).map((d) => d.input.text).join('\n')
@@ -470,6 +475,66 @@ describe('closing a chain a session works on, and its state, as on main (owner d
     expect(bodies(w, 'b')).not.toContain(task.id)
     expect(notices(w, B)).toEqual([])
     expect(w.told).toEqual([])
+  })
+
+  it('a request in delivery when the person closes (the session was waking) is not sent after all, the session is told, and nothing is left held', async () => {
+    const w = ready(hostWorld())
+    let release = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (release = r))
+    w.clock.t += 10
+    const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'person', delivered: false })
+    expect(w.row(task.id, B)).toMatchObject({ attempts: 1, deliveredAt: null })
+    w.person.close(task.id, 'dropped')
+    release()
+    await w.advance(31_000)
+    // The gate saw it withdrawn: not delivered, the try counts for nothing, and it is not tried again
+    expect(w.row(task.id, B)).toMatchObject({ deliveredAt: null, attempts: 0, settled: 'withdrawn' })
+    // It might have arrived, so the session is told, with the notice waiting as mail
+    expect(notices(w, B)).toMatchObject([{ facts: { chainClosed: { withdrawn: [task.id] } } }])
+  })
+
+  it('a request held uncertain (a restart, a tool that failed late) that the person drops leaves the held list, cannot be sent again, and its session is told', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'person', delivered: false })
+    w.store.mailbox.markUncertain(B, [task.id])
+    expect(w.person.list().held.map((h) => h.messageId)).toEqual([task.id])
+    w.person.close(task.id, 'dropped')
+    expect(w.person.list().held).toEqual([])
+    expect(w.person.thread(task.id).thread.held).toBe(0)
+    expect(notices(w, B)).toHaveLength(1)
+  })
+
+  it('a session whose process fails to take the notice at once gets it from the mailbox instead, not never', async () => {
+    const w = ready(hostWorld())
+    w.live.add('b')
+    w.tellFails()
+    const task = working(w)
+    w.person.close(task.id, 'dropped')
+    await w.advance(5_000)
+    // The direct try failed (nothing was told that way); the notice was undelivered again and the mailbox's own delivery carried it
+    expect(w.told).toEqual([])
+    const id = dbOf(w).prepare(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ? AND message_id IN (SELECT id FROM mail WHERE kind = 'notice')`).get(B) as { id: string }
+    expect(w.to('b').map((d) => d.input.text).join(' ')).toContain(id.id)
+    expect(notices(w, B)).toHaveLength(1)
+  })
+
+  it('closing the chains an old thread’s id names tells a session once, not once for each chain', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(60), owner: A, at: t }, [
+      { id: mid(60), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
+      { id: mid(61), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    ])
+    const r = ready(w)
+    r.live.add('b')
+    r.clock.t += 10
+    const one = r.mail.task(PERSON, B, { text: 'one', origin: 'person', delivered: true, replyTo: mid(60) })
+    const two = r.mail.task(PERSON, B, { text: 'two', origin: 'person', delivered: true, replyTo: mid(61) })
+    r.person.close(tid(60), 'dropped')
+    expect(r.told).toHaveLength(1)
+    expect(notices(r, B)).toHaveLength(1)
+    expect(notices(r, B)[0]?.facts.chainClosed).toMatchObject({ withdrawn: expect.arrayContaining([one.id, two.id]) })
   })
 
   it('a question of the person’s that waits for an answer is withdrawn the same way, and its session is told', () => {

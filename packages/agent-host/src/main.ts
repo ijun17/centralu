@@ -446,10 +446,10 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   turnOn: (id) => {
     const s = mgr.sessionInfo(id)
     const turn = s && inTurn(s.state) ? hostMailbox.turns.current(id) : undefined
-    return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+    return turn && { work: turn.messageId ?? turn.starter }
   },
   tellsNow: (id) => mgr.tellsMailNow(id),
-  tell: (id, text) => void mgr.tellMailNow(id, text),
+  tell: (id, text) => mgr.tellMailNow(id, text),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
