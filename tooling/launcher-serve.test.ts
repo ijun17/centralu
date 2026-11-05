@@ -487,13 +487,28 @@ describe('replacing a file that a reader holds open (#1041)', () => {
 
   it('gives up with the last error once the time is spent, and waits longer between tries', () => {
     const waits: number[] = []
-    let t = 0
     const rename = () => {
       throw busy('EPERM')
     }
-    expect(() => renameRetrying('a', 'b', { retry: true, rename, sleep: (ms: number) => ((t += ms), waits.push(ms)), now: () => t, budgetMs: 500 })).toThrow(/EPERM/)
+    expect(() => renameRetrying('a', 'b', { retry: true, rename, sleep: (ms: number) => waits.push(ms), budgetMs: 500 })).toThrow(/EPERM/)
     expect(waits.slice(0, 4)).toEqual([10, 20, 40, 80])
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(500)
+  })
+
+  // The CI job that failed (windows tests 1/2, 2026-11-05) stalled for 36 s at a time; a clock ran on while the reader waited too
+  it('does not count a pause of the whole process as time it waited', () => {
+    let clock = 0
+    let calls = 0
+    const rename = () => {
+      // The reader lets go on the third try, which it can only do once the machine runs it again
+      if (++calls < 3) throw busy('EPERM')
+    }
+    const sleep = (ms: number) => {
+      clock += calls === 1 ? 60_000 : ms
+    }
+    // `now` is the clock the budget used to read (it is no longer an option): given, it makes the old code give up after two tries
+    renameRetrying('a', 'b', { retry: true, rename, sleep, now: () => clock })
+    expect(calls).toBe(3)
   })
 
   it('does not retry anywhere else, nor an error that is not a busy file', () => {

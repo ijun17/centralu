@@ -134,6 +134,21 @@ function launcher(): string {
 }
 
 /**
+ * Builds the launcher now, for the run's global setup (`tooling/vitest-tmp-root.ts`): the first fake program a worker made
+ * compiled it inside a hook, and on a cold, loaded Windows runner two workers did that at once and held their event loops
+ * for 36 s, past the 30 s hook limit. Windows only, as the launcher is; a build that fails is left for the first test that
+ * needs it to say.
+ */
+export function buildLauncherEarly(): void {
+  if (process.platform !== 'win32') return
+  try {
+    launcher()
+  } catch {
+    // the test that needs it builds it again and fails with the compiler's own words
+  }
+}
+
+/**
  * The launcher itself, to be a `node.exe` inside an archive: it runs the Node in `CC_FAKE_NODE` (the
  * environment of whoever runs it) with the arguments it was given. Windows only.
  */
