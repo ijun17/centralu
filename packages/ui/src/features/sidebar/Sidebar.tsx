@@ -75,7 +75,7 @@ export function Sidebar() {
         testId="sidebar-resize"
       />
       <div className="shrink-0">
-        {/* The first row (owner, 2026-11-05; SearchField): its 8px sides and top are SEARCH_ROW, which the palette hangs from */}
+        {/* The first row (owner, 2026-11-05; SearchField): the palette hangs from wherever this field is measured to be */}
         <div className="px-2 pt-2">
           <SearchField />
         </div>

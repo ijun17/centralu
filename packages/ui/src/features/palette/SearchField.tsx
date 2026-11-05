@@ -15,18 +15,14 @@ import { SearchIcon } from '../../components/icons.jsx'
  * It stood at the top of the sidebar (#535), moved to the middle of the top bar (#727) and went back
  * (owner, 2026-11-05): the bar is going to hold more controls, which squeeze a centred field. It is
  * the first row of the sidebar, the sidebar's full width less its padding, and the palette it opens
- * hangs directly under it (CommandPalette, which reads the geometry below). The sidebar is under the
+ * hangs directly under it (CommandPalette, which measures where the field is: the shell's banner can push the sidebar down). The sidebar is under the
  * top bar, not beside the traffic lights, and is no drag region, so the field needs no guard for either.
  *
  * Field-shaped and faint: it is a door used now and then, and must not compete with the rows below.
  */
 
-/** The top bar's height (App's TopBar, h-9); the sidebar and the palette's anchor start under it */
-export const TOP_BAR_H = 36
-/** The field's row in the sidebar: 8px above (pt-2), 28px tall (h-7), 8px at each side (px-2) */
-export const SEARCH_ROW = { top: 8, height: 28, side: 8 } as const
-/** Where the field ends, in the window: what the palette hangs from */
-export const SEARCH_FIELD_BOTTOM = TOP_BAR_H + SEARCH_ROW.top + SEARCH_ROW.height
+/** What the palette finds the field by, to hang under it (CommandPalette) */
+export const SEARCH_ANCHOR = 'data-search-anchor'
 
 export function SearchField() {
   const sc = useShortcut()
@@ -40,6 +36,7 @@ export function SearchField() {
       aria-haspopup="dialog"
       aria-expanded={open}
       data-testid="search-button"
+      {...{ [SEARCH_ANCHOR]: '' }}
       title="Search sessions, projects, apps and past conversations"
     >
       <SearchIcon />

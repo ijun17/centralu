@@ -60,12 +60,12 @@ test('the field fits the sidebar at its narrowest and its widest', async ({ page
 
 test('the field fits the narrowest sidebar when the text is zoomed in', async ({ page }) => {
   await demo(page, 1440)
-  await page.evaluate(() => {
-    const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
-    style.zoom = '1.3'
-    style.setProperty('--text-zoom', '1.3')
-    ;(window as any).__store.getState().setSidebarWidth(0)
-  })
+  // The text size comes from the preference, as the settings set it: the sidebar's minimum is in real pixels, so in CSS pixels it narrows with it
+  await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1.25 }))
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.textSize)).toBe(1.25)
+  await page.evaluate(() => (window as any).__store.getState().setSidebarWidth(0))
+  // 144 CSS pixels, 180 on screen
+  await expect.poll(async () => Math.round((await box(page.getByTestId('sidebar'))).width)).toBe(180)
   await expect(field(page)).toBeVisible()
   expect(await field(page).evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false)
   const side = await box(page.getByTestId('sidebar'))
