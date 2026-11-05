@@ -5,6 +5,7 @@ export type ModelQuery = {
   supportedModels(): Promise<
     {
       value: string
+      resolvedModel?: string
       displayName?: string
       description?: string
       supportsEffort?: boolean
@@ -26,6 +27,8 @@ export async function readClaudeModels(q: ModelQuery): Promise<ModelOption[]> {
   const rows = await q.supportedModels()
   return rows.map((m) => ({
     id: m.value,
+    // The model an alias names now: lets a stored full id be matched to the entry that covers it (#1989)
+    ...(m.resolvedModel ? { resolved: m.resolvedModel } : {}),
     label: m.displayName || m.value,
     description: m.description || undefined,
     // If supportsEffort is false, ignore any levels sent along — two answers would conflict.
