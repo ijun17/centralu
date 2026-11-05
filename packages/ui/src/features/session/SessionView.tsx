@@ -102,7 +102,7 @@ export function SessionPane({
    *
    * Collapsing came from a two-row grid leaving too little room to read (a user, 2026-09-10) — of a
    * 370px cell, the input area took up 95px, and only 22px of that was the actual text field.
-   * Collapsed, **only the rounded card's top edge** remains, and it rises above the conversation
+   * Collapsed, **a sliver of the rounded card** remains (`FOLDED_SLIVER`), and it rises above the conversation
    * once a hand comes near the bottom. It was a setting until 2026-10-20; now the pane decides by
    * its own height (`FOLD_SHARE`), so a tall panel keeps the composer open and a short one folds it.
    */
@@ -458,7 +458,7 @@ export function SessionPane({
       )}
 
       {/*
-        Collapsed (requested by a user on 2026-09-10): a rounded card shows only its top edge
+        Collapsed (requested by a user on 2026-09-10): a rounded card shows a sliver of itself
         from below, then rises. **Not explained in words** — the rounded corners themselves say
         this is a card that can rise.
 

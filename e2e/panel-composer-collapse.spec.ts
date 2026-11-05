@@ -57,7 +57,7 @@ const COMPOSER_REACH = 54
  * The collapsed composer in the grid (user request, 2026-09-10).
  *
  * Reading space was tight in a two-row grid — out of a 370px panel, the input area took 95px,
- * while the actual text field was only 22px. Collapsed, the rounded card shows only its top edge,
+ * while the actual text field was only 22px. Collapsed, the rounded card shows a sliver of itself,
  * and when a cursor arrives at the bottom, it **rises over the conversation.** It covers rather
  * than pushes, so the line being read does not move.
  */

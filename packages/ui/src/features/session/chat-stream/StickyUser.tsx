@@ -7,7 +7,7 @@ import { isRelayed, mineBubbleAttrs, mineBubbleLook } from '../chat-rows/bubbleL
 /*
  * The banner that pins the person's latest message once it scrolls off the top (#428): which
  * message that is, when the next one comes in under it, and the banner itself. ChatStream reads
- * `stickyIndex` and `stickyText` to hide the original row; its scroll handler calls `syncSticky`.
+ * `stickyIndex` and `stickyCovers` to hide the original row; its scroll handler calls `syncSticky`.
  */
 
 /** How long the pinned copy takes to leave or come back when the pane folds (design-system §9, the 150-200 ms layers) */
@@ -119,7 +119,7 @@ export function useStickyUser({
     return () => clearTimeout(t)
   }, [folded])
   /** Whether the pinned copy stands in for the original row, which is hidden meanwhile (ChatStream) */
-  const stickyCovers = stickyText !== null && !stickyGone
+  const stickyCovers = stickyText !== null && (!folded || !stickyGone)
 
   /*
    * If the next user message comes in under the pinned banner, one of the two has to disappear.
@@ -172,6 +172,16 @@ export function useStickyUser({
       scheduleStickyOverlap.current = () => {}
     }
   }, [syncStickyOverlap])
+
+  /*
+   * The copy is measured where it rests, not where the fold has moved it: when the pane folds or opens the check is
+   * run again once the slide has ended, so a copy coming back down over the next message steps aside as it does on
+   * a scroll.
+   */
+  useEffect(() => {
+    const t = setTimeout(() => scheduleStickyOverlap.current(), STICKY_FOLD_MS + 20)
+    return () => clearTimeout(t)
+  }, [folded])
 
   useLayoutEffect(() => {
     if (stickyObscured) {
