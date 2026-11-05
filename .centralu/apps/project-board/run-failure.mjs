@@ -39,10 +39,11 @@ const SETUP_STEP = [
  * (`if-no-files-found: error`, to fail a build that bundled nothing) is not named so: its failure is the commit's.
  */
 const STORE_STEP = [/^Upload /i, /^Post /i]
-/** A step that fetches what it needs, packages or the tools tauri downloads to bundle (#2004): a setup step only when the failure names the network or a package source */
-const FETCH_STEP = /^(?:Run (?:pnpm|npm|yarn) (?:install|ci|i)\b|Build bundle$)/i
+/** Steps that fetch what they need, packages or the tools tauri downloads to bundle (#2004): a setup step only when the failure names the network or a package source */
+const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
+const BUNDLE_STEP = /^Build bundle$/i
 /** Whether a failing step is one whose log line `jobFailure` needs to read (its `log`) */
-export const isFetchStep = (name) => FETCH_STEP.test(String(name ?? ''))
+export const isFetchStep = (name) => INSTALL_STEP.test(String(name ?? '')) || BUNDLE_STEP.test(String(name ?? ''))
 const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
 
 /**
@@ -67,7 +68,11 @@ const NETWORK_LINE = [
 export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test(String(text ?? '')))
 
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
-export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (isFetchStep(name) && (FETCH_NOTE.test(notes) || (/failed to bundle project:/i.test(notes) && looksLikeNetworkError(notes))))
+// The bundle's own line must carry the network wording: annotations and the log hold warnings (a cache that could not restore, a retry) beside a real failure
+export const isSetupStep = (name, notes = '', log = '') =>
+  SETUP_STEP.some((re) => re.test(String(name ?? ''))) ||
+  (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(`${notes}\n${log}`)) ||
+  (BUNDLE_STEP.test(String(name ?? '')) && /failed to bundle project:/i.test(log) && looksLikeNetworkError(log))
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
 const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
 const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
@@ -138,7 +143,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
   // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
   // (an artifact upload that runs on failure) says nothing more.
-  if (step && isSetupStep(step.name, `${notes}\n${job.log ?? ''}`)) return { real: false, cause: 'setup', step: step.name }
+  if (step && isSetupStep(step.name, notes, job.log)) return { real: false, cause: 'setup', step: step.name }
   if (step && STORE_STEP.some((re) => re.test(step.name))) return { real: false, cause: 'storage', step: step.name }
   // Failed, and no reason to call it the runner's: the session's to look at, never rerun blind
   return { real: true, cause: step ? 'test' : 'no-step', step: step?.name ?? null }
