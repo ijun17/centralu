@@ -224,7 +224,7 @@ export const UiPreferences = z.object({
   /** The theme for the light side: a preset id (`light`, …) or a theme file's id */
   themeLight: z.string().max(80),
   /**
-   * An accent colour, or null for none (the default: the app is achromatic, and brightness is
+   * An accent colour, or null for none (the default: the chrome has no hue of its own, and brightness is
    * what speaks urgency). When set it colours focus, selection and checked
    * controls — never the signal colour, which stays the one thing reserved for "waiting for you".
    */

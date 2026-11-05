@@ -18,7 +18,7 @@ type Mock = {
   windowAppearance: { scheme: 'dark' | 'light' | null; background: string } | null
 }
 
-const DARK_FLOOR = '#0f0f0f'
+const DARK_FLOOR = '#120e0a'
 
 export async function token(page: Page, name: string): Promise<string> {
   return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
@@ -108,7 +108,7 @@ export function presetTests() {
 
     // A `system` an older build stored, with a light theme chosen for the light side: still Dark, and the window is held to Dark (not handed back to the OS)
     await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'system', themeLight: 'hc-light' }))
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(18, 14, 10)' })
     expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
 
     // Picking the light theme is what sets the light side
@@ -218,7 +218,7 @@ export function themeTests() {
     await expect(problems).toContainText('Unknown token "glitter" is ignored.')
     await expect(problems).toContainText('"blue-ish" is not a usable value for ink')
     // The unusable ink is not applied: the Dark ink stays
-    expect(await token(page, '--color-ink')).toBe('#ededed')
+    expect(await token(page, '--color-ink')).toBe('#f0ecea')
   })
 
   test('the theme choice and the file survive a reload, and the last theme is cached for the first frame', async ({ page }) => {
@@ -241,6 +241,20 @@ export function themeTests() {
     expect(await token(page, '--color-surface-floor')).toBe('#101820')
   })
 
+  test('a custom theme whose file is broken when the window starts keeps its floor instead of falling to Dark', async ({ page }) => {
+    await openDemo(page)
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeDark: 'mine' }))
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#101820')
+    // Half edited, then the window starts: no clean version of the file has been read in this page yet
+    await writeFile(page, 'mine', '{ "name": "Mine", "base": "dark", "tokens": { "surface-floor": ')
+    await page.reload()
+    await expect(page.getByTestId('chat-stream')).toBeVisible()
+    expect(await token(page, '--color-surface-floor')).toBe('#101820')
+    const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('cc-theme') ?? 'null'))
+    expect(cached.dark).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
+  })
+
   test('a light theme file picked in Settings sets the light side and tells the window; picking Dark again takes it back, whatever the OS says', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' })
     await openDemo(page)
@@ -258,7 +272,7 @@ export function themeTests() {
     // Picked back to Dark, the window is told so (and its own background is the floor); the light side keeps its theme
     await pickTheme(page, 'dark')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(18, 14, 10)' })
     expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'dark', themeLight: 'paper' })
   })
 

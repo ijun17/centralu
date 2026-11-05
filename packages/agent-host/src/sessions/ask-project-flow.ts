@@ -490,7 +490,7 @@ export class AskProjectFlow {
     this.linkedAsks.set(chosen.id, ask)
     // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
     const asker = labelOf(this.host.store.messages, this.host.meta.get(callerId)!)
-    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task, { name: asker, sessionId: callerId }), asker, { depth: depthOf(this.host, callerId) + 1 })
+    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task, { name: asker, sessionId: callerId, mailable: false }), asker, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
       putBack?.()

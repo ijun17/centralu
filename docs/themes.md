@@ -44,13 +44,15 @@ view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-the
 `surface-reading` and `surface-reading-raised` still exist, so a custom theme can give the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
-Dark is a dark floor (`#0f0f0f`) with raised boxes (`#242424`, ΔL* 9.9 above the floor). The
-sidebar and the top bar are the floor's own `#0f0f0f` (the owner's ask, 2026-10-27), so only the edge line (`#363636`)
+Dark is a warm dark floor (`#120e0a`) with raised boxes (`#282320`, ΔL* 10.0 above the floor). Since 2026-11-05
+(the owner's decision) its greys carry a faint warm tint, the colours of the "Dark Warm" custom theme, with the lightness steps
+the neutral Dark had (floor `#0f0f0f`, raised `#242424`, ΔL* 9.9) within 0.1 and the same contrast. The
+sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#3a3531`)
 parts them from the conversation. They were `#181818` (ΔL* 3.9, at the owner's ask of 2026-10-20) and `#1d1d1d` (6.5) before: a reader once saw
 the two as "the same colour" at three steps apart with the line between them, and the owner chose to let the line do it alone. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
-with the inks widened to match: body `#ededed` (16.4:1 on the floor), secondary `#a8a8a8` (8.1:1),
-background `#707070` (3.9:1).
+with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they still are). The inks are now body `#f0ecea`, secondary `#aca7a3`
+and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
 is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
@@ -102,7 +104,7 @@ lowercase letters, digits and hyphens.
   list with descriptions is there.
 - **Mistakes never stop the app.** An unknown key or token, or a value the browser rejects, is
   listed next to the theme in Settings and skipped. A file that does not parse (halfway through an
-  edit) is listed as broken, and the screen keeps showing the last version of it that did.
+  edit) is listed as broken, and the screen keeps showing the last version of it that did. A window that starts with the file broken has read no version yet, so the last run's cache (`cc-theme`) stands in for it, and the theme keeps its floor instead of falling to Dark (#1979).
 - **A token Centralu stopped using is skipped without a word.** A theme made before it left still
   names it, and nothing is wrong with that file: `activity-1` to `activity-5` went with the working
   orbit (#742), and the schema still accepts them, marked retired (`RETIRED_THEME_TOKENS`).
@@ -153,7 +155,7 @@ longer forced to Dark, WKWebView painted its own default until the bundle loaded
 default is white. `main.tsx` runs only after the bundle, so a small inline script in `index.html` (desktop and web, the
 same text) runs before any stylesheet or module: it reads the same `cc-theme` cache, picks the side the same way, and
 sets `background-color` and `color-scheme` on `<html>` to that theme's floor (a custom theme's own floor token, else its
-preset's). Nothing cached paints the stylesheet's Dark, `#0f0f0f`. `applyTheme` removes the two inline values, because
+preset's). Nothing cached paints the stylesheet's Dark, `#120e0a`. `applyTheme` removes the two inline values, because
 from then on the stylesheet owns them, and a leftover inline `color-scheme` would outrank `html[data-theme-base]`
 after a switch.
 

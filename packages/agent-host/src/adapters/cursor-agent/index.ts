@@ -45,6 +45,17 @@ export function centraluToolOfCall(call: { title?: string | null; kind?: string 
   return m?.[2] && m[1] === `${ORCHESTRATOR_MCP_NAME}-${m[2]}` ? m[2] : null
 }
 
+/**
+ * Out of quota, Cursor answers every prompt with this sentence alone and ends the turn `end_turn`: no error frame, nothing on
+ * stderr (agent 2026.10.22, signed in, #1969). Read only when it is the turn's whole answer, up to case and the space round it
+ */
+const OUT_OF_QUOTA_ANSWER = 'upgrade your plan to continue'
+
+export function cursorRefusalIn(answer: string): string | null {
+  const words = answer.trim()
+  return words.toLowerCase() === OUT_OF_QUOTA_ANSWER ? words : null
+}
+
 /** `agent status` costs a Node start (~2 s), and pickers ask on every open: one answer is reused this long */
 const STATUS_FOR_MS = 60_000
 
@@ -68,6 +79,7 @@ export function cursorProfile(): AcpProfile {
       return findCursor()?.version ?? null
     },
     centraluToolOf: centraluToolOfCall,
+    shape: { refusalIn: cursorRefusalIn },
     localUsage,
     async detect() {
       if (status && Date.now() - status.at < STATUS_FOR_MS) return status.result

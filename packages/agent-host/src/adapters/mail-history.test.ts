@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildMailFrame, type MailFrameItem } from '../mail/frame.js'
+import { oldWake, type OldWakeItem } from '../mail/old-wake.test-helpers.js'
 import { __setSessionApiForTest, readClaudeHistory } from './claude/history.js'
 import { turnsToHistory } from './codex/history.js'
 
@@ -13,10 +13,10 @@ afterEach(() => __setSessionApiForTest(undefined))
 
 const T1 = 'hub-aaaaaaaa.t_01J00000000000000000000001'
 const M = (n: number) => `hub-aaaaaaaa.m_01J${String(n).padStart(23, '0')}`
-const item = (n: number, over: Partial<MailFrameItem> = {}): MailFrameItem => ({ messageId: M(n), threadId: T1, kind: 'note', from: 'person', relation: 'the person', inline: 'Fourth message', ...over })
+const item = (n: number, over: Partial<OldWakeItem> = {}): OldWakeItem => ({ messageId: M(n), threadId: T1, kind: 'note', from: 'person', relation: 'the person', inline: 'Fourth message', ...over })
 
-const FROM_PERSON = buildMailFrame([item(1)]).text
-const FROM_SESSION = buildMailFrame([item(2, { from: 'session:hub-aaaaaaaa/s2', relation: 'the session that gave you this work', kind: 'assign', inline: 'Do the thing\nand report' })]).text
+const FROM_PERSON = oldWake([item(1)])
+const FROM_SESSION = oldWake([item(2, { from: 'session:hub-aaaaaaaa/s2', relation: 'the session that gave you this work', kind: 'assign', inline: 'Do the thing\nand report' })])
 
 describe('a mail wake read back from the record', () => {
   it('Claude: is not the person’s message, and what is around it stays', async () => {

@@ -158,7 +158,7 @@ centralu/
 │        │     ├─ store-keys.ts  # the bookkeeping keys the runner, the gate and vacuum.ts keep in app_settings
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts (the session archive)
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
-│        │     ├─ mail.ts  mail-retention.ts   # the mailbox's rows (#1347, docs/plans/mailbox.md §4) and what it keeps for how long
+│        │     ├─ mail-types.ts  # the old thread mail words and a message row that live code still reads (mailbox-adopt.ts moves what the old tables hold)
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM
 │        └─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 │

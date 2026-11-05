@@ -10,7 +10,7 @@ import type { DelegationHost } from './delegation-flow.js'
 import type { HostAsk } from './host-cards.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionTrashHost } from './session-trash.js'
-import { agentFrame, presetWithin } from './start-agent.js'
+import { agentFrame, canMailParent, presetWithin } from './start-agent.js'
 import { errorKind } from './error-kind.js'
 import { labelOf, progressOf } from './transcript-view.js'
 
@@ -186,7 +186,7 @@ export class QueuedRequests {
         await this.host.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else if (r.via === 'agent_session') {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
-        await this.host.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
+        await this.host.deliver(sessionId, agentFrame(from.name, r.text, [], '', canMailParent(this.host.meta.get(sessionId) ?? {}, caller.id)), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'

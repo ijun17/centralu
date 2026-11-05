@@ -2,7 +2,7 @@ import type { Interruption, SessionState } from '@cc/protocol/client'
 import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**
- * What a folded project's name line says in place of the sessions it hides (#205).
+ * What a project's name line says of its sessions, in place of the rows a fold hides (#205), and beside them when it is open.
  *
  * The sidebar is the place to see "who is waiting for me" at a glance (FR-1). If folding hides the
  * session rows and also hides that signal along with them, folding stops being a tidying feature and

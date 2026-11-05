@@ -73,10 +73,10 @@ export function OrchestratorButton() {
   useEffect(() => expander.hold(holding), [expander, holding])
   useEffect(() => () => expander.reset(), [expander])
 
-  // pt-2: the lane's top margin. Search used to stand above this row (#529); it moved to the top bar (#727)
+  // pt-1.5, the grid's own gap: the search field stands above it (#529, back there 2026-11-05) and takes the lane's top margin
   return (
     <div
-      className="px-2 pt-2"
+      className="px-2 pt-1.5"
       ref={blockRef}
       onPointerLeave={(e) => {
         if (e.pointerType === 'mouse') expander.leaveBlock()

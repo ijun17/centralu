@@ -1,7 +1,7 @@
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { MessageKind } from '../dev-services/store/mail.js'
+import type { MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 

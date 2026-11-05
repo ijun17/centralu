@@ -526,7 +526,7 @@ accent; [themes.md](themes.md)), so an app can look like Centralu without knowin
   (`packages/ui/src/features/app-frame/hostStyles.ts` is the table): the colour roles (background,
   text and border for primary, secondary, tertiary, inverse, ghost, info, danger, success, warning
   and disabled, and the focus rings), the two fonts, weights, text and heading sizes with their line
-  heights, radii, the border width and shadows. Centralu is achromatic, so the roles the standard
+  heights, radii, the border width and shadows. Centralu has no hue in its chrome, so the roles the standard
   gives a hue land on the inks: info is plain text, and **warning is the signal colour**, what is
   waiting for the person (pure white in dark, pure black in light). Danger is Centralu's danger red,
   success the diff's green. The two fonts and the text line heights follow the body font, code font

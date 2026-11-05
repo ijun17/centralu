@@ -70,10 +70,10 @@ describe('the first paint (#340)', () => {
   })
 
   it('paints the dark floor when nothing is cached, or the cache is unreadable', () => {
-    expect(firstPaint(null)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
-    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
+    expect(firstPaint(null)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
+    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
     // Nothing cached is the stylesheet's Dark even on a light OS: no theme has been chosen yet
-    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
+    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
   })
 
   it('paints the light floor for a cached light theme', () => {
@@ -81,8 +81,8 @@ describe('the first paint (#340)', () => {
   })
 
   it('does not follow the OS: a System mode an older build cached is the dark side, on a light OS or a dark one', () => {
-    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
-    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
+    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
+    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
     // And a held Light stays Light under a dark OS
     expect(firstPaint(choice('light'), true)).toEqual({ backgroundColor: '#f0f0f0', colorScheme: 'light' })
   })

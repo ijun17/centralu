@@ -3,8 +3,8 @@ import type { SessionLook } from '../../session/look.js'
 import type { FoldSummaryState } from '../fold.js'
 
 /**
- * The status summary for a folded project (#205) — what the hidden session rows are waiting for,
- * as counts.
+ * The status summary on a project's name line (#205) — what its session rows are waiting for, as counts: all of them
+ * when the project is folded and hides the rows, and still the same when it is open (owner, 2026-11-05).
  *
  * **Uses the same marks as a session row.** Inventing a new symbol would mean the person has to
  * learn it too, and it would read as the row's mark and the summary saying different things. So the

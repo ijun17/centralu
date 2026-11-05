@@ -1,7 +1,7 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
-import type { MessageRow } from '../dev-services/store/mail.js'
+import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { CITE_MS, type HoldReason, type MessageService, type ReadItem, type SendResult } from './messages.js'
@@ -37,11 +37,9 @@ export type AskerFacts = { name: string; project: string | null; trusted: boolea
 /** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
-  caller(sessionId: string): { address: string; askedBy: string | null } | undefined
+  caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
   /** The orchestrator's session id, or null while there is none */
   orchestratorId(): string | null
-  /** The schema the session's process was spawned with: 1 everywhere in M3a (§11.3) */
-  mailArgs(sessionId: string): 1 | 2
   /** How the session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the orchestrator (§7.6) */
@@ -63,6 +61,8 @@ export type MailToolHost = {
  */
 export class MailTool {
   private readonly now: () => number
+  /** The sessions told once that `orchestrator` is not their parent (#1984) */
+  private readonly hinted = new Set<string>()
 
   constructor(
     private readonly service: MessageService,
@@ -77,14 +77,14 @@ export class MailTool {
     try {
       const me = this.host.caller(sessionId)
       if (!me) throw refuse('gone', 'this session is not here')
-      return { text: this.dispatch(sessionId, me, args, mailCalls(this.host.mailArgs(sessionId), this.host.form(sessionId))) }
+      return { text: this.dispatch(sessionId, me, args, mailCalls(1, this.host.form(sessionId))) }
     } catch (e) {
       const reason = refusalReason(e)
       return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }
     }
   }
 
-  private dispatch(sessionId: string, me: { address: string; askedBy: string | null }, a: MailToolArgs, calls: MessageCalls): string {
+  private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
     switch (a.action) {
       case 'inbox':
         return this.inbox(me.address, calls)
@@ -95,7 +95,7 @@ export class MailTool {
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
         const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}) })
-        return this.sent(sent)
+        return this.sent(sent) + this.parentHint(sessionId, me, to)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
@@ -129,7 +129,7 @@ export class MailTool {
    * A party the call names: `person`, `orchestrator` (the role, D15), `parent` (the session that started the caller, D16), an absolute address,
    * or a bare id of a session on this host. Names come with the version-2 tool (M3b)
    */
-  private party(sessionId: string, me: { askedBy: string | null }, to: string): { address: string; via?: string } {
+  private party(sessionId: string, me: { askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const t = to.trim()
     if (t === PERSON) return { address: PERSON }
     if (t.toLowerCase() === 'orchestrator') {
@@ -138,11 +138,23 @@ export class MailTool {
       return { address: this.service.sessionAddress(id), via: 'orchestrator' }
     }
     if (t.toLowerCase() === 'parent') {
+      // #1987: started from a linked computer, its parent is a session of that computer's hub, which mail does not reach yet; "person" would stay unseen here too
+      if (!me.askedBy && me.fromHub) throw refuse('unknown', 'your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
       if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "orchestrator" or "person".')
       return { address: this.service.sessionAddress(me.askedBy) }
     }
     if (t === sessionId) throw refuse('bad_value', 'a message is for someone else')
     return { address: t.includes(':') ? t : this.service.sessionAddress(t) }
+  }
+
+  /**
+   * #1984: a session that has a parent and mails `orchestrator` may have meant the parent, which nothing it sees named. The answer says so once per session
+   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the orchestrator itself.
+   */
+  private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
+    if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.orchestratorId() || this.hinted.has(sessionId)) return ''
+    this.hinted.add(sessionId)
+    return ` It went to the orchestrator, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */

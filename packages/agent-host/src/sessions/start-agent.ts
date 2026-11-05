@@ -32,16 +32,28 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
   return PRESET_RANK[child] <= PRESET_RANK[parent]
 }
 
+/** How a child reaches its parent before it finishes (#1984): the address `mail` resolves to the session that started it, which nothing else the child sees names */
+const PARENT_MAIL = 'To write to it before you finish, call mail with `to: "parent"`. '
+
+/**
+ * Whether `child` can mail the session `senderId` as its `parent` (#1984): it was started by that session (`askedBy`) and has the mail tool, which a
+ * session outside a project (the orchestrator's) does not. A fork of the orchestrator's has no `askedBy`; a child on a linked machine is not asked at all.
+ */
+export function canMailParent(child: { askedBy?: string | null; projectId?: string | null }, senderId: string): boolean {
+  return child.askedBy === senderId && !!child.projectId
+}
+
 /**
  * The message a child receives. It says who asks and how the answer travels back, as ask_project's frame does: the
  * child cannot see its parent, and its final text is all the parent reads; so the answer waits for the child's own
  * background work rather than ending the turn on "waiting for it" (#729). It directs nothing else (product-spec.md
  * §1.2): the task is the parent's words, and the child works under its own approvals.
  */
-export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = [], instructions = ''): string {
+export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = [], instructions = '', mailParent = false): string {
   return [
     `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
+      (mailParent ? PARENT_MAIL : '') +
       // #729: children that backgrounded their verify and ended the turn "waiting for it" left the parent unanswered (#721)
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     // #841 item 3: the agent does not read the session's notices, and met a missing `.env` as a failing command
@@ -98,6 +110,8 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
+      // #1987: mail does not cross computers yet, so the answer is the only way it hears from the child
+      'Mail does not reach it from here yet: the answer is how it hears from you. ' +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     '',
     task,
@@ -107,8 +121,8 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
 }
 
 /** A follow-up carries the parent's words without replacing the task or promising an independent answer. */
-export function agentNoteFrame(parentName: string, text: string): string {
-  return `[A note from the parent session "${frameField(parentName)}" through Centralu's agent_session. These are the parent's words about your ongoing work.]\n\n${text}`
+export function agentNoteFrame(parentName: string, text: string, mailParent = false): string {
+  return `[A note from the parent session "${frameField(parentName)}" through Centralu's agent_session. These are the parent's words about your ongoing work.${mailParent ? ' To write to it, call mail with `to: "parent"`.' : ''}]\n\n${text}`
 }
 
 /**

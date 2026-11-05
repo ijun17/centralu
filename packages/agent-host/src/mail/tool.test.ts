@@ -51,6 +51,33 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     })
   })
 
+  // #1984: a child told to write to its parent mailed the orchestrator, the one role it could see
+  it('a session with a parent that mails "orchestrator" is told once that it went there, not to the parent; the mail is not rerouted', () => {
+    const w = world()
+    const first = w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 1' })
+    expect(first.text).toContain('It went to the orchestrator, not to your parent "alpha". If you meant your parent, use to: "parent".')
+    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
+    expect(w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
+    // To the parent, or from a session with none, there is nothing to say
+    expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')
+    expect(world().run('b', { action: 'send', to: 'orchestrator', text: 'help' }).text).not.toContain('not to your parent')
+    // A child the orchestrator started has it for its parent: nothing to correct
+    expect(world().run('o', { action: 'send', to: 'orchestrator', text: 'done' }).text).not.toContain('not to your parent')
+  })
+
+  // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer
+  it('"parent" of a session started from a linked computer says the parent is elsewhere and unreachable, and does not point at "person"', () => {
+    const w = world()
+    const r = w.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
+    expect(r.text).not.toContain('another computer')
+    const hub = hostWorld({ fromHub: ['b'] })
+    stops.push(() => hub.stop())
+    const refused = hub.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toBe('Refused (unknown): your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
+    expect(refused.text).not.toContain('person')
+  })
+
   it('from an untrusted project to another project it is held, and the answer says so', () => {
     const w = world()
     const r = w.run('x', { action: 'send', to: 'a', text: 'hello' })

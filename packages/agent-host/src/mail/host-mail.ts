@@ -150,10 +150,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     caller: (id) => {
       const s = sessions.sessionInfo(id)
-      return s && { address: addressOf(id), askedBy: s.askedBy ?? null }
+      return s && { address: addressOf(id), askedBy: s.askedBy ?? null, ...(s.startedFromHub ? { fromHub: true } : {}) }
     },
     orchestratorId: () => sessions.orchestratorId(),
-    mailArgs: () => 1,
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),

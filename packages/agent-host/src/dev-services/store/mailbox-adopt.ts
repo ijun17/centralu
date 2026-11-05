@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { parseAddress } from '../../mail/address.js'
 import { wakes } from '../../mail/rules.js'
-import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail.js'
+import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail-types.js'
 import { factsFrom, RECIPIENT_HOLD_WORDS, type MailFacts, type MailKind } from './mailbox.js'
 
 /*

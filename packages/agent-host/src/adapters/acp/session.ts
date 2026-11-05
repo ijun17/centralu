@@ -19,6 +19,7 @@ import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
 import {
+  blockText,
   InitializeResult,
   OpenedSession,
   PromptResult,
@@ -86,6 +87,8 @@ type Turn = {
   costTotal: number | null
   /** The provider refused this turn (`AcpToolShape.refusalOf`): the tool was cancelled, and the turn ends so when it answers */
   refusal: string | null
+  /** The text the agent answered with in this turn (`agent_message_chunk`s joined), for `AcpToolShape.refusalIn` */
+  answer: string
 }
 
 /** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
@@ -355,7 +358,7 @@ class AcpWire implements ToolWire {
   }
 
   startTurn(input: TurnInput, core: RunningTurn): void {
-    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null, refusal: null }
+    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null, refusal: null, answer: '' }
     this.turn = turn
     // `session/prompt` has no earlier answer: the write is the nearest the agent says it took the input (§2.3)
     this.io.inputAccepted(input.id)
@@ -400,6 +403,9 @@ class AcpWire implements ToolWire {
       turn.core.end({ how: 'failed', error: { code: 'internal', message: `${this.label}: ${failure.message}`, retryable: true }, inputError: failure })
       return
     }
+    // A refusal said as the answer itself, with a finished turn and no error (`AcpToolShape.refusalIn`)
+    const said = !turn.refusal && result.stopReason === 'end_turn' && !turn.core.stopAsked ? this.deps.shape?.refusalIn?.(turn.answer) : null
+    if (said) turn.refusal = `${this.label}'s model refused the turn: ${said}`
     turn.core.end(turn.refusal ? this.refusedEnding(turn.refusal) : this.endingOf(result), () => this.endEvents(result, turn))
   }
 
@@ -539,6 +545,10 @@ class AcpWire implements ToolWire {
       case 'tool_call':
       case 'tool_call_update':
         this.emitAll(this.normalizer.update({ ...this.foldEdit(this.readCall(u), u.sessionUpdate), sessionUpdate: u.sessionUpdate }), turn)
+        return
+      case 'agent_message_chunk':
+        if (turn) turn.answer += blockText(u.content)
+        this.emitAll(this.normalizer.update(u), turn)
         return
       default:
         this.emitAll(this.normalizer.update(u), turn)
