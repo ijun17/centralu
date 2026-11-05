@@ -1,7 +1,7 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
-import type { MessageRow } from '../dev-services/store/mail.js'
+import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { CITE_MS, type HoldReason, type MessageService, type ReadItem, type SendResult } from './messages.js'
@@ -40,8 +40,6 @@ export type MailToolHost = {
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
   /** The orchestrator's session id, or null while there is none */
   orchestratorId(): string | null
-  /** The schema the session's process was spawned with: 1 everywhere in M3a (§11.3) */
-  mailArgs(sessionId: string): 1 | 2
   /** How the session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the orchestrator (§7.6) */
@@ -79,7 +77,7 @@ export class MailTool {
     try {
       const me = this.host.caller(sessionId)
       if (!me) throw refuse('gone', 'this session is not here')
-      return { text: this.dispatch(sessionId, me, args, mailCalls(this.host.mailArgs(sessionId), this.host.form(sessionId))) }
+      return { text: this.dispatch(sessionId, me, args, mailCalls(1, this.host.form(sessionId))) }
     } catch (e) {
       const reason = refusalReason(e)
       return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }

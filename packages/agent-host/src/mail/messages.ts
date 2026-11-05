@@ -118,7 +118,7 @@ export type InboxView = {
   held: { row: RecipientRow; message: MailRow; why: HoldReason }[]
 }
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
-/** The calls a wake names; `mailCalls` makes them. M3c renames `MessageCalls` when the old `MailCalls` of `frame.ts` goes */
+/** The calls a wake names; `mailCalls` makes them. The same type as `MessageCalls`, under the name this file used before the thread frame went */
 export type MailCalls = MessageCalls
 
 export type DrainOptions = {
