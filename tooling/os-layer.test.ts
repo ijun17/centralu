@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -541,6 +541,54 @@ describe("the Windows shards, split by each file's measured time", () => {
       ]),
     ).toEqual({ 'packages/agent-host/src/os.test.ts': 1.2, 'tooling/launcher-cmd.test.ts': 0.1 })
     expect(() => durationsFromReports([{ not: 'a report' }])).toThrow(/testResults/)
+  })
+
+  describe('--refresh-durations, on a durations file and reports in a folder', () => {
+    const tests = ['tooling/a.test.ts', 'tooling/b.test.ts', 'tooling/c.test.ts', 'tooling/d.test.ts']
+    const report = (times: Record<string, number>) => ({ testResults: Object.entries(times).map(([name, secs]) => ({ name: `/w/${name}`, startTime: 0, endTime: secs * 1000 })) })
+    /** A folder with the durations file and one report of the run; the paths of both */
+    function setup(current: Record<string, number>, run: unknown) {
+      const dir = mkdtempSync(join(tmpdir(), 'os-tests-durations-'))
+      const file = join(dir, 'test-durations.json')
+      const reportFile = join(dir, 'vitest-times.json')
+      writeFileSync(file, formatDurations(current, 'an older run, 2026-01-01'))
+      writeFileSync(reportFile, JSON.stringify(run))
+      return { file, reportFile, text: () => readFileSync(file, 'utf8') }
+    }
+    const read = (text: string) => parseDurations(text)
+
+    it('writes the run over the file for the tests that exist, and keeps or drops the rest (#1983)', () => {
+      // The run predates a split (old.test.ts became c and d) and a delete (gone.test.ts)
+      const f = setup({ 'tooling/a.test.ts': 1, 'tooling/b.test.ts': 3, 'tooling/c.test.ts': 5 }, report({ 'tooling/a.test.ts': 9, 'tooling/b.test.ts': 4, 'tooling/old.test.ts': 400, 'tooling/gone.test.ts': 7 }))
+      const said = refreshDurationsFile(f.file, [f.reportFile], tests, new Date('2026-11-05T03:00:00Z'))
+      // a and b from the run, c kept, d new at the median of those (4, 5, 9 -> 5)
+      expect(read(f.text())).toEqual({ 'tooling/a.test.ts': 9, 'tooling/b.test.ts': 4, 'tooling/c.test.ts': 5, 'tooling/d.test.ts': 5 })
+      expect(JSON.parse(f.text()).source).toContain('2026-11-05')
+      expect(said).toContain('2 timed by the run, 1 kept, 1 new')
+    })
+
+    it('leaves the file alone when only the date would change, and says so', () => {
+      const same = { 'tooling/a.test.ts': 1, 'tooling/b.test.ts': 3, 'tooling/c.test.ts': 5, 'tooling/d.test.ts': 5 }
+      const f = setup(same, report({ 'tooling/a.test.ts': 1, 'tooling/b.test.ts': 3, 'tooling/c.test.ts': 5, 'tooling/d.test.ts': 5, 'tooling/gone.test.ts': 2 }))
+      const before = f.text()
+      const said = refreshDurationsFile(f.file, [f.reportFile], tests, new Date('2026-11-05T03:00:00Z'))
+      expect(f.text()).toBe(before)
+      expect(said).toContain('unchanged')
+      // A name only the run has (gone here) is not a drop from the file
+      expect(said).toContain('0 dropped')
+    })
+
+    it('refuses reports that time fewer than half of the selected tests, and writes nothing', () => {
+      const f = setup({ 'tooling/a.test.ts': 1 }, report({}))
+      const before = f.text()
+      expect(() => refreshDurationsFile(f.file, [f.reportFile], tests)).toThrow(/time 0 of the 4 tests/)
+      expect(f.text()).toBe(before)
+      const wrong = setup({ 'tooling/a.test.ts': 1 }, report({ 'tooling/a.test.ts': 2, 'tooling/other.test.ts': 2, 'tooling/x.test.ts': 2 }))
+      expect(() => refreshDurationsFile(wrong.file, [wrong.reportFile], tests)).toThrow(/fewer than half/)
+      // Exactly half is enough
+      const half = setup({}, report({ 'tooling/a.test.ts': 2, 'tooling/b.test.ts': 2 }))
+      expect(() => refreshDurationsFile(half.file, [half.reportFile], tests)).not.toThrow()
+    })
   })
 
   it('refreshes from a run that predates a split and a delete: the files on this checkout, never the ones the run knew', () => {

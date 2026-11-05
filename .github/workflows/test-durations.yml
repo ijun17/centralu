@@ -69,7 +69,7 @@ jobs:
               # An error body goes to stdout too: anything but a number is unknown
               [[ "$behind" =~ ^[0-9]+$ ]] || behind=unknown
               age_days=$(( ($(date +%s) - $(date -d "$created" +%s)) / 86400 ))
-              echo "Times of run $run, $behind commits and $age_days days behind this checkout."
+              echo "Times of run $run, $behind commits and $age_days days behind $GITHUB_REF_NAME."
               {
                 echo "run=$run"
                 echo "behind=$behind"
@@ -113,8 +113,13 @@ jobs:
           AGE_DAYS: ${{ needs.refresh.outputs.age_days }}
         run: |
           if [ -z "$(git status --porcelain -- tooling/test-durations.json)" ]; then
-            echo "::notice::The times are as fresh as the latest run; nothing pushed."
-            echo "The times are as fresh as the newest green run (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}); nothing pushed." >> "$GITHUB_STEP_SUMMARY"
+            # An older week's branch is left as it is; a person closes or deletes it
+            older=''
+            if git ls-remote --exit-code --heads origin test-durations/weekly > /dev/null 2>&1; then
+              older=' The branch test-durations/weekly of an earlier week is still there; it may hold older times: close its pull request and delete it if it is not wanted.'
+            fi
+            echo "::notice::The times are as fresh as the latest run; nothing pushed.$older"
+            echo "The times are as fresh as the newest green run (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}); nothing pushed.$older" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           branch='test-durations/weekly'
@@ -124,7 +129,7 @@ jobs:
           git add -- tooling/test-durations.json
           git commit -m 'chore(test): refresh the Windows shard times'
           git push --force origin "$branch"
-          behind="the run is ${BEHIND} commits and ${AGE_DAYS} days behind main"
+          behind="the run is ${BEHIND} commits and ${AGE_DAYS} days behind ${GITHUB_REF_NAME}"
           if [ "$BEHIND" = unknown ] || [ "$BEHIND" -gt 20 ] || [ "$AGE_DAYS" -gt 7 ]; then
             behind="WARNING: $behind (more than 20 commits or 7 days), so its times may be old"
           fi
@@ -138,7 +143,7 @@ jobs:
           {
             echo "### Times pushed to \`$branch\`"
             echo
-            echo "No pull request is open: the repository does not let this workflow create one. Open it with this line, and start its CI when queueing:"
+            echo "This workflow opens no pull request: the repository does not let it create one. If one is already open for this branch, it now has this week's commit. Otherwise open it with this line, and start its CI when queueing:"
             echo
             echo '```sh'
             echo "gh pr create --base main --head $branch --title '$title' --body '$body'"
@@ -146,4 +151,4 @@ jobs:
             echo
             echo "Source run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN} ($behind)."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::Pushed $branch. Open its pull request: gh pr create --base main --head $branch (${behind})."
+          echo "::notice::Pushed $branch. If no pull request is open for it: gh pr create --base main --head $branch (${behind})."

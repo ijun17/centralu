@@ -358,6 +358,32 @@ export function refreshDurations(current: Durations, run: Durations, tests: read
   return Object.fromEntries(tests.map((t) => [t, timed[t] ?? fallback]))
 }
 
+/**
+ * `--refresh-durations`: rewrites the durations `file` from the vitest JSON reports at `reportFiles`, for the `tests` this
+ * checkout selects (`refreshDurations`), and answers the line to print. The file is left alone when only the date would
+ * change (the weekly job pushes only when the times differ). It throws when the reports time fewer than half of `tests`:
+ * an empty or wrong report would otherwise replace every time with the old ones or the median, under a run's name.
+ */
+export function refreshDurationsFile(file: string, reportFiles: readonly string[], tests: readonly string[], today = new Date()): string {
+  const run = durationsFromReports(reportFiles.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
+  const current = parseDurations(readFileSync(file, 'utf8'))
+  const timed = tests.filter((t) => t in run).length
+  if (timed * 2 < tests.length) {
+    throw new Error(`the reports time ${timed} of the ${tests.length} tests this checkout selects: fewer than half, so they are not the Windows shards' reports of a run of this repository`)
+  }
+  const durations = refreshDurations(current, run, tests)
+  const kept = tests.filter((t) => !(t in run) && t in current).length
+  const added = tests.length - timed - kept
+  // Dropped: what the file named that is not selected here (gone, or not run on Windows now); the run's own extra names are not counted
+  const dropped = Object.keys(current).filter((t) => !tests.includes(t)).length
+  const counts = `${timed} timed by the run, ${kept} kept, ${added} new (the median), ${dropped} dropped (gone, or not run on Windows)`
+  const same = Object.keys(durations).length === Object.keys(current).length && Object.entries(durations).every(([t, secs]) => current[t] === secs)
+  if (same) return `${DURATIONS}: unchanged (${counts})`
+  const source = `the Windows unit shards' vitest JSON reports, refreshed ${today.toISOString().slice(0, 10)}`
+  writeFileSync(file, formatDurations(durations, source))
+  return `${DURATIONS}: ${tests.length} files (${counts})`
+}
+
 /** tooling/test-durations.json's text: sorted, one file per line */
 export function formatDurations(durations: Durations, source: string): string {
   const files = Object.keys(durations)
@@ -486,24 +512,8 @@ async function main(argv: string[]) {
   if (argv.includes('--refresh-durations')) {
     const reports = argv.filter((a) => !a.startsWith('--'))
     if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
-    const run = durationsFromReports(reports.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
-    const current = readDurations()
     const tests = await repo.selectTests(await vitestFiles())
-    const durations = refreshDurations(current, run, tests)
-    const count = (pick: (t: string) => boolean) => tests.filter(pick).length
-    console.error(
-      `${count((t) => t in run)} files timed by the run, ${count((t) => !(t in run) && t in current)} kept, ${count((t) => !(t in run) && !(t in current))} new (the median), ` +
-        `${Object.keys({ ...run, ...current }).filter((t) => !tests.includes(t)).length} dropped (gone, or not run on Windows)`,
-    )
-    // The date alone is no change: the weekly job pushes only when the times differ
-    const same = Object.keys(durations).length === Object.keys(current).length && Object.entries(durations).every(([t, secs]) => current[t] === secs)
-    if (same) {
-      console.error(`${DURATIONS}: unchanged`)
-      return
-    }
-    const source = `the Windows unit shards' vitest JSON reports, refreshed ${new Date().toISOString().slice(0, 10)}`
-    writeFileSync(`${ROOT}${DURATIONS}`, formatDurations(durations, source))
-    console.error(`${DURATIONS}: ${Object.keys(durations).length} files`)
+    console.error(refreshDurationsFile(`${ROOT}${DURATIONS}`, reports, tests))
     return
   }
   const out = argv[argv.indexOf('--out') + 1]
