@@ -37,7 +37,7 @@ export type AskerFacts = { name: string; project: string | null; trusted: boolea
 /** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
-  caller(sessionId: string): { address: string; askedBy: string | null } | undefined
+  caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
   /** The orchestrator's session id, or null while there is none */
   orchestratorId(): string | null
   /** The schema the session's process was spawned with: 1 everywhere in M3a (§11.3) */
@@ -86,7 +86,7 @@ export class MailTool {
     }
   }
 
-  private dispatch(sessionId: string, me: { address: string; askedBy: string | null }, a: MailToolArgs, calls: MessageCalls): string {
+  private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
     switch (a.action) {
       case 'inbox':
         return this.inbox(me.address, calls)
@@ -131,7 +131,7 @@ export class MailTool {
    * A party the call names: `person`, `orchestrator` (the role, D15), `parent` (the session that started the caller, D16), an absolute address,
    * or a bare id of a session on this host. Names come with the version-2 tool (M3b)
    */
-  private party(sessionId: string, me: { askedBy: string | null }, to: string): { address: string; via?: string } {
+  private party(sessionId: string, me: { askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const t = to.trim()
     if (t === PERSON) return { address: PERSON }
     if (t.toLowerCase() === 'orchestrator') {
@@ -140,6 +140,8 @@ export class MailTool {
       return { address: this.service.sessionAddress(id), via: 'orchestrator' }
     }
     if (t.toLowerCase() === 'parent') {
+      // #1987: started from a linked computer, its parent is a session of that computer's hub, which mail does not reach yet; "person" would stay unseen here too
+      if (!me.askedBy && me.fromHub) throw refuse('unknown', 'your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
       if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "orchestrator" or "person".')
       return { address: this.service.sessionAddress(me.askedBy) }
     }

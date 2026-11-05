@@ -23,7 +23,7 @@ const SESSIONS: Record<string, Sess> = {
  * The host's mail as `main.ts` wires it (`hostMail`), over a real store and a table of sessions the test edits, with a clock and a scheduler that move
  * only when the test moves them. Pass the store of an earlier world to start "the next host" on it (a restart, an update's stop and continue)
  */
-export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: ReadonlySet<string>; oldOwes?: (ownerId: string, childId: string) => boolean } = {}) {
+export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: ReadonlySet<string>; oldOwes?: (ownerId: string, childId: string) => boolean; fromHub?: readonly string[] } = {}) {
   const store = opts.store ?? new Store()
   for (const [id, trusted] of [['p1', true], ['p2', true], ['px', false]] as const) {
     if (!store.projects.listProjects().some((p) => p.id === id)) store.projects.addProject({ id, path: `/${id}`, name: id === 'px' ? 'Pex' : id, trusted })
@@ -32,7 +32,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
   const { states, delivered, behaviour, deliver, schedule, advance, to } = deliveryCore(clock)
   const info = (id: string): SessionInfo | undefined => {
     const s = SESSIONS[id]
-    return s && ({ id, name: s.name, projectId: s.projectId, askedBy: s.askedBy ?? null, kind: s.kind ?? 'worker', state: states.get(id)?.kind === 'busy' ? 'working' : 'idle' } as unknown as SessionInfo)
+    return s && ({ id, name: s.name, projectId: s.projectId, askedBy: s.askedBy ?? null, ...(opts.fromHub?.includes(id) ? { startedFromHub: true } : {}), kind: s.kind ?? 'worker', state: states.get(id)?.kind === 'busy' ? 'working' : 'idle' } as unknown as SessionInfo)
   }
   const sessions: HostMailSessions = {
     sessionInfo: info,

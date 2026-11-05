@@ -70,7 +70,9 @@ describe('the frame a child gets (#729)', () => {
     // A child on a linked machine, or one that cannot mail its parent, is not told to
     expect(agentFrame('parent', 'run the tests')).not.toContain('call mail')
     expect(agentNoteFrame('parent', 'use Chromium')).not.toContain('call mail')
+    // A child started from a linked computer is told mail does not reach its parent, not to mail it (#1987)
     expect(remoteAgentFrame('parent', 'run the tests')).not.toContain('call mail')
+    expect(remoteAgentFrame('parent', 'run the tests').split('\n')[0]).toContain('Mail does not reach it from here yet: the answer is how it hears from you.')
   })
 
   it('can mail its parent only when that session started it and it is in a project (a fork of the orchestrator has no parent, an orchestrator child no mail tool)', () => {

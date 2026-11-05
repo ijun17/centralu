@@ -110,6 +110,8 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
+      // #1987: mail does not cross computers yet, so the answer is the only way it hears from the child
+      'Mail does not reach it from here yet: the answer is how it hears from you. ' +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     '',
     task,

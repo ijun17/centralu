@@ -65,6 +65,19 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     expect(world().run('o', { action: 'send', to: 'orchestrator', text: 'done' }).text).not.toContain('not to your parent')
   })
 
+  // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer
+  it('"parent" of a session started from a linked computer says the parent is elsewhere and unreachable, and does not point at "person"', () => {
+    const w = world()
+    const r = w.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
+    expect(r.text).not.toContain('another computer')
+    const hub = hostWorld({ fromHub: ['b'] })
+    stops.push(() => hub.stop())
+    const refused = hub.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toBe('Refused (unknown): your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
+    expect(refused.text).not.toContain('person')
+  })
+
   it('from an untrusted project to another project it is held, and the answer says so', () => {
     const w = world()
     const r = w.run('x', { action: 'send', to: 'a', text: 'hello' })
