@@ -223,8 +223,13 @@ agent (review of #1685, follow-up 8).
   variable (`TEMP`, `LOCALAPPDATA`, `XDG_CACHE_HOME`): `/tmp` is shared with other users, a variable may name a shared
   folder whose ACL the helper would inherit (another user could replace it), and a cleaner emptying a temporary folder
   by age would remove a live helper, sending the launcher on to the real browser (adversarial review of #1688). The
-  name is neither the Windows installer's folder (`%LOCALAPPDATA%\Centralu`) nor the app's own (`app.centralu`). Every path
-  is made absolute, as the agent runs in the session's folder. Where no helper can be written even so (that folder's
+  name is neither the Windows installer's folder (`%LOCALAPPDATA%\Centralu`) nor the app's own (`app.centralu`). On
+  macOS and Linux the folder is made 0700 and refused unless it is a real folder of the person's that no one else can
+  write, below folders only the person or root can change (sticky ones aside; `notOwnFolder`, deep review of #2012).
+  A link above it (`~/.cache` on another disk) is accepted where it leads somewhere only the person or root can change,
+  since the folders are judged as resolved; one into a folder another user made is refused. macOS cache cleaners may
+  still purge `~/Library/Caches`, and a live helper purged there sends Python's launcher on to the real browser: rare,
+  and only on this fallback path. Every path is made absolute, as the agent runs in the session's folder. Where no helper can be written even so (that folder's
   path holds one too or cannot be written, or on Windows the path of the Node that runs the helper holds one), the
   sign-in and every session refuse to start the agent, with a line in `host.log` and an error that names the path and the character in plain words
   (`BrowserFolder.why`). A session's refusal is `refused`, not retryable, since a path does not change between tries;

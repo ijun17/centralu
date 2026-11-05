@@ -1353,8 +1353,10 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   folder is made in a folder of the person's own instead, built from the home folder alone
   (`~\AppData\Local\centralu-antigravity`, `~/Library/Caches/centralu-antigravity`, `~/.cache/centralu-antigravity`;
   no variable such as `TEMP`, `LOCALAPPDATA` or `XDG_CACHE_HOME`, which may name a shared folder): per user by the OS's
-  defaults (on Windows its ACL is the profile's; elsewhere the folder is 0700), not a folder a cleaner empties by age,
-  and every path given to `BROWSER` is absolute. A host that crashes leaves its helper folder there until the next
+  defaults (on Windows its ACL is the profile's; elsewhere it is made 0700 and used only as a real folder, not a link,
+  owned by the person and writable by no one else, below folders only the person or root can change, sticky ones such
+  as `/tmp` aside; a `~/.cache` that is a link is followed and judged where it leads), not a folder a cleaner empties
+  by age, and every path given to `BROWSER` is absolute. A host that crashes leaves its helper folder there until the next
   helper is made there (it holds no token). Where no helper can be written even so, the
   agent is not started, and the error names the path and the character. Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
