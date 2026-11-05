@@ -63,6 +63,8 @@ export type MailToolHost = {
  */
 export class MailTool {
   private readonly now: () => number
+  /** The sessions told once that `orchestrator` is not their parent (#1984) */
+  private readonly hinted = new Set<string>()
 
   constructor(
     private readonly service: MessageService,
@@ -95,7 +97,7 @@ export class MailTool {
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
         const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}) })
-        return this.sent(sent)
+        return this.sent(sent) + this.parentHint(sessionId, me, to)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
@@ -143,6 +145,16 @@ export class MailTool {
     }
     if (t === sessionId) throw refuse('bad_value', 'a message is for someone else')
     return { address: t.includes(':') ? t : this.service.sessionAddress(t) }
+  }
+
+  /**
+   * #1984: a session that has a parent and mails `orchestrator` may have meant the parent, which nothing it sees named. The answer says so once per session
+   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the orchestrator itself.
+   */
+  private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
+    if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.orchestratorId() || this.hinted.has(sessionId)) return ''
+    this.hinted.add(sessionId)
+    return ` It went to the orchestrator, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. To write to your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */

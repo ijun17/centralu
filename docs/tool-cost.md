@@ -915,7 +915,12 @@ says when to set it (", with cite=true only when the person's last message here 
 the request and the message it cites, and which steps still ask (about 110 characters more; its ceiling 9,910 → 10,030). The check of
 the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), so it costs nothing in a request.
 
-Every field but `action` is optional and has no description: each word rides in every Codex request, and the answers say
+**#1984 (the address of the session that started you).** A child that was told to write to its parent chose `orchestrator`, the one role it could see.
+`to` now has a description naming the three addresses and when each is for (`"parent"`, `"orchestrator"`, `"person"`): the definition is 1,077,
+`MAIL_BUDGET_CHARS` 910 → 1,080, and the reader seat's ceilings rise by 170. The frames that start a child (`start_agent`, `agent_session`) and
+`ask_project`'s name the address in a line of their own, which rides in that task and not in every request.
+
+Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds
 it through tool search by "mail".
