@@ -26,9 +26,9 @@ const WAKES: Record<string, string> = {
     item(3, { inline: 'first' }),
     item(4, { threadId: 'hub-aaaaaaaa.t_01J00000000000000000000002', kind: 'assign', from: S2, relation: 'the session that gave you this work', inline: 'second\nthird' }),
   ]),
-  'an inline body that had to be cut': oldWake([item(5, { inline: 'x'.repeat(12_000) })]),
+  'an inline body that had to be cut': oldWake([item(5, { inline: `${'x'.repeat(8_000)}\n… (4000 more characters: read the message with mail(action="read"))` })]),
   'a message of the frame now, with its words inline': buildMessageFrame([{ messageId: M(20), kind: 'message', from: S2, relation: 'a session of your project', needsReply: true, inline: 'two\nlines' }]).text,
-  'many folded into "and N more"': oldWake(Array.from({ length: 80 }, (_, n) => item(10 + n, { inline: `message ${n} `.repeat(20) }))),
+  'many folded into "and N more"': oldWake(Array.from({ length: 40 }, (_, n) => item(50 + n, { inline: `message ${n} `.repeat(20) })), 40),
 }
 
 describe('a mail wake read back from the tool’s record (§9.2)', () => {

@@ -1,5 +1,5 @@
 /**
- * The wake frame of mail without threads (docs/plans/mailbox.md §8.3, §11.3, §15 S1): the new builder beside the old one, with the same header, escaping and budget.
+ * The wake frame of mail without threads (docs/plans/mailbox.md §8.3, §11.3, §15 S1): its header, escaping and budget.
  */
 import { describe, expect, it } from 'vitest'
 import { MAIL_FRAME_BUDGET, buildMessageFrame, mailCalls, type MessageFrameItem } from './frame.js'
@@ -104,8 +104,14 @@ describe('the frame of mail without threads', () => {
     expect(out.shown.length).toBeLessThan(60)
     expect(out.shown.at(-1)).toBe(M(60))
     expect(out.inline).toEqual(out.shown)
+    // The count says how many are unread in all; what is shown and what is folded add up to it, and the newest are the ones kept
+    expect(out.text).toContain('<centralu-mail unread="60">')
+    const folded = Number(/and (\d+) more/.exec(out.text)![1])
+    expect(out.shown).toHaveLength(60 - folded)
+    expect(out.shown).toEqual(many.slice(folded).map((i) => i.messageId))
 
-    const cut = buildMessageFrame([item(1, { inline: 'x'.repeat(12_000) })])
+    const cut = buildMessageFrame([item(1, { inline: 'word '.repeat(5_000) + 'THE END' })])
+    expect(cut.text).not.toContain('THE END')
     expect(cut.text.length).toBeLessThanOrEqual(MAIL_FRAME_BUDGET)
     expect(cut.text).toContain('more characters: read the message with mail(action="read")')
     expect(cut.shown).toEqual([M(1)])

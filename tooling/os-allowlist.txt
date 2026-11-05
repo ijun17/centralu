@@ -174,7 +174,6 @@ packages/agent-host/src/dev-services/schema-doc.ts
 packages/agent-host/src/dev-services/store-asked-by.test.ts
 packages/agent-host/src/dev-services/store-durability.test.ts
 packages/agent-host/src/dev-services/store-machine-asks.test.ts
-packages/agent-host/src/dev-services/store-mail.test.ts
 packages/agent-host/src/dev-services/store-migrations.test.ts
 packages/agent-host/src/dev-services/store-min-reader.test.ts
 packages/agent-host/src/dev-services/store-older-builds.test.ts

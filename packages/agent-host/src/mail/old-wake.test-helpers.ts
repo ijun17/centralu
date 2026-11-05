@@ -4,6 +4,8 @@
  * `wake-text.ts` must take it out as it does the new one. The builder is gone with its callers; these lines are its fixed words.
  */
 
+import { escapeFrameTags } from './frame.js'
+
 export type OldWakeItem = {
   messageId: string
   threadId: string
@@ -37,7 +39,7 @@ export function oldWake(items: readonly OldWakeItem[], folded = 0): string {
     .filter((i) => i.inline !== undefined)
     .map((i) => {
       const who = i.from === 'person' ? 'the person wrote it' : 'the person did not write it'
-      const quoted = (i.inline ?? '')
+      const quoted = escapeFrameTags(i.inline ?? '')
         .split(/\r\n|[\n\r\u0085\u2028\u2029]/)
         .map((line) => `> ${line}`)
         .join('\n')

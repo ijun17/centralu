@@ -3,7 +3,7 @@
  * §6.2, §6.3, M1).
  *
  * The v64 build is this build's `Store` with the steps after 64 left out: its schema, and its thread mail written by
- * the statements its `MailRecords` ran (this build's copy, and plain SQL where this build no longer has them). So a test here that reads with the v64
+ * the statements its `MailRecords` ran (`store/mail-v64.test-helpers.ts`, and plain SQL here). So a test here that reads with the v64
  * build after v65 ran is the swap and the rollback: an older host serving a store a newer one migrated.
  */
 import { describe, expect, it } from 'vitest'

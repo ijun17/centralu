@@ -206,7 +206,7 @@ function messageHeader(i: MessageFrameItem): string {
 }
 
 /**
- * The wake frame of mail without threads, with the header lines, the escaping and the budget of `buildMailFrame`: one line per message, then S1's words.
+ * The wake frame of mail without threads, with the header lines, the escaping and the budget the wake has always had: one line per message, then S1's words.
  * The ids it tells the receiver of are those not folded into "and N more"
  */
 export function buildMessageFrame(
