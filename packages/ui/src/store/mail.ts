@@ -85,7 +85,7 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
         set({ mailThread: view })
         void get().loadMail()
       } catch (e) {
-        set({ toast: `Could not open that thread: ${errorMessage(e)}` })
+        set({ toast: `Could not open that: ${errorMessage(e)}` })
       }
     },
 
@@ -124,7 +124,7 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       const platform = get().platform
       const open = get().mailThread
       if (!platform || !open) return false
-      return act('close that thread', async () => {
+      return act('close that', async () => {
         await platform.mail.close(open.thread.id, outcome)
         await refreshThread(get, set, open.thread.id)
         void get().loadMail()

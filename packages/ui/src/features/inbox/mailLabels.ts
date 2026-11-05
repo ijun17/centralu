@@ -43,7 +43,7 @@ export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): s
 export function heldLabel(reason: string): { why: string; action: string; kind: 'resume-thread' | 'resume-session' | 'release' } {
   switch (reason) {
     case 'loop':
-      return { why: 'Paused: this thread started many turns without a word from you', action: 'Resume', kind: 'resume-thread' }
+      return { why: 'Paused: these messages started many turns without a word from you', action: 'Resume', kind: 'resume-thread' }
     case 'budget':
       return { why: 'Paused: this session has used its share of turns started by mail', action: 'Resume', kind: 'resume-session' }
     case 'policy':

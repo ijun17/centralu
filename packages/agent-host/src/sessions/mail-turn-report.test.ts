@@ -235,7 +235,8 @@ describe('the person closing a chain whose work is going, over the real manager 
         const turn = s && inTurn(s.state) ? m.turns.current(id) : undefined
         return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
       },
-      closed: (c) => void w.mgr.mailWorkClosed(c),
+      tellsNow: (id) => w.mgr.tellsMailNow(id),
+      tell: (id, text) => void w.mgr.tellMailNow(id, text),
     })
   /** A session at work on the person's task, which the mailbox delivered and started its turn with */
   async function working() {
@@ -248,21 +249,42 @@ describe('the person closing a chain whose work is going, over the real manager 
     return { helper, task }
   }
 
-  it('Drop stops the session’s turn, tells it once without a wake in main’s words, and the stopped turn reports nothing to the person', async () => {
+  it('Drop tells the session once without a wake, in Centralu’s words, and stops nothing: its turn goes on, and what it writes after reaches the person in the same chain', async () => {
     const { helper, task } = await working()
     const person = personOf()
     expect(person.list().threads[0]).toMatchObject({ id: task.id, state: 'running', working: true })
     expect(person.close(task.id, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped' })
     await w.until(() => handleOf(helper).quiet.length === 1)
-    expect(handleOf(helper).interrupted).toBe(1)
-    expect(handleOf(helper).quiet[0]).toContain(`[Centralu] The person dropped thread ${task.id}; its work was stopped. Do not continue it.`)
-    await turnEnds(helper, 'stopped')
+    expect(handleOf(helper).quiet[0]).toContain(`[Centralu] The person dropped the mail that began with ${task.id} and withdrew what they asked of you in it (${task.id}). Do not continue that work. Centralu did not stop your turn`)
+    person.close(task.id, 'dropped')
+    await new Promise((r) => setTimeout(r, 30))
+    // Once: the second close adds nothing, and nothing was interrupted
+    expect(handleOf(helper).quiet).toHaveLength(1)
+    expect(handleOf(helper).interrupted).toBe(0)
+    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
+    // The turn ends with its answer: the task is withdrawn, so no report of it opens the chain again
+    await turnEnds(helper, 'completed')
     await new Promise((r) => setTimeout(r, 30))
     expect(outcomes(task.id)).toEqual([])
     expect(person.list().threads[0]).toMatchObject({ id: task.id, state: 'done', outcome: 'dropped', unread: 0 })
   })
 
-  it('stops the background work the stopped turn started, and leaves work it did not start running (#1474)', async () => {
+  it('a tool that takes no quiet input (Codex) is not given the notice mid-turn: it waits as mail for its next mail, and nothing is stopped', async () => {
+    const { helper, task } = await working()
+    // Codex starts a turn for any input
+    Object.defineProperty(w.adapters.get('claude')!, 'quietInput', { value: false })
+    expect(w.mgr.tellsMailNow(helper)).toBe(false)
+    personOf().close(task.id, 'dropped')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(handleOf(helper).quiet).toEqual([])
+    expect(handleOf(helper).interrupted).toBe(0)
+    // Written as mail for it, not delivered into the turn it is in
+    const [notice] = read.to(addr(helper)).filter((x) => x.message.kind === 'notice')
+    expect(notice?.message.facts.chainClosed).toMatchObject({ root: task.id, outcome: 'dropped' })
+    expect(notice?.row.deliveredAt).toBeNull()
+  })
+
+  it('does not stop the background work the turn started either (#1474): the session decides', async () => {
     Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
     const { helper, task } = await working()
     const h = handleOf(helper)
@@ -270,15 +292,12 @@ describe('the person closing a chain whose work is going, over the real manager 
     h.event({
       type: 'background_tasks',
       sessionId: helper,
-      live: [
-        { id: 't-this', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c-this' },
-        { id: 't-server', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
-      ],
+      live: [{ id: 't-this', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c-this' }],
     })
     personOf().close(task.id, 'finished')
     await w.until(() => h.quiet.length === 1)
-    expect(h.interrupted).toBe(1)
-    expect(h.stoppedTasks).toEqual(['t-this'])
-    expect(h.quiet[0]).toContain(`The person marked done thread ${task.id}; its work was stopped.`)
+    expect(h.interrupted).toBe(0)
+    expect(h.stoppedTasks).toEqual([])
+    expect(h.quiet[0]).toContain(`The person marked done the mail that began with ${task.id}`)
   })
 })

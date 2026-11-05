@@ -406,8 +406,11 @@ export class MessageService {
     return task ? this.records.handedOn(task.id).filter((r) => !r.delivered || oldOwes(r.sender, r.recipient)).length : 0
   }
 
-  /** A notice from Centralu (D2, D21): quiet when `facts.quiet`. Undefined when its `dedupeKey` was used already */
-  notice(recipient: string, input: { body: string; facts: MailFacts; dedupeKey: string }): MailRow | undefined {
+  /**
+   * A notice from Centralu (D2, D21): quiet when `facts.quiet`. Undefined when its `dedupeKey` was used already. `delivered`: the caller puts it into the
+   * receiver at once, so it is written delivered and read (as `refused`)
+   */
+  notice(recipient: string, input: { body: string; facts: MailFacts; dedupeKey: string; delivered?: boolean }): MailRow | undefined {
     const stored = this.run(() => this.centralu(recipient, { kind: 'notice', ...input }))
     return stored.duplicate ? undefined : stored
   }

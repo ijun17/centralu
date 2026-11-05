@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MailMessage } from '@cc/protocol/client'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
+import { Fold } from '../../components/Fold.js'
 import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
@@ -9,7 +10,7 @@ import { isComposerSendKey } from '../session/composerKeys.js'
 import { partyName, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
- * One thread of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
+ * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
  * the person's own are marked as theirs. Centralu's lines (a state moved, a party joined) are small and plain.
  */
 export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: string) => void }) {
@@ -17,10 +18,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const back = useStore((s) => s.closeMailThread)
   const close = useStore((s) => s.closeMail)
   const older = useStore((s) => s.loadOlderMail)
-  // Closing a thread whose turn is going stops that turn: asked once first, with no way to close and leave it running (3.10)
-  const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
   const list = useRef<HTMLOListElement>(null)
-  // A thread opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
+  // A conversation opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
   const newest = view?.messages.at(-1)?.seq
   useEffect(() => {
     const el = list.current
@@ -58,7 +57,6 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
           {partyName(thread.owner)}
           {thread.assignee ? ` → ${partyName(thread.assignee)}` : ''}
         </span>
-        {thread.next && <span className="truncate text-ink-muted">Next: {thread.next}</span>}
       </div>
 
       <ol ref={list} className="flex max-h-[calc(40vh/var(--text-zoom))] min-h-0 flex-col gap-2 overflow-y-auto px-4 py-2" data-testid="mail-messages">
@@ -72,47 +70,30 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         {view.messages.map((m) => (
           <Message key={m.id} m={m} />
         ))}
-        {view.more && <li className="text-center text-xs text-ink-faint">There are more messages. Open the thread again to read on.</li>}
+        {view.more && <li className="text-center text-xs text-ink-faint">There are more messages. Open this again to read on.</li>}
       </ol>
 
-      {done ? (
+      {/* Closing takes the reply box and the two acts away and brings the note in, each folding and fading for a moment (reduced motion: a fade), so nothing under them jumps */}
+      <Fold open={done}>
         <p className="border-t border-line/60 px-4 py-3 text-sm text-ink-faint" data-testid="mail-done-note">
-          This thread is done. Open a follow-up from a session to go on.
+          This is done. Open a follow-up from a session to go on.
         </p>
-      ) : (
-        <>
+      </Fold>
+      <Fold open={!done}>
+        {/* Only where there is something of the person's to answer: a chain of mail between sessions held for them has no one for a reply to go to (a host of an older build does not say, and has the box) */}
+        <Fold open={view.canReply !== false}>
           <Reply />
-          {confirming !== null && (
-            <div className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
-              <span className="min-w-0">{thread.assignee ? partyName(thread.assignee) : 'The session'} is working on this. Stop its work and close the thread?</span>
-              <Button
-                size="sm"
-                variant="danger"
-                className="ml-auto shrink-0"
-                onClick={() => {
-                  const outcome = confirming
-                  setConfirming(null)
-                  void close(outcome)
-                }}
-                data-testid="mail-stop-close"
-              >
-                Stop and close
-              </Button>
-              <Button size="sm" variant="quiet" className="shrink-0" onClick={() => setConfirming(null)} data-testid="mail-stop-cancel">
-                Cancel
-              </Button>
-            </div>
-          )}
-          <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
-            <Button size="sm" variant="quiet" onClick={() => (thread.working ? setConfirming('finished') : void close('finished'))} data-testid="mail-finish">
-              Mark done
-            </Button>
-            <Button size="sm" variant="quiet" onClick={() => (thread.working ? setConfirming('dropped') : void close('dropped'))} data-testid="mail-drop">
-              Drop
-            </Button>
-          </div>
-        </>
-      )}
+        </Fold>
+        {/* Closing is at once: the session that was working on it is told, and its turn is not stopped */}
+        <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
+          <Button size="sm" variant="quiet" onClick={() => void close('finished')} data-testid="mail-finish">
+            Mark done
+          </Button>
+          <Button size="sm" variant="quiet" onClick={() => void close('dropped')} data-testid="mail-drop">
+            Drop
+          </Button>
+        </div>
+      </Fold>
     </div>
   )
 }
@@ -175,7 +156,7 @@ function Reply() {
             void send()
           }
         }}
-        placeholder="Write to this thread"
+        placeholder="Reply"
         aria-label="Your reply"
         className="max-h-40 min-w-0 flex-1 resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
         data-testid="mail-reply"
