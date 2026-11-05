@@ -1,9 +1,9 @@
 import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
-import { createdPreset, orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { parseAddress } from '../mail/address.js'
-import { presetWithin } from './start-agent.js'
+import { lowestPreset, presetWithin } from './start-agent.js'
 import { AskedGate } from './asked-gate.js'
 import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
@@ -81,6 +81,8 @@ import {
   errorMessage,
   ORCHESTRATOR_CHANGE,
   oneLineText,
+  PermissionPreset as PresetSchema,
+  defaultPresetFor,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { raceTimeout } from '../timing.js'
@@ -486,7 +488,8 @@ export class SessionManager {
           return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())?.permissionPreset
         }
         const preset =
-          call.name === 'create_session' ? createdPreset(seat) // here or on a linked machine, the same cap
+          // What `createdPreset` gives: the preset named, or the project's default held to the seat (one this host does not hold, on a linked machine, is taken as trusted: the higher default)
+          call.name === 'create_session' ? (PresetSchema.safeParse(call.args.preset).data ?? lowestPreset(defaultPresetFor({ trusted: this.createdInTrusted(call.args.project) }), seat))
           : call.name === 'start_agent' ? seat // its child runs under the caller's preset (start-agent-flow.ts)
           : call.name === 'handoff_session' ? (call.args.sessionId === undefined ? seat : of(call.args.sessionId)) // the new session keeps the old one's
           : call.name === 'ask_project' ? of(call.args.session)
@@ -1579,6 +1582,13 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   /** Why `tool` cannot run this session as its next launch would, under `preset` (its own by default), or null (`tool-fit.ts`) */
+  /** Whether a project create_session names (by id or name) is trusted here; one this host does not hold reads as trusted, the looser default (#1739's gate) */
+  private createdInTrusted(project: unknown): boolean {
+    const named = typeof project === 'string' ? project.trim() : ''
+    const p = this.store.projects.listProjects().find((x) => x.id === named || x.name === named)
+    return p ? p.trusted === true : true
+  }
+
   toolRefusal(m: SessionInfo, tool: ToolName = m.tool, preset: PermissionPreset = m.permissionPreset): string | null {
     return this.toolRegistry.refusal(tool, sessionDemands(m, this.launchInputs.settingFilesFor(m), preset))
   }

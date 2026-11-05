@@ -219,12 +219,13 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(sent).not.toMatchObject({ isError: true })
     expect(card()).toBeUndefined()
     // A new session there, which the asking session (normal, in a trusted project) would have started itself with no card
-    const made = await settled(tool('create_session', { project: acme.id, firstMessage: 'start on it' }))
+    // Named `normal`, as the asking session's: a trusted project's default would be `auto` under this `auto` seat, looser (owner decision 2026-11-05)
+    const made = await settled(tool('create_session', { project: acme.id, preset: 'normal', firstMessage: 'start on it' }))
     expect(made).not.toMatchObject({ isError: true })
     expect(card()).toBeUndefined()
     expect(recordsIn(asker)).toEqual([expect.stringContaining('run send_to_session'), expect.stringContaining('run create_session')])
     // Another project, at `normal` (no looser than the asking session's): no request card either, and recorded
-    const elsewhere = await settled(tool('create_session', { project: beta.id, firstMessage: 'start on it' }))
+    const elsewhere = await settled(tool('create_session', { project: beta.id, preset: 'normal', firstMessage: 'start on it' }))
     expect(elsewhere).not.toMatchObject({ isError: true })
     expect(card()).toBeUndefined()
     expect(w.mgr.listSessions().filter((x) => x.projectId === beta.id)).toHaveLength(1)
@@ -243,7 +244,7 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(card()!.text).toContain('asked the orchestrator to run send_to_session')
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await call).isError).toBe(true)
-    // And a new session there would run under `normal`, looser than `safe`
+    // And a new session there would run under `auto` (a trusted project's default under this `auto` seat), looser than `safe`
     const made = tool('create_session', { project: acme.id, firstMessage: 'start on it' })
     await eventually(() => !!card())
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')

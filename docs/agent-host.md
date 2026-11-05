@@ -442,7 +442,7 @@ child's own preset still apply. Deleting a session without a worktree still requ
 (`askedBy` or `parentSessionId` equals the caller), even under `auto` (#637). Observing an app agent reuses its completion watcher, so
 `run_agent` still receives its answer and the agent keeps its own preset. Cleanup removes an idle worktree and branch even with dirty files or an unproven tip, after setting aside
 local work with the conversation in the session archive (#608). `run_agent`
-app agents start under `auto` like any new session (owner decision 2026-11-05), and no session gets a preset above its caller. When auto observes another
+app agents start under `auto`, never above the session whose call started the chain (owner decision 2026-11-05), and no session gets a preset above its caller. When auto observes another
 caller's unfinished delegation, its wait has its own bound and cancellation and returns
 `reported: false` while working. It does not consume the owner's report, key, waiter count
 or read grants. A stop leaves the owner's failure report and result available, including
@@ -693,7 +693,7 @@ the card. The card is `agent_start` with `machine`: it names the computer, is ra
 (#1273): the hub asks it first (`host.hubAuto`, its "Allow auto from a linked computer" switch); a machine whose switch is
 off gets the card, which says why the child runs under `normal` (`autoWithheld`). The child
 is made over the link (`agents.createSession` there) under the caller's preset capped at `normal` (as create_session
-over a link, #838) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
+over a link, #838, which carries an `auto` one the same way) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
 did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
 `startedFromHub`, and its row and header show its preset there and on the hub. It is made with the model, effort and worktree

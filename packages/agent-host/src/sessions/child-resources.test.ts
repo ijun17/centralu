@@ -73,7 +73,7 @@ describe('child sessions and the machine (#686)', () => {
       const id = await new Promise<string>((resolve, reject) => {
         w.mgr
           .appSessions.runAppAgent(
-            { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
+            { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around', origin: null },
             { signal: new AbortController().signal, progress: () => {}, onSession: resolve },
           )
           .catch(reject)
@@ -196,7 +196,7 @@ describe('child sessions and the machine (#686)', () => {
       let sessionId: string | undefined
       void w.mgr
         .appSessions.runAppAgent(
-          { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
+          { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around', origin: null },
           { signal: new AbortController().signal, progress: (m) => progress.push(m), onSession: (id) => (sessionId = id) },
         )
         .catch(() => {})
@@ -214,7 +214,7 @@ describe('child sessions and the machine (#686)', () => {
       const ctl = new AbortController()
       let sessionId: string | undefined
       const run = w.mgr.appSessions.runAppAgent(
-        { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around' },
+        { app: { projectId: w.caller.id, appId: 'app-notes' }, appName: 'Notes', tool: 'claude', prompt: 'look around', origin: null },
         { signal: ctl.signal, progress: () => {}, onSession: (id) => (sessionId = id) },
       )
       await new Promise((r) => setTimeout(r, 50))

@@ -99,6 +99,28 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(kept).toMatchObject({ appId: 'notes', appName: 'App notes', sessionId: agent!.id, sessionName: name, status: 'ok' })
   })
 
+  /*
+   * Owner decision 2026-11-05: no session gains through an app what its own preset withholds. The agent runs under
+   * `auto` held to the session whose call started the chain; a chain the app's screen started is the person's own.
+   */
+  it('never runs above the session whose call started it: a safe caller reaches a safe agent, a normal one a normal agent, the app screen an auto one', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      h.say('ok')
+      h.done()
+    }
+    for (const preset of ['safe', 'normal'] as const) {
+      const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: preset })) as SessionInfo
+      expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize.' } }))).toMatchObject({ isError: false })
+      expect(agentsMade().at(-1), preset).toMatchObject({ appId: 'notes', permissionPreset: preset })
+      expect(claude.opened.at(-1)!.permissionPreset).toBe(preset)
+    }
+    // The capability was allowed above and is remembered, so the screen's call asks nothing
+    await rt.call({ projectId, appId: 'notes' }, 'ask_broker', { mode: 'run', args: { prompt: 'From the screen.' } }, { kind: 'view' })
+    expect(agentsMade().at(-1)).toMatchObject({ appId: 'notes', permissionPreset: 'auto' })
+  })
+
   it("auto session control observes an app agent without replacing the app request's completion watcher or changing its preset", async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
@@ -153,7 +175,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
       h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
     }
     const controller = new AbortController()
-    const run = mgr.appSessions.runAppAgent({ app: { appId: 'notes', projectId }, appName: 'App notes', tool: 'claude', prompt: 'Summarize.' }, { signal: controller.signal, progress: () => {} })
+    const run = mgr.appSessions.runAppAgent({ app: { appId: 'notes', projectId }, appName: 'App notes', tool: 'claude', prompt: 'Summarize.', origin: null }, { signal: controller.signal, progress: () => {} })
     run.catch(() => {})
     await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
     controller.abort()
@@ -227,7 +249,8 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const r = brokerSaid(await callFromSession(orchestrator, 'app-timer', { args: { prompt: 'x' } }))
     expect(r).toEqual({ isError: false, text: 'Done.', structured: null })
     const agent = agentsMade()[0]!
-    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'auto' })
+    // Never above the orchestrator whose call started it, which runs under normal
+    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'normal' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
   })
 

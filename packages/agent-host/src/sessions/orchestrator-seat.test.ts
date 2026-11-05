@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { sessionLiveDefaults, type AdapterCapabilities, type SessionInfo, type ToolName } from '@cc/protocol'
+import { sessionLiveDefaults, type AdapterCapabilities, type PermissionPreset, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -511,39 +511,69 @@ describe("two sends to a linked machine's session at once (#839)", () => {
 /*
  * create_session (#838): the new session never runs above the seat's own permissions, and its first message is the
  * seat's, not the person's. It was `normal` whatever the seat ran under, with the instruction stored as the person's.
+ * Since the owner decision of 2026-11-05 it gets the default a new session gets (`auto` in a trusted project, `normal`
+ * in an untrusted one), held to the seat, or the preset named within the seat's own.
  */
 describe('a session the orchestrator creates', () => {
   const created = (id: string) => ({ ...session(id), permissionPreset: 'safe' }) as SessionInfo
+  const seatUnder = (preset: PermissionPreset) => meta.set('orch', { ...meta.get('orch')!, permissionPreset: preset })
 
   beforeEach(() => {
     store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    store.projects.addProject({ id: 'p2', path: join(tmpdir(), 'kept'), name: 'kept', trusted: true })
     host.createSession = vi.fn(async () => created('new'))
     host.firstTool = vi.fn(() => 'claude' as ToolName)
   })
 
   it('a safe seat creates a safe session, and its first message is marked as the seat’s', async () => {
-    meta.set('orch', { ...meta.get('orch')!, permissionPreset: 'safe' })
+    seatUnder('safe')
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', firstMessage: 'do it' })).toMatchObject({ ok: true })
     expect(host.createSession).toHaveBeenCalledWith(expect.objectContaining({ permissionPreset: 'safe' }))
     expect(host.send).toHaveBeenCalledWith('new', 'do it', undefined, { sessionId: 'orch', name: 'Orchestrator' })
   })
 
-  it('a normal seat creates a normal session, and an auto seat still no more than normal', async () => {
-    for (const [seat, expected] of [['normal', 'normal'], ['auto', 'normal']] as const) {
-      meta.set('orch', { ...meta.get('orch')!, permissionPreset: seat })
-      await orchestratorToolsFor(host, 'orch').createSession({ project: 'site' })
-      expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: expected }))
+  it('names none: auto in a trusted project and normal in an untrusted one, never above the seat', async () => {
+    for (const [seat, project, expected] of [
+      ['auto', 'kept', 'auto'],
+      ['auto', 'site', 'normal'],
+      ['normal', 'kept', 'normal'],
+      ['safe', 'kept', 'safe'],
+    ] as const) {
+      seatUnder(seat)
+      expect(await orchestratorToolsFor(host, 'orch').createSession({ project })).toMatchObject({ ok: true })
+      expect(host.createSession, `${seat} seat in ${project}`).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: expected }))
     }
   })
 
+  it('an auto seat may name auto, in an untrusted project too; a preset named above the seat is refused and nothing is made', async () => {
+    seatUnder('auto')
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', preset: 'auto' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'auto' }))
+    seatUnder('normal')
+    const calls = vi.mocked(host.createSession).mock.calls.length
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'auto' })).toMatchObject({ ok: false, error: expect.stringContaining('runs under normal') })
+    expect(vi.mocked(host.createSession).mock.calls.length).toBe(calls)
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'safe' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'safe' }))
+  })
+
   it('on a linked machine, the same cap goes with the request', async () => {
-    meta.set('orch', { ...meta.get('orch')!, permissionPreset: 'safe' })
+    seatUnder('safe')
     const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
     const send = vi.fn(async () => ({ ok: true as const }))
-    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x' }], away: [] }), createSession, send } as unknown as LinkedSessions
+    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: true }], away: [] }), createSession, send } as unknown as LinkedSessions
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true })
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'safe' }))
+    expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.not.objectContaining({ callerPreset: expect.anything() }))
     expect(send).toHaveBeenCalledWith('m1/s', 'go', 'Orchestrator')
+  })
+
+  it("an auto seat's session on a trusted linked project carries auto for that machine's own switch to take, normal at most otherwise", async () => {
+    seatUnder('auto')
+    const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
+    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: true }], away: [] }), createSession, send: vi.fn() } as unknown as LinkedSessions
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far' })).toMatchObject({ ok: true })
+    expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'normal', callerPreset: 'auto' }))
   })
 })
 

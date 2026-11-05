@@ -51,6 +51,12 @@ export type AgentRunRequest = {
   prompt: string
   /** The shape of the answer (JSON Schema, an object at the root). If present, this makes the tool produce structured output */
   schema?: Record<string, unknown>
+  /**
+   * Who started the chain this request belongs to (`DeskApps.origin`): the session whose call reached the app, the app's
+   * screen, or null when the chain can no longer be followed. The agent never runs above a calling session (owner
+   * decision 2026-11-05, `AppSessions.runAppAgent`)
+   */
+  origin: CapabilityOrigin | null
 }
 
 export type AgentRunResult = {
@@ -569,7 +575,7 @@ export class BrokerDesk {
     let r: AgentRunResult
     try {
       r = await host.runAgent(
-        { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
+        { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}), origin: this.apps.origin(call.parentRunId) },
         {
           signal: call.signal,
           progress: call.progress,

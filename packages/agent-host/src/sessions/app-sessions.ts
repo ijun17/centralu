@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import { orchestratorHome } from './orchestrator-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
+import { lowestPreset } from './start-agent.js'
 import { AgentRunWait } from './app-agents.js'
 import { turnAnswer } from './turn-answer.js'
 import { builderRole } from './app-builder.js'
@@ -360,9 +361,9 @@ export class AppSessions {
    *   Location  That project (cwd is the project root) for a project app; for a user-folder app, the
    *             orchestrator's own empty folder with no project, the same as a coordinator session.
    *             The session's app slot (`appId`) is set to that app.
-   *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), whatever
-   *             the calling session uses; it was always `safe` before (see the comment at the start
-   *             below for what still holds it).
+   *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), but never
+   *             above the session whose call started the chain (`appAgentPreset`); it was always
+   *             `safe` before (see the comment where the session is made).
    *   Text      Sent as the app's own text, not the person's — recorded in the conversation as a
    *             message the app sent (`fromApp`), and reaches the agent wrapped in the same frame as
    *             an inline view's message (`appMessageFrame`, every line contained in a quote) with the
@@ -420,21 +421,22 @@ export class AppSessions {
     }
 
     /*
-     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), whatever the calling
-     * session uses.
+     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the session
+     * whose call started the chain** (`appAgentPreset`): a `safe` session's call reaches a `safe` agent, a `normal` one's a
+     * `normal` one, so no session gains through an app what its own preset withholds. The app's screen is the person's
+     * own reach, so a chain it started gets `auto`; a chain that can no longer be followed gets `safe`.
      *
-     * It was `safe` before (and `normal` before that, the plan's decision 6), because this prompt was never written by the
-     * person: the app's code sent it, and data the app pulled in from outside can be mixed into it (a prompt injection
-     * channel). The owner chose to have app agents run without approval cards like the rest. What still holds them is
-     * not the preset: no Centralu server and no apps (`session-app-wiring.ts`), no Centralu updates (`updates-asked.ts`), the
-     * project's trust for its files (`launch-inputs.ts`), and no other session answers a card raised here
-     * (`answersApproval`, routed-cards.ts). The person may lower it in the session's settings, as any session's.
+     * It was always `safe` before (and `normal` before that, the plan's decision 6), because this prompt was never written
+     * by the person: the app's code sent it, and data the app pulled in from outside can be mixed into it (a prompt
+     * injection channel). What holds it besides the preset: no Centralu server and no apps (`session-app-wiring.ts`), no
+     * Centralu updates (`updates-asked.ts`), the project's trust for its files (`launch-inputs.ts`), and no other session
+     * answers a card raised here (`answersApproval`, routed-cards.ts). The person may lower it in the session's settings.
      */
     const info = await this.host.createSession({
       projectId: req.app.projectId,
       cwd,
       tool: req.tool,
-      permissionPreset: 'auto',
+      permissionPreset: appAgentPreset(req.origin, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset),
       appId: req.app.appId,
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })
@@ -630,4 +632,16 @@ export async function gitStatusForApp(
     ...(summary.more ? { more: true as const } : {}),
     files: await files(),
   }
+}
+
+/**
+ * The preset an app's agent starts under (owner decision 2026-11-05): `auto`, the default every new session gets, held to
+ * the preset of the session whose call started the chain, as a child never runs above its caller (`presetWithin`). A
+ * chain the app's screen started is the person's own, so `auto`. One that can no longer be followed (its call ended), or
+ * whose session is gone, gets `safe`: nothing says who asked.
+ */
+export function appAgentPreset(origin: AgentRunRequest['origin'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
+  if (origin?.kind === 'view') return 'auto'
+  if (origin?.kind === 'session') return lowestPreset('auto', presetOf(origin.sessionId) ?? 'safe')
+  return 'safe'
 }

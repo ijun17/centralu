@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AgentDifficulty, ToolName } from '@cc/protocol'
+import { AgentDifficulty, PermissionPreset, ToolName } from '@cc/protocol'
 import type { IfBusy } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { APP_GUIDE_TOPICS } from './app-guide.js'
@@ -504,6 +504,7 @@ export const ORCHESTRATOR_TOOLS = [
        */
       tool: ToolName.optional().describe("If omitted, the project's default tool."),
       name: z.string().optional().describe('Session name. If given, the automatic name does not override it.'),
+      preset: PermissionPreset.optional().describe('If omitted: auto in a trusted project, else normal. Never above yours.'),
       firstMessage: z.string().optional().describe('The first instruction to send as soon as it is created.'),
       // #1233: work handed out is work whose end is heard, as start_agent's is; false opts out
       reportBack: z.boolean().optional().describe('With firstMessage: false if you do not need to hear when that first turn ends.'),
@@ -975,9 +976,10 @@ export const READER_BUDGET_CHARS = 1960
  * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the orchestrator, whose ceilings rise by 10 (1,960; 9,710).
  * #1447 (sessions asking the orchestrator): the mail tool's description names the address (`MAIL_BUDGET_CHARS` 800 → 820, measured 811, so the reader's sum rises by 20), and the orchestrator's instructions say a session's request is not the person's word and is answered in its thread (9,710 → 9,910; measured 9,906 with the commands tier).
  * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the orchestrator's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
+ * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, or one named within the seat's own), +144 with its enum and one line: the orchestrator rises 10,030 → 10,180 (measured 10,634 with compaction's 460).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 10_030 + COMPACT_BUDGET_CHARS,
+  orchestrator: 10_180 + COMPACT_BUDGET_CHARS,
   scoped: 2_600,
   builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS,
