@@ -83,8 +83,12 @@ export function ProjectHeader({
   // A chain its view started waits on the person (M4 D-4): the mark says so, as the app row's "asks you" did
   const appAsks = useStore((s) => !!rootApp && s.appQuestions.some((q) => q.origin.appId === rootApp.appId && (q.origin.projectId ?? null) === projectId))
   const openRootApp = rootApp ? () => openApp(projectId, rootApp.appId) : undefined
-  // When expanded, each row's own mark already states its state — do not repeat it on the name line
-  const summary = folded ? foldSummary(sessions) : []
+  /*
+   * The counts stand on the name line whether the project is folded or open (owner, 2026-11-05). They were drawn only
+   * folded, on the reasoning that an open project's rows state their own state; but the count is read from the name
+   * line, and it vanished the moment the project opened (or the pointer rested on it and it opened under it).
+   */
+  const summary = foldSummary(sessions)
 
   return (
     /*

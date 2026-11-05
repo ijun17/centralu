@@ -117,9 +117,9 @@ export function popoverDragTests(): void {
     test('the empty top bar still moves the window when no dropdown is open', async ({ page }) => {
       await setup(page, ['/tmp/alpha'])
       await resetDrags(page)
-      // The gap just left of the search field: empty bar, nothing interactive
-      const field = (await page.getByTestId('search-button').boundingBox())!
-      await page.mouse.move(field.x - 8, field.y + field.height / 2)
+      // The middle of the bar: empty, nothing interactive
+      const bar = (await page.getByTestId('app-header').boundingBox())!
+      await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
       await page.mouse.down()
       await page.mouse.up()
       expect(await drags(page)).toBe(1)

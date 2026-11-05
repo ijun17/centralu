@@ -75,11 +75,11 @@ describe('the accent', () => {
 
 describe('the urgency order (contrast is urgency)', () => {
   const dark: Record<string, Rgba> = {
-    '--color-surface-floor': [15, 15, 15, 1],
+    '--color-surface-floor': [18, 14, 10, 1],
     '--color-ink-signal': [255, 255, 255, 1],
-    '--color-ink': [237, 237, 237, 1],
-    '--color-ink-muted': [168, 168, 168, 1],
-    '--color-ink-faint': [112, 112, 112, 1],
+    '--color-ink': [240, 236, 234, 1],
+    '--color-ink-muted': [172, 167, 163, 1],
+    '--color-ink-faint': [117, 111, 107, 1],
   }
 
   it('holds for the Dark values', () => {

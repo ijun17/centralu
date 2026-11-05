@@ -20,7 +20,7 @@
         "minHeight": 600,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "backgroundColor": "#0f0f0f",
+        "backgroundColor": "#120e0a",
         "dragDropEnabled": false,
         "trafficLightPosition": {
           "x": 19,
@@ -29,7 +29,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-1orefhVLx591hU7/RmciQTO2IU0/nfqxCgYAT06CvqY='; frame-src http://127.0.0.1:*"
+      "csp": "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-6Xk7FMRFQ5L+WIeF+DEhkk6AJfGC81qYnxyEpkKuhGc='; frame-src http://127.0.0.1:*"
     },
     "macOSPrivateApi": true
   },

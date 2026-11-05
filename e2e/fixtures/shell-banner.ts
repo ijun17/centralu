@@ -122,6 +122,19 @@ export function shellBannerTests(): void {
       expect(composer.y + composer.height).toBeLessThanOrEqual(page.viewportSize()!.height)
     })
 
+    // The sidebar stands under the banner, so the search field does too: the palette hangs under the field, not under the bar's row
+    test('the palette hangs under the search field the banner pushed down, and covers none of it', async ({ page }) => {
+      await open(page, 'demo=focus&state=other')
+      const banner = await box(page, 'host-other-build')
+      const field = await box(page, 'search-button')
+      expect(field.y).toBeGreaterThanOrEqual(banner.y + banner.height)
+      await page.getByTestId('search-button').click()
+      await expect(page.getByTestId('palette-input')).toBeVisible()
+      await expect.poll(async () => (await box(page, 'palette-panel')).y).toBeGreaterThanOrEqual(field.y + field.height)
+      const panel = await box(page, 'palette-panel')
+      expect(panel.y - (field.y + field.height)).toBeLessThan(16)
+    })
+
     for (const state of ['progress', 'failed'] as const) {
       test(`the switch ${state} state sits in the same place`, async ({ page }) => {
         await open(page, `demo=focus&state=${state}`)

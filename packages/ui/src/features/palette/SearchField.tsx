@@ -12,27 +12,31 @@ import { SearchIcon } from '../../components/icons.jsx'
  * baseline, docs/ux-metrics.md). This is that path, and it says its key out loud, so the shortcut
  * is learned by using the field rather than by being told.
  *
- * It sat at the top of the sidebar, which left the left side crowded (#727). It now stands in the
- * middle of the top bar, the way an editor's command bar does: the place pressed is the top edge,
- * and the palette it opens hangs directly under it (CommandPalette).
+ * It stood at the top of the sidebar (#535), moved to the middle of the top bar (#727) and went back
+ * (owner, 2026-11-05): the bar is going to hold more controls, which squeeze a centred field. It is
+ * the first row of the sidebar, the sidebar's full width less its padding, and the palette it opens
+ * hangs directly under it (CommandPalette, which measures where the field is: the shell's banner can push the sidebar down). The sidebar is under the
+ * top bar, not beside the traffic lights, and is no drag region, so the field needs no guard for either.
  *
- * Field-shaped and faint: it is a door used now and then, and must not compete with the counts
- * beside it. Only the field is the button: the bar around it stays the window's drag handle, so
- * the wrapper in App's TopBar lets presses through everywhere but here (DragRegion skips a press
- * on a `button`).
+ * Field-shaped and faint: it is a door used now and then, and must not compete with the rows below.
  */
+
+/** What the palette finds the field by, to hang under it (CommandPalette) */
+export const SEARCH_ANCHOR = 'data-search-anchor'
+
 export function SearchField() {
   const sc = useShortcut()
   const open = useStore((s) => s.paletteOpen)
   return (
     <button
-      className={`pointer-events-auto flex h-7 w-full min-w-0 items-center gap-2 rounded-field border pl-3 pr-1 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
+      className={`flex h-7 w-full min-w-0 items-center gap-2 rounded-field border pl-3 pr-1 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
         open ? 'border-line-strong text-ink' : 'border-line text-ink-faint'
       }`}
       onClick={() => useStore.getState().togglePalette(true)}
       aria-haspopup="dialog"
       aria-expanded={open}
       data-testid="search-button"
+      {...{ [SEARCH_ANCHOR]: '' }}
       title="Search sessions, projects, apps and past conversations"
     >
       <SearchIcon />

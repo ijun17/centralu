@@ -1,5 +1,5 @@
 import { usePresence } from '../../components/presence.js'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { newSessionProjectOf, useStore } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
@@ -17,6 +17,7 @@ import { useLoad } from '../../app/useLoad.js'
 import { LoadFailedFold } from '../../components/LoadFailed.jsx'
 import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
 import { ShortcutTable } from './ShortcutTable.jsx'
+import { SEARCH_ANCHOR } from './SearchField.jsx'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
@@ -26,11 +27,30 @@ type Item =
   | { kind: 'message'; id: string; sessionId: string; seq: number; label: string; sub: string }
   | { kind: 'app'; id: string; label: string; sub: string; projectId: string | null; appId: string; machine: string | null }
 
+/** Where the palette hangs when no field is on screen to measure: the sidebar's first row under the top bar (8px in, 72px down) */
+const FALLBACK_ANCHOR = { left: 8, bottom: 72 }
+
+/**
+ * Where the search field is inside `within`, in its own pixels: the sum of the offsets up to it, which the window's zoom
+ * does not skew as a client rect would. The shell's banner pushes the sidebar down, so the place is read, not assumed.
+ */
+function anchorOf(within: HTMLElement | null): { left: number; bottom: number } {
+  const field = document.querySelector<HTMLElement>(`[${SEARCH_ANCHOR}]`)
+  if (!field || !within) return FALLBACK_ANCHOR
+  let left = 0
+  let top = 0
+  for (let el: Element | null = field; el instanceof HTMLElement && el !== within.offsetParent; el = el.offsetParent) {
+    left += el.offsetLeft
+    top += el.offsetTop
+  }
+  return { left, bottom: top + field.offsetHeight }
+}
+
 /**
  * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
  * one search box. Since "where did we talk about that" is the real question in this app, search
- * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field in the top bar
- * (#529, #727), which is how a person who was never told the key finds it.
+ * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field at the top of the sidebar
+ * (#529, #727, back in the sidebar 2026-11-05), which is how a person who was never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -288,26 +308,41 @@ export function CommandPalette() {
 
   // Comes down from the field and fades in, and goes the same way (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
+  // The field's place, read before the first paint of the open palette and again as the window resizes
+  const catcher = useRef<HTMLDivElement>(null)
+  const [anchor, setAnchor] = useState(FALLBACK_ANCHOR)
+  useLayoutEffect(() => {
+    if (!shown) return
+    const read = () => {
+      const next = anchorOf(catcher.current)
+      setAnchor((prev) => (prev.left === next.left && prev.bottom === next.bottom ? prev : next))
+    }
+    read()
+    window.addEventListener('resize', read)
+    return () => window.removeEventListener('resize', read)
+  }, [shown])
   if (!shown) return null
 
   /*
-   * A popover hanging from the top bar's search field (#727), not a dialog in the middle of the
-   * window. The catcher covers the whole window, the top bar included, so a press anywhere but the
-   * panel closes it, as it did; only the dimming starts below the bar (top-9 is the bar's h-9,
-   * App's TopBar), so the field the person pressed stays in view over the panel that came from it.
-   * The catcher sits outside the bar's drag region in the tree, so a press on it never moves the
-   * window. The panel is centred in the window like the field, and opens at the bar's edge.
+   * A popover hanging from the sidebar's search field (#727), not a dialog in the middle of the
+   * window. The catcher covers the whole window, so a press anywhere but the panel closes it, as it
+   * did; only the dimming starts below the field's row, so the field the person pressed (and the top
+   * bar above it) stays in view over the panel that came from it. The panel's left edge is the
+   * field's and it opens 4px under it, from where the field is measured (anchorOf). The catcher
+   * sits outside the top bar's drag region in the tree, so a press on it never moves the window.
    */
   return (
     <div
-      className={`absolute inset-0 z-40 flex items-start justify-center pt-10 ${leaving ? 'pointer-events-none' : ''}`}
+      ref={catcher}
+      className={`absolute inset-0 z-40 flex items-start justify-start ${leaving ? 'pointer-events-none' : ''}`}
+      style={{ paddingTop: anchor.bottom + 4, paddingLeft: anchor.left }}
       onClick={() => toggle(false)}
       data-testid="command-palette"
       data-leaving={leaving || undefined}
       // Leaving, it takes no keys and no focus: a layer closing over it gives focus back past it (focusReturn.ts)
       inert={leaving}
     >
-      <div className={`absolute inset-x-0 bottom-0 top-9 bg-scrim backdrop-blur-[2px] ${leaving ? 'cc-fade-out' : 'cc-fade'}`} />
+      <div style={{ top: anchor.bottom }} className={`absolute inset-x-0 bottom-0 bg-scrim backdrop-blur-[2px] ${leaving ? 'cc-fade-out' : 'cc-fade'}`} />
       <div
         ref={panelRef}
         {...dialog}
