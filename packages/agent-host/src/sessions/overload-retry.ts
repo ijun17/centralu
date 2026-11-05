@@ -106,7 +106,7 @@ export class OverloadRetry {
     }
   }
 
-  /** Every event of a session: what takes the wait away, and the work flowing again */
+  /** Every event of a session: the ones that end the turn take a wait away, and start the count over */
   observe(e: NormalizedEvent): void {
     const id = e.sessionId
     if (!id) return
