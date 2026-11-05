@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { emitEvent, newSession, setup } from './fixtures/control.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * The conversation as a chat (owner, 2026-10-18): the agent's words stand in an answer bubble on the left, drawn in
@@ -138,10 +139,13 @@ test("the person's message stands 24px from its neighbours and its time 4px unde
 
 test("the conversation's scrollbar is drawn over its content, and the native one takes no width", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'a long one')
-  for (let i = 0; i < 40; i++) {
-    await emitEvent(page, 0, { type: 'tool_call', callId: `c${i}`, summary: { tool: 'Bash', title: `step ${i}`, paths: [] } })
-  }
+  const sid = await newSession(page, 'alpha', 'a long one')
+  // Long enough to scroll: answers, since the tool calls between them fold into a line (#2007)
+  await page.evaluate((s) => {
+    const store = (window as any).__store
+    const rows = Array.from({ length: 40 }, (_, i) => ({ kind: 'assistant', seq: 100 + i, text: `step ${i} `.repeat(40) }))
+    store.setState({ chat: { ...store.getState().chat, [s]: rows } })
+  }, sid)
   const bar = page.getByTestId('chat-scrollbar')
   await expect(bar).toBeVisible()
   const scroller = page.getByTestId('chat-stream')
@@ -211,6 +215,7 @@ test('a reasoning row is drawn in ink-muted, bold, links and headings included, 
   )
   const reasoning = page.getByTestId('msg-reasoning')
   const answer = page.getByTestId('msg-assistant')
+  await openFolds(page)
   await expect(reasoning).toContainText('Plain words')
 
   // The tokens' own value, as the browser resolves it, whatever the theme is

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './fixtures/control.js'
 import { openSessionDialog } from './fixtures/new-session.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * Clicking a file an agent named (#39).
@@ -314,6 +315,7 @@ test('the path in a tool card opens the file; a path outside the project stays t
   await agentCalls(page, 'Read', 'Read: /tmp/alpha/src/a.ts', ['/tmp/alpha/src/a.ts'], 'c1')
   await agentCalls(page, 'Read', 'Read: /etc/hosts.conf', ['/etc/hosts.conf'], 'c2')
 
+  await openFolds(page)
   await expect(page.getByTestId('tool-card')).toHaveCount(2)
   // Only the file inside the project is a link, and it reads as the title did
   const link = page.getByTestId('tool-card').first().getByTestId('file-link')

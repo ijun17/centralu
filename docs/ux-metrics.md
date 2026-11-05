@@ -283,7 +283,7 @@ pixel. A pull request that makes one cheaper tightens it.
 | See what the agent changed in a file | `open-diff.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.10 | 546 |
 | Open a file the agent named: its link in the reply | `open-file.mouse-link` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.08 | 211 |
 | Open a file the agent named: the Files tab, folder by folder | `open-file.mouse-tree` | `H M P B B M P B B M P B B M P B B M P B B M P B B` | 0 | 6 | 12 | 1 | 6 | 25 | 15.83 | 890 |
-| Open a file the agent named: the path in a tool card (since #543 item 6) | `open-file.mouse-tool-card` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.07 | 167 |
+| Open a file the agent named: the path in a tool card (since #543 item 6; from #2007 the card stands in a folded run, so one press more first: `H M P B B M P B B`, 9 · 5.55 s) | `open-file.mouse-tool-card` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.07 | 167 |
 | Attach a file to a message | `attach-file.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.16 | 426 |
 | Commit the session's changes with a message | `commit.mouse` | `H M P B B P B B H 30K H M P B B` | 30 | 3 | 6 | 3 | 2 | 44 | 16.33 | 1398 |
 | Stop a session that is working | `stop-session.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.12 | 384 |

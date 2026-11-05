@@ -9,6 +9,8 @@ import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
+import { FoldLine } from './FoldLine.jsx'
+import { dayBreaksOnPage, foldIsOpen, foldRuns, liveStep, type Fold } from './foldRuns.js'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
 import { useChatScroll } from './useChatScroll.js'
@@ -137,12 +139,71 @@ export function ChatStream({
     },
     [chat, sessionId, inlineFramesVersion],
   )
-  // Never two rows under one key: a shared key leaves copies of a row behind in the DOM (#64, `rowKeys`)
-  const keys = useMemo(() => rowKeys(chat), [chat])
+  /*
+   * The runs of thinking and tool calls between the bubbles, folded into one line each (#2007, foldRuns.ts). The list
+   * keeps one virtual row per chat row, so every index the scroller, the banner and a search hit speak in stays the
+   * same: a folded run's first row draws the line and the rest stand at no height (their row is not drawn at all).
+   * A run is shown open when the person pressed it (`foldOpen`, kept in the store so a detached row and a session
+   * left come back as they were) or when a search hit is inside it.
+   */
+  const views = useStore((s) => s.inlineViews[sessionId])
+  const opened = useStore((s) => s.foldOpen[sessionId])
+  const setFoldOpen = useStore((s) => s.setFoldOpen)
+  const clearSearchTarget = useStore((s) => s.clearSearchTarget)
+  const hit = useMemo(() => (searchTarget ? chat.findIndex((c) => c.storedSeq === searchTarget.seq) : -1), [chat, searchTarget])
+  const { runs, runOf } = useMemo(() => foldRuns(chat, (id) => !!views?.[id]), [chat, views])
+  const folds = useMemo(() => {
+    const heads = new Map<number, { fold: Fold; open: boolean }>()
+    const hidden = new Uint8Array(chat.length)
+    for (const fold of runs) {
+      const open = foldIsOpen(fold, opened, hit < 0 ? null : hit)
+      heads.set(fold.first, { fold, open })
+      if (!open) hidden.fill(1, fold.first + 1, fold.last + 1)
+    }
+    return { heads, hidden }
+  }, [runs, opened, hit, chat.length])
+  // A search hit inside a folded run opens it for good, as pressing it would (the open state is read the same way)
+  useEffect(() => {
+    const head = hit < 0 ? -1 : (runOf[hit] ?? -1)
+    const run = head < 0 ? undefined : folds.heads.get(head)?.fold
+    if (run && !run.keys.some((k) => opened?.[k])) setFoldOpen(sessionId, run.keys, true)
+  }, [hit, runOf, folds, opened, sessionId, setFoldOpen])
+  /*
+   * A run opens with a fade of its rows (`cc-fade`) and closes with one (`cc-fade-out`, then the rows go): a short
+   * change of brightness, no travel, and under reduced motion the same rule the other fades follow (index.css). The
+   * press never waits: the line answers at once and the rows follow.
+   */
+  const [motion, setMotion] = useState<{ first: number; kind: 'in' | 'out' } | null>(null)
+  const motionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(motionTimer.current), [])
+  useEffect(() => setMotion(null), [sessionId])
+  const toggleFold = (fold: Fold, open: boolean) => {
+    if (motion?.kind === 'out') return
+    clearTimeout(motionTimer.current)
+    if (!open) {
+      setFoldOpen(sessionId, fold.keys, true)
+      setMotion({ first: fold.first, kind: 'in' })
+      motionTimer.current = setTimeout(() => setMotion(null), FOLD_FADE_MS + 50)
+      return
+    }
+    // A run held open by the search hit in it closes the hit with it, or it would open again
+    if (searchTarget && hit >= fold.first && hit <= fold.last) clearSearchTarget(sessionId, searchTarget.at)
+    setMotion({ first: fold.first, kind: 'out' })
+    motionTimer.current = setTimeout(() => {
+      setFoldOpen(sessionId, fold.keys, false)
+      setMotion(null)
+    }, FOLD_FADE_MS)
+  }
+  /*
+   * Never two rows under one key: a shared key leaves copies of a row behind in the DOM (#64, `rowKeys`). A row a fold
+   * hides has a key of its own, so what was measured while it showed is not taken for its height at none, and it is
+   * measured fresh when the run opens.
+   */
+  const keys = useMemo(() => rowKeys(chat).map((k, i) => (folds.hidden[i] ? `${k}~fold` : k)), [chat, folds])
   const virtualizer = useVirtualizer({
     count: chat.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 64,
+    estimateSize: (i) => (folds.hidden[i] ? 0 : 64),
     overscan: CHAT_OVERSCAN,
     rangeExtractor,
     /*
@@ -224,7 +285,10 @@ export function ChatStream({
   const fade = useEdgeFade(scrollRef, stickToBottom, [virtualizer.getTotalSize(), bottomPad, bottomPeek, yieldSpace, pending, questions.length, working])
 
   // Where a new day begins, and which bubble ends an answer and carries its time (answerBubble.ts)
-  const dayBreaks = useMemo(() => dayBreaksOf(chat), [chat])
+  const dayBreaks = useMemo(
+    () => dayBreaksOnPage(dayBreaksOf(chat), runs, runOf, (f) => !!folds.heads.get(f.first)?.open),
+    [chat, runs, runOf, folds],
+  )
   const answerEnds = useMemo(() => answerEndsOf(chat), [chat])
 
   return (
@@ -288,7 +352,12 @@ export function ChatStream({
           style={{ height: `${virtualizer.getTotalSize()}px` }}
           data-sized-rows={virtualizer.itemSizeCache.size}
         >
-          {virtualizer.getVirtualItems().map((v) => (
+          {virtualizer.getVirtualItems().map((v) => {
+            // A row inside a folded run is not drawn: it stands at no height (estimateSize, keys)
+            if (folds.hidden[v.index]) return null
+            const head = folds.heads.get(v.index)
+            const inMotion = motion !== null && v.index > motion.first && v.index <= (folds.heads.get(motion.first)?.fold.last ?? -1)
+            return (
             <div
               key={v.key}
               ref={virtualizer.measureElement}
@@ -315,6 +384,8 @@ export function ChatStream({
                     ? ''
                     : 'pb-3'
               } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
+                inMotion ? (motion.kind === 'in' ? 'cc-fade' : 'cc-fade-out') : ''
+              } ${
                 chat[v.index]?.storedSeq === searchTarget?.seq
                   ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
                   : ''
@@ -331,20 +402,32 @@ export function ChatStream({
               style={{ top: v.start }}
             >
               {dayBreaks.has(v.index) && <DayDivider label={dayBreaks.get(v.index)!} />}
-              <AnswerBubble
-                part={bubbleOf(chat, v.index)}
-                at={answerEnds.has(v.index) ? chat[v.index]?.at : undefined}
-              >
-                <ChatRow
-                  item={chat[v.index]!}
-                  projectRoot={projectRoot}
-                  projectId={projectId}
-                  sessionId={sessionId}
-                  leaving={isLeaving(virtualizer.range, v.index)}
+              {head && (
+                <FoldLine
+                  fold={head.fold}
+                  open={head.open && motion?.kind !== 'out'}
+                  // Live: the run the turn is in, which is the conversation's last rows
+                  step={working && head.fold.last === chat.length - 1 ? liveStep(chat, head.fold) : null}
+                  onToggle={() => toggleFold(head.fold, head.open)}
                 />
-              </AnswerBubble>
+              )}
+              {(!head || head.open) && (
+                <AnswerBubble
+                  part={bubbleOf(chat, v.index)}
+                  at={answerEnds.has(v.index) ? chat[v.index]?.at : undefined}
+                >
+                  <ChatRow
+                    item={chat[v.index]!}
+                    projectRoot={projectRoot}
+                    projectId={projectId}
+                    sessionId={sessionId}
+                    leaving={isLeaving(virtualizer.range, v.index)}
+                  />
+                </AnswerBubble>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
 
         {pending && (
@@ -431,6 +514,9 @@ function DayDivider({ label }: { label: string }) {
     </div>
   )
 }
+
+/** How long a run's rows take to fade as it closes; the open fade is `.cc-fade`'s own 160ms */
+const FOLD_FADE_MS = 150
 
 /** The number of rows the conversation list pre-renders off screen (on both sides) */
 const CHAT_OVERSCAN = 12

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './project-screen.js'
+import { openFolds } from './folds.js'
 
 /**
  * Centralu's own tool calls in a conversation (#730), driven through the mock platform with the events the host sends:
@@ -31,6 +32,7 @@ export function centraluCallTests(): void {
         summary: { tool: 'mcp__browser__list_tabs', title: 'mcp__browser__list_tabs', paths: [] },
       })
 
+      await openFolds(page)
       const cards = page.getByTestId('tool-card')
       await expect(cards).toHaveCount(2)
       const centralu = cards.nth(0)
@@ -84,6 +86,7 @@ export function centraluCallTests(): void {
         ok: false,
         summary: 'The session "Release" is busy with a turn that is not yours (working). Nothing was sent.',
       })
+      await openFolds(page)
       const card = page.getByTestId('tool-card').first()
       for (const width of [1280, 900, 480]) {
         await page.setViewportSize({ width, height: 800 })

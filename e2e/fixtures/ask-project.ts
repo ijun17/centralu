@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './project-screen.js'
+import { openFolds } from './folds.js'
 
 /**
  * One project asking another (#371 part B) on screen, driven through the mock platform with the events the host
@@ -131,6 +132,7 @@ export function askProjectTests(): void {
 
       await emit(page, 'delegated-1', { type: 'user_message', seq: 1, text: "[A session asks through Centralu's ask_project.] Export sprites", from: { sessionId: caller, name: 'consumer session' } })
 
+      await openFolds(page)
       const card = page.getByTestId('ask-project-card')
       await expect(card).toBeVisible()
       await expect(card.getByTestId('ask-project-toggle')).toContainText('Asked toolkit')

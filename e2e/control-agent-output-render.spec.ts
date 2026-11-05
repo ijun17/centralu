@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession, emitEvent } from './fixtures/control.js'
 import { startSession } from './fixtures/new-session.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * The control loop's scenarios on how an agent's output is drawn: markdown, tool cards, reasoning, plans, images and waiting looks. Moved out of control-loop.spec.ts by subject (#845); the
@@ -89,6 +90,7 @@ test('Tool card: closed, it is its title row; opened, it shows the whole output 
     ok: true,
     summary: `line one\nline two\nline three\nline four\n200 lines of file content`,
   })
+  await openFolds(page)
   const card = page.getByTestId('tool-card')
   await expect(card).toBeVisible()
   await expect(card).not.toContainText('line one')
@@ -108,6 +110,7 @@ test('An opened card shows a long input whole above its output, each named, a sh
   const command = `pnpm exec vitest run ${Array.from({ length: 6 }, (_, i) => `packages/ui/src/file-${i}.test.ts`).join(' ')}`
   await emitEvent(page, 0, { type: 'tool_call', callId: 'c2', summary: { tool: 'Bash', title: command, paths: [] } })
   await emitEvent(page, 0, { type: 'tool_result', callId: 'c2', ok: true, summary: 'Tests 6 passed' })
+  await openFolds(page)
   await expect(page.getByTestId('tool-card-input')).toHaveCount(0)
   await page.getByTestId('tool-card-toggle').click()
   const input = page.getByTestId('tool-card-input')
@@ -153,6 +156,7 @@ test('Tool cards open and close without an inner scrollbar', async ({ page }) =>
     })
   }, id)
 
+  await openFolds(page)
   // Closed: the title row alone
   await expect(page.getByTestId('tool-card')).toBeVisible()
   const output = page.getByTestId('tool-card-output')
@@ -202,6 +206,7 @@ test('A single blob with no newlines adds nothing to a closed card, and wraps wh
     m.emit({ type: 'tool_result', sessionId: sid, callId: 'c1', ok: true, summary: blob })
   }, id)
 
+  await openFolds(page)
   const card = page.getByTestId('tool-card')
   const toggle = page.getByTestId('tool-card-toggle')
   await expect(card).toBeVisible()
@@ -569,6 +574,7 @@ test('Tool cards appear collapsed whether Bash or Edit', async ({ page }) => {
     summary: 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8',
   })
 
+  await openFolds(page)
   const card = page.getByTestId('tool-card').first()
   await expect(card).toBeVisible()
   await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -593,6 +599,7 @@ test("codex's reasoning summary shows as a gray block and survives a restore", a
 
   await emitEvent(page, 0, { type: 'reasoning_delta', text: '**Reviewing path constraints**' })
   await emitEvent(page, 0, { type: 'reasoning_delta', text: '\n\n**Checking the minimum count**' })
+  await openFolds(page)
   await expect(page.getByTestId('msg-reasoning')).toContainText('Reviewing path constraints')
   await expect(page.getByTestId('msg-reasoning')).toContainText('Checking the minimum count')
 
@@ -603,6 +610,7 @@ test("codex's reasoning summary shows as a gray block and survives a restore", a
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
     return store.getState().loadHistory(sid)
   }, id)
+  await openFolds(page)
   await expect(page.getByTestId('msg-reasoning')).toContainText('Reviewing path constraints')
 })
 
@@ -686,6 +694,7 @@ test('Live tool output streams as a tail in an open card, and switches to the re
   })
   await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 2\n' })
   await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 3\n' })
+  await openFolds(page)
   // Closed, a running card says it runs and shows none of its output
   await expect(page.getByTestId('tool-card-toggle').getByLabel('running')).toBeVisible()
   await expect(page.getByTestId('tool-card-live')).toHaveCount(0)

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession, emitEvent } from './fixtures/control.js'
 import { openSessionDialog } from './fixtures/new-session.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * The control loop's scenarios on reading older conversation back: pages, past conversations, compaction and external continuation. Moved out of control-loop.spec.ts by subject (#845); the
@@ -353,6 +354,7 @@ test('A session whose events arrive first: an older-conversation path stands eve
     .toMatchObject({ loading: false, more: false })
   await expect(page.getByTestId('load-older')).toBeHidden()
   await expect(stream.getByTestId('msg-user').filter({ hasText: 'Make a note' })).toHaveCount(1)
+  await openFolds(page)
   await expect(stream.getByTestId('tool-card').filter({ hasText: 'Read note.md' })).toHaveCount(1)
   await expect(stream.getByTestId('tool-card').filter({ hasText: 'Write note.md' })).toHaveCount(1)
 })

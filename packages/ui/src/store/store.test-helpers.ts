@@ -84,6 +84,7 @@ export function resetStore() {
     view: 'focus',
     history: {},
     subagentSteps: {},
+    foldOpen: {},
     resuming: {},
     wakeError: {},
     wakeLocked: {},
