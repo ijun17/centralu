@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import type { AgentSpawnSpec } from '../contract.js'
-import { agyHome, browserFolder, spareFolder, windowsBrowserCommand } from './agent-files.js'
+import { agyHome, browserFolder, notOwnFolder, spareFolder, windowsBrowserCommand, type FolderFact } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
 import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
-import { driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, isAbsolutePath, leftovers, pathIn, relativeTo, runBrowser, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
+import { chmodPath, driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, isAbsolutePath, leftovers, linkTo, pathIn, relativeTo, runBrowser, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
 
 /**
  * The agent's browser (review of #1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
@@ -276,8 +276,8 @@ describe('a path BROWSER cannot carry', () => {
   function badData(name: string, archive = AGY_RELEASE.archives['windows-x86_64']) {
     const t = temp()
     const dataDir = pathIn(t.dir, name)
+    // Made by `browserFolder` itself (0700), as the real one is
     const spare = pathIn(t.dir, 'spare')
-    folder(spare)
     const home = agyHome(dataDir, AGY_RELEASE.version)
     fakeInstall(home, archive)
     fakeSignIn(home)
@@ -317,13 +317,14 @@ describe('a path BROWSER cannot carry', () => {
 
   it('a folder to fall back on that cannot be written leaves no helper, and says so in plain words', async () => {
     const n = badData('data;x')
+    folder(n.spare)
     write(pathIn(n.spare, 'a-file'), '')
     const spare = pathIn(n.spare, 'a-file', 'below')
-    const folder = await browserFolder(n.home, 'win32', { spare })
-    expect(folder.browser).toBe('')
-    expect(folder.why).toContain(n.home.root)
-    expect(folder.why).toContain(spare)
-    expect(folder.why).toMatch(/could not be written to/)
+    const none = await browserFolder(n.home, 'win32', { spare })
+    expect(none.browser).toBe('')
+    expect(none.why).toContain(n.home.root)
+    expect(none.why).toContain(spare)
+    expect(none.why).toMatch(/could not be written to/)
     expect(leftovers(n.home, '.sign-in-')).toEqual([])
   })
 
@@ -333,6 +334,55 @@ describe('a path BROWSER cannot carry', () => {
     const folder = await browserFolder(home, 'win32')
     expect(isAbsolutePath(folder.browser.split("' '")[1] ?? '')).toBe(true)
     await folder.remove()
+  })
+
+  it('the folder to fall back on is refused where another user could change it or a folder above it, a link, or not a folder', () => {
+    const me = 501
+    const own = (path: string, mode = 0o40700): FolderFact => ({ path, link: false, dir: true, uid: me, mode })
+    const above = [own('/home/o/.cache', 0o40755), own('/home/o', 0o40750), { ...own('/home', 0o40755), uid: 0 }, { ...own('/', 0o40755), uid: 0 }]
+    const spare = own('/home/o/.cache/centralu-antigravity')
+    expect(notOwnFolder({ folder: spare, above }, me)).toBe('')
+    expect(notOwnFolder({ folder: { ...spare, mode: 0o40770 }, above }, me)).toBe('can be changed by other users')
+    expect(notOwnFolder({ folder: { ...spare, mode: 0o40707 }, above }, me)).toBe('can be changed by other users')
+    expect(notOwnFolder({ folder: { ...spare, link: true, dir: false }, above }, me)).toBe('is a link')
+    expect(notOwnFolder({ folder: { ...spare, dir: false }, above }, me)).toBe('is not a folder')
+    expect(notOwnFolder({ folder: { ...spare, uid: 502 }, above }, me)).toBe('belongs to another user')
+    // A ~/.cache that leads into /tmp: the sticky /tmp is fine, a folder there another user made is not
+    const viaTmp = [own('/tmp/c'), { ...own('/tmp', 0o41777), uid: 0 }, { ...own('/', 0o40755), uid: 0 }]
+    expect(notOwnFolder({ folder: spare, above: viaTmp }, me)).toBe('')
+    expect(notOwnFolder({ folder: spare, above: [{ ...own('/tmp/c'), uid: 502 }, ...viaTmp.slice(1)] }, me)).toBe('is inside /tmp/c, which other users can change')
+    expect(notOwnFolder({ folder: spare, above: [own('/home/o/.cache', 0o40775), ...above.slice(1)] }, me)).toBe('is inside /home/o/.cache, which other users can change')
+  })
+
+  it.skipIf(process.platform === 'win32')('on macOS and Linux, a fallback folder other users can change, or one that is a link, is refused for real', async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    folder(n.spare)
+    chmodPath(n.spare, 0o775)
+    const shared = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: n.spare })
+    expect(shared.browser).toBe('')
+    expect(shared.why).toContain(`${n.spare}, the folder Centralu tries instead, can be changed by other users`)
+    const real = pathIn(n.spare, 'real')
+    folder(real)
+    chmodPath(real, 0o700)
+    const link = pathIn(n.spare, 'link')
+    linkTo(real, link)
+    const linked = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: link })
+    expect(linked.browser).toBe('')
+    expect(linked.why).toContain('is a link')
+    expect(inFolder(real)).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32')('on macOS and Linux, a fallback folder below a link (a ~/.cache elsewhere) is used where it leads to the person\'s own', async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    const cache = pathIn(n.spare, 'cache-elsewhere')
+    folder(cache)
+    chmodPath(cache, 0o700)
+    const dotCache = pathIn(n.spare, 'dot-cache')
+    linkTo(cache, dotCache)
+    const folderIn = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: pathIn(dotCache, 'centralu-antigravity') })
+    expect(folderIn.why).toBe('')
+    expect(folderIn.browser).toContain(pathIn(dotCache, 'centralu-antigravity', '.sign-in-'))
+    await folderIn.remove()
   })
 
   it("the folder to fall back on is the person's own on each OS, from the home folder alone, never a temporary one", () => {

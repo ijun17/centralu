@@ -1,9 +1,9 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
@@ -493,6 +493,44 @@ export function spareFolder(platform: Platform = HOST_PLATFORM, home: string = h
   return p.join(own, 'centralu-antigravity')
 }
 
+/** What `notOwnFolder` judges of one folder: `link` as `lstat` sees it, the rest as `stat` does */
+export type FolderFact = { path: string; link: boolean; dir: boolean; uid: number; mode: number }
+
+/** The spare folder itself (not followed if it is a link) and every folder above it, from its real parent up to the root */
+async function folderFacts(spare: string): Promise<{ folder: FolderFact; above: FolderFact[] }> {
+  const fact = (path: string, s: { isSymbolicLink(): boolean; isDirectory(): boolean; uid: number; mode: number }): FolderFact => ({
+    path,
+    link: s.isSymbolicLink(),
+    dir: s.isDirectory(),
+    uid: s.uid,
+    mode: s.mode,
+  })
+  const folder = fact(spare, await lstat(spare))
+  const above: FolderFact[] = []
+  for (let p = await realpath(dirname(spare)); ; p = dirname(p)) {
+    above.push(fact(p, await stat(p)))
+    if (dirname(p) === p) break
+  }
+  return { folder, above }
+}
+
+/**
+ * Why a POSIX spare folder is not the person's alone, or empty. The folder itself: a real folder, not a link, owned by
+ * `uid`, that no group or other user can write. Every folder above it, resolved (so a `~/.cache` that is a link is
+ * accepted where it leads somewhere only the person or root can change, and refused where it leads into another user's
+ * folder): owned by `uid` or root, and writable by no one else unless sticky (as `/tmp` is: there no one renames
+ * another's entry). Anyone who could write one of them could rename the person's folder and put their own in its place
+ */
+export function notOwnFolder(facts: { folder: FolderFact; above: readonly FolderFact[] }, uid: number): string {
+  const { folder } = facts
+  if (folder.link) return 'is a link'
+  if (!folder.dir) return 'is not a folder'
+  if (folder.uid !== uid) return 'belongs to another user'
+  if ((folder.mode & 0o022) !== 0) return 'can be changed by other users'
+  const open = facts.above.find((f) => (f.uid !== uid && f.uid !== 0) || ((f.mode & 0o022) !== 0 && (f.mode & 0o1000) === 0))
+  return open ? `is inside ${open.path}, which other users can change` : ''
+}
+
 /**
  * A folder only this user can read (0700) beside the install, for one Antigravity process's browser: the `BROWSER` helper,
  * which writes the one argument it is given to a file of its own there (`url-<run>`) through a temporary name, so the
@@ -528,7 +566,12 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     const spareBad = unusableIn(join(spare, '.sign-in-x'), sep)
     if (spareBad) return noHelper(`${data}; nor ${spareBad} in ${spare}, the folder Centralu tries instead. ${move}`)
     try {
-      await mkdir(spare, { recursive: true })
+      await mkdir(spare, { recursive: true, mode: 0o700 })
+      // Not the person's alone (POSIX): another user who can change it, or a folder above it, could put their own helper
+      // in place of the person's, which the agent then runs as the person (deep review of #2012)
+      const uid = platform === 'win32' ? undefined : process.getuid?.()
+      const notOwn = uid === undefined ? '' : notOwnFolder(await folderFacts(spare), uid)
+      if (notOwn) return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, ${notOwn}. ${move}`)
       await removeStale(spare, '.sign-in-')
       dir = resolve(await mkdtemp(join(spare, `.sign-in-${ownerTag()}-`)))
     } catch (err) {
