@@ -3072,7 +3072,8 @@ tool-neutral (`sessions/interruptions.ts`):
 (`lifecycle/shutdown.ts`), so a host handing over wakes no session the next one takes. A delivery already waiting for a session to
 wake checks again before it sends (`deliverMail`'s `leaving`). It writes a heartbeat (`mail.heartbeat`) with each 60 s sweep, except
 while the person has not answered for a crowd of sleeping sessions, so that a restart asks again. A host that was off, or away without
-stopping, more than 30 minutes wakes a sleeping session only for mail that needs it (§7.9). The sweep also runs the mailbox's retention
+stopping, more than 30 minutes wakes a sleeping session only for mail that needs it (§7.9); plain news it held back starts no turn of its own
+when the person only opens the session, and goes with the next mail that wakes it (#1951). The sweep also runs the mailbox's retention
 and moves on the work of a session that left without telling the mailbox. Sleeping sessions are resumed two at a time.
 
 A wake is delivered when the tool says it took the input (`takeInput`, `sessions/session-events.ts`); a tool silent for 90 s counts as

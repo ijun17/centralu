@@ -1,7 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, parseAddress } from './address.js'
-import { HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE, HOUR_MS, needsReceiver } from './rules.js'
+import { HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE, HOUR_MS, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainOptions, DrainResult, MessageService } from './messages.js'
 
@@ -111,8 +111,9 @@ export class MailDelivery {
   /** Until when a mailbox's wake waits for the host-wide cap, as last said in the log: the sweep tries it again meanwhile, and says nothing new */
   private readonly capUntil = new Map<string, number>()
   /**
-   * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A sleeping session is then woken only for mail that
-   * needs it, among what came due before; the rest waits for its next turn. Null in a host that was running a moment ago
+   * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A session is then woken only for mail that
+   * needs it, among what came due before; the rest waits for its next turn (the one other mail wakes it for), not for its process to
+   * run (#1951). Null in a host that was running a moment ago
    */
   private cutoff: number | null = null
   /** The first sweep after such a stop is the catch-up */
@@ -249,7 +250,8 @@ export class MailDelivery {
 
   /**
    * The first sweep after the host was off a long while (§7.9). Everything that came due while it was down is one batched wake
-   * per receiver, as always. Sessions that are awake take their mail at once. A sleeping one is woken only for mail that needs it,
+   * per receiver, as always. Sessions that are awake take their mail at once, except old plain news that would start a turn of its own
+   * (`skipOldWake`). A sleeping one is woken only for mail that needs it,
    * the person's threads first, then the ones with a question waiting, then the rest, two at a time. Past `crowdOver` of them
    * nobody is woken: the Inbox asks once (`crowdWaiting`, `answerCrowd`)
    */
@@ -304,6 +306,12 @@ export class MailDelivery {
   /** What a host that was off a long while does not wake a sleeping session for (`cutoff`): what came due before and needs no one */
   private readonly skipOld = (message: MailRow, row: RecipientRow): boolean =>
     this.cutoff !== null && row.dueAt <= this.cutoff && !needsReceiver(message)
+
+  /**
+   * `skipOld` for a session whose process runs: only what would start a turn of its own. Its quiet mail goes into the process as before
+   * (no turn), and a message that needs the receiver is never skipped. A resume is not a turn (#1951)
+   */
+  private readonly skipOldWake = (message: MailRow, row: RecipientRow): boolean => this.skipOld(message, row) && wakesMessage(message)
 
   /**
    * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `partyGone`, or the call
@@ -432,8 +440,12 @@ export class MailDelivery {
      */
     const now = this.now()
     const plan = this.records.transaction(() => {
-      const skip = waiting ? this.skipUnlessPersonSince : state.live ? undefined : this.skipOld
-      const drained = this.service.drain(recipient, { ...(skip ? { skip } : {}), ...this.guardsFor(recipient) })
+      // Mail held back for a long stop waits for the session's next turn whether or not its process runs: a resume is not a turn (#1951)
+      const skip = waiting ? this.skipUnlessPersonSince : state.live ? this.skipOldWake : this.skipOld
+      const drain = (skipping: typeof skip | undefined) => this.service.drain(recipient, { ...(skipping ? { skip: skipping } : {}), ...this.guardsFor(recipient) })
+      let drained = drain(skip)
+      // A live session that other mail wakes takes it with the wake. A sleeping one was just resumed for what needs it, and the rest waits (§7.9)
+      if (!waiting && state.live && this.cutoff !== null && drained.wake) drained = drain(undefined)
       this.service.hold(recipient, drained.heldBack)
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
       // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9)
