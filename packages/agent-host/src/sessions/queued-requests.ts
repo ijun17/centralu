@@ -186,7 +186,7 @@ export class QueuedRequests {
         await this.host.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else if (r.via === 'agent_session') {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
-        await this.host.deliver(sessionId, agentFrame(from.name, r.text, [], '', canMailParent(target, caller.id)), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
+        await this.host.deliver(sessionId, agentFrame(from.name, r.text, [], '', canMailParent(this.host.meta.get(sessionId) ?? {}, caller.id)), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'
