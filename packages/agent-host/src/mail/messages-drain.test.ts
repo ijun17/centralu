@@ -235,9 +235,8 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'gone', releasedAt: null })
     expect(w.rowOf(own.id, C).settled).toBe('withdrawn')
     expect(w.rowOf(ownTask.id, C).settled).toBe('withdrawn')
-    // The person is told in the Inbox (§4.1), and a task's sender is told by the old report path
-    expect(w.rowOf(fromPerson.id, B)).toMatchObject({ settled: 'gone', releasedWhy: 'gone', toldAt: w.clock.t })
-    expect(w.records.pendingFor(PERSON, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice').map((p) => p.message.facts.unanswered)).toEqual([[{ id: fromPerson.id, recipient: B, why: 'gone' }]])
+    // The person is not told, and a task's sender is told by the old report path
+    expect(w.rowOf(fromPerson.id, B)).toMatchObject({ settled: 'gone', releasedWhy: 'gone', toldAt: null })
     expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])
 
     const told = w.records.pendingFor(A, w.clock.t + 10_000)

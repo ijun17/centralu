@@ -178,12 +178,12 @@ The machinery exists: `releaseAndTell` and `tellUnanswered` (`messages.ts:823`, 
 sender one gathered `notice` (D25). Today only `gone` (`partyGone`) and `lost` (`turnsLost`, #1916) use it;
 `WHY_WORDS` (`messages.ts:1121`) and `RELEASE_WHY` (`dev-services/store/mailbox.ts:23`) already have `stopped` and
 `error`. New: `MessageService.sessionStopped(address, why, { quiet })`, which releases every open request to the session
-(tasks included) and tells each sender once per stop. The person is included: `tellUnanswered` stops skipping the
+(tasks included, once P6 lands; P1 releases questions, see "Built in P1") and tells each sender once per stop. The person is included: `tellUnanswered` stops skipping the
 person (`parseAddress(sender)?.kind !== 'session'`, line 989) and writes the person's notice to the Inbox.
 
-| Stop | Notice | To whom | Wakes the sender |
+| Stop | Notice | To whom | Wakes the sender (Q1: only one at rest that waits on the session) |
 |---|---|---|---|
-| Error ending the turn (`error`) | "`<name>` stopped with an error before it answered `<ids>`. It keeps its conversation; send it a message to go on." | each open request's sender, the person for theirs | yes, if at rest (Q1) |
+| Error ending the turn (`error`) | "`<name>` stopped with an error before it answered `<ids>`. It keeps its conversation; send it a message to go on." | each open request's sender, the person for theirs | yes (Q1) |
 | Usage limit (`limit_reached`) | "… reached its usage limit before it answered …. It can go on after the limit resets; send it a message then." | same | yes |
 | Network (`interruption.reason = network`) | "… lost the network before it answered …. Send it a message once the network is back to go on." | same | yes |
 | The tool interrupted it (`interrupted`) | "`<name>`'s tool interrupted its turn before it answered …. Send it a message to go on." | same | yes |
@@ -191,23 +191,36 @@ person (`parseAddress(sender)?.kind !== 'session'`, line 989) and writes the per
 | Quit or shutdown of Centralu (`quit`, `shutdown`) | "Centralu quit while `<name>` worked on …, so it did not answer. The person decides whether it goes on; ask again later if you still need the answer." (`shutdown`: "… did not answer …: the computer shut down, restarted or signed out while it worked. …") | same | **no**: written quiet at the next start, read at the sender's next turn (owner: a restart must not wake every waiting sender) |
 | Update, swap, crash or host death, continued by Centralu (#1975, owner 2026-11-04) | none; the continued turn answers | — | — |
 | Same, but the continue failed (`uncontinued`) | "Centralu could not continue `<name>` after an update or restart, so it did not answer …. Send it a message to go on." | same | yes |
-| Deleted or moved to the trash (`partyGone`) | today's `gone` wording; now also for tasks | same | yes |
+| Deleted or moved to the trash (`partyGone`) | today's `gone` wording; now also for tasks | same, but not the person (their own act) | yes |
 | The link to its machine lost | the hub's `LinkedReports` notice, unchanged (§5) | the hub-side caller | as today |
 | Asleep | not a stop | — | — |
 
 **Built in P1** (`MessageService.sessionStopped`, `stopOf` in `sessions/interruptions.ts`): the causes above for **questions**
-(`needsReply` messages, the person's too). It leaves out what a later PR owns, so nothing is told twice: **tasks** (the old report
-path tells their owner until P6), **requests to the orchestrator** (their own turn's end settles them, until P2), rows not yet
-delivered (the session gets them at its next wake) and rows already released. The words carry no text of the tool or the
-session (#120), so "`<one line>`" of the first draft is the cause alone; `read_session` shows the error. Not told: the turn Centralu
-starts to compact a conversation, and a turn Centralu is continuing (`continuingTurns`, #1975). A quit or a shutdown is found at the next
-start from the mark the start leaves on the session (`hostMail.afterReady`), so it is told once however often the host starts.
-Until P6 the older report paths still tell some senders of the same stop (the owner of a report, the caller of a delegation, the session that
-started the child, unless the turn was the person's, #1377): their rows are released and marked told, with no second notice (`told`).
-A host that is leaving writes no stop notice (`SessionManager.mailStopped`): its sessions are cut by the leaving, and the next host continues
-them or finds them marked. A sender a quit cut is never woken (it waits for the person's Continue). The person's notice lists only what
-was released by that stop, in words for the person. A turn that ends while Centralu is continuing a cut turn is not a stop, so a continued turn
+(`needsReply` messages, the person's too) delivered into **the turn that was cut**: a question an earlier turn read stays open, since
+the session may have answered it in conversation (the same rule as `turnsLost`, #1916). It leaves out what a later PR owns, so nothing is
+told twice: **tasks** (the old report path tells their owner until P6; so `tasks included` above is P6's), **requests to the
+orchestrator** (their own turn's end settles them, until P2), rows not yet delivered (the session gets them at its next wake), rows
+already released, and a message a session sent itself. The words carry no text of the tool or the session (#120), so "`<one line>`" of
+the first draft is the cause alone; `read_session` shows the error. Not told: the turn Centralu starts to compact a conversation, and a
+turn Centralu is continuing (`continuingTurns`, #1975). A quit or a shutdown is found at the next start from the mark the start leaves
+on the session (`hostMail.afterReady`) and written in one write for all sessions it cut, so a sender, and the person, read one notice
+however many sessions the quit cut and however often the host starts.
+
+Until P6 the older report paths still tell some senders of the same stop. The stop notice does not tell those again: their rows are
+released and marked told (`told`). Who the older paths tell is read from what they send, not from who they might send to: the owner of a
+report, or of the thread's turn; a call still waiting, which reads the stop itself; and, when no report is owed, the session that gave the
+turn or started it, but only for a stop the tool left a mark of (the network, its interrupt; `tellAskerOfInterruption`) and not for an
+error, a limit or a Stop, which leave none. At the start the same holds for a quit (`SessionManager.quitTold`); a requester the same
+quit cut is not told by the older path (`wentWithItsProcess`), so the stop notice tells it. Nothing is told for the person's own turn
+(#1377). A host that is leaving writes no stop notice (`SessionManager.mailStopped`): its sessions are cut by the leaving, and the next
+host continues them or finds them marked. A turn that ends while Centralu is continuing a cut turn is not a stop, so a continued turn
 that fails at once is not told either; this is the one gap P1 leaves (a continue that fails before the tool accepted it).
+
+The person's notice goes to the Inbox in words for the person: the session's name and "your message", no message id or session
+address, and no advice for agents. It lists only what that stop released. The person is told nothing of what they did themselves: their
+own Stop (`stopped`; an agent's `agent_session stop` ends the turn the same way, and is not told either) and deleting a session
+(`gone`).
+
 The release words are `stopped`, `error`, `limit`, `network`, `interrupted`, `quit`, `shutdown`, `uncontinued` (`RELEASE_WHY`;
 an older build reads one it does not know as null, which it words as "gone").
 
@@ -219,9 +232,11 @@ Rules:
   the conversation's stopped line and Continue as today (#1947), no Inbox row.
 - **A sender that is itself stopped by the same event** (both cut by the same quit) gets it quiet, as `tellAskerOfInterruption`
   does today with `wentWithItsProcess` (`child-reports.ts:402`).
-- **Woken or not (Q1), as built**: the notice is written for the sender's state at the moment of the stop. A sender at rest gets a
-  waking notice; a sender in a turn gets a quiet one, which it reads with its other mail; a quit or a shutdown is quiet for all; the
-  person's goes to the Inbox and wakes nothing.
+- **Woken or not (Q1, decided in §11)**: only a sender that is at rest **and waits on the stopped session** is woken: it gave the session
+  a task that is still open, or it waits on it by a blocking wait or a report it is owed (`SessionManager.waitsOn`). Every other sender gets
+  the notice quiet and reads it with its other mail, as does a sender in a turn; a quit or a shutdown is quiet for all; the person's goes to
+  the Inbox and wakes nothing. A sender that only asked a question and waits on nothing else is therefore not woken by the stop; the notice
+  is there at its next turn.
 - **The person's Continue**: the rows stay open (§2.2 item 4), so the continued work's reply or at-rest report answers
   them; nothing else is sent.
 - The owner left "the stop notice's cost" open (2026-11-04). Q1 (decided, §11): wake only at-rest senders that
@@ -396,7 +411,7 @@ Sizes are rough, from the audit and the files' lengths (guess within ±50%). Eac
 
 | # | Title | Removes / adds | Tier | True before the next |
 |---|---|---|---|---|
-| P1 (built) | Stop notices over message rows (floor a) for questions and the person; this document | code +150; tests +280; docs this file, mailbox §10.6, agent-host stop rows (+60) | light (mail/**) | Every stop cause in §4.1 has a test; a continued cut sends nothing; one notice per sender per stop; quit notices are quiet. Tasks still go by the old report path (no double notice: `sessionStopped` skips `task` rows until P6) |
+| P1 (built) | Stop notices over message rows (floor a) for questions and the person; this document | code +150; tests +280; docs this file, mailbox §10.6, agent-host stop rows (+60) | **deep** (a store path: `RELEASE_WHY` in `dev-services/store/mailbox.ts`; no migration, table or column) | Every stop cause in §4.1 has a test; a continued cut sends nothing; one notice per sender per stop; quit notices are quiet. Tasks still go by the old report path (no double notice: `sessionStopped` skips `task` rows until P6) |
 | P2 | The asked gate reads its asker from request rows (C11) | code −50 +70 (`asked-by.ts`, `turns.ts` `asker` field, `tool.ts` words gate); tests +160 (§4.2's table as tests, the fail-closed invariant); docs security-boundaries, mailbox §7.6 (+40) | **deep** (raise by hand: security-boundaries.md) | `MailTurns.Open.asker` and `askerOf` gone; every `orchestrator-asked.test.ts` and `asked-gate.test.ts` case passes unchanged |
 | P3 | The composer's "Working for" choice goes (C1, C10's part) | code −330 (UI `ReportChoice.tsx`, `Composer.tsx` intent, port `reportOwed`/`intent`, `manager.send` intent, `takeTurn`, `personTookOver`, `took_over`, `added`, `LinkedReports.choosing`, `ADD_NEXT_MS`) +20 (`agents.reportOwed` answers null for older windows; `intent` accepted and ignored); tests −300 +40; docs agent-host §1.2.1 two rows (−20) | **deep** (`linked-host.ts`) | No product code reads `intent` other than `ask`; a person's message behaves as "Just asking" did. e2e `report-choice.spec.ts` removed |
 | P4 | Mailbox M8: task rows are the record of an owed report (B2/B3) | code −350 +200 (`oldOwes`, `ReportedAs`, `toMailbox`, `held`; `writeLegacyMarks`); tests: setup changes + the five M8 tests; docs mailbox M8 marked built | **deep** (`dev-services/store/child-ownership.ts`) | Nothing reads `report_marks`; the report words and #1377's rule still hold (no behaviour change yet) |
