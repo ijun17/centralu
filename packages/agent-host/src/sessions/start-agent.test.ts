@@ -1014,6 +1014,9 @@ describe('starting another agent in the same project', () => {
     expect(settled).toBe(false)
     expect(h.sent[1]).toContain('gives you this task')
     expect(h.sent[1]).toContain('Your final message goes back to it as the answer')
+    // #1984: the started child is told how to reach the session that started it, in the task and in a later send
+    expect(h.sent[0]).toContain('call mail with `to: "parent"`')
+    expect(h.sent[1]).toContain('call mail with `to: "parent"`')
     expect(h.sent[1]).not.toContain('A note from the parent session')
     h.answer('new answer')
     expect(await next).toMatchObject({ ok: true, state: 'done', answer: 'new answer' })
