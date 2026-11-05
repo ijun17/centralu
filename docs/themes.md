@@ -102,7 +102,7 @@ lowercase letters, digits and hyphens.
   list with descriptions is there.
 - **Mistakes never stop the app.** An unknown key or token, or a value the browser rejects, is
   listed next to the theme in Settings and skipped. A file that does not parse (halfway through an
-  edit) is listed as broken, and the screen keeps showing the last version of it that did.
+  edit) is listed as broken, and the screen keeps showing the last version of it that did. A window that starts with the file broken has read no version yet, so the last run's cache (`cc-theme`) stands in for it, and the theme keeps its floor instead of falling to Dark (#1979).
 - **A token Centralu stopped using is skipped without a word.** A theme made before it left still
   names it, and nothing is wrong with that file: `activity-1` to `activity-5` went with the working
   orbit (#742), and the schema still accepts them, marked retired (`RETIRED_THEME_TOKENS`).

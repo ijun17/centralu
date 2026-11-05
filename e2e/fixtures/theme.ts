@@ -241,6 +241,20 @@ export function themeTests() {
     expect(await token(page, '--color-surface-floor')).toBe('#101820')
   })
 
+  test('a custom theme whose file is broken when the window starts keeps its floor instead of falling to Dark', async ({ page }) => {
+    await openDemo(page)
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeDark: 'mine' }))
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#101820')
+    // Half edited, then the window starts: no clean version of the file has been read in this page yet
+    await writeFile(page, 'mine', '{ "name": "Mine", "base": "dark", "tokens": { "surface-floor": ')
+    await page.reload()
+    await expect(page.getByTestId('chat-stream')).toBeVisible()
+    expect(await token(page, '--color-surface-floor')).toBe('#101820')
+    const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('cc-theme') ?? 'null'))
+    expect(cached.dark).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
+  })
+
   test('a light theme file picked in Settings sets the light side and tells the window; picking Dark again takes it back, whatever the OS says', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' })
     await openDemo(page)
