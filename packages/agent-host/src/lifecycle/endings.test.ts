@@ -103,6 +103,16 @@ describe("the parent's pipe (HO7)", () => {
       expect(gone, event).toBe(1)
     }
   })
+
+  // #1942: the listeners are attached at the end of start-up; a pipe that closed before has no event left to send
+  it('a stdin that already ended or closed while the host was starting is the parent gone at once', () => {
+    for (const state of [{ readableEnded: true }, { destroyed: true }]) {
+      const s = fakeStdin()
+      let gone = 0
+      watchParent(true, { ...s.stdin, ...state }, () => void gone++)
+      expect(gone, JSON.stringify(state)).toBe(1)
+    }
+  })
 })
 
 describe('errors nobody caught (HO10)', () => {

@@ -15,6 +15,9 @@ export type ProcessLike = {
 }
 
 export type Stdin = {
+  /** Set once the stream has been read to its end, and once it is closed: an `end` / `close` that came before a listener is not replayed */
+  readonly readableEnded?: boolean
+  readonly destroyed?: boolean
   resume(): unknown
   on(event: 'end' | 'close' | 'error', listener: () => void): unknown
 }
@@ -94,9 +97,14 @@ export function holdSignals(
  * port (8cc60ff0). **Only with `--watch-parent`**: a host started by some other script has stdin on
  * `/dev/null`, where EOF arrives at once, and deciding by "is stdin a TTY" made such a host end
  * itself (M1.5 defect 4). On Windows this is the only parent-death signal there is.
+ *
+ * The listeners are attached at the end of start-up, and a pipe's end is read even while the stream is
+ * paused, so a parent that went during start-up has already closed it and no event will come (#1942):
+ * a stream that is already ended or closed is the parent gone at once.
  */
 export function watchParent(enabled: boolean, stdin: Stdin, onGone: () => void): void {
   if (!enabled) return
+  if (stdin.readableEnded || stdin.destroyed) return onGone()
   stdin.resume()
   stdin.on('end', onGone)
   stdin.on('close', onGone)
