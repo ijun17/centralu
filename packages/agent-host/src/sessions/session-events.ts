@@ -10,6 +10,8 @@ import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest } from '../mail/delivery.js'
+import type { StopWhy } from '../mail/messages.js'
+import { stopOf, wentWithItsProcess } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
 import { scriptMessageFrame } from './script-messages.js'
@@ -61,6 +63,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailPoke: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
+    /** A turn ended without finishing, and why: the senders of the questions it left unanswered are told once (`MessageService.sessionStopped`), except `told`, whom the older report paths tell of it. Never throws */
+    mailStopped: (sessionId: string, why: StopWhy, told: string[]) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
@@ -338,6 +342,12 @@ export class SessionEvents {
      * the tasks it waits on are not this turn's. Taken at every end, so a later turn is not read as it
      */
     const mailTurn = endedTurn && e.sessionId ? this.host.children.takeMailTurn(e.sessionId) : undefined
+    /*
+     * A turn that ends without finishing leaves the questions delivered into it unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
+     * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
+     */
+    const stopWhy = endedTurn && e.sessionId && !this.host.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
+    if (stopWhy && e.sessionId) this.host.mailStopped(e.sessionId, stopWhy, this.reportedTo(e.sessionId, { turnBy, mailOwner: mailTurn?.ownerId, tracksInputs: !!run?.tracksInputs, owed, waited, caller: delegation?.callerId, stop: nowInterrupted }))
     if (mailTurn && e.sessionId) {
       // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
       void this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
@@ -390,6 +400,21 @@ export class SessionEvents {
    * itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
+  /**
+   * The sessions the older report paths tell of this same stop, read before they run (they clear their marks): the owner of the report, or of the
+   * thread's turn; a call still waiting, which reads it itself; and, when no report is owed, the session that gave the turn or started it, for a stop
+   * the tool left a mark of (the network, its interrupt). An error, a limit or a Stop leaves none, so they tell the asker nothing. Never the person's own turn (#1377)
+   */
+  private reportedTo(id: string, d: { turnBy: { by: string } | undefined; mailOwner: string | undefined; tracksInputs: boolean; owed: boolean; waited: boolean; caller: string | undefined; stop: Interruption | null }): string[] {
+    if (d.turnBy?.by === 'person') return []
+    const meta = this.host.meta
+    const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
+    const told: (string | undefined)[] = [d.mailOwner ?? (d.tracksInputs ? undefined : this.host.children.awaitingReport.get(id))]
+    if (d.waited) told.push(asker)
+    if (!d.owed && d.stop && d.stop.reason !== 'reconnecting' && asker && meta.has(asker) && !wentWithItsProcess(meta.get(asker)?.interruption)) told.push(asker)
+    return told.flatMap((who) => (who && who !== id && meta.has(who) ? [who] : []))
+  }
+
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
     const m = this.host.meta.get(e.sessionId)
     if (!m) return e

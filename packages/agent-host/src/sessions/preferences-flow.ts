@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import { themeSlug } from '../themes.js'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
@@ -396,7 +396,7 @@ export class PreferencesFlow {
     for (const [tool, levels] of Object.entries(change)) {
       if (!known.includes(tool)) return `agentModels: ${plainQuoted(tool, 80)} is not an agent CLI on this computer; agent_status lists them (${known.join(', ') || 'none'}).`
       const own: Record<string, unknown> = { ...out[tool] }
-      let catalog: { id: string; efforts: string[] }[] | null | undefined
+      let catalog: ModelOption[] | null | undefined
       for (const [level, choice] of Object.entries(levels)) {
         if (choice === null) delete own[level]
         else if (choice !== undefined) {
@@ -409,7 +409,7 @@ export class PreferencesFlow {
             catalog = r?.supported && r.models.length ? r.models : null
           }
           if (catalog) {
-            const m = catalog.find((x) => x.id === model)
+            const m = listedModel(catalog, model)
             if (!m) warnings.push(`Note: ${plainQuoted(model, 200)} is not in ${tool}'s current list (agent_models); saved as typed.`)
             else if (effort && m.efforts.length && !m.efforts.includes(effort)) warnings.push(`Note: ${plainQuoted(effort, 80)} is not in the current efforts of ${plainQuoted(model, 200)} (${m.efforts.map((e) => plainQuoted(e, 40)).join(', ')}); saved as typed.`)
           }

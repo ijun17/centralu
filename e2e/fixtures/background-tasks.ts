@@ -87,7 +87,7 @@ async function start(page: Page): Promise<string> {
 
 export function backgroundTasksTests(): void {
   test.describe('background tasks (#290)', () => {
-    test('the header counts the running tasks, ambient ones excluded, and the sidebar row carries the same mark', async ({ page }) => {
+    test('the header counts the running tasks, ambient ones excluded, and the sidebar row carries a dot on its tool mark and the same count in its label', async ({ page }) => {
       const id = await start(page)
       const badge = page.getByTestId('background-badge')
       await expect(badge).toHaveAttribute('data-count', '2')
@@ -95,7 +95,53 @@ export function backgroundTasksTests(): void {
       await expect(badge).toHaveText('2')
       await expect(badge).toHaveAttribute('aria-label', '2 background')
       await expect(badge.getByTestId('background-running-dot')).toHaveCount(0)
-      await expect(page.getByTestId(`background-mark-${id}`)).toHaveText('2 bg')
+      // The row has no chip of its own for it any more (owner, 2026-11-05): a dot on the tool mark, the count in its words
+      const dot = page.getByTestId(`background-mark-${id}`)
+      await expect(dot).toBeVisible()
+      await expect(dot).toHaveText('')
+      const mark = page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-claude')
+      await expect(mark).toHaveAttribute('aria-label', `Claude Code · Working · 2 background tasks running (keeps the session awake)
+· ${AGENT.description}
+· ${SHELL.description}`)
+      await expect(page.getByTestId(`session-row-${id}`)).not.toContainText(/\bbg\b/)
+    })
+
+    test('the dot takes no room: the mark and the row keep their size, and it stands on the mark corner, faint, and fades out', async ({ page }) => {
+      const id = await start(page)
+      const row = page.getByTestId(`session-row-${id}`)
+      const mark = row.getByTestId('tool-mark-claude')
+      const dot = page.getByTestId(`background-mark-${id}`)
+      await expect(dot).toBeVisible()
+      const withDot = { row: (await row.boundingBox())!, mark: (await mark.boundingBox())!, dot: (await dot.boundingBox())! }
+      expect(withDot.mark.width).toBe(17)
+      expect(withDot.mark.height).toBe(17)
+      expect(Math.round(withDot.dot.width)).toBe(5)
+      // On the bottom-right corner: its centre is within 3px of the mark's corner, both ways
+      expect(Math.abs(withDot.dot.x + withDot.dot.width / 2 - (withDot.mark.x + withDot.mark.width))).toBeLessThanOrEqual(3)
+      expect(Math.abs(withDot.dot.y + withDot.dot.height / 2 - (withDot.mark.y + withDot.mark.height))).toBeLessThanOrEqual(3)
+      // Faint, with the ring in the sidebar's own colour
+      const look = await dot.evaluate((el) => {
+        const probe = document.createElement('span')
+        const read = (token: string) => {
+          probe.style.color = `var(${token})`
+          document.body.append(probe)
+          const c = getComputedStyle(probe).color
+          probe.remove()
+          return c
+        }
+        return { bg: getComputedStyle(el).backgroundColor, faint: read('--color-ink-faint'), shadow: getComputedStyle(el).boxShadow, side: read('--color-surface-side') }
+      })
+      expect(look.bg).toBe(look.faint)
+      expect(look.shadow).toContain(look.side)
+      // When the last task ends the dot leaves with a fade, and the row is the same height as with it
+      await page.evaluate((sid) => (window as any).__mock.emit({ type: 'background_tasks', sessionId: sid, live: [] }), id)
+      // It leaves with a fade (usePresence keeps it for the exit), not at once
+      await expect(dot).toHaveAttribute('data-leaving', 'true')
+      await expect(dot).toHaveCount(0)
+      const without = { row: (await row.boundingBox())!, mark: (await mark.boundingBox())! }
+      expect(without.row.height).toBe(withDot.row.height)
+      expect(without.mark.x).toBe(withDot.mark.x)
+      expect(without.mark.y).toBe(withDot.mark.y)
     })
 
     test('the list names each task, what Stop on the turn does to it, and stops one on its own', async ({ page }) => {
@@ -113,7 +159,8 @@ export function backgroundTasksTests(): void {
       await expect(page.getByTestId(`background-task-${SHELL.id}`)).toHaveAttribute('data-status', 'stopped')
       await expect(page.getByTestId(`background-stop-${SHELL.id}`)).toHaveCount(0)
       await expect(page.getByTestId('background-badge')).toHaveAttribute('data-count', '1')
-      await expect(page.getByTestId(`background-mark-${id}`)).toHaveText('1 bg')
+      await expect(page.getByTestId(`background-mark-${id}`)).toBeVisible()
+      await expect(page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-claude')).toHaveAttribute('aria-label', /1 background task running \(keeps/)
     })
 
     test('Stop on the turn says which tasks it stops and which keep running, and the stopped agent stays listed with its steps', async ({ page }) => {

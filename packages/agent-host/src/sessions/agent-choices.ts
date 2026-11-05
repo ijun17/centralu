@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ModelOption } from '@cc/protocol'
+import { listedModel, type ModelOption } from '@cc/protocol'
 import type { StartAgentOpts } from '../adapters/contract.js'
 import { gitSummary } from '../dev-services/git.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
@@ -54,7 +54,7 @@ export class AgentChoices {
     const mismatch = (models: ModelOption[]): { error: string; on: 'model' | 'effort' } | null => {
       const find = (name: string) => {
         const n = name.toLowerCase()
-        return models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
+        return listedModel(models, name) ?? models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
       }
       if (askedModel && !find(askedModel)) return { error: `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.`, on: 'model' }
       if (askedEffort) {

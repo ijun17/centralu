@@ -607,6 +607,7 @@ below retained for `safe` and `normal`:
    | Later turn ends while work still runs say nothing; the first turn end with none left delivers the owed report ("The session ended its turn", the answer of that turn) and wakes the caller through `deliver`'s resume | One pause notice per task: a Monitor that fires every few minutes would otherwise wake the caller each time. The turns that keep the report are the child's own work, never a loop: a report does not start the reporting session's turn |
    | The work ends with no turn running and none starts within `PAUSED_REPORT_SETTLE_MS` (60 s): the report goes out with the last answer and how each task ended ("background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished"; "…: completed …" when all completed) | Claude starts the turn within a second (its task-notification); a task the person stopped by hand starts none. Each change of the work starts the wait again, and a turn running when it is up reports at its own end |
    | A failed or stopped turn (error, usage limit, the person's Stop, the #698 reasons) is reported as it ended, work running or not | Those need the caller now; the next turn is not the work's own |
+   | A turn that stops without answering (an error, a usage limit, the network, its tool's interrupt, a Stop, a quit or shutdown found at the next start, a cut turn Centralu could not continue) releases the questions delivered into the cut turn and not answered (`needsReply` messages; the person's too) and tells each sender once, in one notice (`MessageService.sessionStopped`, [plans/turn-owned-by-no-one.md](plans/turn-owned-by-no-one.md) §4.1, #1948). It says what happened and what the reader can do, never the tool's own words. It wakes only a sender that is at rest and waits on the session (an open task it gave, or a wait), is written quiet for every other, and for a quit or shutdown wakes no one. The person is told in the Inbox in plain words, never of their own Stop or delete; a sender the older report path tells of the same stop is not told twice. The rows stay open, so a reply after the session is continued still answers them. Tasks and requests to the orchestrator are not here: the report above tells a task's owner, and the orchestrator's turn end settles its requests | A question asked of a session that then failed, hit its limit or was stopped was never heard of again by its asker; only a deleted session, or a turn a restart lost, told it |
    | A call waiting on the turn (`wait: true`, `agent_session wait`) takes the paused answer, with a notice that the work is not over, and the report is held for the end without a separate pause notice. `status` and `wait` on a paused child read the answer and the same notice and leave the report owed | A read of the paused answer used to take the report down, and with it the end |
    | The turn the child's own tool starts when the paused work ends (no message began it, no person wrote into it) is the caller's work (`ChildOwnership.continuesPause`, the same reading `reportBackIfAwaited` reports it by): `agent_session send` puts a note into it on a wait of its own, as an observer's note, with no `auto` needed and the report still owed; a person's turn or a person's message in it is refused as before, and the refusal says "the person may be using it" only for a turn a person started (#1576) | The note was refused "busy with something else (the person may be using it)" during the turn whose end the caller was owed |
 | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
@@ -696,7 +697,7 @@ is made over the link (`agents.createSession` there) under the caller's preset c
 over a link, #838, which carries an `auto` one the same way) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
 did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
-`startedFromHub`, and its row and header show its preset there and on the hub. It is made with the model, effort and worktree
+`startedFromHub`, and its header shows its preset there and on the hub (its sidebar row stopped showing it: `auto` is the default, so the tag was noise, owner 2026-11-05). It is made with the model, effort and worktree
 branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
@@ -2218,6 +2219,13 @@ that the sentence above can be true (#74).
 (`AdapterCapabilities`, `ModelOption`) and discovered at runtime; `TOOL_META` holds only how
 to present it. Mixing the two is how a knob ends up having to be taught to the UI twice.
 
+**A model's id is stored as given (#1989).** A full id such as `claude-opus-5-5` is a pin: Claude's list names it by the alias
+`opus`, which may later name another model, so the host never rewrites one. The CLI's list says which model each alias names
+(`resolvedModel`, carried as `ModelOption.resolved`); the screen reads a stored id as the one entry that names it
+(`listedModel`, skipping `default`) and start_agent's check accepts it. Matching is exact, as the SDK defines `resolvedModel`: a 1M variant (`claude-opus-5[1m]`) and its base id are different
+models, so an id nothing names reads "not in list" (and says nothing when no row of the tool carries `resolved`, as from an
+older host).
+
 ### 3.1 Vendor-surface drift checks (run these before any SDK/CLI upgrade)
 
 Everything we know about a vendor's protocol was learned by measuring, and a vendor
@@ -3015,7 +3023,7 @@ asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {sto
 `CronDelete` names it, a `CronList` answer omits it, or it auto-expires after seven days (a one-shot job is kept as
 long, conservatively). The adapter looks again a second after the next one is due. A process adopted from a previous
 host reads them back from its conversation's last 400 messages (the transcript has no structured results, so a
-wake-up counts its asked delay from the adoption). The background mark's tooltip lists them and says the session stays
+wake-up counts its asked delay from the adoption). The tool mark's tooltip on the sidebar row lists them (its dot says that some run) and says the session stays
 awake until they end. A Codex session is never put to sleep, so its own scheduling needs nothing here.
 
 Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.

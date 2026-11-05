@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from 'react'
 import { isMirrored, isUnread } from '@cc/core'
 import { childrenGroupKey } from '../../../store/foldGroups.js'
 import { useStore } from '../../../store/store.js'
-import { BackgroundMark } from '../../session/BackgroundTasks.jsx'
 import { DotsIcon } from '../../../components/icons.jsx'
 import { groupAttention } from '../fold.js'
 import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
@@ -13,7 +12,6 @@ import { SessionRow } from './SessionRow.jsx'
 import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
-import { PresetTag } from '../../session/PresetTag.jsx'
 import type { TreeRow } from '../tree.js'
 
 /**
@@ -129,10 +127,8 @@ export function SessionListRow({
               state. A separate dot right next to the mark would read as overlapping the
               two, and blur both instead.
             */}
-            <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
+            <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} background={{ tasks: s.backgroundTasks, testId: `background-mark-${s.id}` }} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
-            {/* Started from a linked computer (#1273): its preset, which an auto caller carries there */}
-            <PresetTag preset={s.permissionPreset} startedFromHub={s.startedFromHub} testId={`session-preset-${s.id}`} />
             {childrenFolded && (
               <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
             )}
@@ -161,16 +157,13 @@ export function SessionListRow({
                 data-testid={`pr-badge-${s.id}`}
                 title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
               >
-                PR #{s.pr.number}
+                #{s.pr.number}
                 {s.pr.state === 'closed' ? ' ✕' : ''}
               </span>
             )}
             {/*
-              Background work still running (#290) — the header's count, on the row. A session whose turn
-              ended can still have agents or shells running behind it; restarting or interrupting it would
-              end them.
+              Background work still running (#290) is the dot on the tool mark above, not a chip of its own (owner, 2026-11-05).
             */}
-            <BackgroundMark tasks={s.backgroundTasks} testId={`background-mark-${s.id}`} />
             {/*
               An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
 

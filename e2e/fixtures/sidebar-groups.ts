@@ -288,7 +288,7 @@ export function sidebarGroupTests(): void {
         await expectCentred('project-header-alpha', ['project-fold-alpha', 'project-menu-alpha'])
         await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-menu-beta'])
         // Session rows at the three depths, the badges they carry, and the menu at their end
-        await expectCentred(`session-row-${plain}`, ['mark', 'title', `background-mark-${plain}`, `session-menu-${plain}`])
+        await expectCentred(`session-row-${plain}`, ['mark', 'title', `session-menu-${plain}`])
         await expectCentred(`session-row-${PARENT}`, ['mark', 'title', `pr-badge-${PARENT}`, `children-fold-${PARENT}`, `session-menu-${PARENT}`])
         await expectCentred(`session-row-${KIDS[0]}`, ['mark', 'title', `merged-badge-${KIDS[0]}`, `session-menu-${KIDS[0]}`])
         await expectCentred(`app-row-${appKey}`, ['mark', 'title', `app-fold-${appKey}`])

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useDismiss } from '../../components/useDismiss.js'
 import { usePresence } from '../../components/presence.js'
 import { ChevronIcon } from '../../components/icons.jsx'
-import { autoCompactOf, launchRefusal, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol/client'
+import { autoCompactOf, launchRefusal, listedModel, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
@@ -224,13 +224,24 @@ export function SessionSettings({
   const rootRef = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
-  const current = models.find((m) => m.id === model)
-  // A model not in the list (set directly, or fetched while the list could not be read) is kept
-  // so it is not lost
-  const options =
-    model && !current
-      ? [...models, { id: model, label: model, efforts: [], defaultEffort: null, tiers: [] }]
-      : models
+  // The list's entry the model names: a full id (`claude-opus-5-5`) is its alias's entry (`opus`)
+  const listed = listedModel(models, model)
+  // A model the list does not hold (set directly, or the list could not be read) is kept so it is not lost. Once the list is
+  // read it says so, and offers the efforts its models take, as the tool may accept them. A list without `resolved` on any row
+  // (an older host) cannot tell, so it says nothing
+  const says = models.some((m) => m.resolved)
+  const unlisted: ModelOption | null = model && !listed
+    ? {
+        id: model,
+        label: says ? `${model} (not in list)` : model,
+        description: says ? `${toolLabel}'s list of models does not hold this one` : undefined,
+        efforts: [...new Set(models.flatMap((m) => m.efforts))],
+        defaultEffort: null,
+        tiers: [],
+      }
+    : null
+  const current = listed ?? unlisted ?? undefined
+  const options = unlisted ? [...models, unlisted] : models
 
   /*
    * Closes on an outside click or Esc.
@@ -260,7 +271,7 @@ export function SessionSettings({
    */
   const choose = (patch: Parameters<typeof update>[1]) => void update(sessionId, patch)
 
-  const modelLabel = current?.label ?? model ?? 'Default'
+  const modelLabel = listed?.label ?? model ?? 'Default'
   // The current values must be readable without opening the menu — this pays back the cost of
   // hiding them inside one.
   // verbosity shares level names with effort (low/medium/high), so shown bare it would be
@@ -329,8 +340,9 @@ export function SessionSettings({
                 key={m.id}
                 testId={`settings-model-${m.id}`}
                 label={m.label}
-                title={m.description}
-                selected={m.id === model}
+                // A stored full id shows as its entry; picking the entry sets the alias, so the pin is named here
+                title={m.id === listed?.id && model !== m.id ? `${m.label} · pinned ${model}` : m.description}
+                selected={m.id === current?.id}
                 // Effort and speed are reset when the model changes — support differs from
                 // model to model, so carrying the old value over would silently leave an
                 // unsupported combination in place
