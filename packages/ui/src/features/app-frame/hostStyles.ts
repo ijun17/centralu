@@ -30,7 +30,7 @@ const tint = (token: string, pct: number) => (read: (t: string) => string) => {
 }
 
 /*
- * Centralu is achromatic, so the roles the standard gives a hue map onto the four inks: info is
+ * Centralu has no hue in its chrome, so the roles the standard gives a hue map onto the four inks: info is
  * plain ink, and warning is the signal colour, "waiting for you" (#312 decision 5). Danger and
  * success keep the only hues the chrome has, the danger red and the diff's addition green.
  */

@@ -113,6 +113,10 @@ describe('the built CSS actually contains styles', () => {
    * overlap with the brightness hierarchy — but the fact that it is outside this check's scope
    * still has to be known.
    *
+   *   - Dark's warm tints (the owner, 2026-11-05): every neutral of the Dark preset (floor, steps, lines, inks, scrollbar,
+   *     keycap, terminal greys) leans a little toward orange, at a chroma around 0.01, so Dark reads warm and not
+   *     cold. It adds no hue to the chrome: brightness still ranks everything, and the surfaces and inks of Light and the
+   *     high-contrast presets stay R=G=B. A tint is listed here by value, so a stray coloured grey still fails the build.
    *   - diff addition/deletion (diff-add/diff-del): judging an approval is something done at a glance,
    *     and green and red go past a learned convention into something close to reflex. In
    *     exchange, they never leave the body of a diff.
@@ -130,13 +134,19 @@ describe('the built CSS actually contains styles', () => {
    * and fill, in grey and white). This list is both a record of what is allowed and **a list
    * of things to revisit.**
    */
-  it('the palette is monochrome (R=G=B) outside the allowed exceptions', () => {
+  it('the palette is monochrome (R=G=B) outside the allowed exceptions, the warm Dark tints among them', () => {
     const ALLOWED = new Set([
-      '8ff59a', '0f2f1c', // diff addition
-      'ff9b91', '38171a', // diff deletion, and danger
+      // Dark: the warm tints of the surfaces, lines, inks and terminal greys
+      '120e0a', '282320', '393430', '46413d', '2f2a27', '3a3531', '514c48',
+      'f0ecea', 'aca7a3', '756f6b', 'a8a39f', 'b8b3af', '403b37',
+      '2e2926', '1b1815', '0e0905', '201c1a', '37322e', 'd8d5d2', '5b5551', 'f1edeb',
+      'b1f085', '192e16', // Dark: diff addition
+      'fb9e86', '371816', // Dark: diff deletion, and danger
       // The terminal's ANSI palette (xterm's defaults, see --color-term-* in index.css)
-      '2e3436', 'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a', 'd3d7cf',
-      '555753', 'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2', 'eeeeec',
+      'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a',
+      'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2',
+      // high contrast dark keeps xterm's own greys
+      '2e3436', 'd3d7cf', '555753', 'eeeeec',
       /*
        * The light and high-contrast presets (#312 step 4) carry the same exceptions, each
        * re-tuned for its floor: the diff's green and red (and danger, which borrows the red), and the

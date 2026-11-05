@@ -288,8 +288,8 @@ export function rowApprovalTests() {
     await ask(page, target, { kind: 'command', command: 'ls', cwd: CWD })
 
     await expect(page.getByTestId(`session-row-${target}`).locator('[data-state="waiting_approval"]')).toBeVisible()
-    // The preset's `mark-waiting` (Dark `#a4a4a4`), not the grey or the floor it had
-    await expect.poll(fill).toBe('rgb(164, 164, 164)')
+    // The preset's `mark-waiting` (Dark `#a8a39f`), not the grey or the floor it had
+    await expect.poll(fill).toBe('rgb(168, 163, 159)')
     expect(await fill()).not.toBe(resting)
     // Nothing under the row: no line, no Allow or Deny in the sidebar
     await expect(page.getByTestId('sidebar').locator('[data-testid*="approval"], [data-testid*="approve-"]')).toHaveCount(0)
