@@ -3,7 +3,8 @@ import { appKeyOf, isAway, type SessionSummary } from '@cc/core'
 import type { ExternalAppStatus } from '@cc/protocol/client'
 import { appSessionsNeedAttention } from '../tree.js'
 import { useStore } from '../../../store/store.js'
-import { AppIcon } from '../../../components/icons.jsx'
+import { AppIcon, StopIcon } from '../../../components/icons.jsx'
+import { IconButton } from '../../../components/IconButton.jsx'
 import { isRemoteUserApp, type ExternalCatalogApp } from '../../../store/app-catalog.js'
 import { MachineBadge, MachineBadgePlaceholder } from '../../machines/MachineTag.jsx'
 import { APP_MIME, projectItemMime } from '../reorder.js'
@@ -75,12 +76,13 @@ export function AppRow({
    */
   const waitsForYou = asking || appSessionsNeedAttention(sessions)
   /*
-   * An app keeping itself running for background work (#1236) says what it is doing, and has Stop right on its row: a
-   * process that stays with nothing open is something the person should see and be able to end, an app with no view
-   * included (its view and Settings' app row have Stop too)
+   * An app keeping itself running for background work (#1236) has Stop right on its row, an icon: a process that stays
+   * with nothing open is something the person should see and be able to end, an app with no view included (its view and
+   * Settings' app row have Stop too). What it is doing is the icon's tooltip, not a text on the row, so the title keeps
+   * the row's width (owner, 2026-11-06, #1928).
    */
   const busy = app.info.status === 'running' && app.info.busy ? `Running: ${app.info.busy}` : null
-  const hint = waitsForYou ? 'asks you' : (busy ?? APP_HINT[app.info.status])
+  const hint = waitsForYou ? 'asks you' : APP_HINT[app.info.status]
   const projectId = app.projectId
   // A linked machine's user-folder app keeps the dimming its machine's group gave it while that machine is not connected (#734)
   const away = useStore((s) => isAway({ machine }, s.machines))
@@ -139,7 +141,7 @@ export function AppRow({
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${busy ? 'pr-14' : 'pr-3'} text-left text-md transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${busy ? 'pr-9' : 'pr-3'} text-left text-md transition-colors ${
           active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
@@ -154,11 +156,9 @@ export function AppRow({
         )}
         {hint && (
           <span
-            className={`readout ml-auto text-2xs ${busy && !waitsForYou ? 'min-w-0 max-w-[60%] truncate' : 'shrink-0'} ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
+            className={`readout ml-auto shrink-0 text-2xs ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
             data-testid="app-row-hint"
             data-asking={waitsForYou || undefined}
-            data-busy={(busy && !waitsForYou) || undefined}
-            title={busy && !waitsForYou ? busy : undefined}
           >
             {hint}
           </span>
@@ -166,16 +166,16 @@ export function AppRow({
       </button>
       {busy && (
         // A sibling of the row, not inside it: a button inside a button is neither valid nor reachable by keyboard
-        <button
-          type="button"
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1.5 py-0.5 text-2xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
-          onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine })}
-          title={`${busy}. Stop it; it starts again the next time something needs it`}
-          aria-label={`Stop ${app.title}`}
-          data-testid={`app-stop-${app.key}`}
-        >
-          Stop
-        </button>
+        <span className="absolute right-2 top-1/2 flex -translate-y-1/2">
+          <IconButton
+            label={`${busy}. Stop it; it starts again the next time something needs it`}
+            onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine })}
+            testId={`app-stop-${app.key}`}
+            align="right"
+          >
+            <StopIcon />
+          </IconButton>
+        </span>
       )}
       {machine && (
         <MachineBadge

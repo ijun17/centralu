@@ -83,7 +83,7 @@ refusal comes back as that error: show it plainly instead of retrying.
 with work on its own clock (a timer that polls, a queue it drives) declares it in the manifest,
 `"uses": { "background": "what it does, in a few words" }`, and calls `centralu.busy('what it is
 doing now')` while there is work and `centralu.busy(false)` once there is none: anywhere, a timer
-included. Meanwhile it keeps running, and its row says "Running: <what it is doing now>"; the person
+included. Meanwhile it keeps running, and its sidebar row has a Stop icon that says "Running: <what it is doing now>"; the person
 can stop it. It resolves false (said on stderr) when Centralu did not take it. Hold it only while
 there is work.
 

@@ -396,16 +396,17 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     expect(await opened(page)).toEqual([])
   })
 
-  test('an app with no view kept running for background work says why on its row and in Settings, and is stopped from either (#1236)', async ({ page }) => {
+  test('an app with no view kept running for background work names why on its Stop icon and in Settings, and is stopped from either (#1236, #1928)', async ({ page }) => {
     const pid = await trustedProject(page, '/tmp/alpha')
     const busyApp = () => app('queue', pid, { home: null, status: 'running', busy: 'merge queue, 2 items', uses: { background: 'drives the merge queue' } })
     await setApps(page, [busyApp()])
     const row = page.getByTestId(`app-row-${pid}/queue`)
-    await expect(row.getByTestId('app-row-hint')).toHaveText('Running: merge queue, 2 items')
+    // No text on the row: the reason is the stop icon's name, and the title keeps the whole row (#1928)
+    await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
+    await expect(page.getByTestId(`app-stop-${pid}/queue`)).toHaveAttribute('aria-label', /^Running: merge queue, 2 items\. Stop it; /)
     // Stop is on the row itself, so an app with no view to open is stopped without one
     await page.getByTestId(`app-stop-${pid}/queue`).click()
     await expect.poll(() => restarts(page)).toEqual([{ appId: 'queue', projectId: pid }])
-    await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
     await expect(page.getByTestId(`app-stop-${pid}/queue`)).toHaveCount(0)
     expect(await opened(page)).toEqual([])
 
