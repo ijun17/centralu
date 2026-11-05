@@ -180,8 +180,26 @@ script rehearses by default and why nothing publishes automatically.
   with about half again on top: the e2e shards 15 minutes (slowest 9.7), `verify` 20 (10.8), the
   Windows unit tests 25 (13.1); the Rust builds more, for a run that misses the cache (bundles
   30, keeper end to end 20). `build.yml`'s comment above the `e2e` job has every number. A job
-  that hits its limit ends with GitHub's "has exceeded the maximum execution time" annotation,
-  which the merge queue counts as an infrastructure failure (rerun once), not a test failure.
+  that hits its limit ends with GitHub's "has exceeded the maximum execution time" annotation
+  (worded "of 20 minutes" until 2026-11-05, "of 20m0s" since; the queue reads both), which the merge
+  queue counts as an infrastructure failure (rerun once), not a test failure, and names the step the
+  limit ended: one that sets the job up (an install, a cache) is the runner's, one that does the
+  job's work (a test) is reported as a timeout in that step. A run cancelled by a newer push has
+  no such annotation and stays "cancelled, with no failed job".
+- **System packages** (2026-11-05, #1603): the Linux jobs that install apt packages beyond the
+  Playwright ones (`keeper e2e (linux)`, the Linux bundles) use `.github/actions/apt-packages`:
+  the `.deb` files of an earlier run of the same runner image are put back first (a cache keyed by
+  OS, image version, architecture and the job's list), each try of `apt-get update && install` is
+  limited to 3 minutes by `.github/scripts/apt-install.sh` and tried once more, and the calling
+  step has a `timeout-minutes` of 9. A stuck mirror then fails a step named `Install … system
+  dependencies`, which the queue reads as setup and reruns, in under 9 minutes, where it had held
+  a job until its 20-minute limit twice. `release.yml` still installs with a bare `apt-get`
+  (a release is rerun by hand when it fails halfway).
+- **The remote Node's Windows host tests** (2026-11-06): `host tests, remote Node` runs the
+  whole set on Linux (7 to 10 minutes of tests) and in two shards on Windows, split by each file's
+  measured time (`tooling/os-tests.ts --remote-node --shard`). One Windows job took 13.2 to 18.6
+  minutes of tests (the limit, 20, with its setup) and was cancelled at the limit in 18 of the 34
+  runs of main from 2026-11-04 to 2026-11-05.
 - **Fail fast** (owner decision 2026-10-19): on a manual run (the merge queue's batches, or
   `gh workflow run build.yml` by hand), a failed `verify` cancels the rest of the run at once,
   through the `fail fast` job: nothing lands from such a run, and its other jobs held the batch

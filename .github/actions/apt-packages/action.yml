@@ -1,0 +1,56 @@
+name: Install apt packages, from a cache when it has them
+description: >-
+  apt-get install of the packages given, with the .deb files of an earlier run of the same runner image put back first (apt then
+  asks the network for the package lists only), each try limited and one retry. Linux only; run after checkout. Give the calling
+  step a name that sets the job up ("Install Linux system dependencies") and a `timeout-minutes`: the merge queue reads the step's
+  name and tells a timeout there from a timeout in a test (.centralu/apps/project-board/run-failure.mjs). Not a step of the
+  caller's own, so no step in here can carry a limit or `continue-on-error` of its own: .github/scripts/apt-install.sh limits
+  each try with `timeout`.
+inputs:
+  packages:
+    description: The packages, separated by white space.
+    required: true
+  key:
+    description: What the cache is for (the job's own list), added to the runner image in the cache's key.
+    required: true
+runs:
+  using: composite
+  steps:
+    # The image (its OS and version) is in the key: another image's packages are not wanted, and a new image version is a cold
+    # cache once. The cache is found by its exact key and never by a prefix.
+    - name: Read the runner image
+      id: image
+      shell: bash
+      run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}-${RUNNER_ARCH:-unknown}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the apt packages of an earlier run
+      id: debs
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ inputs.key }}
+
+    - name: Put the apt packages where apt looks
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../../scripts/apt-deb-cache.sh" restore "$RUNNER_TEMP/apt-debs"
+
+    - name: Install the packages
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      # Unquoted on purpose: the list is words
+      run: bash "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" $PACKAGES
+
+    # Right after a successful install, not at the end of the job: a failed test run must not keep the cache from filling
+    - name: Keep the apt packages this run downloaded
+      id: kept
+      if: steps.debs.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../../scripts/apt-deb-cache.sh" save "$RUNNER_TEMP/apt-debs"
+
+    # An empty folder is not saved: it would be a hit that restores nothing, for every later run of the same image
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ inputs.key }}

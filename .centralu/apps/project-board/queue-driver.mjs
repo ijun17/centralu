@@ -24,6 +24,7 @@ import {
   dispatchWorkflow,
   FATAL,
   GitHubError,
+  isOutage,
   markDraft,
   markReady,
   mergePr,
@@ -790,13 +791,14 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   try {
     r = await pollItem(item, { now, ref, renew, save, landed, opened: openedBy(readOpened(dir), item.repo, item.pr), readied: () => rememberReadied(dir, item), stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
   } catch (e) {
-    const fatal = e instanceof GitHubError && FATAL.has(e.kind)
+    // An outage (a 5xx, a dropped connection, what FATAL names) pauses the queue and is no strike against the item
+    const fatal = isOutage(e)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
     if (!(e instanceof GitHubError)) console.error('[project-board] merge queue:', e)
     updateQueue(dir, (fresh) => {
       if (fatal) {
         const ms = Math.min(PAUSE_MAX_MS, Math.max(PAUSE_MIN_MS, (fresh.pause?.ms ?? 0) * 2))
-        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: e.kind, reason: message }
+        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: FATAL.has(e.kind) ? e.kind : 'outage', reason: message }
       }
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
       if (!it) return

@@ -34,6 +34,7 @@ import {
   dispatchWorkflow,
   FATAL,
   GitHubError,
+  isOutage,
   mergeInto,
   postStatus,
   QUEUE_PR_FIELDS,
@@ -106,7 +107,7 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
   try {
     r = b.state === 'building' ? await build(b, ctx) : b.state === 'ci' ? await runCi(b, ctx) : await landNext(b, ctx)
   } catch (e) {
-    const fatal = e instanceof GitHubError && FATAL.has(e.kind)
+    const fatal = isOutage(e)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
     if (!(e instanceof GitHubError)) console.error('[project-board] merge queue batch:', e)
     let ended = false
@@ -114,7 +115,7 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
     updateQueue(dir, (fresh) => {
       if (fatal) {
         const ms = Math.min(15 * 60_000, Math.max(60_000, (fresh.pause?.ms ?? 0) * 2))
-        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: e.kind, reason: message }
+        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: FATAL.has(e.kind) ? e.kind : 'outage', reason: message }
       }
       const fb = fresh.batches.find((x) => x.id === b.id)
       if (!fb || !BATCH_ACTIVE.has(fb.state)) return

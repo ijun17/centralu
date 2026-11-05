@@ -363,6 +363,9 @@ export function decideRun({ subject, head, checks, runs = [], failures = {}, now
     const cause = CAUSE_TEXT[why.cause] ?? why.cause
     const ours = (subject.head === head ? (subject.queueCancelled ?? []) : []).some((c) => c.run === bad.id && c.attempt === (bad.attempt ?? 1))
     const kind = bad.conclusion !== 'cancelled' ? 'failed' : ours ? 'queue' : 'cancelled'
+    // A job that ran out of time says so, with the step the limit ended; a run a newer push or a person cancelled says only that
+    const limited = why.cause === 'timeout'
+    const inStep = why.step && limited ? ` in step "${why.step}"` : ''
     const done = reruns[kind]
     // GitHub refused the rerun (a run too old, a permission): asking again would only fail again
     if (done?.error && done.run === bad.id && bad.attempt <= done.attempt) return rerunRefused(n, bad.id, done.error)
@@ -384,14 +387,16 @@ export function decideRun({ subject, head, checks, runs = [], failures = {}, now
         state: 'ci',
         action: { type: 'rerun', runId: bad.id, failedOnly, kind },
         patch: { reruns: { ...reruns, [kind]: { run: bad.id, attempt: bad.attempt, at } } },
-        event: `${n}: run ${bad.id} ${kind === 'queue' ? 'was cancelled by the merge queue for a batch; rerunning it' : kind === 'cancelled' ? `was cancelled (${cause}${why.job ? `: ${jobText(why.job)}` : ''}); rerunning it once` : `failed (${jobText(job)}: ${cause}); rerunning its failed jobs once`} for ${short(head)}.`,
+        event: `${n}: run ${bad.id} ${kind === 'queue' ? 'was cancelled by the merge queue for a batch; rerunning it' : kind === 'cancelled' ? `was cancelled (${cause}${why.job ? `: ${jobText(why.job)}` : ''}${inStep}); rerunning it once` : `failed (${jobText(job)}: ${cause}); rerunning its failed jobs once`} for ${short(head)}.`,
       }
     }
     if (kind === 'cancelled')
-      return attention('cancelled', `${n}: CI run ${bad.id} was cancelled again after one rerun at ${short(head)} (${cause}). Look at why on GitHub (a newer run, a timeout), then push again or rerun it yourself.`)
+      return limited
+        ? attention('timeout', `${n}: ${jobText(why.job)} hit its time limit again at ${short(head)}${inStep}, after one rerun (${why.inSetup ? 'a step that sets the job up: the runner or a package source was slow' : 'a step that does the work: a hang or a slow suite'}). Read it with read_failed_job${why.job?.id ? ` (job ${why.job.id})` : ''}, then fix or push again.`, { job: why.job })
+        : attention('cancelled', `${n}: CI run ${bad.id} was cancelled again after one rerun at ${short(head)} (${cause}). Look at why on GitHub (a newer run, a timeout), then push again or rerun it yourself.`)
     return attention(
       'failed',
-      `${n}: required check ${jobText(job)} failed twice at ${short(head)} (once more after rerunning the failed jobs; this time ${cause}). Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
+      `${n}: required check ${jobText(job)} failed twice at ${short(head)} (once more after rerunning the failed jobs; this time ${cause}${inStep}). Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
       { job },
     )
   }

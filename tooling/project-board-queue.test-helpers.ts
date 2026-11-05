@@ -153,6 +153,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (file === undefined) fail('Not Found (HTTP 404)')
   out(file)
 } else if (path && /\/check-runs\?/.test(path)) {
+  // GitHub failing (HTTP 500, #1993) or refusing (HTTP 422) the read of a head's checks, as the test sets it
+  if (st.checksError) fail(st.checksError)
   out({ check_runs: (st.checks ?? {})[path.split('/')[4]] ?? [] })
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
   out({ state: 'pending', statuses: [] })

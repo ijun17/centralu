@@ -32,7 +32,7 @@ From `.github/workflows/build.yml` and the run of main `f369f5c` (run 4030385980
 |---|---|---|---|
 | `windows tests` | full | `pnpm lint`, `pnpm depcruise`, `pnpm typecheck`; no tests | 2.8 min |
 | `windows tests (vitest 1/2)`, `(vitest 2/2)` | quick (every pull request) and full | `vitest run --shard=N/2`: every test file of both vitest projects (`unit`, `app-runtime`), 687 files, halved by count | 19.1 and 11.4 min (vitest's own `Duration` 1,090 s and 625 s) |
-| `host tests, remote Node (windows-2022)` | full, when the host's tests changed | `vitest run packages/agent-host packages/protocol tooling/launcher-` on the remotes' pinned Node: 459 files | 17.8 min (vitest 895 s) |
+| `host tests, remote Node (windows-2022)` | full, when the host's tests changed | `vitest run packages/agent-host packages/protocol tooling/launcher-` on the remotes' pinned Node: 459 files | 17.8 min (vitest 895 s). Since 2026-11-06 in two shards, `(windows-2022 1/2)` and `(2/2)`, 524 files halved by measured time (`os-tests.ts --remote-node`): the one job had reached 18.6 min and its 20 min limit |
 
 The issue's batch-227 numbers (18.4 + 10.5 and 16.3 runner-minutes) are the same shape.
 

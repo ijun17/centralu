@@ -14,11 +14,15 @@ const MAX_PAGES = 20
 
 /** A failure the person can act on. `kind` says which, `message` says what to do, in plain words. */
 export class GitHubError extends Error {
-  /** `lost`: the write was sent and GitHub's answer never came, so whether it did it is not known. */
-  constructor(kind, message, { lost = false } = {}) {
+  /**
+   * `lost`: the write was sent and GitHub's answer never came, so whether it did it is not known.
+   * `status`: the HTTP status gh printed (0 when it printed none), which tells GitHub failing (5xx) from GitHub refusing (4xx).
+   */
+  constructor(kind, message, { lost = false, status = 0 } = {}) {
     super(message)
     this.kind = kind
     this.lost = lost
+    this.status = status
   }
 }
 
@@ -69,7 +73,7 @@ export async function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}
     if (error.killed) throw new GitHubError('network', `gh did not answer within ${Math.round(timeoutMs / 1000)} s. Check the network, then refresh.`)
     // A GraphQL error comes back as JSON on stdout with a non-zero exit; keep it for the caller.
     throw Object.assign(classify(`${error.stderr}
-${error.stdout}`), { stdout: error.stdout, stderr: error.stderr })
+${error.stdout}`), { stdout: error.stdout, stderr: error.stderr, status: httpStatus(error) })
   }
 }
 
@@ -293,12 +297,20 @@ const firstLine = (e) =>
 export const FATAL = new Set(['network', 'auth', 'gh-missing', 'rate'])
 
 /**
+ * An outage, not a verdict on the thing asked for (2026-11-06: #1993 went to attention after three HTTP 500s from one
+ * check-runs read that answered fine moments later): what FATAL names, GitHub failing (a 5xx), or a connection dropped
+ * with no answer (`lost`, gh's "EOF"). The queue pauses and backs off on these and never counts them against an item;
+ * a 4xx (a pull request gone, a refused write) is GitHub's answer about the item and still does.
+ */
+export const isOutage = (e) => e instanceof GitHubError && (FATAL.has(e.kind) || e.status >= 500 || e.lost === true)
+
+/**
  * What a failed write says: GitHub's refusal when it answered with a client error (404, 409, 422), else `lost`: the
  * connection dropped (gh's "EOF") or GitHub failed (5xx) and the write may have been done (#1958, #1961).
  */
 function refusal(what, e) {
   const status = httpStatus(e)
-  return new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}`, { lost: status < 400 || status >= 500 })
+  return new GitHubError('github', `GitHub refused ${what}: ${firstLine(e)}`, { lost: status < 400 || status >= 500, status })
 }
 
 /** Runs a gh call; whatever fails but a rate limit, a login or the network is GitHub's refusal, said as `GitHub refused <what>: <its first line>`. */
@@ -323,7 +335,7 @@ export async function restJson(path, { missing = [] } = {}) {
     out = await runGh(['api', path])
   } catch (e) {
     if (e instanceof GitHubError && !FATAL.has(e.kind) && missing.includes(httpStatus(e))) return null
-    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `GitHub answered ${path.split('?')[0]} with: ${firstLine(e)}`)
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `GitHub answered ${path.split('?')[0]} with: ${firstLine(e)}`, { status: httpStatus(e) })
     throw e
   }
   const json = parseJson(out)
@@ -351,7 +363,7 @@ export async function readPr(repo, number, fields = PR_FIELDS) {
   try {
     out = await runGh(['pr', 'view', String(number), '-R', repo, '--json', fields])
   } catch (e) {
-    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not a pull request this GitHub login can see (${firstLine(e)}).`)
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not a pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
     throw e
   }
   const pr = parseJson(out)
@@ -499,7 +511,7 @@ export async function readJobLog(repo, jobId) {
       throw e
     })
   } catch (e) {
-    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `the log of job ${jobId} could not be read: ${firstLine(e)}`)
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `the log of job ${jobId} could not be read: ${firstLine(e)}`, { status: httpStatus(e) })
     throw e
   }
 }
@@ -741,7 +753,7 @@ export async function readRepoFile(repo, path, ref) {
     return await runGh(['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${repo}/contents/${path}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`])
   } catch (e) {
     if (e instanceof GitHubError && !FATAL.has(e.kind) && httpStatus(e) === 404) return null
-    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `${path} could not be read from ${repo}: ${firstLine(e)}`)
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('github', `${path} could not be read from ${repo}: ${firstLine(e)}`, { status: httpStatus(e) })
     throw e
   }
 }
