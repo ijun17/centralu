@@ -1,5 +1,5 @@
 import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
-import type { ThreadOrigin } from '../dev-services/store/mail.js'
+import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON } from './address.js'
 import type { DelegationOrigin, MessageService, TurnReport } from './messages.js'
 import { refusalReason } from './rules.js'

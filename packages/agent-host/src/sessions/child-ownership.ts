@@ -7,7 +7,7 @@ import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj, tryParseJson } from '../json-value.js'
 import { HUB_SENDER } from './hub-sender.js'
-import type { ThreadOrigin } from '../dev-services/store/mail.js'
+import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
 

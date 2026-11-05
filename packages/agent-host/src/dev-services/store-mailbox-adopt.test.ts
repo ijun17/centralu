@@ -13,6 +13,7 @@ import { sessionAddress } from '../mail/address.js'
 import { Store } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
 import { legacyChain, movePendingThreadMail } from './store/mailbox-adopt.js'
+import { V64Mail } from './store/mail-v64.test-helpers.js'
 
 const HOST = 'hub-aaaaaaaa'
 const NOW = 1_800_000_000_000
@@ -31,6 +32,9 @@ let newest = 65
  * host or a rollback does
  */
 class Versioned extends Store {
+  /** The v64 build's thread mail statements (`MailRecords`), on this connection */
+  readonly mail = new V64Mail(this.db)
+
   protected override migrationSteps(): MigrationStep[] {
     return super.migrationSteps().filter((s) => s.to <= newest)
   }
@@ -153,7 +157,7 @@ describe('v65 on a store the v64 build served', () => {
     const store = v64Store()
     const ids = v64Mail(store)
     const view = () => ({
-      pending: [S1, S2, S3].map((x) => store.mail.pendingFor(x, NOW).map((p) => p.message.id)),
+      pending: [S1, S2, S3].map((x) => store.mail.pendingIds(x, NOW)),
       receipts: Object.values(ids).map((id) => store.mail.receiptsOf(id)),
       thread: store.mail.messagesTail(ids.thread ?? '', 50),
       held: store.mail.heldReceipts(),
@@ -162,7 +166,7 @@ describe('v65 on a store the v64 build served', () => {
     store.upgrade()
     try {
       expect(view()).toEqual(was)
-      // The v64 build's statements go on working: posting, turns, sessions, retention
+      // The v64 build's statements go on working: posting, turns, sessions
       const next = `${HOST}.m_next`
       store.mail.insertMessage({ id: next, threadId: ids.thread ?? '', sender: S1, kind: 'note', urgent: false, needsOwner: false, wake: null, replyTo: null, body: 'still here', facts: {}, dedupeKey: null, createdAt: NOW })
       for (const x of [S2, S3]) store.mail.insertReceipt(next, x, NOW)
@@ -179,7 +183,6 @@ describe('v65 on a store the v64 build served', () => {
         importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
       })
       expect(store.sessions.listSessions().map((x) => x.name)).toEqual(['nine'])
-      expect(store.mail.sweep(NOW)).toMatchObject({ threads: 0 })
     } finally {
       store.close()
     }
@@ -218,7 +221,7 @@ describe('movePendingThreadMail', () => {
     // And what was not moved is as it was
     expect(receipts(db).find((r) => r.message_id === ids.old)).toMatchObject({ handled_at: null, delivered_at: null })
     // The v64 build serving again delivers none of it
-    expect([S1, S2, S3].flatMap((x) => store.mail.pendingFor(x, NOW).map((p) => p.message.id))).toEqual([ids.old])
+    expect([S1, S2, S3].flatMap((x) => store.mail.pendingIds(x, NOW))).toEqual([ids.old])
     store.close()
   })
 
