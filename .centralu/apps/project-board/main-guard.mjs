@@ -18,7 +18,7 @@ import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
 import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
-import { CAUSE_TEXT, classifyRun, jobFailure, looksLikeNetworkError } from './run-failure.mjs'
+import { CAUSE_TEXT, classifyRun, isFetchStep, jobFailure, looksLikeNetworkError } from './run-failure.mjs'
 import { now as clock } from './clock.mjs'
 
 export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 60_000
@@ -138,7 +138,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   for (const j of [...failed, ...cancelled]) {
     j.notes = j.id != null ? await jobNotes(repo, j.id) : []
     const step = j.steps.find((s) => s.conclusion === 'failure')
-    if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
+    if (step && isFetchStep(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
   }
   // Named with the failed jobs: a cancelled job that has a cause (the time limit, a lost runner), not one cancelled with no reason
   failed = [...failed, ...cancelled.filter((j) => jobFailure(j, { flaky })?.cause !== 'cancelled')]

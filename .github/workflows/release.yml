@@ -236,6 +236,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/tauri-tools
+
       - name: Build, verify and publish the platform package
         env:
           # linuxdeploy and appimagetool are AppImages and mount via FUSE, which runners can
