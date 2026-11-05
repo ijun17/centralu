@@ -100,60 +100,47 @@ describe('common layer boundary', () => {
 /*
  * `boundaries/element-types` is the table of docs/architecture.md §2, one allow-list per layer. It judges an import by what
  * it resolves to (tooling/eslint-alias-resolver.cjs), and for a long time resolved none of the `@cc/*` imports the packages
- * use, so it judged nothing (#1847). Each row is an import and whether the table allows it.
+ * use, so it judged nothing (#1847). One case per layer: what it may import and what it may not. An allowed import is
+ * checked next to a refused one, since on its own it passes whether or not the rule reads anything.
  */
 describe('layer table (boundaries/element-types)', () => {
-  const refused = async (filePath: string, from: string) =>
-    ruleIds(await lint(filePath, `import { a } from '${from}'\nexport const b = a`)).includes('boundaries/element-types')
+  type Style = 'import' | 'export' | 'dynamic'
+  const refused = async (filePath: string, from: string, style: Style = 'import') => {
+    const code = {
+      import: `import { a } from '${from}'\nexport const b = a`,
+      export: `export * from '${from}'`,
+      dynamic: `export const b = () => import('${from}')`,
+    }[style]
+    return ruleIds(await lint(filePath, code)).includes('boundaries/element-types')
+  }
 
   it.each([
-    ['packages/protocol/src/x.ts', '@cc/core'],
-    ['packages/protocol/src/x.ts', '@cc/common'],
-    ['packages/common/src/x.ts', '@cc/core'],
-    ['packages/common/src/x.ts', '@cc/protocol'],
-    ['packages/core/src/x.ts', '@cc/platform/ports'],
-    ['packages/platform/src/ports/x.ts', '@cc/common'],
-    ['packages/platform/src/web/x.ts', '@cc/core'],
-    ['packages/ui/src/x.tsx', '@cc/platform/mock'],
-    // a test takes the mock platform only
-    ['packages/ui/src/x.test.tsx', '@cc/platform/tauri'],
-    ['packages/agent-host/src/x.ts', '@cc/core'],
-    ['packages/agent-host/src/x.ts', '@cc/ui'],
-    // a path into another layer's folder is the same import
-    ['packages/protocol/src/x.ts', '../../core/src/index.js'],
-  ])('refuses %s importing %s', async (filePath, from) => {
-    expect(await refused(filePath, from)).toBe(true)
+    { file: 'packages/protocol/src/x.ts', allowed: ['zod', './other.js'], refused: ['@cc/core', '@cc/common', '../../core/src/index.js'] },
+    { file: 'packages/common/src/x.ts', allowed: ['./other.js'], refused: ['@cc/core', '@cc/protocol'] },
+    { file: 'packages/core/src/x.ts', allowed: ['@cc/common', '@cc/protocol'], refused: ['@cc/platform/ports', '@cc/ui'] },
+    { file: 'packages/platform/src/ports/x.ts', allowed: ['@cc/protocol'], refused: ['@cc/common', '@cc/core'] },
+    { file: 'packages/platform/src/web/x.ts', allowed: ['@cc/common', '@cc/platform/ports'], refused: ['@cc/core', '@cc/ui'] },
+    { file: 'packages/ui/src/x.tsx', allowed: ['@cc/core', '@cc/platform/ports'], refused: ['@cc/platform/mock', '@cc/platform/tauri'] },
+    // a test takes the mock platform (docs/platform-abstraction.md §6), and no other implementation
+    { file: 'packages/ui/src/x.test.tsx', allowed: ['@cc/platform/mock', '@cc/core'], refused: ['@cc/platform/tauri'] },
+    // `agent-host/src/apps/` is a folder of the host, not the apps layer
+    { file: 'packages/agent-host/src/adapters/x.ts', allowed: ['@cc/common', '../../apps/contract.js'], refused: ['@cc/core', '@cc/ui'] },
+    { file: 'apps/web/src/x.ts', allowed: ['@cc/platform/web', '@cc/ui'], refused: ['../../../packages/agent-host/src/index.js'] },
+  ])('$file takes only what its row allows', async ({ file, allowed, refused: banned }) => {
+    for (const from of banned) expect(await refused(file, from), `${file} importing ${from}`).toBe(true)
+    for (const from of allowed) expect(await refused(file, from), `${file} importing ${from}`).toBe(false)
   })
 
-  it('refuses a re-export and a dynamic import as it refuses an import', async () => {
-    expect(await refused('packages/protocol/src/x.ts', '@cc/core', 'export')).toBe(true)
-    expect(await refused('packages/protocol/src/x.ts', '@cc/core', 'dynamic')).toBe(true)
-    expect(await refused('packages/core/src/x.ts', '@cc/common', 'export')).toBe(false)
+  it('judges a re-export and a dynamic import as it judges an import', async () => {
+    for (const style of ['export', 'dynamic'] as const) {
+      expect(await refused('packages/protocol/src/x.ts', '@cc/core', style)).toBe(true)
+      expect(await refused('packages/core/src/x.ts', '@cc/common', style)).toBe(false)
+    }
   })
 
   it('reads a path below an alias as the alias folder, and refuses an @cc/ specifier that is none', async () => {
     expect(await refused('packages/agent-host/src/x.ts', '@cc/platform/mock/demo')).toBe(true)
-    const code = "import { a } from '@cc/nowhere'\nexport const b = a"
-    const msgs = await lint('packages/ui/src/x.tsx', code)
+    const msgs = await lint('packages/ui/src/x.tsx', "import { a } from '@cc/nowhere'\nexport const b = a")
     expect(msgs.map((m) => m.message).join()).toMatch(/not an alias/)
-  })
-
-  it.each([
-    ['packages/core/src/x.ts', '@cc/common'],
-    ['packages/core/src/x.ts', '@cc/protocol'],
-    ['packages/platform/src/web/x.ts', '@cc/common'],
-    ['packages/platform/src/web/x.ts', '@cc/platform/ports'],
-    ['packages/ui/src/x.tsx', '@cc/core'],
-    ['packages/ui/src/x.tsx', '@cc/platform/ports'],
-    ['packages/agent-host/src/x.ts', '@cc/common'],
-    ['apps/web/src/x.ts', '@cc/platform/web'],
-    // a test takes the mock platform (docs/platform-abstraction.md §6)
-    ['packages/ui/src/x.test.tsx', '@cc/platform/mock'],
-    // what lies in a folder named `apps` below a package is not the apps layer
-    ['packages/agent-host/src/adapters/x.ts', '../../apps/contract.js'],
-    ['packages/protocol/src/x.ts', './other.js'],
-    ['packages/protocol/src/x.ts', 'zod'],
-  ])('allows %s importing %s', async (filePath, from) => {
-    expect(await refused(filePath, from)).toBe(false)
   })
 })
