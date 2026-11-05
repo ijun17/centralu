@@ -181,6 +181,21 @@ describe('a project\'s default model follows the tool (#107)', () => {
     expect(mock.lastCreateParams?.effort).toBeUndefined()
   })
 
+  it("a full id the list names by an alias is kept, not dropped as unknown (#1989)", async () => {
+    const mock = new MockPlatform()
+    const proj = await withDefaults(mock, '/tmp/def-4', { claude: { model: 'claude-opus-5-5', effort: 'high' } })
+    const real = mock.agents.models.bind(mock.agents)
+    mock.agents.models = async (...a) => {
+      const r = await real(...a)
+      return { ...r, models: r.models.map((m) => (m.id === 'opus' ? { ...m, resolved: 'claude-opus-5-5' } : m)) }
+    }
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().createSession(proj.id, { tool: 'claude' })
+    expect(mock.lastCreateParams?.model).toBe('claude-opus-5-5')
+    expect(mock.lastCreateParams?.effort).toBe('high')
+  })
+
   it('a model still on the list is sent as is', async () => {
     const mock = new MockPlatform()
     const proj = await withDefaults(mock, '/tmp/def-3', { codex: { model: 'gpt-5.6-terra', effort: 'medium' } })

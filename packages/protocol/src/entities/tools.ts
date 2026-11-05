@@ -297,5 +297,19 @@ export const ModelOption = z.object({
    * verbatim: the wording that usage costs more is codex's own, and it is accurate.
    */
   tiers: z.array(z.object({ id: z.string(), name: z.string(), description: z.string() })).default([]),
+  /** The model's own id an alias entry (`opus`) names now (`claude-opus-5-5`), as the tool reports it; absent for a plain id */
+  resolved: z.string().optional(),
 })
 export type ModelOption = z.infer<typeof ModelOption>
+
+/**
+ * The list's entry a model id names: the entry with that id, else the one alias that names it (`ModelOption.resolved`). Claude's
+ * `default` row names the same model as the alias beside it, so it does not count; two other aliases naming one model leave the id as it is.
+ */
+export function listedModel(models: readonly ModelOption[], model: string | null | undefined): ModelOption | undefined {
+  if (!model) return undefined
+  const named = models.find((m) => m.id === model)
+  if (named) return named
+  const aliases = models.filter((m) => m.resolved === model && m.id !== 'default')
+  return aliases.length === 1 ? aliases[0] : undefined
+}

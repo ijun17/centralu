@@ -2219,6 +2219,13 @@ that the sentence above can be true (#74).
 (`AdapterCapabilities`, `ModelOption`) and discovered at runtime; `TOOL_META` holds only how
 to present it. Mixing the two is how a knob ends up having to be taught to the UI twice.
 
+**A model's id is stored as given (#1989).** A full id such as `claude-opus-5-5` is a pin: Claude's list names it by the alias
+`opus`, which may later name another model, so the host never rewrites one. The CLI's list says which model each alias names
+(`resolvedModel`, carried as `ModelOption.resolved`); the screen reads a stored id as the one entry that names it
+(`listedModel`, skipping `default`) and start_agent's check accepts it. Matching is exact, as the SDK defines `resolvedModel`: a 1M variant (`claude-opus-5[1m]`) and its base id are different
+models, so an id nothing names reads "not in list" (and says nothing when no row of the tool carries `resolved`, as from an
+older host).
+
 ### 3.1 Vendor-surface drift checks (run these before any SDK/CLI upgrade)
 
 Everything we know about a vendor's protocol was learned by measuring, and a vendor

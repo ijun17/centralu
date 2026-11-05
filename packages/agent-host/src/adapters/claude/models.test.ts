@@ -22,6 +22,11 @@ describe('readClaudeModels', () => {
     expect(out[0]!.efforts).toEqual([])
   })
 
+  it('carries the model an alias names (resolvedModel), so a stored full id can be matched to its entry', async () => {
+    const out = await readClaudeModels(q([{ value: 'opus', resolvedModel: 'claude-opus-5-5' }, { value: 'x' }]))
+    expect(out.map((m) => m.resolved)).toEqual(['claude-opus-5-5', undefined])
+  })
+
   it('uses the id as the label when there is no name', async () => {
     expect((await readClaudeModels(q([{ value: 'opus' }])))[0]!.label).toBe('opus')
   })

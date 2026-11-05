@@ -510,6 +510,59 @@ test('The model list comes from what the tool reports, and effort only appears f
   expect(settings.effort).toBe('xhigh')
 })
 
+/*
+ * A session that holds a model's full id (#1989): Claude's list names it by the alias, and the host says which model the alias
+ * resolved to (`resolved`). The menu shows the list's entry with its efforts, not a second entry for the raw id; an id the
+ * list does not hold says so and still offers the efforts.
+ */
+test('A model held by its full id shows as the list entry, and one not in the list says so and keeps its efforts', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  // Before the session opens: the menu reads the list when it mounts
+  await page.evaluate(() => {
+    const w = window as never as { __mock: any }
+    const real = w.__mock.agents.models.bind(w.__mock.agents)
+    w.__mock.agents.models = async (tool: string) => {
+      const r = await real(tool)
+      return { ...r, models: r.models.map((m: { id: string }) => (m.id === 'opus' ? { ...m, resolved: 'claude-opus-5-5' } : m)) }
+    }
+  })
+  await newSession(page, 'alpha', 'task')
+  const setModel = (model: string) =>
+    page.evaluate((m) => {
+      const s = (window as any).__store.getState()
+      return s.updateSessionSettings(s.focusedSessionId, { model: m })
+    }, model)
+  const menu = page.getByTestId('settings-menu')
+
+  await setModel('claude-opus-5-5')
+  await page.getByTestId('settings-open').click()
+  await expect(menu.getByTestId('settings-model-opus')).toHaveAttribute('aria-checked', 'true')
+  await expect(menu.getByTestId('settings-model-claude-opus-5-5')).toHaveCount(0)
+  await expect(menu.getByTestId('settings-effort-high')).toBeVisible()
+  await expect(page.getByTestId('settings-open')).toContainText('Opus')
+  // Picking the entry would set the alias, so the row names the pin
+  await expect(menu.getByTestId('settings-model-opus')).toHaveAttribute('title', 'Opus · pinned claude-opus-5-5')
+
+  await setModel('claude-nova-9')
+  const unlisted = menu.getByTestId('settings-model-claude-nova-9')
+  await expect(unlisted).toContainText('claude-nova-9 (not in list)')
+  await expect(unlisted).toHaveAttribute('title', "Claude Code's list of models does not hold this one")
+  await expect(unlisted).toHaveAttribute('aria-checked', 'true')
+  await expect(menu.getByTestId('settings-effort-high')).toBeVisible()
+})
+
+// A list that carries no `resolved` (an older host) cannot tell a model is missing from it, so the label says nothing
+test('A model the list cannot be said to lack reads as itself when no row of the list carries resolved', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.updateSessionSettings(s.focusedSessionId, { model: 'claude-nova-9' })
+  })
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-model-claude-nova-9')).toHaveText(/^✓claude-nova-9$/)
+})
+
 /**
  * Response speed (codex's service_tier — measured: gpt-5.4+ offers exactly one, "Fast, 1.5x
  * speed"). The group only appears for models that offer a tier, and switching to a model with no

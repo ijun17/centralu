@@ -1,5 +1,5 @@
 import { APP_ARRIVAL_ID_PREFIX, defaultPresetFor, isAppArrivalId, sessionPanelId, withPanel } from '@cc/core'
-import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol/client'
+import { errorMessage, listedModel, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol/client'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
@@ -105,7 +105,7 @@ async function usableDefaults(
   try {
     const { supported, models } = await platform.agents.models(tool, machine)
     if (!supported || models.length === 0) return saved
-    return models.some((m) => m.id === saved.model) ? saved : none
+    return listedModel(models, saved.model) ? saved : none
   } catch {
     return saved // Same reason as above — failing to ask is not the same as "does not exist"
   }

@@ -225,6 +225,14 @@ describe('starting another agent in the same project', () => {
       expect(calls.n).toBe(1)
     }, 20_000 * SLOW)
 
+    it("takes a model by the full id its list's alias names, and starts the child on that id (#1989)", async () => {
+      allowProject()
+      const s = await session()
+      withList(async () => [{ ...option('gpt-alias'), resolved: 'gpt-full-1' }, option('gpt-other')])
+      expect(await w.mgr.startAgent(s, { task: 'check it', tool: 'codex', model: 'gpt-full-1', wait: false })).toMatchObject({ ok: true })
+      expect(childrenOf(s)).toEqual([expect.objectContaining({ tool: 'codex', model: 'gpt-full-1' })])
+    })
+
     it('keeps a list that arrives after the bound, and checks the next call against it', async () => {
       allowProject()
       const s = await session()
