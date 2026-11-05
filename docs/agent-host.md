@@ -697,7 +697,7 @@ is made over the link (`agents.createSession` there) under the caller's preset c
 over a link, #838) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
 did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
-`startedFromHub`, and its row and header show its preset there and on the hub. It is made with the model, effort and worktree
+`startedFromHub`, and its header shows its preset there and on the hub (its sidebar row stopped showing it: `auto` is the default, so the tag was noise, owner 2026-11-05). It is made with the model, effort and worktree
 branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
@@ -3016,7 +3016,7 @@ asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {sto
 `CronDelete` names it, a `CronList` answer omits it, or it auto-expires after seven days (a one-shot job is kept as
 long, conservatively). The adapter looks again a second after the next one is due. A process adopted from a previous
 host reads them back from its conversation's last 400 messages (the transcript has no structured results, so a
-wake-up counts its asked delay from the adoption). The background mark's tooltip lists them and says the session stays
+wake-up counts its asked delay from the adoption). The tool mark's tooltip on the sidebar row lists them (its dot says that some run) and says the session stays
 awake until they end. A Codex session is never put to sleep, so its own scheduling needs nothing here.
 
 Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.

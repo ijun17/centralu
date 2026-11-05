@@ -389,7 +389,7 @@ test('Opening a PR shows a PR chip, and merging replaces it with the merged badg
       pr: { number: 12, state: 'open', url: 'https://github.com/x/y/pull/12' },
     })
   })
-  await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveText('PR #12')
+  await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveText('#12')
 
   // Once merged, the outcome is stated only once — the merged badge appears and the PR chip steps
   // aside

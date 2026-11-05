@@ -1,8 +1,7 @@
 import type { PermissionPreset } from '@cc/protocol/client'
 
 /**
- * The preset of a session a linked computer started (#1273: start_agent with a machine), on its sidebar row and its
- * header, on the computer it runs on and on the one that started it. An `auto` caller's child runs under `auto` there
+ * The preset of a session a linked computer started (#1273: start_agent with a machine), in its header (not on its sidebar row any more: owner, 2026-11-05), on the computer it runs on and on the one that started it. An `auto` caller's child runs under `auto` there
  * when that computer allows it, with no card, so the preset is said where the session is seen rather than only in its
  * settings row. Nothing for any other session: every row carries its preset in its settings, and a tag on each would be
  * noise. MachineTag's hairline chip, so it reads as one more fact about where and how it runs.
