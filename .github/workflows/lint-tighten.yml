@@ -11,11 +11,11 @@
 #   tighten  reads only: installs, runs `pnpm lint:tighten`, and hands the lists on as an artifact.
 #            Its checkout keeps no token.
 #   open     writes only: no install, no repository code run; it puts the lists on a fresh
-#            checkout of main and pushes them to one branch, `lint-tighten/weekly`, opening its pull
-#            request only when none is open (a week not yet landed is updated, not doubled).
-# A pull request a workflow opens with its own token runs no workflows itself, so whoever queues it
-# starts its CI (an empty commit, or `gh workflow run build.yml --ref lint-tighten/weekly`). Opening
-# it needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+#            checkout of main and pushes them to one branch, `lint-tighten/weekly` (a week not yet landed is
+#            updated, not doubled). It opens no pull request: the repository does not let GITHUB_TOKEN do that
+#            (#1983), and allowing it would widen the token. The job summary names the branch and the
+#            `gh pr create` line for a person to run.
+# A pull request opened by hand from that branch runs its CI as any other.
 name: lint tighten
 
 on:
@@ -69,9 +69,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write
     steps:
-      # Only git and gh run here: nothing installed, nothing from the repository executed
+      # Only git runs here: nothing installed, nothing from the repository executed
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Take the lowered lists
@@ -82,12 +81,11 @@ jobs:
           name: lint-allowlist
           path: tooling/lint-allowlist
 
-      - name: Push them, and open the pull request if none is open
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Push them, and say how to open the pull request
         run: |
           if [ -z "$(git status --porcelain -- tooling/lint-allowlist)" ]; then
-            echo "Every line holds what its file holds; nothing to push."
+            echo "::notice::Every line holds what its file holds; nothing pushed."
+            echo "Every line holds what its file holds; nothing pushed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           branch='lint-tighten/weekly'
@@ -97,15 +95,20 @@ jobs:
           git add -A -- tooling/lint-allowlist
           git commit -m 'chore(lint): lower the lint allowlists to what the files hold' -m 'Refs: #1339'
           git push --force origin "$branch"
-          open=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')
-          if [ -n "$open" ]; then
-            echo "Updated the open pull request #$open."
-            exit 0
-          fi
-          gh pr create --base main --head "$branch" \
-            --title 'chore(lint): lower the lint allowlists to what the files hold' \
-            --body "$(printf '%s\n' \
-              '## Why' '' 'The weekly lint tighten (.github/workflows/lint-tighten.yml, #1339): lines that listed more findings than their files hold, or files that are gone.' '' \
-              '## What changed' '' 'Only `tooling/lint-allowlist/*.txt`, lowered or removed; nothing raised or added. A later week updates this pull request while it is open.' '' \
-              '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Its CI does not start by itself (a workflow's own token): start it when queueing." '' \
-              '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the lint run above.' '' '## Closes' '' 'Refs #1339')"
+          title='chore(lint): lower the lint allowlists to what the files hold'
+          # The pull request template's sections; nothing here has a single quote, as the line below quotes it
+          body=$(printf '%s\n' \
+            '## Why' '' 'The weekly lint tighten (.github/workflows/lint-tighten.yml, #1339): lines that listed more findings than their files hold, or files that are gone.' '' \
+            '## What changed' '' 'Only tooling/lint-allowlist/*.txt, lowered or removed; nothing raised or added. A later week updates this pull request while it is open.' '' \
+            '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}." '' \
+            '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the lint run above.' '' '## Closes' '' 'Refs #1339')
+          {
+            echo "### Lowered lists pushed to \`$branch\`"
+            echo
+            echo "This workflow opens no pull request: the repository does not let it create one. If one is already open for this branch, the push updated it. Otherwise open it with this line:"
+            echo
+            echo '```sh'
+            echo "gh pr create --base main --head $branch --title '$title' --body '$body'"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Pushed $branch. If no pull request is open for it: gh pr create --base main --head $branch"
