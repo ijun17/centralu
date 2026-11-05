@@ -36,7 +36,7 @@ export function firstPaintTests() {
       // A light OS: the webview's own default would be white
       await page.emulateMedia({ colorScheme: 'light' })
       const shown = await beforeTheBundle(page, undefined)
-      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(15, 15, 15)', scheme: 'dark' })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(18, 14, 10)', scheme: 'dark' })
     })
 
     test('with a light theme cached, the page is the light floor before any stylesheet or module loads', async ({ page }) => {
@@ -55,7 +55,7 @@ export function firstPaintTests() {
     test('a System mode cached by an older build is the dark floor, whatever the OS is set to', async ({ page }) => {
       await page.emulateMedia({ colorScheme: 'light' })
       const shown = await beforeTheBundle(page, { ...LIGHT_CHOICE, mode: 'system' })
-      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(15, 15, 15)', scheme: 'dark' })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(18, 14, 10)', scheme: 'dark' })
     })
 
     test('once a theme is applied the stylesheet owns the colours again, so a switch is not held to the first side', async ({ page }) => {

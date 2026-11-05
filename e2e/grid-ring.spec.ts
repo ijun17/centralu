@@ -29,9 +29,9 @@ test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
 const WIDTHS = [1280, 1281, 1333, 1366, 1401, 1404, 1437, 1500]
 
 /**
- * The threshold for a lit side: the answering look's border is --color-ink-muted (168, #a8a8a8, in the dark preset
+ * The threshold for a lit side: the answering look's border is --color-ink-muted (172, #aca7a3, in the dark preset
  * when this was measured), read from the page so a palette change does not move the line (#845). A side where the
- * border vanished reads as only the floor (surface-floor 15) or the grey of a resting panel (line-strong 77); a side
+ * border vanished reads as only the floor (surface-floor 18) or the grey of a resting panel (line-strong 81); a side
  * dimmed to a half pixel sits in between (about 91). A lit side reads as the muted grey itself.
  */
 async function litThreshold(page: Page): Promise<number> {
