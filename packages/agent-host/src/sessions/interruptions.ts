@@ -1,5 +1,6 @@
 import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
+import type { StopWhy } from '../mail/messages.js'
 
 /**
  * Why a turn did not run to its end (#698), read from the event that ended it. Tool-neutral: both adapters hand the
@@ -94,6 +95,24 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
  * a session polling CI with 15–40 s sleeps looked frozen and was not (the issue's false alarm).
  */
 export const RECONNECTING_FLAG_MS = 5 * 60_000
+
+/**
+ * Why the turn this event ended did not finish, for the senders of the questions it left unanswered (docs/plans/turn-owned-by-no-one.md §4.1); null when
+ * it ended normally. `interruption` is the session's, after this event: the network is told from it
+ */
+export function stopOf(e: NormalizedEvent, interruption: Interruption | null | undefined): StopWhy | null {
+  switch (e.type) {
+    case 'error':
+      return interruption?.reason === 'network' ? 'network' : 'error'
+    case 'limit_reached':
+      return 'limit'
+    case 'state_change':
+      if (e.state !== 'waiting_input') return null
+      return e.reason === INTERRUPTED_BY_TOOL ? 'interrupted' : e.reason === 'interrupted' ? 'stopped' : null
+    default:
+      return null
+  }
+}
 
 /** One line for an orchestrator's list and agent_session (#698), in the words the model reads */
 export function interruptionWords(i: Interruption): string {

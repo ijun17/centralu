@@ -1571,7 +1571,7 @@ is unchanged. M5's real-surface check measures one, and the decision log (§10.8
 
 ### 10.6 What the sender is told (D25)
 
-When needsReply rows are released or settled `gone`, their senders are told, unless the sender is the person:
+When needsReply rows are released or settled `gone`, their senders are told, unless the sender is the person (a stop of a session tells the person in the Inbox too, #1948 P1):
 
 - one Centralu notice per sender lists every row of that sender released and not yet told (`released_at` set,
   `told_at` null; `MailboxRecords.releasedUntold(sender)`): `facts.unanswered = [{ id, recipient, why }]`, with `why`
@@ -1581,7 +1581,11 @@ When needsReply rows are released or settled `gone`, their senders are told, unl
 - it is posted by the 60 s sweep when the sender's follow-up budget allows (D24), else at the next moment it does; it
   wakes like any notice (quiet past `warmMs`), and it counts in the sender's guards.
 
-Its text is S3.
+Its text is S3. A session that stops without answering (an error, a usage limit, the network, its tool's interrupt, the person's Stop, a quit or
+shutdown, a cut turn Centralu could not continue) releases the questions delivered to it with `stopped`, `error`, `limit`, `network`,
+`interrupted`, `quit`, `shutdown` or `uncontinued` (`MessageService.sessionStopped`), and each sender is told at once in a sentence per
+session and cause (not S3's list), the notice waking only a sender at rest that waits on the session (quiet for a quit or shutdown)
+([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). Tasks are left to the report path.
 
 ### 10.7 The state table
 
@@ -1978,7 +1982,7 @@ export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
 export type MailKind = (typeof MAIL_KINDS)[number]
 export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
 export type Settled = (typeof SETTLED)[number]
-export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost'] as const
+export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost', 'limit', 'network', 'interrupted', 'quit', 'shutdown', 'uncontinued'] as const
 export type ReleaseWhy = (typeof RELEASE_WHY)[number]
 export const MailFacts = z.object({
   outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']).optional(),

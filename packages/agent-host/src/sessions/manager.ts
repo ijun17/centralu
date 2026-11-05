@@ -12,7 +12,7 @@ import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
-import type { HandedOverMessage } from '../mail/messages.js'
+import type { HandedOverMessage, StopWhy } from '../mail/messages.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -102,6 +102,8 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /** A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): the senders of the questions it left unanswered are told once. Quiet: wakes no one */
+  stopped?(sessionId: string, why: StopWhy, opts?: { quiet?: boolean; told?: readonly string[] }): void
   /**
    * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
@@ -150,7 +152,7 @@ import { crashedInSystemEnd, cutBySystemEnd, type SystemEnd } from '../lifecycle
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import type { Ended } from '../lifecycle/update-ended.js'
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
-import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
+import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE, wentWithItsProcess } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
 import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
@@ -349,6 +351,8 @@ export class SessionManager {
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
   private quitNotices: QuitNotice[] = []
+  /** The session each turn a quit cut will be told to by the older report path (`tellAskerOfInterruption`), read by the mailbox's stop notice so it does not tell the same session again */
+  private quitRequesters = new Map<string, string>()
   /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
   private quitPersonWork: string[] = []
   /**
@@ -640,7 +644,11 @@ export class SessionManager {
     for (const s of stoppedByQuit) {
       const requester = requesterOf(s)
       // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
-      if (requester) this.quitNotices.push({ sessionId: s.id, requester, turn: marks.has(s.id) ? undefined : cutTurns.get(s.id) })
+      if (requester) {
+        this.quitNotices.push({ sessionId: s.id, requester, turn: marks.has(s.id) ? undefined : cutTurns.get(s.id) })
+        // The person's own turn is told to nobody (#1377)
+        if (marks.has(s.id) || cutTurns.get(s.id)?.by !== 'person') this.quitRequesters.set(s.id, requester)
+      }
     }
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
     const cutIds = new Set(cutByUpdate.map((s) => s.id))
@@ -975,6 +983,23 @@ export class SessionManager {
     return this.children.oldOwes(ownerId, childId)
   }
 
+  /** The session the older report path tells of the quit that cut `sessionId`'s turn, found at this start: none when it was cut by the same quit, which waits for the person's Continue (`tellAskerOfInterruption`) */
+  quitTold(sessionId: string): string[] {
+    const requester = this.quitRequesters.get(sessionId)
+    return requester && !wentWithItsProcess(this.meta.get(requester)?.interruption) ? [requester] : []
+  }
+
+  /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
+  mailStopped(sessionId: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[] } = {}): void {
+    // A host that is leaving writes nothing: its sessions are cut by the leaving, and the next host continues them or finds them marked (§4.1)
+    if (this.disposing || this.handingOver) return
+    try {
+      this.mailHooks?.stopped?.(sessionId, why, opts)
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to the senders (${errorMessage(e)})`)
+    }
+  }
+
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
@@ -1183,6 +1208,12 @@ export class SessionManager {
     // Whose the turn was (#1377): the person's is reported to nobody
     // The process is gone with it (#1604): what it was given is run by no one
     const turnBy = this.children.turnEnded(m.id, null, true)
+    // Centralu cut this turn and could not continue it: the senders of the questions it left unanswered are told (§4.1), except one the older path below
+    // tells of the same stop: the owner of the report, else the session that gave the turn or started it (not for the person's own turn, #1377)
+    const owner = this.children.awaitingReport.get(m.id)
+    const asker = this.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? undefined
+    const told = turnBy?.by === 'person' ? [] : [owner ?? (asker && this.meta.has(asker) && !wentWithItsProcess(this.meta.get(asker)?.interruption) ? asker : undefined)]
+    this.mailStopped(m.id, 'uncontinued', { told: told.flatMap((id) => (id && id !== m.id ? [id] : [])) })
     if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
     else {
       void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId, turnBy)
@@ -2186,6 +2217,7 @@ export class SessionManager {
           console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
         }
       },
+      mailStopped: (id, why, told) => self.mailStopped(id, why, { told }),
       mailEvent: (e, ended) => {
         try {
           self.mailHooks?.sessionEvent?.(e, ended)
