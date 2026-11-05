@@ -801,7 +801,7 @@ export const AGENT_BUDGET_CHARS = 1400
  * its start, because the tool list a session starts with is its prompt prefix and does not change under it. Deferred on Claude,
  * behind tool search: the wake that delivers mail names the exact call (`mail(action="read", thread="…")`), so the model finds it
  * from there, and a session that opens a thread itself says so in words the instructions do not need. Codex loads every tool.
- * Every field but `action` is optional and unexplained: the answers say what a call lacks, and each word rides in every request.
+ * Every field but `action` and `to` is optional and unexplained: the answers say what a call lacks, and each word rides in every request.
  */
 export const MAIL_TOOLS = [
   {
@@ -810,7 +810,7 @@ export const MAIL_TOOLS = [
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close']),
       thread: z.string().optional(),
-      to: z.string().optional(),
+      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "orchestrator": the Centralu orchestrator, for what only it can decide; "person": the human; or a session id'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),
@@ -828,7 +828,7 @@ export const MAIL_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /** The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md */
-export const MAIL_BUDGET_CHARS = 910
+export const MAIL_BUDGET_CHARS = 1110
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
@@ -975,6 +975,7 @@ export const READER_BUDGET_CHARS = 1960
  * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the orchestrator, whose ceilings rise by 10 (1,960; 9,710).
  * #1447 (sessions asking the orchestrator): the mail tool's description names the address (`MAIL_BUDGET_CHARS` 800 → 820, measured 811, so the reader's sum rises by 20), and the orchestrator's instructions say a session's request is not the person's word and is answered in its thread (9,710 → 9,910; measured 9,906 with the commands tier).
  * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the orchestrator's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
+ * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `orchestrator` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   orchestrator: 10_030 + COMPACT_BUDGET_CHARS,

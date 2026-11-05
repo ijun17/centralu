@@ -5,7 +5,7 @@ import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import { taskLine } from './ask-project.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
-import { agentFrame, lowestPreset, presetWithin } from './start-agent.js'
+import { agentFrame, canMailParent, lowestPreset, presetWithin } from './start-agent.js'
 import type { AgentStartFlow, StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf } from './transcript-view.js'
 
@@ -148,7 +148,7 @@ export class DelegationForks {
       // The delegation counts the fork now
       place.release()
       try {
-        await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), text), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
+        await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), text, [], '', canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
       } catch (e) {
         d.wait.fail(e as Error)
         this.host.children.dropDelegation(key, d)

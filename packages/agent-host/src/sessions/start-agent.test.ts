@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
@@ -61,6 +61,25 @@ describe('the model a child starts on (#107, #729)', () => {
 describe('the frame a child gets (#729)', () => {
   it('asks it to wait for its own background work that ends inside its turn', () => {
     expect(agentFrame('parent', 'run the tests')).toContain('Wait for your own background work that ends (a test run, a build) inside your turn before you answer.')
+  })
+
+  // #1984: a child told to share checkpoints with "the parent" mailed the orchestrator; nothing it saw named the address
+  it('names the address that reaches the parent, in the task and in a later note, when the child can mail it', () => {
+    expect(agentFrame('parent', 'run the tests', [], '', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
+    expect(agentNoteFrame('parent', 'use Chromium', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
+    // A child on a linked machine, or one that cannot mail its parent, is not told to
+    expect(agentFrame('parent', 'run the tests')).not.toContain('call mail')
+    expect(agentNoteFrame('parent', 'use Chromium')).not.toContain('call mail')
+    // A child started from a linked computer is told mail does not reach its parent, not to mail it (#1987)
+    expect(remoteAgentFrame('parent', 'run the tests')).not.toContain('call mail')
+    expect(remoteAgentFrame('parent', 'run the tests').split('\n')[0]).toContain('Mail does not reach it from here yet: the answer is how it hears from you.')
+  })
+
+  it('can mail its parent only when that session started it and it is in a project (a fork of the orchestrator has no parent, an orchestrator child no mail tool)', () => {
+    expect(canMailParent({ askedBy: 'p', projectId: 'proj' }, 'p')).toBe(true)
+    expect(canMailParent({ askedBy: null, projectId: 'proj' }, 'p')).toBe(false)
+    expect(canMailParent({ askedBy: 'other', projectId: 'proj' }, 'p')).toBe(false)
+    expect(canMailParent({ askedBy: 'p', projectId: null }, 'p')).toBe(false)
   })
 
   it("keeps the parent's name on the frame's line: a name cannot add a line to it (#428)", () => {
@@ -995,6 +1014,9 @@ describe('starting another agent in the same project', () => {
     expect(settled).toBe(false)
     expect(h.sent[1]).toContain('gives you this task')
     expect(h.sent[1]).toContain('Your final message goes back to it as the answer')
+    // #1984: the started child is told how to reach the session that started it, in the task and in a later send
+    expect(h.sent[0]).toContain('call mail with `to: "parent"`')
+    expect(h.sent[1]).toContain('call mail with `to: "parent"`')
     expect(h.sent[1]).not.toContain('A note from the parent session')
     h.answer('new answer')
     expect(await next).toMatchObject({ ok: true, state: 'done', answer: 'new answer' })

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { AgentStartRequest, Delegation } from './child-ownership.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
-import { agentChoice, agentFrame, agentName, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
+import { agentChoice, agentFrame, agentName, canMailParent, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
@@ -507,7 +507,7 @@ export class AgentStartFlow {
     try {
       // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
       const instructions = project.id === ORCHESTRATOR_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
-      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
+      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions, canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
     } catch (e) {
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)

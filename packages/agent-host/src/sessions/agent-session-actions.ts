@@ -10,7 +10,7 @@ import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
 import type { RemoteAgents } from './remote-agents.js'
 import { agentState, ownAgents } from './own-agents.js'
-import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
+import { agentFrame, agentNoteFrame, canMailParent, presetWithin } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { raceBound } from '../timing.js'
@@ -240,7 +240,7 @@ export class AgentSessionActions {
             this.host.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
           }
           if ((d && !d.settled) || continuing) {
-            const text = agentNoteFrame(from.name, opts.text ?? '')
+            const text = agentNoteFrame(from.name, opts.text ?? '', canMailParent(child, callerId))
             if (!this.host.adapters.get(child.tool)?.capabilities.midTurnInput || !this.host.handles.get(child.id)?.sendTracked) {
               return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
             }
@@ -310,7 +310,7 @@ export class AgentSessionActions {
           const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
           const next = this.flow.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
           try {
-            await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
+            await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? '', [], '', canMailParent(child, callerId)), undefined, from, false)
           } catch (e) {
             // Its wait fails too (#839): a wait of the caller's joined it while the child woke
             next.wait.fail(e as Error)

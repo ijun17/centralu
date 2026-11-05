@@ -150,7 +150,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     caller: (id) => {
       const s = sessions.sessionInfo(id)
-      return s && { address: addressOf(id), askedBy: s.askedBy ?? null }
+      return s && { address: addressOf(id), askedBy: s.askedBy ?? null, ...(s.startedFromHub ? { fromHub: true } : {}) }
     },
     orchestratorId: () => sessions.orchestratorId(),
     mailArgs: () => 1,
