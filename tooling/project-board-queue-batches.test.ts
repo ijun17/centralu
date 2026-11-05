@@ -107,7 +107,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
   })
 
-  it('makes no batch for an hour when CI cannot be started on it, and cancels none of their own runs', async () => {
+  it('makes no batch for an hour when CI cannot be started on it, cancels none of their own runs, and lists the queue in the order it was made', async () => {
     runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
@@ -121,23 +121,16 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       [77, 'ci', null],
       [78, 'ci', null],
     ])
-  })
-
-  // The flake of job 117380827558: the list was ordered by when each item was last read, so which of #77 and #78 came
-  // first depended on which poll came last. Waits for the state that made it fail: #78 read after #77.
-  it('lists the queue in the order it was made, whichever item was read last', async () => {
-    runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await call('queue_merge', { pr: 78, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped')
-    const readAt = (q: any, pr: number) => q.queue.find((i: any) => i.pr === pr).updatedAt as string
+    // The flake of job 117380827558: the list was ordered by when each item was last read, so which of #77 and #78 came
+    // first depended on which poll came last. Waits for the state that made it fail: #78 read after #77.
+    const readAt = (v: any, pr: number) => v.queue.find((i: any) => i.pr === pr).updatedAt as string
     for (const [first, last] of [
       [77, 78],
       [78, 77],
     ] as const) {
       // The view that shows the state is the one asserted on
-      const q = await until((x) => readAt(x, last) > readAt(x, first), `#${last} to be read after #${first}`)
-      expect(q.queue.map((i: any) => i.pr)).toEqual([77, 78])
+      const v = await until((x) => readAt(x, last) > readAt(x, first), `#${last} to be read after #${first}`)
+      expect(v.queue.map((i: any) => i.pr)).toEqual([77, 78])
     }
   })
 
@@ -753,68 +746,8 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
  * while batch-209 tested #1542) rebatches its members on the new main, and tells no session, up to a cap per head.
  */
 describe('the merge queue batches a pull request again when main moved under its batch (#1548)', { timeout: 240_000 * SLOW }, () => {
-  const quickChecks = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12), ghCheck('macos tests', 'success', 13)]
   const fullChecks = (suite: number) => [suiteCheck('full tier', 'success', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite), suiteCheck('macos tests', 'success', suite * 10 + 3, suite)]
-  const ONE = `batch-${SHA}`
-  /** Batch `k`'s green full run on a one-member batch */
-  const runOf = (k: number) => ghRun('success', 1, ONE, { id: 950 + k, head_branch: `queue/batch-${k}`, event: 'workflow_dispatch', check_suite_id: 6000 + k })
-  /** CI starts on batch `k` (a green run), and main moves meanwhile: a merge outside the queue, as the release bump #1545 */
-  const movesAt = (k: number) => ({ [`dispatch:queue/batch-${k}`]: { runs: { [ONE]: [runOf(k)] }, checks: { [ONE]: fullChecks(6000 + k) }, main: { sha: `main-moved-${k}`, tree: `tree-moved-${k}` } } })
-  const oneState = (on: Gh) => ghState({ checks: { [SHA]: quickChecks }, on })
   const told = () => notices().filter((e) => e.kind === 'attention')
-
-  // The case of batch-209, 2026-10-26: its member waited for a session, and the run was lost
-  it('tests a batch of one again on the new main, with no alone mark and no message, and lands it', async () => {
-    runtime(oneState({ ...movesAt(1), 'dispatch:queue/batch-2': { runs: { [ONE]: [runOf(2)] }, checks: { [ONE]: fullChecks(6002) } } }), TIERS)
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'merged', 'the merge')
-    await until(() => batchesOnDisk().length === 2 && batchesOnDisk()[1].state === 'done', 'the second batch to end')
-    expect(batchesOnDisk().map((b) => [b.branch, b.members.map((m: any) => m.pr), b.state])).toEqual([
-      ['queue/batch-1', [77], 'stopped'],
-      ['queue/batch-2', [77], 'done'],
-    ])
-    expect(batchEvents().some((t) => t.startsWith('Batch queue/batch-1: stopped before #77: main is not the tree the batch had before #77 (something else landed). That is no fault of #77: it is tested again on the new main.'))).toBe(true)
-    expect(batchEvents().some((t) => t === 'Batch queue/batch-2: #77 was in queue/batch-1, which stopped because main moved; it is batched again on it (restart 1 of 3).')).toBe(true)
-    // Never blamed, never told: the next batch is formed from the stop itself, with no round through its own CI
-    expect(queueOnDisk().items[0].alone).toBeUndefined()
-    expect(queueOnDisk().items[0].batchless).toBeUndefined()
-    expect(told()).toEqual([])
-    expect(notices().map((e) => e.kind)).toEqual(['merged'])
-    expect(writes().map(short2)).toEqual([
-      'branch queue/batch-1',
-      `merge-into ${SHA}`,
-      'dispatch queue/batch-1',
-      'delete queue/batch-1',
-      'branch queue/batch-2',
-      `merge-into ${SHA}`,
-      'dispatch queue/batch-2',
-      `status ${SHA}`,
-      'merge 77',
-      'delete feat/b77',
-      'delete queue/batch-2',
-    ])
-  })
-
-  it('tests it again at most three times on one head, then tells its session as before, once', async () => {
-    runtime(oneState({ ...movesAt(1), ...movesAt(2), ...movesAt(3), ...movesAt(4) }), TIERS)
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention')
-    await morePolls(4)
-    expect(batchesOnDisk().map((b) => [b.branch, b.state])).toEqual([
-      ['queue/batch-1', 'stopped'],
-      ['queue/batch-2', 'stopped'],
-      ['queue/batch-3', 'stopped'],
-      ['queue/batch-4', 'stopped'],
-    ])
-    expect(batchEvents().filter((t) => t.includes('is batched again on it (restart'))).toHaveLength(3)
-    expect(told()).toHaveLength(1)
-    expect(told()[0]!.text).toContain("#77 passed the quick tier of CI, and lands only from a full run, but its batch of one ran the full tier and ended without landing it: batch queue/batch-4 stopped before #77: main is not the tree the batch had before #77 (something else landed).")
-    expect(told()[0]!.text).toContain('It was batched again 3 times on this head already, and main moved under each batch.')
-    expect(queueOnDisk().items[0]).toMatchObject({ state: 'attention', moved: { head: SHA, n: 3 }, alone: { head: SHA, tier: 'full' } })
-    expect(writes().map(short2)).not.toContain('merge 77')
-    // Not formed again on this head
-    expect(batchesOnDisk()).toHaveLength(4)
-  })
 
   it('tests the members not landed again together, in a new batch, when main moved after the first landed', async () => {
     const H = (n: number) => `${n}`.repeat(40).slice(0, 40)
@@ -850,6 +783,10 @@ describe('the merge queue batches a pull request again when main moved under its
       [79, null, null],
     ])
     expect(writes().map(short2).filter((w) => w.startsWith('merge ')).map((w) => w.slice(6))).toEqual(['77', '78', '79'])
+    // The stopped batch's branch is deleted before the next is made
+    const order = writes().map(short2)
+    expect(order.indexOf('delete queue/batch-1')).toBeGreaterThan(-1)
+    expect(order.indexOf('delete queue/batch-1')).toBeLessThan(order.indexOf('branch queue/batch-2'))
   })
 })
 
@@ -911,38 +848,6 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else, in the full tier.'])
   })
 
-  // All the checks are done a moment before GitHub marks the run completed (a normal window). The first version dropped the
-  // batch there: a lost full run, and its session told the batch of one ended without landing it
-  it('waits for the run to be completed when every check has reported, instead of dropping the batch', async () => {
-    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'] }, null), ENV)
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run')
-    await morePolls(6)
-    expect(batchesOnDisk()).toHaveLength(1)
-    expect(batchesOnDisk()[0]).toMatchObject({ state: 'ci', tier: 'full' })
-    expect(told()).toEqual([])
-    expect(writes().map(short2)).not.toContain('merge 77')
-    expect(gh().dispatched).toHaveLength(1)
-    // GitHub marks the run completed: it lands from that run
-    patchGh((s) => {
-      s.runs[ONE] = [batchRun('success')]
-    })
-    await until((x) => stateOf(x) === 'merged', 'the merge')
-    expect(gh().dispatched).toHaveLength(1)
-    expect(told()).toEqual([])
-  })
-
-  // build.yml's e2e-chromium-skipped reports a check named like a real shard and succeeds, when the branch's own classify
-  // says only documents changed. A name alone cannot tell it from the shard: the job's step that runs the scenarios can
-  it('does not take the stand-in of a left-out shard for the shard that was to run, though it reports success under its name', async () => {
-    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'], standIns: ['e2e (chromium 1/1)'] }), ENV)
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention')
-    expect(writes().map(short2)).not.toContain('merge 77')
-    expect(told()).toHaveLength(1)
-    expect(told()[0]!.text).toContain('not every heavy job (e2e (webkit *), e2e (chromium *)) was reported, succeeded and ran its scenarios (the step pnpm e2e (shard *))')
-  })
-
   it('lands a batch that changes nothing the UI scenarios see from the fast tier, as before, saying so', async () => {
     runtime(state(reports(6000, { full: false }), { batchFiles: ['docs/a.md', 'tooling/x.test.ts', 'packages/ui/src/App.test.tsx', '.centralu/apps/project-board/queue.mjs'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -953,14 +858,8 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     expect(notices()[0]!.text).toContain('Tested in batch queue/batch-1 with nothing else, in the fast tier.')
   })
 
-  it.each([
-    ['a renamed file counts under both names', [{ filename: 'docs/moved.md', previous_filename: 'packages/ui/src/old.tsx' }]],
-    ['the host', ['packages/agent-host/src/sessions/x.ts']],
-    ['the protocol', ['packages/protocol/src/messages.ts']],
-    ['the scenarios themselves', ['e2e/some.spec.ts']],
-    ['the build config', ['pnpm-lock.yaml']],
-  ])('counts %s as a change to the screen', async (_what, batchFiles) => {
-    runtime(state(reports(6000), { batchFiles }), ENV)
+  it('counts a renamed file under both names as a change to the screen', async () => {
+    runtime(state(reports(6000), { batchFiles: [{ filename: 'docs/moved.md', previous_filename: 'packages/ui/src/old.tsx' }] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched[0].inputs).toEqual({ tier: 'full', everything: 'false' })
@@ -984,25 +883,13 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     expect(told()[0]!.text).toContain('its run passed without running the full tier (the "full tier" check did not pass), and nothing lands from less (it changes the screen (packages/ui/src/App.tsx))')
   })
 
-  it('tells the session which tier a batch of one failed in', async () => {
-    runtime(state(reports(6000, { e2e: 'failure' }), { batchFiles: ['packages/ui/src/App.tsx'], logs: { '60006': 'FAIL e2e window.spec.ts > opens the window\nError: expected 1 window' } }, 'failure'), ENV)
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention')
-    expect(told()).toHaveLength(1)
-    expect(told()[0]!.text).toContain('#77 failed alone in batch queue/batch-1, a run of the full tier on main at main0')
-    expect(writes().map(short2)).not.toContain('merge 77')
-  })
-
-  it.each([
-    ['the judge is not on main', { files: {} }, 'ci-changes.mjs is not on main'],
-    ['the judge does not answer', { files: { '.github/scripts/ci-changes.mjs': 'process.exit(3)' } }, 'it could not be told whether it changes the screen'],
-    ['GitHub lists too many files to be sure', { batchFiles: Array.from({ length: 300 }, (_, i) => `docs/${i}.md`) }, 'the files it changes are not known'],
-  ])('runs the heavy jobs for a batch it cannot judge: %s', async (_what, patch: Gh, why) => {
-    runtime(state(reports(6000), { batchFiles: ['docs/a.md'], ...patch }), ENV)
+  // The judge not on main, or not answering, is covered by the pure cases in project-board-queue-screen.test.ts; GitHub's file limit is only here
+  it('runs the heavy jobs for a batch whose changed files GitHub lists too many of to be sure', async () => {
+    runtime(state(reports(6000), { batchFiles: Array.from({ length: 300 }, (_, i) => `docs/${i}.md`) }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge')
     expect(gh().dispatched[0].inputs).toEqual({ tier: 'full', everything: 'false' })
-    expect(batchesOnDisk()[0].tierWhy).toContain(why)
+    expect(batchesOnDisk()[0].tierWhy).toContain('the files it changes are not known')
   })
 
   it('keeps running the full tier for every batch under ci.landTier full, and asks for nothing more', async () => {

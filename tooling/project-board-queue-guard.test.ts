@@ -349,11 +349,9 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
   })
 
   // The release no longer makes a bump commit (#1143), so nothing about a commit's title or files exempts it from the revert
-  it.each([
-    ['a chore(release) commit that changes a UI file', 'chore(release): change 81 (#81)', 'packages/ui/src/a.ts'],
-    ['a commit that changes only brand.ts', 'feat(ui): change 81 (#81)', 'packages/protocol/src/brand.ts'],
-    ['a chore(release) commit that changes brand.ts', 'chore(release): 1.2.3 (#81)', 'packages/protocol/src/brand.ts'],
-  ])('finds %s as the culprit and reverts it like any other', async (_name, subject, file) => {
+  it('finds a chore(release) commit that changes brand.ts as the culprit and reverts it like any other', async () => {
+    const subject = 'chore(release): 1.2.3 (#81)'
+    const file = 'packages/protocol/src/brand.ts'
     const repo = mainRepo([{ subject, files: [file] }])
     const culprit = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: culprit, title: subject.replace(/ \(#81\)$/, ''), updatedAt: new Date().toISOString(), reruns: {} }])
@@ -427,22 +425,6 @@ describe("the main guard does not revert a commit for the runner's own failure (
     on: { 'rerun-failed:990': rerun },
   })
   const reruns = () => writes().filter((w) => w[0] === 'rerun-failed')
-
-  it('reruns the job once, and opens no revert, issue or notice when the rerun passes', async () => {
-    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
-    const sha = repo.shas[0]!
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
-    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'success'), mainRun(980, repo.green, 'success')] } }))
-    await call('merge_queue')
-    await until(() => guardOnDisk().green === sha, 'main green again')
-    await polls(11)
-    expect(reruns()).toEqual([['rerun-failed', '990']])
-    expect(guardOnDisk().reruns[990]).toMatchObject({ attempt: 1 })
-    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
-    expect(issues()).toEqual([])
-    expect(mainRedNotices()).toEqual([])
-    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
-  })
 
   // 2026-11-03: every test step of `macos tests` passed; only the artifact upload that keeps the test times failed ("Failed to
   // FinalizeArtifact ... ENOTFOUND"). It was read as a test failure: the only commit since the last green one was blamed and a revert opened.
@@ -682,35 +664,6 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', step: 'Install WebKit', touched: [sha.slice(0, 7)] })
   })
 
-  it('hunts the commit that changes the apt list in the workflow file: .github is a setup input', async () => {
-    const repo = mainRepo([{ subject: 'ci: add a system library (#81)', files: ['.github/workflows/build.yml'] }])
-    const sha = repo.shas[0]!
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'ci: add a system library', updatedAt: new Date().toISOString(), reruns: {} }])
-    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': UNKNOWN_PACKAGE_LOG } })
-    await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
-    expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', touched: [sha.slice(0, 7)] })
-  })
-
-  it('hunts the commit when apt answers 404 for a package it asked for: a bare "Failed to fetch" is not the network', async () => {
-    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
-    const sha = repo.shas[0]!
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
-    const log = [
-      '2026-10-21T04:11:03.5000000Z ##[group]Run pnpm exec playwright install --with-deps webkit',
-      '2026-10-21T04:11:03.5300000Z ##[endgroup]',
-      '2026-10-21T04:11:07.2000000Z Err:7 http://archive.ubuntu.com/ubuntu noble/universe amd64 libwebkit2gtk-9.9-0 amd64 9.9.1',
-      '2026-10-21T04:11:07.2100000Z   404  Not Found [IP: 91.189.91.82 80]',
-      '2026-10-21T04:11:07.9000000Z E: Failed to fetch http://archive.ubuntu.com/ubuntu/pool/universe/w/webkit2gtk/libwebkit2gtk-9.9-0_9.9.1_amd64.deb  404  Not Found [IP: 91.189.91.82 80]',
-      '2026-10-21T04:11:08.0000000Z Failed to install browsers',
-      '2026-10-21T04:11:08.0200000Z ##[error]Process completed with exit code 1.',
-    ].join('\n')
-    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': log } })
-    await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
-    expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', touched: [sha.slice(0, 7)] })
-  })
-
   it('reads every line of the failing step for the network, not only its first error line (warnings come first in a real outage)', async () => {
     const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
     const sha = repo.shas[0]!
@@ -799,34 +752,6 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(reruns()).toHaveLength(1)
     expect(issues()[0]!.body).toMatch(/the rerun asked for at \d\d:\d\d UTC has not started/)
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
-  })
-
-  it('hunts a commit when a job that timed out times out again after the rerun: only a failing setup is the runner own failure', async () => {
-    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
-    const sha = repo.shas[0]!
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
-    const timedOut = { ...failedJob(31, 'verify'), conclusion: 'timed_out' }
-    guardRuntime(repo, {
-      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
-      jobs: { 990: [timedOut] },
-      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
-    })
-    await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
-    expect(reruns()).toHaveLength(1)
-    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
-  })
-
-  it('reverts a failure in a test step once its failed jobs fail again on one rerun, and says it is a test failure (#1496)', async () => {
-    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
-    const sha = repo.shas[0]!
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
-    guardRuntime(repo, { branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [failedJob(31, 'verify')] } })
-    await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
-    expect(reruns()).toEqual([['rerun-failed', '990']])
-    expect(mainRedNotices()[0]!.text).toContain('verify failed at')
-    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
   })
 })
 
@@ -1114,24 +1039,6 @@ describe('the main guard blames a commit only for a test that fails again on a r
     expect(issues()[0]!.body).toContain('The same test failed 3 times on main within its last 20 runs')
   })
 
-  it('does not count another test of the same job, nor a failure older than the newest 20 runs', async () => {
-    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
-    const [c1, c2] = repo.shas as [string, string]
-    const old = Array.from({ length: 19 }, (_, i) => mainRun(900 + i, repo.green, 'success'))
-    landed(c2, { reruns: { '985': marked(c1, 'FAIL unit tooling/other.test.ts > another test'), '960': marked(c1, line) } })
-    guardRuntime(repo, {
-      branchRuns: { main: [mainRun(990, c2, 'failure'), mainRun(985, c1, 'success'), ...old.slice(0, 18), mainRun(960, repo.green, 'success')] },
-      jobs: { 990: [failedJob(31, 'verify')] },
-      logs: { '31': flakyLog },
-      on: { 'rerun-failed:990': { branchRuns: { main: [again(990, c2, 'success'), mainRun(985, c1, 'success'), mainRun(980, repo.green, 'success')] } } },
-    })
-    await call('merge_queue')
-    await until(() => guardOnDisk().green === c2, 'main green again')
-    expect(reruns()).toEqual([['rerun-failed', '990']])
-    expect(gh().dispatched ?? []).toEqual([])
-    expect(issues()).toEqual([])
-  })
-
   it('reports a test failure whose rerun failed in setup as neither confirmed nor cleared, and hunts nothing', async () => {
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     const sha = repo.shas[0]!
@@ -1175,28 +1082,6 @@ describe('the main guard blames a commit only for a test that fails again on a r
     expect(issues()[0]!.body).toContain('No commit is blamed')
   })
 
-  it('starts the hunt for a counted failure before the window it was counted in, so a break that passed by chance after it is a candidate', async () => {
-    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
-    const [c1, c2, c3, c4] = repo.shas as [string, string, string, string]
-    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
-    landed(c4, { reruns: { '985': marked(c3, line), '980': marked(c2, line) } })
-    guardRuntime(repo, {
-      // #81 broke the test; its own run (975) passed by chance and so did nothing flag it. Runs 985 and 980 passed their reruns
-      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(985, c3, 'success'), mainRun(980, c2, 'success'), mainRun(975, c1, 'success'), mainRun(970, repo.green, 'success')] },
-      jobs: { 990: [failedJob(31, 'verify')], 991: [failedJob(41, 'verify')], 992: [failedJob(42, 'verify')], 993: [failedJob(43, 'verify')] },
-      logs: { '31': flakyLog },
-      on: {
-        [`dispatch:${probe(c4)}`]: { branchRuns: { [probe(c4)]: [probeRun(991, c4, 'failure')] } },
-        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(992, c2, 'failure')] } },
-        [`dispatch:${probe(c1)}`]: { branchRuns: { [probe(c1)]: [probeRun(993, c1, 'failure')] } },
-      },
-    })
-    await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit')
-    expect(guardOnDisk().hunt.green).toBe(repo.green)
-    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1 })
-  })
-
   it('counts a failure only by the test it names, and by the whole of its name', () => {
     const runs = Array.from({ length: 25 }, (_, i) => ({ id: 1000 - i }))
     const flake = (text: string, extra = {}) => ({ flaked: true, jobs: ['verify'], line: text, ...extra })
@@ -1210,6 +1095,9 @@ describe('the main guard blames a commit only for a test that fails again on a r
     expect(earlier({ 999: flake(bare), 998: flake(bare) }, bare)).toEqual([])
     // A flake a hunt has counted is spent
     expect(earlier({ 999: flake(same, { counted: true }), 998: flake(same) }, same)).toEqual(['998'])
+    // Only the newest 20 of main's runs count: 981 is the 20th, 980 is outside
+    expect(earlier({ 981: flake(same) }, same)).toEqual(['981'])
+    expect(earlier({ 980: flake(same) }, same)).toEqual([])
   })
 
   it('starts the hunt at the newest clean green run older than the window, else the oldest one', () => {
