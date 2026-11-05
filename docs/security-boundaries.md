@@ -2185,8 +2185,9 @@ then who may call it:
   `busy` (#1236): an app says it is busy with background work, or no longer, without a run id. It
   asks for nothing outside the app: it only keeps the app's own process from the idle rule, and only
   when the manifest declares `uses.background` (in `uses`, so an imported app adding it is reviewed
-  again and the trust card lists it). The hold is the app's row ("Running: <reason>"), it ends with
-  the process, and the person stops it from its sidebar row, its row in Settings or its view
+  again and the trust card lists it). The hold shows on the app's sidebar row as its Stop icon button,
+  whose tooltip and label carry the reason ("Running: <reason>. Stop it; …"; the row writes no busy
+  text, #1928). It ends with the process, and the person stops it from that button, its row in Settings or its view
   (`app-lifecycle.ts` `setBusy`; `busy.test.ts`, `e2e/apps.spec.ts`). A host that starts again
   starts the apps that held busy when the last one stopped (`app-busy.json`), but only one still
   allowed to run (trusted, enabled, not failed) and still declaring `uses.background`; the person's
