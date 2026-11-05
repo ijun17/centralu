@@ -227,6 +227,26 @@ describe('themes reach every token', () => {
 })
 
 /**
+ * Dark's four terminal greys are warm, and High contrast dark sets no ANSI colours of its own, so it
+ * would inherit them. It sets those four itself to xterm's neutral values, which keeps the preset
+ * the way it was when Dark turned warm (#1995).
+ */
+describe('High contrast dark keeps the neutral terminal greys', () => {
+  it('sets term-black, term-white, term-bright-black and term-bright-white in its own block', () => {
+    const css = readFileSync(join(ROOT, 'packages/ui/src/styles/index.css'), 'utf8')
+    const start = css.indexOf("[data-theme='hc-dark'] {")
+    const block = css.slice(start, css.indexOf('\n}\n', start))
+    const value = (name: string) => block.match(new RegExp(`--color-${name}:\\s*([^;]+);`))?.[1]
+    expect({
+      black: value('term-black'),
+      white: value('term-white'),
+      brightBlack: value('term-bright-black'),
+      brightWhite: value('term-bright-white'),
+    }).toEqual({ black: '#2e3436', white: '#d3d7cf', brightBlack: '#555753', brightWhite: '#eeeeec' })
+  })
+})
+
+/**
  * The font and line-height settings (#312 step 5) write their values on top of the stylesheet's,
  * so app/typography.ts keeps copies: the stacks a picked font goes in front of, and the Normal line
  * heights the factors multiply. A copy that drifted would change the default screen the moment a
