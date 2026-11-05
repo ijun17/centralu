@@ -1350,8 +1350,13 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   the agent runs inherit `BROWSER`, so any other address they hand it is dropped and logged without the address, never
   opened and never taken for a sign-in: nothing is opened that the person did not ask for (§4.4). Where the data
   folder's path cannot be put in `BROWSER` (it holds `;` on Windows, `:` elsewhere, or `%s`), the helper's private
-  folder is made in the OS's temporary folder instead (0700, per user on Windows and macOS); where no helper can be
-  written even so, the agent is not started, and the error names the path and the character. Lines of
+  folder is made in a folder of the person's own instead, built from the home folder alone
+  (`~\AppData\Local\centralu-antigravity`, `~/Library/Caches/centralu-antigravity`, `~/.cache/centralu-antigravity`;
+  no variable such as `TEMP`, `LOCALAPPDATA` or `XDG_CACHE_HOME`, which may name a shared folder): per user by the OS's
+  defaults (on Windows its ACL is the profile's; elsewhere the folder is 0700), not a folder a cleaner empties by age,
+  and every path given to `BROWSER` is absolute. A host that crashes leaves its helper folder there until the next
+  helper is made there (it holds no token). Where no helper can be written even so, the
+  agent is not started, and the error names the path and the character. Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
 - **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
   rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.

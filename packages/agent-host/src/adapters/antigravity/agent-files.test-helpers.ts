@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -67,6 +67,9 @@ export const inRoot = (home: AgyHome, name: string) => join(home.root, name)
 export const folder = (path: string) => mkdirSync(path, { recursive: true })
 export const write = (path: string, text: string) => writeFileSync(path, text)
 export const pathIn = (...parts: string[]) => join(...parts)
+/** `path` relative to this process's folder, and whether a path is absolute here */
+export const relativeTo = (path: string) => relative(process.cwd(), path)
+export const isAbsolutePath = (path: string) => isAbsolute(path)
 
 const hosts: (() => Promise<void>)[] = []
 

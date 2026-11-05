@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import type { AgentSpawnSpec } from '../contract.js'
-import { agyHome, browserFolder, windowsBrowserCommand } from './agent-files.js'
+import { agyHome, browserFolder, spareFolder, windowsBrowserCommand } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
 import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
-import { driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, leftovers, pathIn, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
+import { driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, isAbsolutePath, leftovers, pathIn, relativeTo, runBrowser, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
 
 /**
  * The agent's browser (review of #1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
@@ -267,9 +267,9 @@ describe('a stored sign-in that stopped working, in a session', () => {
 
 /**
  * A path holding the separator the agent's launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in
- * it (#1688). A data folder with one has the helper made in the temporary folder instead; only where that cannot be either
- * (or, on Windows, Node's own path has one) is there no helper, and then the agent's launcher would start the browser itself,
- * inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started,
+ * it (#1688). A data folder with one has the helper made in the person's own folder instead (`spareFolder`); only where
+ * that cannot be either (or, on Windows, Node's own path has one) is there no helper, and then the agent's launcher would
+ * start the browser itself, inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started,
  * naming the path and the character, and not offered as worth retrying
  */
 describe('a path BROWSER cannot carry', () => {
@@ -291,12 +291,12 @@ describe('a path BROWSER cannot carry', () => {
     return { dataDir, spare, home, archive, spawned, spawn }
   }
 
-  it('a data folder holding ; on Windows has the helper in the temporary folder, which works and is removed after', async () => {
+  it("a data folder holding ; on Windows has the helper in the person's own folder, which works and is removed after", async () => {
     const n = badData('data;x')
     const folder = await browserFolder(n.home, 'win32', { spare: n.spare })
     expect(folder.why).toBe('')
     expect(folder.browser).not.toContain(';')
-    expect(folder.browser).toContain(pathIn(n.spare, 'centralu-agy-'))
+    expect(folder.browser).toContain(pathIn(n.spare, '.sign-in-'))
     const got = handedOver(folder)
     expect(await runBrowser(folder.browser, ADDRESS)).toBe(0)
     expect(await got).toBe(ADDRESS)
@@ -305,28 +305,54 @@ describe('a path BROWSER cannot carry', () => {
     expect(leftovers(n.home, '.sign-in-')).toEqual([])
   })
 
-  it('a data folder holding %s has the helper in the temporary folder, on this OS too', async () => {
+  it("a data folder holding %s has the helper in the person's own folder, on this OS too", async () => {
     const n = badData('data%sx', HOST_TEST_ARCHIVE)
     const folder = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: n.spare })
     expect(folder.browser).not.toContain('data%sx')
-    expect(folder.browser).toContain(pathIn(n.spare, 'centralu-agy-'))
+    expect(folder.browser).toContain(pathIn(n.spare, '.sign-in-'))
     expect(leftovers(n.home, '.sign-in-')).toEqual([])
     await folder.remove()
     expect(inFolder(n.spare)).toEqual([])
   })
 
-  it('a session in a data folder holding ; starts, with the helper in the temporary folder', async () => {
+  it('a folder to fall back on that cannot be written leaves no helper, and says so in plain words', async () => {
+    const n = badData('data;x')
+    write(pathIn(n.spare, 'a-file'), '')
+    const spare = pathIn(n.spare, 'a-file', 'below')
+    const folder = await browserFolder(n.home, 'win32', { spare })
+    expect(folder.browser).toBe('')
+    expect(folder.why).toContain(n.home.root)
+    expect(folder.why).toContain(spare)
+    expect(folder.why).toMatch(/could not be written to/)
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+  })
+
+  it('a relative data folder still gives an absolute helper path (the agent runs in the session folder)', async () => {
+    const t = temp()
+    const home = agyHome(relativeTo(t.dir), AGY_RELEASE.version)
+    const folder = await browserFolder(home, 'win32')
+    expect(isAbsolutePath(folder.browser.split("' '")[1] ?? '')).toBe(true)
+    await folder.remove()
+  })
+
+  it("the folder to fall back on is the person's own on each OS, from the home folder alone, never a temporary one", () => {
+    expect(spareFolder('win32', String.raw`C:\Users\o`)).toBe(String.raw`C:\Users\o\AppData\Local\centralu-antigravity`)
+    expect(spareFolder('darwin', '/Users/o')).toBe('/Users/o/Library/Caches/centralu-antigravity')
+    expect(spareFolder('linux', '/home/o')).toBe('/home/o/.cache/centralu-antigravity')
+  })
+
+  it("a session in a data folder holding ; starts, with the helper in the person's own folder", async () => {
     const n = badData('data;x')
     const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { spare: n.spare } }), n.spawn)
     const handle = await adapter.createSession(sessionOpts('agy-spare'), driven().emit)
     expect(n.spawned).toHaveLength(1)
-    expect(n.spawned[0]?.env?.BROWSER).toContain(pathIn(n.spare, 'centralu-agy-'))
+    expect(n.spawned[0]?.env?.BROWSER).toContain(pathIn(n.spare, '.sign-in-'))
     await handle.dispose()
   })
 
   it('a session is refused, not worth retrying, before the agent starts, naming the path and the character', async () => {
     const n = badData('data')
-    const node = 'C:\tools;old\node.exe'
+    const node = String.raw`C:\tools;old\node.exe`
     const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { node, spare: n.spare } }), n.spawn)
     const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
       () => null,
@@ -353,7 +379,8 @@ describe('a path BROWSER cannot carry', () => {
     const message = (err as InstallFailure).message
     expect(message).toContain(n.home.root)
     expect(message).toContain(spare)
-    expect(message).toContain('";" or "%s"')
+    expect(message).toContain('";"')
+    expect(message).toContain('"%s"')
     expect(n.spawned).toEqual([])
     expect(opened).toEqual([])
     expect(leftovers(n.home, '.sign-in-')).toEqual([])

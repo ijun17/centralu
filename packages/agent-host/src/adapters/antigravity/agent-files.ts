@@ -2,8 +2,8 @@ import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
@@ -36,7 +36,8 @@ import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from '.
  *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
  *                            removed when that process's sign-in or session ends)
  *
- * Where the data folder's path cannot be put in `BROWSER`, a helper's folder is `<os temp>/centralu-agy-<owner>-<random>/`
+ * Where the data folder's path cannot be put in `BROWSER`, a helper's folder is `.sign-in-<owner>-<random>/` in the person's
+ * own folder instead (`spareFolder`)
  *
  * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
@@ -474,12 +475,23 @@ export type BrowserFolder = {
 export type HelperPlaces = {
   /** The Node that runs the Windows helper (`process.execPath`) */
   node?: string
-  /** The second place for the folder, when the data folder's path cannot be given to `BROWSER` (`os.tmpdir()`) */
+  /** The folder a helper's folder goes in when the data folder's path cannot be given to `BROWSER` (`spareFolder`) */
   spare?: string
 }
 
-/** The prefix of a helper's folder in the spare place, which other programs share */
-const SPARE_PREFIX = 'centralu-agy-'
+/**
+ * The person's own folder for a helper's folder when the data folder's path cannot be given to `BROWSER` (#1688): per
+ * user by the OS's defaults and never emptied by age, as a temporary folder is (a cleaner removing a live helper would
+ * send the agent's launcher on to the real browser), and never a folder other users share (`/tmp`, or a TEMP set to
+ * `C:\Temp`, whose ACL a new file would inherit). Built from the home folder alone: `LOCALAPPDATA` and `XDG_CACHE_HOME`
+ * may name a shared folder too. Its name is neither the Windows installer's folder (`%LOCALAPPDATA%\Centralu`) nor the
+ * app's own (`app.centralu`), which an update or uninstall would touch
+ */
+export function spareFolder(platform: Platform = HOST_PLATFORM, home: string = homedir()): string {
+  const p = pathsOf(platform)
+  const own = platform === 'win32' ? p.join(home, 'AppData', 'Local') : platform === 'darwin' ? p.join(home, 'Library', 'Caches') : p.join(home, '.cache')
+  return p.join(own, 'centralu-antigravity')
+}
 
 /**
  * A folder only this user can read (0700) beside the install, for one Antigravity process's browser: the `BROWSER` helper,
@@ -494,29 +506,35 @@ const SPARE_PREFIX = 'centralu-agy-'
  *   helper exits 0, so the launcher does not fall back to the default browser
  *
  * A path holding the separator the launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in it
- * (#1688). Where the data folder's path holds one, the folder is made in the OS's temporary folder instead (`spare`:
- * per user on Windows and macOS; on Linux a `0700` folder in `/tmp`, as `mkdtemp` makes it), so only a temporary folder
- * with one too, or on Windows a Node path with one, leaves no helper. Each path is judged as made, the one that is used
+ * (#1688). Where the data folder's path holds one, the folder is made in the person's own folder instead (`spareFolder`),
+ * so only that path holding one too (or it cannot be written), or on Windows a Node path with one, leaves no helper.
+ * Each path is judged as made and absolute (the agent runs in the session's folder, so a relative path would name
+ * another file there), and that string is the one used
  */
 export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, places: HelperPlaces = {}): Promise<BrowserFolder> {
   const node = places.node ?? process.execPath
   const sep = platform === 'win32' ? ';' : ':'
-  const nodeBad = platform === 'win32' ? unusableIn(node, sep) : null
-  if (nodeBad) return noHelper(`the Node program Centralu runs on is at ${node}, and Antigravity cannot be given a path with ${quoted(nodeBad)} in it. Install Centralu (or that Node) in a folder whose path has no ${quoted(nodeBad)}.`)
+  const nodeBad = platform === 'win32' ? unusableIn(node, sep) : ''
+  if (nodeBad) return noHelper(`the Node program Centralu runs on is at ${node}, and Antigravity cannot be given a path with ${nodeBad} in it. Install Centralu (or that Node) in a folder whose path has none.`)
   await mkdir(home.root, { recursive: true })
   await removeStale(home.root, '.sign-in-')
-  let dir = await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`))
+  let dir = resolve(await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`)))
   const dataBad = unusableIn(dir, sep)
   if (dataBad) {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
-    const spare = places.spare ?? tmpdir()
-    const spareBad = unusableIn(join(spare, `${SPARE_PREFIX}x`), sep)
-    if (spareBad) {
-      const chars = [...new Set([dataBad, spareBad])].map(quoted).join(' or ')
-      return noHelper(`Centralu's data folder is at ${home.root} and the temporary folder at ${spare}, and Antigravity cannot be given a path with ${chars} in it. Move the data folder to a path without ${chars}.`)
+    const spare = resolve(places.spare ?? spareFolder(platform))
+    const data = `Centralu's data folder is at ${home.root}, and Antigravity cannot be given a path with ${dataBad} in it`
+    const move = 'Move the data folder to a path without them.'
+    const spareBad = unusableIn(join(spare, '.sign-in-x'), sep)
+    if (spareBad) return noHelper(`${data}; nor ${spareBad} in ${spare}, the folder Centralu tries instead. ${move}`)
+    try {
+      await mkdir(spare, { recursive: true })
+      await removeStale(spare, '.sign-in-')
+      dir = resolve(await mkdtemp(join(spare, `.sign-in-${ownerTag()}-`)))
+    } catch (err) {
+      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${typeof code === 'string' ? ` (${code})` : ''}. ${move}`)
     }
-    await removeStale(spare, SPARE_PREFIX)
-    dir = await mkdtemp(join(spare, `${SPARE_PREFIX}${ownerTag()}-`))
   }
   await chmod(dir, 0o700).catch(() => {})
   let browser: string
@@ -534,7 +552,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   }
   if (browser === '') {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
-    return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${quoted(sep)} or "%s").`)
+    return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${unusableIn(dir, sep)}).`)
   }
   let watcher: FSWatcher | null = null
   const taken = new Set<string>()
@@ -603,12 +621,17 @@ export function windowsBrowserCommand(node: string, script: string): string {
 /** In single quotes, as both `sh` and `shlex` read them: nothing is escaped inside, and a `'` is closed, escaped and reopened */
 const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
-const usableBrowser = (path: string, listSep: string) => unusableIn(path, listSep) === null
+const usableBrowser = (path: string, listSep: string) => unusableIn(path, listSep) === ''
 
-/** What in `path` cannot be in `BROWSER`: the separator its launcher splits it at, or `%s` (where it puts the address) */
-const unusableIn = (path: string, listSep: string): string | null => (path.includes(listSep) ? listSep : path.includes('%s') ? '%s' : null)
-
-const quoted = (c: string) => `"${c}"`
+/**
+ * What in `path` cannot be in `BROWSER`, in words (`";" and "%s"`), or empty: the separator its launcher splits it at, and
+ * `%s` (where it puts the address)
+ */
+const unusableIn = (path: string, listSep: string): string =>
+  [listSep, '%s']
+    .filter((c) => path.includes(c))
+    .map((c) => `"${c}"`)
+    .join(' and ')
 
 /** No helper, and why: nothing on disk to remove */
 const noHelper = (why: string): BrowserFolder => ({ browser: '', why, watch() {}, async remove() {} })
