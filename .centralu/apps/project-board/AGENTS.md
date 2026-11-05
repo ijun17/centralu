@@ -731,7 +731,7 @@ looked into).
   queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run
   whose failed jobs all failed in a step that sets the job up (the cause `setup`: "Set up job", checkout,
   pnpm and Node setup, rust toolchain and cache, artifact download, the browser and system-library
-  installs; `pnpm install` only when its log names the network or a package source), only stored results
+  installs; `pnpm install` and `Build bundle` only when their log names the network or a package source), only stored results
   (`storage`: a step named `Upload ...` or `Post ...`), hit their timeout or
   lost their runner is **infrastructure**: the guard reruns the failed jobs once and does nothing else.
   Reruns are kept **per run id** (`guard.reruns`, written down before it asks, the newest 30): while a

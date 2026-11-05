@@ -1,5 +1,5 @@
 name: Cache tauri's AppImage tools
-description: AppRun and linuxdeploy, which `tauri build` downloads from GitHub for an AppImage and fetches again only when missing (#2004: a 504 failed a bundle). Linux only; run after pnpm install.
+description: AppRun and linuxdeploy, which `tauri build` downloads from GitHub for an AppImage and fetches again only when missing (#2004, a 504 failed a bundle). Linux only; run after pnpm install.
 runs:
   using: composite
   steps:
