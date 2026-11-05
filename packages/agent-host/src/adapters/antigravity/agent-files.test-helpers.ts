@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -55,6 +55,9 @@ export const tokenPath = (home: AgyHome) => join(home.geminiHome, 'antigravity-a
 /** The folders under the install's root whose names start with `prefix` (what an install or a sign-in left) */
 export const leftovers = (home: AgyHome, prefix: string) => (existsSync(home.root) ? readdirSync(home.root).filter((n) => n.startsWith(prefix)) : [])
 
+/** The names in a folder, or none when it is not there */
+export const inFolder = (path: string) => (existsSync(path) ? readdirSync(path) : [])
+
 export const exists = (path: string) => existsSync(path)
 export const readText = (path: string) => readFileSync(path, 'utf8')
 export const inVersion = (home: AgyHome, name: string) => join(home.versionDir, name)
@@ -63,7 +66,13 @@ export const inRoot = (home: AgyHome, name: string) => join(home.root, name)
 /** Makes a folder (and its parents) */
 export const folder = (path: string) => mkdirSync(path, { recursive: true })
 export const write = (path: string, text: string) => writeFileSync(path, text)
+export const chmodPath = (path: string, mode: number) => chmodSync(path, mode)
+/** A link at `link` to the folder `target` */
+export const linkTo = (target: string, link: string) => symlinkSync(target, link, 'dir')
 export const pathIn = (...parts: string[]) => join(...parts)
+/** `path` relative to this process's folder, and whether a path is absolute here */
+export const relativeTo = (path: string) => relative(process.cwd(), path)
+export const isAbsolutePath = (path: string) => isAbsolute(path)
 
 const hosts: (() => Promise<void>)[] = []
 

@@ -5,12 +5,12 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
-import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, type AgyHome } from './agent-files.js'
+import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, type AgyHome, type HelperPlaces } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
-import { agentSignInUrl, googleAuthorizeUrl, NO_HELPER } from './sign-in.js'
+import { agentSignInUrl, googleAuthorizeUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -44,6 +44,8 @@ export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'appFound' | 'installIo'
   dataDir?: string
   platform?: Platform
   arch?: string
+  /** Where a session's `BROWSER` helper may go (`browserFolder`): its real places when not given */
+  helperPlaces?: HelperPlaces
 }
 
 export type AgyProfile = AcpProfile & { readonly agySetup: AgySetup; readonly home: AgyHome; readonly archive: AgyArchive | null }
@@ -67,13 +69,13 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       // No address is opened from a session: the person asked for a conversation, and the line offers Sign in. Every
       // command the agent runs inherits `BROWSER`, so any other address (`gcloud auth login`, a script opening a page) is
       // only logged, never opened and never taken for a sign-in (plan §4.4)
-      const folder = await browserFolder(home, deps.platform)
+      const folder = await browserFolder(home, deps.platform, deps.helperPlaces)
       if (folder.browser === '') {
         // Without a helper the agent's launcher would start the browser itself, on Windows inside the host's job, and a
-        // stored sign-in that stopped working would hang the start again (review of #1685): refused rather than started
-        await folder.remove()
-        console.error(`[Antigravity] session refused: ${NO_HELPER}`)
-        throw rpcError(`Antigravity cannot start here: ${NO_HELPER}.`)
+        // stored sign-in that stopped working would hang the start again (review of #1685): refused rather than started.
+        // A path does not change between tries, so the refusal is not worth retrying (#1688)
+        console.error(`[Antigravity] session refused: ${folder.why}`)
+        throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: 'no_browser_helper' } })
       }
       return {
         ...agyLaunch(home, archive, folder.browser),

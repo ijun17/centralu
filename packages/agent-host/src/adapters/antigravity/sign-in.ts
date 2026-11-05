@@ -5,7 +5,7 @@ import { startToolProcess } from '../core/tool-process.js'
 import { lineSplitter } from '../../transport/json-lines.js'
 import { asObj } from '../../json-value.js'
 import type { Platform } from '../../os.js'
-import { browserFolder, openInBrowser, type AgyHome } from './agent-files.js'
+import { browserFolder, openInBrowser, type AgyHome, type HelperPlaces } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
@@ -27,7 +27,7 @@ import { agyStderrLine } from './shape.js'
  * of the log (`agyStderrLine`). The address reaches the host, never host.log.
  *
  * The address is opened once, and only the agent's own login request (`agentSignInUrl`). Where no helper can be written
- * the sign-in is refused, not started (`NO_HELPER`). A cancel ends the process, and with it the
+ * the sign-in is refused, not started, saying which path holds what (`BrowserFolder.why`). A cancel ends the process, and with it the
  * listener (ACP cannot cancel `authenticate`, spike §4).
  */
 
@@ -45,15 +45,13 @@ export type SignInDeps = {
    */
   openUrl?: (url: string) => void
   platform?: Platform
+  /** Where the `BROWSER` helper may go (`browserFolder`): its real places when not given */
+  helperPlaces?: HelperPlaces
   timeoutMs?: number
 }
 
 const Tier = z.looseObject({ name: z.string(), upgradeUri: z.string().nullish() })
 const AuthResult = z.looseObject({ _meta: z.looseObject({ antigravity: z.looseObject({ tier: Tier.nullish() }).nullish() }).nullish() }).nullish()
-
-/** Why no `BROWSER` helper could be written: the paths it is made of hold what its launcher splits at */
-export const NO_HELPER =
-  "the path of Centralu's data folder or of the host's Node holds a character Antigravity's browser setting cannot carry (';' on Windows, ':' elsewhere, or '%s')"
 
 const URL_LINE = /Open the following link to authenticate the ACP server:\s*(\S+)/
 
@@ -110,13 +108,13 @@ export function agentSignInUrl(raw: string): string | null {
 }
 
 export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: AbortSignal, deps: SignInDeps = {}): Promise<SignInResult> {
-  const folder = await browserFolder(home, deps.platform)
+  const folder = await browserFolder(home, deps.platform, deps.helperPlaces)
   // No helper could be written (`browserFolder`): the agent's own launcher would start the browser, on Windows inside the
-  // host's job, so a Stop or the host's exit would end it with every tab. Refused rather than started
+  // host's job, so a Stop or the host's exit would end it with every tab. Refused rather than started, saying which path
+  // to change; the setup line has no word for "not worth trying again", so it is `failed`, said as it is
   if (folder.browser === '') {
-    await folder.remove()
-    console.error(`[Antigravity] sign-in refused: ${NO_HELPER}`)
-    throw new InstallFailure('failed', `Antigravity cannot sign in here: ${NO_HELPER}`)
+    console.error(`[Antigravity] sign-in refused: ${folder.why}`)
+    throw new InstallFailure('failed', `Antigravity cannot sign in: ${folder.why}`)
   }
   const openUrl = deps.openUrl ?? ((url: string) => openInBrowser(url, deps.platform))
   let opened = false

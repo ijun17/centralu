@@ -1348,8 +1348,17 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.3). In a session, the helper handed the agent's own login
   request means the stored sign-in stopped working: the session fails as `not_logged_in` and its process ends. Commands
   the agent runs inherit `BROWSER`, so any other address they hand it is dropped and logged without the address, never
-  opened and never taken for a sign-in: nothing is opened that the person did not ask for (§4.4). Where no helper can be
-  written, the agent is not started. Lines of
+  opened and never taken for a sign-in: nothing is opened that the person did not ask for (§4.4). Where the data
+  folder's path cannot be put in `BROWSER` (it holds `;` on Windows, `:` elsewhere, or `%s`), the helper's private
+  folder is made in a folder of the person's own instead, built from the home folder alone
+  (`~\AppData\Local\centralu-antigravity`, `~/Library/Caches/centralu-antigravity`, `~/.cache/centralu-antigravity`;
+  no variable such as `TEMP`, `LOCALAPPDATA` or `XDG_CACHE_HOME`, which may name a shared folder): per user by the OS's
+  defaults (on Windows its ACL is the profile's; elsewhere it is made 0700 and used only as a real folder, not a link,
+  owned by the person and writable by no one else, below folders only the person or root can change, sticky ones such
+  as `/tmp` aside; a `~/.cache` that is a link is followed and judged where it leads), not a folder a cleaner empties
+  by age, and every path given to `BROWSER` is absolute. A host that crashes leaves its helper folder there until the next
+  helper is made there (it holds no token). Where no helper can be written even so, the
+  agent is not started, and the error names the path and the character. Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
 - **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
   rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.
@@ -2178,8 +2187,9 @@ then who may call it:
   `busy` (#1236): an app says it is busy with background work, or no longer, without a run id. It
   asks for nothing outside the app: it only keeps the app's own process from the idle rule, and only
   when the manifest declares `uses.background` (in `uses`, so an imported app adding it is reviewed
-  again and the trust card lists it). The hold is the app's row ("Running: <reason>"), it ends with
-  the process, and the person stops it from its sidebar row, its row in Settings or its view
+  again and the trust card lists it). The hold shows on the app's sidebar row as its Stop icon button,
+  whose tooltip and label carry the reason ("Running: <reason>. Stop it; …"; the row writes no busy
+  text, #1928). It ends with the process, and the person stops it from that button, its row in Settings or its view
   (`app-lifecycle.ts` `setBusy`; `busy.test.ts`, `e2e/apps.spec.ts`). A host that starts again
   starts the apps that held busy when the last one stopped (`app-busy.json`), but only one still
   allowed to run (trusted, enabled, not failed) and still declaring `uses.background`; the person's
