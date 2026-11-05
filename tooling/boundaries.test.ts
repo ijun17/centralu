@@ -115,12 +115,27 @@ describe('layer table (boundaries/element-types)', () => {
     ['packages/platform/src/ports/x.ts', '@cc/common'],
     ['packages/platform/src/web/x.ts', '@cc/core'],
     ['packages/ui/src/x.tsx', '@cc/platform/mock'],
+    // a test takes the mock platform only
+    ['packages/ui/src/x.test.tsx', '@cc/platform/tauri'],
     ['packages/agent-host/src/x.ts', '@cc/core'],
     ['packages/agent-host/src/x.ts', '@cc/ui'],
     // a path into another layer's folder is the same import
     ['packages/protocol/src/x.ts', '../../core/src/index.js'],
   ])('refuses %s importing %s', async (filePath, from) => {
     expect(await refused(filePath, from)).toBe(true)
+  })
+
+  it('refuses a re-export and a dynamic import as it refuses an import', async () => {
+    expect(await refused('packages/protocol/src/x.ts', '@cc/core', 'export')).toBe(true)
+    expect(await refused('packages/protocol/src/x.ts', '@cc/core', 'dynamic')).toBe(true)
+    expect(await refused('packages/core/src/x.ts', '@cc/common', 'export')).toBe(false)
+  })
+
+  it('reads a path below an alias as the alias folder, and refuses an @cc/ specifier that is none', async () => {
+    expect(await refused('packages/agent-host/src/x.ts', '@cc/platform/mock/demo')).toBe(true)
+    const code = "import { a } from '@cc/nowhere'\nexport const b = a"
+    const msgs = await lint('packages/ui/src/x.tsx', code)
+    expect(msgs.map((m) => m.message).join()).toMatch(/not an alias/)
   })
 
   it.each([

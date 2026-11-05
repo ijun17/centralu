@@ -119,6 +119,8 @@ export default tseslint.config(
     plugins: { boundaries },
     settings: {
       'boundaries/include': ['packages/**/*', 'apps/**/*'],
+      // The plugin reads only `import` by default: `export * from` and `import()` cross a layer the same
+      'boundaries/dependency-nodes': ['import', 'export', 'dynamic-import'],
       // What an import resolves to is tooling/eslint-alias-resolver.cjs (#1847)
       'import/resolver': { [join(import.meta.dirname, 'tooling/eslint-alias-resolver.cjs')]: {} },
       'boundaries/elements': [
@@ -126,7 +128,9 @@ export default tseslint.config(
         { type: 'common', mode: 'full', pattern: 'packages/common/src/**/*' },
         { type: 'core', mode: 'full', pattern: 'packages/core/src/**/*' },
         { type: 'ports', mode: 'full', pattern: 'packages/platform/src/ports/**/*' },
-        { type: 'platform-impl', mode: 'full', pattern: 'packages/platform/src/(web|tauri|mock)/**/*' },
+        // Listed before `platform-impl`: the first element a file matches is its type
+        { type: 'platform-mock', mode: 'full', pattern: 'packages/platform/src/mock/**/*' },
+        { type: 'platform-impl', mode: 'full', pattern: 'packages/platform/src/(web|tauri)/**/*' },
         // Listed before `ui`: the first element a file matches is its type. Tests take the mock platform (docs/platform-abstraction.md §6)
         { type: 'ui-test', mode: 'full', pattern: 'packages/ui/src/**/*.test.{ts,tsx}' },
         { type: 'ui', mode: 'full', pattern: 'packages/ui/src/**/*' },
@@ -145,10 +149,11 @@ export default tseslint.config(
             { from: 'core', allow: ['core', 'common', 'protocol'] },
             { from: 'ports', allow: ['ports', 'protocol'] },
             { from: 'platform-impl', allow: ['platform-impl', 'ports', 'common', 'protocol'] },
-            { from: 'ui-test', allow: ['ui-test', 'ui', 'core', 'common', 'ports', 'platform-impl', 'protocol'] },
+            { from: 'platform-mock', allow: ['platform-mock', 'ports', 'common', 'protocol'] },
+            { from: 'ui-test', allow: ['ui-test', 'ui', 'core', 'common', 'ports', 'platform-mock', 'protocol'] },
             { from: 'ui', allow: ['ui', 'core', 'common', 'ports', 'protocol'] },
             { from: 'agent-host', allow: ['agent-host', 'common', 'protocol'] },
-            { from: 'app', allow: ['app', 'ui', 'core', 'common', 'ports', 'platform-impl', 'protocol'] },
+            { from: 'app', allow: ['app', 'ui', 'core', 'common', 'ports', 'platform-impl', 'platform-mock', 'protocol'] },
           ],
         },
       ],
