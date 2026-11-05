@@ -20,6 +20,7 @@ import type { ChildReports } from './child-reports.js'
 import { HUB_SENDER, type DelegationHost } from './delegation-flow.js'
 import { truncate } from './external-conversations.js'
 import type { InterruptionWatch } from './interruption-watch.js'
+import type { OverloadRetry } from './overload-retry.js'
 import type { QueuedRequests } from './queued-requests.js'
 import type { RoutedCards } from './routed-cards.js'
 import type { SessionRecordHost } from './session-record.js'
@@ -53,6 +54,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
+    /** A turn the provider ended for want of capacity, waiting to be continued (overload-retry.ts) */
+    readonly overloadRetry: OverloadRetry
     /** Refuses a session whose worktree is being removed */
     notBeingRemoved: (sessionId: string) => void
     readonly queue: QueuedRequests
@@ -165,6 +168,9 @@ export class SessionEvents {
       if (!m || !e.ended?.length) return
       return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
     }
+    // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693)
+    if (e.type === 'error') e = this.host.overloadRetry.hold(e)
+    if (e.sessionId) this.host.overloadRetry.observe(e)
     const unborn = e.sessionId && !this.host.meta.has(e.sessionId) ? this.host.record.unborn.get(e.sessionId) : undefined
     if (unborn) {
       unborn.push(e)
@@ -708,6 +714,8 @@ export class SessionEvents {
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
+    // A message into a turn that waits for the provider's capacity carries the work on itself: the retry is not sent on top of it (#1693)
+    this.host.overloadRetry.cancel(sessionId)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)

@@ -2089,6 +2089,21 @@ Implementation rules:
   Claude Code's notices carry `from: 'Claude Code'` and a label (`hook` — `for you`, `notice`, `model switch`,
   `refusal`). The explanation is the host's because recognizing a notice means knowing the tool's wording; the screen
   only draws what it is given, and Codex's own words stay one click away.
+- **A turn the provider ends for want of capacity is retried by the host** (#1693, `sessions/overload-retry.ts`). Codex ends
+  a turn with `TurnError.codexErrorInfo: "serverOverloaded"` ("Selected model is at capacity"; the turns of the issue had run
+  14 to 44 minutes) with no `Reconnecting…` of its own first, and the adapter marks that error alone with
+  `data: {reason: 'server_overloaded'}` (never a usage limit or any other error; the marker comes from Codex's kind, not from
+  the sentence). The host does not let it end the turn: the session stays `working` (so whoever gave the turn is told nothing
+  yet), a `notice` (label `retry`) says "in 30 s (retry 1 of 4)", and after the wait the turn is continued through Centralu's
+  channel (`deliverMail`: no message of the person's, as an update's continue). The waits are 30 s, 2, 5 and 10 minutes. A
+  fifth failure ends the turn as before, with "Centralu retried this turn 4 times" added. The count starts over when the turn
+  finishes, the person sends a message or stops it, or it ends any other way. **Stop** cancels the wait and ends the turn as
+  a Stop does, with or without a process. **A host swap**: the wait is stored (`overload_retry:<session>`); the leaving host
+  drops its timer, the next one finds the session still `working`, arms what is left, and takes the record in one
+  transaction when it fires, so two hosts send it once. A start more than 10 minutes after the time it fell due (Centralu
+  stayed closed) does not continue it: the turn is one a quit cut. **Claude** is not covered: its CLI retries a 529 itself
+  ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
+  on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - **What both adapters do the same way is written once, in `adapters/session-kit.ts`** (#428), since copies of it
   drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an

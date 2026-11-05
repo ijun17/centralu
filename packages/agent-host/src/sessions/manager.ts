@@ -7,7 +7,7 @@ import { presetWithin } from './start-agent.js'
 import { AskedGate } from './asked-gate.js'
 import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
-import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import { MailNotAtRest, type MailSessions, type ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
@@ -20,6 +20,7 @@ import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
+import { OverloadRetry } from './overload-retry.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { MachineFlow, type MachineOps } from './machine-flow.js'
@@ -249,6 +250,8 @@ export class SessionManager {
   private readonly reports: ChildReports
   /** A session's `interruption` kept with its events, the reconnect clocks, and a quit's stop (interruption-watch.ts) */
   private readonly interruptions: InterruptionWatch
+  /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts, #1693) */
+  private readonly overloadRetry: OverloadRetry
   /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
   private readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
@@ -511,6 +514,31 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
+    this.overloadRetry = new OverloadRetry({
+      settings: store.settings,
+      meta: this.meta,
+      leaving: () => this.handingOver || this.disposing,
+      compactTurn: (id) => this.selfCompaction.compactTurn(id),
+      note: (e) => this.events.onEvent(e),
+      send: async (id, text) => {
+        // A host that has no process for it yet (a swap that kept none) wakes it for the note, and the turn stays the turn it was (as an update's continue does)
+        const wake = !this.handles.has(id)
+        if (wake) this.restartPolicy.continuingTurns.add(id)
+        try {
+          await this.events.deliverMail(
+            id,
+            { text, quiet: false, line: '', label: 'retry', skipLine: () => true },
+            { leaving: () => this.handingOver || this.disposing, atRest: () => inTurn(this.meta.get(id)?.state ?? 'idle') },
+          )
+        } catch (e) {
+          // The person stopped the turn while it woke: nothing was sent and nothing failed
+          if (e instanceof MailNotAtRest) return
+          throw e
+        } finally {
+          if (wake) this.restartPolicy.continuingTurns.delete(id)
+        }
+      },
+    })
     const compactSetting = () => autoCompactOf(this.uiPreferences())
     const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
     this.selfCompaction = new SelfCompaction({
@@ -578,7 +606,9 @@ export class SessionManager {
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
        * there.
        */
-      const cut = turnCut(s) && !keeperOpts.keptSessions?.has(s.id)
+      // A turn waiting to be retried (#1693) is no cut turn: it stays `working` with no process, as a kept one does, and the wait goes on (`restore`)
+      const retrying = turnCut(s) && this.overloadRetry.pending(s.id)
+      const cut = turnCut(s) && !retrying && !keeperOpts.keptSessions?.has(s.id)
       /*
        * And where a linked hub's update cut the turn (#1618): the turn goes on, in a new process, as a kept session's
        * does in its old one. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
@@ -616,6 +646,7 @@ export class SessionManager {
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
       if (stopped) stoppedBy.set(s.id, stopped)
+      if (retrying) this.overloadRetry.restore(s.id)
       if (goesOn) {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
         store.sessions.upsertSession(fixed)
@@ -1973,7 +2004,9 @@ export class SessionManager {
   }
 
   interrupt(sessionId: string): void {
-    const handle = this.requireHandle(sessionId)
+    // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop
+    const waiting = this.overloadRetry.cancel(sessionId)
+    const handle = waiting ? this.handles.get(sessionId) : this.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
@@ -1981,7 +2014,8 @@ export class SessionManager {
     // A stop takes off what a hub gave the tool for turns to come (#1604): the tool drops what it still holds queued, and says it
     // was not delivered (#1640), so no turn runs for it after the Stop
     this.children.dropInputOrigins(sessionId)
-    handle.interrupt()
+    if (waiting) this.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
+    else handle?.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
     // only ends that caller's wait; work left running past the bound has its own Stop.
     for (const d of this.children.delegations.values()) {
@@ -2284,6 +2318,9 @@ export class SessionManager {
       inputsHeld: (...a) => self.inputsHeld(...a),
       get interruptions() {
         return self.interruptions
+      },
+      get overloadRetry() {
+        return self.overloadRetry
       },
       get keeperOpts() {
         return self.keeperOpts
@@ -2774,6 +2811,8 @@ export class SessionManager {
   private leaveHost(why: string): void {
     // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
     this.interruptions.stopAll()
+    // A retry waiting for the provider's capacity is stored, and the host after this one waits out what is left of it (#1693)
+    this.overloadRetry.stopAll()
     // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
     // mark; handing over, the wait is the next host's, which starts it again on adoption
     this.reports.stopSettlingPausedReports()

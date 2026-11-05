@@ -177,6 +177,20 @@ export class SettingsRecords {
     this.db.transaction(() => this.setAppSetting(key, next(this.appSetting(key)))).immediate()
   }
 
+  /**
+   * Reads a setting and deletes it as one transaction that takes the write lock first: of two processes on the same file
+   * (the old and new host of a swap), only one gets the value, the other null. What is done once, whichever host gets to it.
+   */
+  takeAppSetting(key: string): string | null {
+    return this.db
+      .transaction(() => {
+        const value = this.appSetting(key)
+        if (value !== null) this.deleteAppSetting(key)
+        return value
+      })
+      .immediate()
+  }
+
   /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
     this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)

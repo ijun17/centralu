@@ -1,5 +1,6 @@
 import type { ProtocolError } from '@cc/protocol'
 import { asObj, str } from '../../json-value.js'
+import { isServerOverloaded, SERVER_OVERLOADED } from '../overloaded.js'
 
 /**
  * A provider that refuses the session's model (#1369). A thread kept the model it was started with, and when the
@@ -61,7 +62,8 @@ function refusedModelIn(sentence: string): string | null {
 /** An error event for a turn that failed with `message`: its own kind when the model was refused, else Codex's sentence as it is */
 export function turnError(message: string, errorInfo?: unknown): ProtocolError {
   const rejected = modelRejection(message, errorInfo)
-  if (!rejected) return { code: 'internal', message, retryable: true }
+  // Said by Codex's own kind, never by the sentence: only this error is retried by the host (`OverloadRetry`)
+  if (!rejected) return { code: 'internal', message, retryable: true, ...(isServerOverloaded(errorInfo) ? { data: { reason: SERVER_OVERLOADED } } : {}) }
   return {
     code: 'internal',
     message: `Codex refused the model ${rejected.model}: ${rejected.reason}`,

@@ -935,6 +935,19 @@ interface AdapterCapabilities {
   Claude Code의 알림은 `from: 'Claude Code'`와 라벨(`hook` — `for you`, `notice`, `model switch`, `refusal`)을 싣는다.
   설명을 호스트가 쓰는 것은 알림을 알아보려면 도구의 문구를 알아야 하기 때문이다. 화면은 받은 것을 그리기만 하고, Codex
   자신의 말은 한 번 눌러 펼친다.
+- **서버 용량이 모자라 공급자가 끝낸 턴은 호스트가 다시 시도한다** (#1693, `sessions/overload-retry.ts`). Codex는 자체
+  `Reconnecting…` 없이 `TurnError.codexErrorInfo: "serverOverloaded"`("Selected model is at capacity")로 턴을 끝낸다(이슈의
+  턴들은 14~44분 돌던 것들이다). 어댑터는 이 오류에만 `data: {reason: 'server_overloaded'}`를 붙인다(사용 한도나 다른 오류는
+  절대 아니다. 표지는 문장이 아니라 Codex의 종류에서 나온다). 호스트는 이 오류가 턴을 끝내게 두지 않는다: 세션은 `working`에
+  머물고(턴을 준 쪽은 아직 아무 말도 듣지 않는다), `notice`(label `retry`)가 "in 30 s (retry 1 of 4)"라고 말하며, 기다린
+  뒤 Centralu 자신의 통로(`deliverMail`: 사람의 메시지가 아니다, 업데이트의 이어가기와 같다)로 턴을 이어 간다. 기다림은
+  30초, 2분, 5분, 10분이다. 다섯 번째 실패는 전과 같이 턴을 끝내되 "Centralu retried this turn 4 times"가 붙는다. 턴이
+  끝나거나 사람이 메시지를 보내거나 멈추거나 다른 식으로 끝나면 횟수는 처음부터 센다. **멈춤**은 기다림을 취소하고, 프로세스가
+  있든 없든 멈춤이 끝내는 방식으로 턴을 끝낸다. **호스트 교체**: 기다림은 저장되고(`overload_retry:<세션>`), 떠나는 호스트는
+  타이머를 버리고, 다음 호스트가 세션이 여전히 `working`인 것을 보고 남은 시간만큼 타이머를 걸며, 타이머가 울릴 때 기록을 한
+  트랜잭션으로 가져가므로 두 호스트가 있어도 한 번만 보낸다. 기한이 지난 지 10분이 넘은 뒤의 시작(Centralu가 닫혀 있었다)은
+  이어 가지 않는다: 그 턴은 종료가 끊은 턴이다. **Claude**는 해당하지 않는다: CLI가 529를 점점 길어지는 간격으로 열 번 스스로
+  다시 시도하고(`api_retry`, `retrying` 활동) 그 뒤에야 턴을 끝내므로 여기서 또 하면 겹친다.
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - **두 어댑터가 똑같이 하는 일은 `adapters/session-kit.ts`에 한 번만 쓴다** (#428). 복사본들이 서로 어긋나 버그가
   됐기 때문이다. Centralu가 직접 대화에 남기는 한 줄(`/goal` 확인이나 거절)은 `adapterNotice`다: 자기 `messageId`

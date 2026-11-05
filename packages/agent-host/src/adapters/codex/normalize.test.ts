@@ -352,6 +352,21 @@ describe('state and gauges', () => {
     expect(failed(null)).toMatchObject([{ type: 'error', error: { retryable: true } }])
   })
 
+  /**
+   * The turn of the issue (#1693), as the app-server sends it: the rollout's `task_complete` error with
+   * `codex_error_info: "server_overloaded"`. The marker comes from Codex's kind only, so the host retries this error and not
+   * one whose sentence happens to say "capacity" (a usage limit's does too, in other words).
+   */
+  it('a turn Codex ends with serverOverloaded carries the marker the host retries by (#1693)', () => {
+    const failed = (codexErrorInfo: unknown, message = 'Selected model is at capacity. Please try a different model.') =>
+      n('turn/completed', { threadId: 't1', turn: { id: 'turn-7', items: [], status: 'failed', error: { message, codexErrorInfo, additionalDetails: null, misalignment: null } } })
+    expect(failed('serverOverloaded')).toMatchObject([{ type: 'error', error: { message: 'Selected model is at capacity. Please try a different model.', retryable: true, data: { reason: 'server_overloaded' } } }])
+    for (const other of ['usageLimitExceeded', 'rateLimitExceeded', 'internalServerError', null, { responseStreamDisconnected: { httpStatusCode: null } }]) {
+      expect(failed(other, 'Selected model is at capacity.')).toMatchObject([{ type: 'error', error: { retryable: true } }])
+      expect((failed(other, 'Selected model is at capacity.')[0] as { error: { data?: unknown } }).error.data).toBeUndefined()
+    }
+  })
+
   it('a failed turn/completed → error (does not emit turn_complete)', () => {
     const out = n('turn/completed', {
       threadId: 't1',
