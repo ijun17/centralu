@@ -65,7 +65,9 @@ jobs:
               sha=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .headSha' "$RUNNER_TEMP/runs.json")
               created=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .createdAt' "$RUNNER_TEMP/runs.json")
               # How many commits main has that the run's head has not; the run's age in days
-              behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq '.ahead_by' || echo unknown)
+              behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq '.ahead_by' 2>/dev/null || true)
+              # An error body goes to stdout too: anything but a number is unknown
+              [[ "$behind" =~ ^[0-9]+$ ]] || behind=unknown
               age_days=$(( ($(date +%s) - $(date -d "$created" +%s)) / 86400 ))
               echo "Times of run $run, $behind commits and $age_days days behind this checkout."
               {
@@ -127,16 +129,21 @@ jobs:
             behind="WARNING: $behind (more than 20 commits or 7 days), so its times may be old"
           fi
           title='chore(test): refresh the Windows shard times'
-          body="Weekly refresh of tooling/test-durations.json (.github/workflows/test-durations.yml), from the windows-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}; ${behind}. The file holds the test files of main only: a file the run did not time keeps its entry or gets the median, a deleted file is dropped."
+          # The pull request template's sections; nothing here has a single quote, as the line below quotes it
+          body=$(printf '%s\n' \
+            '## Why' '' 'The weekly refresh of tooling/test-durations.json (.github/workflows/test-durations.yml): the Windows shards are split by these times.' '' \
+            '## What changed' '' "Only tooling/test-durations.json, from the windows-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}; ${behind}. It holds the test files of this checkout only: a file the run did not time keeps its entry or gets the median, a deleted file is dropped." '' \
+            '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Its CI does not start by itself (a workflow token): start it when queueing." '' \
+            '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the refresh run above.' '' '## Closes' '' 'n/a')
           {
             echo "### Times pushed to \`$branch\`"
             echo
-            echo "No pull request is open: the repository does not let this workflow create one. Open it, and start its CI when queueing:"
+            echo "No pull request is open: the repository does not let this workflow create one. Open it with this line, and start its CI when queueing:"
             echo
             echo '```sh'
             echo "gh pr create --base main --head $branch --title '$title' --body '$body'"
             echo '```'
             echo
-            echo "Source run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}. $behind."
+            echo "Source run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN} ($behind)."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::Pushed $branch. Open its pull request: gh pr create --base main --head $branch. ${behind}."
+          echo "::notice::Pushed $branch. Open its pull request: gh pr create --base main --head $branch (${behind})."

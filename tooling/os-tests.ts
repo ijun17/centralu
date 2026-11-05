@@ -495,6 +495,12 @@ async function main(argv: string[]) {
       `${count((t) => t in run)} files timed by the run, ${count((t) => !(t in run) && t in current)} kept, ${count((t) => !(t in run) && !(t in current))} new (the median), ` +
         `${Object.keys({ ...run, ...current }).filter((t) => !tests.includes(t)).length} dropped (gone, or not run on Windows)`,
     )
+    // The date alone is no change: the weekly job pushes only when the times differ
+    const same = Object.keys(durations).length === Object.keys(current).length && Object.entries(durations).every(([t, secs]) => current[t] === secs)
+    if (same) {
+      console.error(`${DURATIONS}: unchanged`)
+      return
+    }
     const source = `the Windows unit shards' vitest JSON reports, refreshed ${new Date().toISOString().slice(0, 10)}`
     writeFileSync(`${ROOT}${DURATIONS}`, formatDurations(durations, source))
     console.error(`${DURATIONS}: ${Object.keys(durations).length} files`)
