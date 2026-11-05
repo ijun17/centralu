@@ -285,6 +285,10 @@ describe('what the merge queue decides for one poll', () => {
     const install = (log: string) => ({ ...job('verify', 'Run pnpm install --frozen-lockfile'), log })
     expect(classifyRun(failedRun, [install(' First failure: ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/x: 503')])).toMatchObject({ real: false, cause: 'setup' })
     expect(classifyRun(failedRun, [install(' First failure: ERR_PNPM_FETCH_404  GET https://registry.npmjs.org/x: Not Found - 404')])).toMatchObject({ real: true, cause: 'test' })
+    // tauri's bundle step is the runner's only when its line says the download failed (#2004), not for a 404 or its own tools failing
+    const bundle = (log: string) => ({ ...job('linux-arm64', 'Build bundle'), log })
+    expect(classifyRun(failedRun, [bundle(' First failure: failed to bundle project: `http status: 504`')])).toMatchObject({ real: false, cause: 'setup', step: 'Build bundle' })
+    for (const log of [' First failure: failed to bundle project: `http status: 404`', ' First failure: failed to bundle project: `failed to run linuxdeploy`', '']) expect(classifyRun(failedRun, [bundle(log)]), log).toMatchObject({ real: true, cause: 'test' })
     // The log's line is no GitHub word for a timeout or a lost runner: a test that says so is still a test failure
     expect(classifyRun(failedRun, [install(' First failure: Error: has exceeded the maximum execution time of 20 minutes')])).toMatchObject({ real: true })
     // A real failure in another job makes the run real, naming that job
@@ -1682,27 +1686,19 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
 
   // 2026-11-05 (#2004, job 127240544856, queue/batch-429): `tauri build` got a 504 fetching AppRun for the AppImage. The
   // annotation is only "Process completed with exit code 1.", so the log's line is what tells the network from the commit
-  const bundleFailed = (error: string) => {
-    const log = ['##[group]Run pnpm --filter @cc/desktop exec tauri build', ' Downloading https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-aarch64', `failed to bundle project: \`${error}\``, `       Error failed to bundle project: \`${error}\``, '##[error]Process completed with exit code 1.'].join('\n')
-    return shutDown({
-      jobs: { 900: [{ id: 12, name: 'linux-arm64', conclusion: 'failure', steps: [{ name: 'Build bundle', conclusion: 'failure' }] }] },
-      annotations: { '12': [{ message: 'Process completed with exit code 1.' }] },
-      logs: { '12': log },
-      on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } },
-    })
-  }
-  it('reruns once a bundle that failed fetching a tool it builds with, and not one that failed for another reason', async () => {
-    runtime(bundleFailed('http status: 504'))
+  it('reruns once a bundle that failed fetching a tool it builds with, and lands it when the rerun passes', async () => {
+    const log = ['##[group]Run pnpm --filter @cc/desktop exec tauri build', ' Downloading https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-aarch64', 'failed to bundle project: `http status: 504`', '       Error failed to bundle project: `http status: 504`', '##[error]Process completed with exit code 1.'].join('\n')
+    runtime(
+      shutDown({
+        jobs: { 900: [{ id: 12, name: 'linux-arm64', conclusion: 'failure', steps: [{ name: 'Build bundle', conclusion: 'failure' }] }] },
+        annotations: { '12': [{ message: 'Process completed with exit code 1.' }] },
+        logs: { '12': log },
+        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } },
+      }),
+    )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
     expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
-  })
-  it.each(['http status: 404', 'failed to run linuxdeploy'])('does not rerun a bundle that failed with `%s`', async (error) => {
-    runtime(bundleFailed(error))
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    await until((x) => stateOf(x) === 'attention', 'attention')
-    await morePolls()
-    expect(writes()).toEqual([])
   })
 
   // The job carries only the runner's cancellation note, so jobNotes reads the log; each log below has a line that looks
