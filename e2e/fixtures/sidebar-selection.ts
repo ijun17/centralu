@@ -191,7 +191,7 @@ export function sidebarSelectionTests(): void {
      * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the orchestrator row, and since
      * #1141 in "Other apps": an app made now is a project of its own, so a user-folder app here is a linked machine's on
      * an older build, or one this host could not move into a project. An agent
-     * its `run_agent` started runs on `safe` and can stop at an approval card, so it needs a row to be found by.
+     * its `run_agent` started can still wait on the person (a question, a card Centralu raises), so it needs a row to be found by.
      * A session with no project that no listed app claims (a coordinator the removed control app left, a session of an
      * app that is gone) gets no row: the palette, search and the inbox still reach it.
      */

@@ -179,6 +179,7 @@ export class ExternalApps {
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => this.startEnv.masker(ref),
         origin: (runId) => this.calls.chainOrigin(runId),
+        agentCallers: (ref) => this.calls.agentCallers(ref),
         chain: (runId) => this.calls.chainOf(runId),
         denied: (runId, d) => this.calls.denied(runId, d),
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),

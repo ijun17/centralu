@@ -527,9 +527,10 @@ export function createRpcHandler(
       return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
     'apps.invoke': async ({ appId, name, args, projectId, instanceId }) => {
-      // The instance is used only as the cause of "changed" — so that view does not hear the change
-      // it caused itself (B-5). Unrelated to permissions
-      const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}) }
+      // The instance is the cause of "changed", so that view does not hear the change it caused itself (B-5). An inline
+      // view's call is also rooted at its conversation: an agent its app starts runs no higher than that session (owner decision 2026-11-05)
+      const inSession = instanceId ? (inlineViews?.owner(instanceId)?.sessionId ?? null) : null
+      const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}), ...(inSession ? { sessionId: inSession } : {}) }
       const out = await requireExternalApps().call({ appId, projectId: projectId ?? null }, name, args, caller)
       return {
         text: out.result ? resultText(out.result) : (out.error ?? ''),

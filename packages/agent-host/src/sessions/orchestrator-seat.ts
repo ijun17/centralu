@@ -1,12 +1,13 @@
 import { stamped } from '../log-file.js'
-import { blockedOnQuestion, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
+import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
-import { lowestPreset } from './start-agent.js'
+import type { Asker } from '../mail/asked-by.js'
+import { lowestPreset, presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { DelegationForks } from './delegation-forks.js'
@@ -25,11 +26,17 @@ import { LINE_WINDOW_CHARS, asPredecessor, budgetOf, fitLines, lineText, session
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
- * The preset of a session create_session makes (#838): never more than the seat's own permissions, and `normal` at most, since `auto` is the
- * person's to give. Also what a request's turn compares with the asking session's own preset (`AskedGateHost.noLooser`)
+ * The preset of a session create_session makes (owner decision 2026-11-05): the one named, or the default a new session
+ * gets in that project (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one). Never more than
+ * the seat's own permissions (#838), and never above `normal` in an untrusted project, named or not. In a turn a
+ * session's request started (`asker`), the default is also held to that session's preset, so the work handed on is no
+ * looser than the asking session and takes no card (#1739). A default above a cap is held to it; a preset named above
+ * one is refused (null). It used to be `normal` at most whatever was asked.
  */
-export function createdPreset(seat: PermissionPreset): PermissionPreset {
-  return lowestPreset('normal', seat)
+export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset, asker?: PermissionPreset): PermissionPreset | null {
+  const cap = project.trusted ? seat : lowestPreset('normal', seat)
+  if (named !== undefined) return presetWithin(named, cap) ? named : null
+  return lowestPreset(defaultPresetFor(project), cap, ...(asker ? [asker] : []))
 }
 
 /**
@@ -62,6 +69,8 @@ export type OrchestratorSeatHost = Pick<DelegationForks, 'forkFor'> &
   ): Promise<SessionInfo & { applied: SettingsApplied }>
   createSession(params: { projectId: string; cwd: string; tool: ToolName | null; permissionPreset: PermissionPreset }): Promise<SessionInfo>
   firstTool(preferred?: ToolName | null): ToolName | null
+  /** The session whose request the orchestrator's turn is answering, if one (#1739, `AskedGateHost.askedBy`); absent where it is not wired */
+  askedBy?(orchestratorId: string): Asker | null
   rename(sessionId: string, name: string): void
   send(sessionId: string, text: string, attachments?: Attachment[], from?: { sessionId: string; name: string }): Promise<void>
   routedCards(sessionId: string, callerId: string): RoutedCard[]
@@ -373,10 +382,23 @@ export function orchestratorToolsFor(
        * The new session never runs with more than this seat's own permissions, and its first message is this seat's,
        * not the person's (#838). It used to be `normal` whatever the seat ran under and stored as if the person had
        * typed it, so a `safe` orchestrator that read a planted instruction could start a `normal` session carrying
-       * it, with no card. `normal` stays the most it gets, as before: `auto` is the person's to give.
+       * it, with no card. Now it gets the default a new session gets, or the preset named, within the seat's own
+       * (`createdPreset`, owner decision 2026-11-05). A project there whose trust the machine does not say is not trusted.
        */
       const seat = host.meta.get(orchestratorId)
-      const preset = createdPreset(seat?.permissionPreset ?? 'safe')
+      const own = seat?.permissionPreset ?? 'safe'
+      const target = remote[0] ?? local[0]
+      const trusted = target?.trusted === true
+      const asker = host.askedBy?.(orchestratorId)
+      const preset = createdPreset(own, { trusted }, opts.preset, asker ? host.meta.get(asker.sessionId)?.permissionPreset ?? 'safe' : undefined)
+      if (preset === null) {
+        return {
+          ok: false,
+          error: trusted
+            ? `This session runs under ${own}, so it cannot create a session under ${opts.preset}. Name ${own} or lower, or ask the person to raise this session's preset.`
+            : `${target?.name ?? 'That project'} is not trusted, so a session there runs under normal at most. Name normal or lower, or ask the person to trust the project.`,
+        }
+      }
       const sender = { sessionId: orchestratorId, name: seat?.name ?? 'Orchestrator' }
       /*
        * The first message is work this seat hands out (#1233): it is told when that turn ends unless it said not to, as
@@ -384,7 +406,6 @@ export function orchestratorToolsFor(
        */
       const reportBack = opts.reportBack !== false
       // §7.4: work given with the new session is the mailbox's to refuse before the session is made
-      const target = remote[0] ?? local[0]
       if (opts.firstMessage && target) {
         const refused = host.refusesDelegation(orchestratorId, remote[0] ? { linked: true } : { projectId: target.id }, {
           tool: 'create_session', target: remote[0] ? `a session on ${remote[0].machine}` : target.name, text: opts.firstMessage,
@@ -392,7 +413,12 @@ export function orchestratorToolsFor(
         if (refused) return { ok: false, error: refused }
       }
       if (reader && remote[0]) {
-        const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset })
+        /*
+         * `normal` at most on the link, as start_agent's child there (`remotePreset`): an `auto` one is carried as the
+         * caller's (`fromHub`), so it runs `auto` there only while that machine's own "Allow auto from a linked computer"
+         * switch is on (#1273), and `edits` never goes on the link (a build from before it refuses the start)
+         */
+        const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset: lowestPreset(preset, 'normal'), ...(preset === 'auto' ? { callerPreset: 'auto' as const } : {}) })
         if (!r.ok) return r
         if (opts.firstMessage) {
           // On a linked machine as send_to_session's instruction there: the report is watched for before it goes

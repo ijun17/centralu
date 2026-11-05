@@ -397,8 +397,12 @@ export class RemoteAgents {
     const found = await this.checkoutOn(machine, project, reader)
     if ('error' in found) return { ok: false, error: found.error }
     const target = found.project
-    // An auto caller's child runs auto there too where that machine takes it (#1273), and then no card is raised
-    const asked = this.callerPreset(callerId) === 'auto' ? await this.autoThere(machine, reader) : null
+    /*
+     * An auto caller's child runs auto there too where that machine takes it (#1273), and then no card is raised. Only in
+     * a project that machine trusts (owner decision 2026-11-05, `presetFromHub` there): in an untrusted one it is a
+     * `normal` child behind the card, as a `normal` caller's
+     */
+    const asked = this.callerPreset(callerId) === 'auto' && target.trusted === true ? await this.autoThere(machine, reader) : null
     if (asked && 'error' in asked) return { ok: false, error: asked.error }
     const tool = opts.tool ?? target.defaultTool ?? caller.tool
     // The person's model for a difficulty is read here, as for a local child; the machine is not asked for its list

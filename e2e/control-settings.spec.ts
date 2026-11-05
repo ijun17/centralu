@@ -726,16 +726,16 @@ test('Permission preset names are never squeezed out by their descriptions', asy
 })
 
 /*
- * The preset a new session starts with (#1525): Edits in a trusted project, Normal in an untrusted one. The picker says
- * what the session may do, and the host holds the same preset as the picker shows.
+ * The preset a new session starts with (owner decision 2026-11-05, before it #1525): Auto in a trusted project, Normal in
+ * an untrusted one. The picker says what the session may do, and the host holds the same preset as the picker shows.
  */
-for (const [trusted, preset] of [[true, 'edits'], [false, 'normal']] as const) {
-  test(`A new session in ${trusted ? 'a trusted' : 'an untrusted'} project starts under ${preset}, and the person can still pick another (#1525)`, async ({ page }) => {
+for (const [trusted, preset] of [[true, 'auto'], [false, 'normal']] as const) {
+  test(`A new session in ${trusted ? 'a trusted' : 'an untrusted'} project starts under ${preset}, and the person can still pick another`, async ({ page }) => {
     await setup(page, { projects: ['/tmp/alpha'], trusted })
     await newSession(page, 'alpha', 'first instruction')
     await page.getByTestId('settings-open').click()
     await expect(page.getByTestId(`settings-preset-${preset}`)).toHaveAttribute('aria-checked', 'true')
-    const other = preset === 'edits' ? 'normal' : 'edits'
+    const other = preset === 'auto' ? 'normal' : 'auto'
     await expect(page.getByTestId(`settings-preset-${other}`)).toHaveAttribute('aria-checked', 'false')
     expect((await page.evaluate(() => [...(window as any).__mock.sessions.values()]))[0]).toMatchObject({ permissionPreset: preset })
     // The person's own choice wins: an explicit Normal in a trusted project stays Normal

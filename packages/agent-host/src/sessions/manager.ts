@@ -4,6 +4,7 @@ import { windowAround } from './snippet.js'
 import { createdPreset, orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { parseAddress } from '../mail/address.js'
 import { presetWithin } from './start-agent.js'
+import { matchProjects } from './ask-project.js'
 import { AskedGate } from './asked-gate.js'
 import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
@@ -81,6 +82,7 @@ import {
   errorMessage,
   ORCHESTRATOR_CHANGE,
   oneLineText,
+  PermissionPreset as PresetSchema,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { raceTimeout } from '../timing.js'
@@ -490,7 +492,8 @@ export class SessionManager {
           return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())?.permissionPreset
         }
         const preset =
-          call.name === 'create_session' ? createdPreset(seat) // here or on a linked machine, the same cap
+          // What `createdPreset` gives in this asked turn (one this host does not hold, on a linked machine, is taken as trusted: the higher default)
+          call.name === 'create_session' ? (createdPreset(seat, { trusted: this.createdInTrusted(call.args.project) }, PresetSchema.safeParse(call.args.preset).data, me.permissionPreset) ?? undefined)
           : call.name === 'start_agent' ? seat // its child runs under the caller's preset (start-agent-flow.ts)
           : call.name === 'handoff_session' ? (call.args.sessionId === undefined ? seat : of(call.args.sessionId)) // the new session keeps the old one's
           : call.name === 'ask_project' ? of(call.args.session)
@@ -1610,6 +1613,18 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   /** Why `tool` cannot run this session as its next launch would, under `preset` (its own by default), or null (`tool-fit.ts`) */
+  /**
+   * Whether a project create_session names is trusted here, matched as create_session matches it (`matchProjects`: id,
+   * then name, then any case); one this host does not hold, or a name two projects share, reads as trusted, the looser
+   * default (#1739's gate)
+   */
+  private createdInTrusted(project: unknown): boolean {
+    const all = this.store.projects.listProjects()
+    const found = matchProjects(typeof project === 'string' ? project : '', all.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })))
+    const [only, second] = found
+    return only && !second ? all.find((p) => p.id === only.id)?.trusted === true : true
+  }
+
   toolRefusal(m: SessionInfo, tool: ToolName = m.tool, preset: PermissionPreset = m.permissionPreset): string | null {
     return this.toolRegistry.refusal(tool, sessionDemands(m, this.launchInputs.settingFilesFor(m), preset))
   }
@@ -2478,6 +2493,7 @@ export class SessionManager {
       usageHistory: (p) => this.usageHistory(p),
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
+      askedBy: (orchestratorId) => this.mailHooks?.askedBy?.(orchestratorId) ?? null,
     }
     // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
     const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()

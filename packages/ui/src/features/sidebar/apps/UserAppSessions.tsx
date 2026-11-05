@@ -11,8 +11,8 @@ import { ToolMark } from '../marks/ToolMark.jsx'
  *
  * This is their one place in the sidebar. Project apps use the same nested rows in their project's
  * app list; user-folder apps have no project, and the "No app" list that used to catch every
- * session with no project is gone (2026-10-05). An agent an app started runs on `safe`, so it can
- * stop at an approval card, and a session waiting on the person must have a row to be found by.
+ * session with no project is gone (2026-10-05). An agent an app started can still wait on the
+ * person (a question, a card Centralu raises, a preset the person lowered), and such a session must have a row to be found by.
  *
  * A session with no project that no listed app claims (a coordinator the removed control app stood
  * up, a session of an app that was removed) has no row: search, the palette and the inbox still
