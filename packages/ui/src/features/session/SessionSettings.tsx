@@ -227,12 +227,14 @@ export function SessionSettings({
   // The list's entry the model names: a full id (`claude-opus-5-5`) is its alias's entry (`opus`)
   const listed = listedModel(models, model)
   // A model the list does not hold (set directly, or the list could not be read) is kept so it is not lost. Once the list is
-  // read it says so, and offers the efforts its models take, as the tool may accept them
+  // read it says so, and offers the efforts its models take, as the tool may accept them. A list without `resolved` on any row
+  // (an older host) cannot tell, so it says nothing
+  const says = models.some((m) => m.resolved)
   const unlisted: ModelOption | null = model && !listed
     ? {
         id: model,
-        label: models.length > 0 ? `${model} (not in list)` : model,
-        description: models.length > 0 ? `${toolLabel}'s list of models does not hold this one` : undefined,
+        label: says ? `${model} (not in list)` : model,
+        description: says ? `${toolLabel}'s list of models does not hold this one` : undefined,
         efforts: [...new Set(models.flatMap((m) => m.efforts))],
         defaultEffort: null,
         tiers: [],
@@ -338,7 +340,8 @@ export function SessionSettings({
                 key={m.id}
                 testId={`settings-model-${m.id}`}
                 label={m.label}
-                title={m.description}
+                // A stored full id shows as its entry; picking the entry sets the alias, so the pin is named here
+                title={m.id === listed?.id && model !== m.id ? `${m.label} · pinned ${model}` : m.description}
                 selected={m.id === current?.id}
                 // Effort and speed are reset when the model changes — support differs from
                 // model to model, so carrying the old value over would silently leave an

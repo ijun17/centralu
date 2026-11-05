@@ -540,6 +540,8 @@ test('A model held by its full id shows as the list entry, and one not in the li
   await expect(menu.getByTestId('settings-model-claude-opus-5-5')).toHaveCount(0)
   await expect(menu.getByTestId('settings-effort-high')).toBeVisible()
   await expect(page.getByTestId('settings-open')).toContainText('Opus')
+  // Picking the entry would set the alias, so the row names the pin
+  await expect(menu.getByTestId('settings-model-opus')).toHaveAttribute('title', 'Opus · pinned claude-opus-5-5')
 
   await setModel('claude-nova-9')
   const unlisted = menu.getByTestId('settings-model-claude-nova-9')
@@ -547,6 +549,18 @@ test('A model held by its full id shows as the list entry, and one not in the li
   await expect(unlisted).toHaveAttribute('title', "Claude Code's list of models does not hold this one")
   await expect(unlisted).toHaveAttribute('aria-checked', 'true')
   await expect(menu.getByTestId('settings-effort-high')).toBeVisible()
+})
+
+// A list that carries no `resolved` (an older host) cannot tell a model is missing from it, so the label says nothing
+test('A model the list cannot be said to lack reads as itself when no row of the list carries resolved', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.updateSessionSettings(s.focusedSessionId, { model: 'claude-nova-9' })
+  })
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-model-claude-nova-9')).toHaveText(/^✓claude-nova-9$/)
 })
 
 /**

@@ -816,7 +816,7 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(unknown.isError).toBe(true)
     expect(unknown.text).toContain('"codex" is not an agent CLI on this computer')
     expect(unknown.text).not.toMatch(/Nothing changed: Nothing changed/)
-    claude.listModels = async () => [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'], defaultEffort: null, tiers: [] }]
+    claude.listModels = async () => [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'], defaultEffort: null, tiers: [], resolved: 'claude-opus-5-5' }]
     const newer = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus-next' } } } })
     expect(newer.isError).toBeFalsy()
     expect(newer.text).toContain(`Note: "opus-next" is not in claude's current list (agent_models); saved as typed.`)
@@ -826,6 +826,9 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(await prefs()).toMatchObject({ agentModels: { claude: { heavy: { model: 'opus', effort: 'max' } } } })
     const inList = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'low' } } } })
     expect(inList.text).not.toContain('Note:')
+    // A full id the list names by its alias (#1989) is in the list: no note, and the alias's efforts apply
+    const pinned = await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'claude-opus-5-5', effort: 'low' } } } })
+    expect(pinned.text).not.toContain('Note:')
     expect((await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: ' ' } } } })).isError).toBe(true)
     await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: null } } })
     expect((await prefs()).agentModels).toEqual({})

@@ -2221,7 +2221,9 @@ to present it. Mixing the two is how a knob ends up having to be taught to the U
 **A model's id is stored as given (#1989).** A full id such as `claude-opus-5-5` is a pin: Claude's list names it by the alias
 `opus`, which may later name another model, so the host never rewrites one. The CLI's list says which model each alias names
 (`resolvedModel`, carried as `ModelOption.resolved`); the screen reads a stored id as the one entry that names it
-(`listedModel`, skipping `default`) and start_agent's check accepts it. An id nothing names reads "not in list".
+(`listedModel`, skipping `default`) and start_agent's check accepts it. Matching is exact, as the SDK defines `resolvedModel`: a 1M variant (`claude-opus-5[1m]`) and its base id are different
+models, so an id nothing names reads "not in list" (and says nothing when no row of the tool carries `resolved`, as from an
+older host).
 
 ### 3.1 Vendor-surface drift checks (run these before any SDK/CLI upgrade)
 

@@ -18,6 +18,15 @@ describe('listedModel (#1989)', () => {
     expect(listedModel([option('default', 'claude-opus-5-5')], 'claude-opus-5-5')).toBeUndefined()
   })
 
+  it('matches exactly, as the SDK defines resolvedModel: a 1M variant and its base id are different models', () => {
+    // An account's real list: no plain `opus` row; `default` and `opus[1m]` name one model, a 1M row names the base id
+    const list = [option('default', 'claude-opus-5[1m]'), option('opus[1m]', 'claude-opus-5[1m]'), option('claude-fable-5-1[1m]', 'claude-fable-5-1')]
+    expect(listedModel(list, 'claude-opus-5[1m]')?.id).toBe('opus[1m]')
+    expect(listedModel(list, 'claude-opus-5')).toBeUndefined()
+    expect(listedModel(list, 'claude-fable-5-1')?.id).toBe('claude-fable-5-1[1m]')
+    expect(listedModel(list, 'claude-fable-5-1[1m]')?.id).toBe('claude-fable-5-1[1m]')
+  })
+
   it('leaves an id two aliases name as it is', () => {
     expect(listedModel([option('opus', 'claude-opus-5-5'), option('opus[1m]', 'claude-opus-5-5')], 'claude-opus-5-5')).toBeUndefined()
   })

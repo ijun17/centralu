@@ -1,4 +1,4 @@
-import type { AgentDifficulty, AgentModelChoice, AgentModels, ToolStatus } from '@cc/protocol/client'
+import { listedModel, type AgentDifficulty, type AgentModelChoice, type AgentModels, type ModelOption, type ToolStatus } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useModels } from '../session/SessionSettings.jsx'
@@ -101,17 +101,19 @@ function LevelRow({
 }: {
   testId: string
   label: string
-  models: { id: string; label: string; efforts: string[] }[]
+  models: ModelOption[]
   value: AgentModelChoice | undefined
   onPick: (choice: AgentModelChoice | null) => void
 }) {
-  const listed = !value || models.some((m) => m.id === value.model)
+  // A full id is the entry that names it (#1989)
+  const entry = listedModel(models, value?.model)
+  const listed = !value || !!entry
   const choice = useOtherChoice({ other: false, draft: '' })
   const { other } = choice
   // A model chosen before and no longer listed (or typed, or a list not read yet) stays shown as itself
-  const options = value && !models.some((m) => m.id === value.model) ? [...models, { id: value.model, label: value.model, efforts: [] }] : models
+  const options = value && !entry ? [...models, { id: value.model, label: value.model, efforts: [] }] : models
   // A model the list does not show (typed under Other…) is offered every effort the tool's listed models have
-  const efforts = models.find((m) => m.id === value?.model)?.efforts ?? [...new Set(models.flatMap((m) => m.efforts))]
+  const efforts = entry?.efforts ?? [...new Set(models.flatMap((m) => m.efforts))]
   const effortOptions = value?.effort && !efforts.includes(value.effort) ? [...efforts, value.effort] : efforts
   const commit = () => {
     const model = choice.draft.trim()
@@ -128,7 +130,7 @@ function LevelRow({
         className={MODEL_WIDTH}
         aria-label={`${label} model`}
         data-testid={testId}
-        value={choice.shown(value?.model ?? '')}
+        value={choice.shown(entry?.id ?? value?.model ?? '')}
         onChange={(e) =>
           choice.onSelect(e, listed ? '' : (value?.model ?? ''), (model) =>
             // A new model takes its own default effort: the effort chosen belonged to the old one

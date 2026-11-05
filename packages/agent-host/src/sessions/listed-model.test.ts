@@ -6,6 +6,8 @@ import { managerWorld, projectDirs } from './manager.test-helpers.js'
 /**
  * A model set by its full id stays that id (#1989): a pin must not move to an alias (`opus`) that may later name another model.
  * Only the screen reads it as the list's entry (`listedModel`).
+ * It passes on main by design: it guards the owner's decision (#1989), which is also why the issue's wish that the orchestrator's
+ * descriptions name the list's id is dropped (ids are stored as given).
  */
 describe('a model set by its full id', () => {
   const dir = projectDirs()
