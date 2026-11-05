@@ -9,6 +9,8 @@ import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { SIDEBAR_VARS } from './layout.js'
 import { OrchestratorButton } from './OrchestratorButton.jsx'
 import { GridButton } from './GridButton.jsx'
+import { SearchField } from '../palette/SearchField.jsx'
+import { OverlayScrollbar } from '../../components/OverlayScrollbar.jsx'
 import { ProjectBlock } from './project/ProjectBlock.jsx'
 import { UserApps } from './apps/UserApps.jsx'
 import { AddProjectMachines } from './menus/AddProjectMachines.jsx'
@@ -29,6 +31,7 @@ export function Sidebar() {
   /** The Add project button's machine choice (#734), open once a machine is linked */
   const [choosing, setChoosing] = useState(false)
   const addAnchor = useRef<HTMLSpanElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
@@ -72,6 +75,10 @@ export function Sidebar() {
         testId="sidebar-resize"
       />
       <div className="shrink-0">
+        {/* The first row (owner, 2026-11-05; SearchField): its 8px sides and top are SEARCH_ROW, which the palette hangs from */}
+        <div className="px-2 pt-2">
+          <SearchField />
+        </div>
         <OrchestratorButton />
         <GridButton />
       </div>
@@ -115,27 +122,38 @@ export function Sidebar() {
           <AppPlusIcon size={14} />
         </IconButton>
       </div>
-      <div className="min-h-[4.5rem] flex-1 overflow-y-auto" data-testid="sidebar-projects">
-        {/*
-          Until the host's first lists arrive the list is not known to be empty (owner, 2026-10-18: "No projects yet"
-          flashed on a slow start). The shape of two projects stands there instead, and the real list fades in.
-        */}
-        {ids.length === 0 && !listed ? (
-          <SidebarSkeleton />
-        ) : ids.length === 0 ? (
-          <p className="cc-fade px-4 py-6 text-sm leading-body text-ink-faint">
-            No projects yet.
-            <br />
-            Start with the buttons beside <span className="text-ink-muted">Projects</span> above: an existing folder or a
-            new app.
-          </p>
-        ) : (
-          <div className="cc-fade">
-            {ids.map((id) => (
-              <ProjectBlock key={id} projectId={id} />
-            ))}
-          </div>
-        )}
+      {/*
+        The list scrolls with its bar drawn over it, as the conversation does (OverlayScrollbar, `cc-scroll-overlay`;
+        owner, 2026-11-05): a native bar took a column of its own, so every row moved left by its width the moment the
+        list grew past the window and back when it shrank. The thumb stands 4px in from the edge, clear of the resize
+        handle (ResizeHandle, w-1) that spans the same edge.
+      */}
+      <div className="relative flex min-h-[4.5rem] flex-1 flex-col">
+        <div ref={listRef} className="cc-scroll-overlay min-h-0 flex-1 overflow-y-auto" data-testid="sidebar-projects">
+          {/*
+            Until the host's first lists arrive the list is not known to be empty (owner, 2026-10-18: "No projects yet"
+            flashed on a slow start). The shape of two projects stands there instead, and the real list fades in.
+          */}
+          {ids.length === 0 && !listed ? (
+            <SidebarSkeleton />
+          ) : ids.length === 0 ? (
+            <p className="cc-fade px-4 py-6 text-sm leading-body text-ink-faint">
+              No projects yet.
+              <br />
+              Start with the buttons beside <span className="text-ink-muted">Projects</span> above: an existing folder or a
+              new app.
+            </p>
+          ) : (
+            <div className="cc-fade">
+              {ids.map((id) => (
+                <ProjectBlock key={id} projectId={id} />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="absolute inset-y-0 right-1 w-0">
+          <OverlayScrollbar scrollRef={listRef} testId="sidebar-scrollbar" />
+        </div>
       </div>
       {/*
         The bottom area stands still under the list (#988). Capped, so a long leftover list cannot push the list off the

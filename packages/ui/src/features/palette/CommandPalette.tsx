@@ -17,6 +17,7 @@ import { useLoad } from '../../app/useLoad.js'
 import { LoadFailedFold } from '../../components/LoadFailed.jsx'
 import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
 import { ShortcutTable } from './ShortcutTable.jsx'
+import { SEARCH_FIELD_BOTTOM, SEARCH_ROW } from './SearchField.jsx'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
@@ -29,8 +30,8 @@ type Item =
 /**
  * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
  * one search box. Since "where did we talk about that" is the real question in this app, search
- * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field in the top bar
- * (#529, #727), which is how a person who was never told the key finds it.
+ * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field at the top of the sidebar
+ * (#529, #727, back in the sidebar 2026-11-05), which is how a person who was never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -291,23 +292,25 @@ export function CommandPalette() {
   if (!shown) return null
 
   /*
-   * A popover hanging from the top bar's search field (#727), not a dialog in the middle of the
-   * window. The catcher covers the whole window, the top bar included, so a press anywhere but the
-   * panel closes it, as it did; only the dimming starts below the bar (top-9 is the bar's h-9,
-   * App's TopBar), so the field the person pressed stays in view over the panel that came from it.
-   * The catcher sits outside the bar's drag region in the tree, so a press on it never moves the
-   * window. The panel is centred in the window like the field, and opens at the bar's edge.
+   * A popover hanging from the sidebar's search field (#727), not a dialog in the middle of the
+   * window. The catcher covers the whole window, so a press anywhere but the panel closes it, as it
+   * did; only the dimming starts below the field's row, so the field the person pressed (and the top
+   * bar above it) stays in view over the panel that came from it. The panel's left edge is the
+   * field's and it opens 4px under it; both come from SearchField's geometry, not from a
+   * measurement, so they follow the window's zoom as the field does. The catcher sits outside the
+   * top bar's drag region in the tree, so a press on it never moves the window.
    */
   return (
     <div
-      className={`absolute inset-0 z-40 flex items-start justify-center pt-10 ${leaving ? 'pointer-events-none' : ''}`}
+      className={`absolute inset-0 z-40 flex items-start justify-start ${leaving ? 'pointer-events-none' : ''}`}
+      style={{ paddingTop: SEARCH_FIELD_BOTTOM + 4, paddingLeft: SEARCH_ROW.side }}
       onClick={() => toggle(false)}
       data-testid="command-palette"
       data-leaving={leaving || undefined}
       // Leaving, it takes no keys and no focus: a layer closing over it gives focus back past it (focusReturn.ts)
       inert={leaving}
     >
-      <div className={`absolute inset-x-0 bottom-0 top-9 bg-scrim backdrop-blur-[2px] ${leaving ? 'cc-fade-out' : 'cc-fade'}`} />
+      <div style={{ top: SEARCH_FIELD_BOTTOM }} className={`absolute inset-x-0 bottom-0 bg-scrim backdrop-blur-[2px] ${leaving ? 'cc-fade-out' : 'cc-fade'}`} />
       <div
         ref={panelRef}
         {...dialog}

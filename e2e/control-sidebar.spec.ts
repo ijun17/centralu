@@ -298,8 +298,26 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   await expect(mark.locator('> span')).toHaveCSS('border-top-width', '2px')
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
-  // An expanded project has no summary — each row's own marker already says it
-  await expect(page.getByTestId('fold-summary-beta')).toHaveCount(0)
+  // An open project keeps its count too (owner, 2026-11-05): beta's session is working
+  await expect(page.getByTestId('fold-summary-beta').locator('[data-state="working"]')).toHaveText('1')
+})
+
+test('Sidebar: a project keeps its count on the name row when it is open, folded, and opened again (owner, 2026-11-05)', async ({
+  page,
+}) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await newSession(page, 'alpha', 'A task')
+  await page.evaluate((sid) => (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], state: 'working' } } })), id)
+  const count = page.getByTestId('fold-summary-alpha').locator('[data-state="working"]')
+  // Open: the count was drawn only once the project was folded
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+  await expect(count).toHaveText('1')
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(0)
+  await expect(count).toHaveText('1')
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+  await expect(count).toHaveText('1')
 })
 
 test('Sidebar: navigating from the inbox to a session in a folded project unfolds it (#205)', async ({

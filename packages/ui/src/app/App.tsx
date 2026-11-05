@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
@@ -26,8 +26,6 @@ import { ProjectView } from '../features/project/ProjectView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
-import { SearchField } from '../features/palette/SearchField.jsx'
-import { useSearchReserve } from './useSearchReserve.js'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
@@ -445,8 +443,6 @@ function Body() {
  */
 /** The bar's edge margin. Same value as `pr-4` on the right, and also the floor for the left padding */
 const EDGE_PADDING = 16
-/** The widest the top bar's search field gets */
-const SEARCH_MAX = 400
 
 function TopBar() {
   const counts = useCounts()
@@ -465,10 +461,6 @@ function TopBar() {
   const controlsInset = useCapability('windowControlsInset')
   const windowControls = useCapability('windowControls')
   const sc = useShortcut()
-  // The search field stands in the middle of the window and takes its width from what the two sides leave (useSearchReserve)
-  const counterRef = useRef<HTMLSpanElement>(null)
-  const rightRef = useRef<HTMLSpanElement>(null)
-  const reserve = useSearchReserve(counterRef, rightRef)
   /*
    * Top bar.
    *
@@ -509,7 +501,7 @@ function TopBar() {
         from #4).
       */}
       {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
-      <span className="relative flex" ref={counterRef}>
+      <span className="relative flex">
         <InboxPill counts={counts} onOpen={() => toggleInbox()} title={`Waiting (${sc('mod', 'I')})`} />
         <Inbox />
       </span>
@@ -533,22 +525,11 @@ function TopBar() {
         so the palette gained both entries in the same change.
       */}
       {/*
-        The search field (#727), centred in the window like an editor's command bar. Absolutely placed, so the
-        controls on either side keep their own layout, and its width is what the window leaves once both sides
-        (the wider of them, twice) have what they need: it shrinks as the window narrows and never reaches under
-        the traffic lights or the right-hand controls. pointer-events-none here and back on for the field itself:
-        the strip around the field is empty bar and must still drag the window and zoom it on a double press.
+        The middle of the bar is empty on purpose (owner, 2026-11-05): the search field went back to the top of the
+        sidebar (SearchField), and the room it stood in is kept for controls still to come. Empty bar is drag region.
       */}
-      <div
-        className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center"
-        style={{ width: `min(${SEARCH_MAX}px, calc(100% - ${2 * reserve}px))` }}
-        data-testid="search-slot"
-      >
-        <SearchField />
-      </div>
-
       {/* data-tauri-drag-region: a double press on the gap inside this wrapper zooms the window, as on the bar itself */}
-      <span className="ml-auto flex items-center gap-3 self-stretch" ref={rightRef} data-tauri-drag-region>
+      <span className="ml-auto flex items-center gap-3 self-stretch" data-tauri-drag-region>
         {/*
           "A new version is available" — a line that appears only when there is one (issue #43).
 
