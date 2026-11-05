@@ -414,7 +414,7 @@ export function ToolCard({
             aria-expanded={open}
             data-testid="tool-card-toggle"
           >
-            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+            <span className="readout max-w-48 shrink-0 truncate rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted" title={item.tool}>
               {item.tool}
             </span>
           </button>
@@ -455,7 +455,7 @@ export function ToolCard({
           title={item.title}
         >
           {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
-          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+          <span className="readout max-w-48 shrink-0 truncate rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted" title={item.tool}>
             {item.tool}
           </span>
           <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">
