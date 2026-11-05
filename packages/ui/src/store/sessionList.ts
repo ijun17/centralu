@@ -253,6 +253,7 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
     notices: s.notices.filter((n) => !gone.has(n.sessionId)),
     history: keep(s.history),
     subagentSteps: keep(s.subagentSteps),
+    foldOpen: keep(s.foldOpen),
     drafts: keep(s.drafts),
     stickToBottom: keep(s.stickToBottom),
     searchTargets: keep(s.searchTargets),

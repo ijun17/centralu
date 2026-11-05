@@ -10,7 +10,7 @@ import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
 import { FoldLine } from './FoldLine.jsx'
-import { dayBreaksOnPage, foldIsOpen, foldRuns, liveStep, type Fold } from './foldRuns.js'
+import { dayBreaksOnPage, foldIsOpen, foldRuns, liveRun, liveStep, type Fold } from './foldRuns.js'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
 import { useChatScroll } from './useChatScroll.js'
@@ -150,47 +150,52 @@ export function ChatStream({
   const opened = useStore((s) => s.foldOpen[sessionId])
   const hit = useMemo(() => (searchTarget ? chat.findIndex((c) => c.storedSeq === searchTarget.seq) : -1), [chat, searchTarget])
   const { runs, runOf } = useMemo(() => foldRuns(chat, (id) => !!views?.[id]), [chat, views])
+  /*
+   * A run opens with a fade of its rows (`cc-fade`) and closes with one (`cc-fade-out`): a short change of brightness,
+   * no travel (none at all under reduced motion, `index.css`). The press never waits and is never at the fade's mercy:
+   * the store takes it at once, and only the rows stay on the page a moment longer to fade (`closing`), so a panel
+   * closed or a session left in that moment has still folded the run.
+   */
+  const [motion, setMotion] = useState<{ sessionId: string; first: number; kind: 'in' | 'out' } | null>(null)
+  const motionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(motionTimer.current), [])
+  const mine = motion?.sessionId === sessionId ? motion : null
   const folds = useMemo(() => {
-    const heads = new Map<number, { fold: Fold; open: boolean }>()
+    const heads = new Map<number, { fold: Fold; open: boolean; closing: boolean }>()
     const hidden = new Uint8Array(chat.length)
     for (const fold of runs) {
-      const open = foldIsOpen(fold, opened, hit < 0 ? null : hit)
-      heads.set(fold.first, { fold, open })
+      const closing = mine?.kind === 'out' && mine.first === fold.first
+      const open = foldIsOpen(fold, opened, hit < 0 ? null : hit) || closing
+      heads.set(fold.first, { fold, open, closing })
       if (!open) hidden.fill(1, fold.first + 1, fold.last + 1)
     }
     return { heads, hidden }
-  }, [runs, opened, hit, chat.length])
+  }, [runs, opened, hit, chat.length, mine])
   // A search hit inside a folded run opens it for good, as pressing it would (the open state is read the same way)
   useEffect(() => {
     const head = hit < 0 ? -1 : (runOf[hit] ?? -1)
     const run = head < 0 ? undefined : folds.heads.get(head)?.fold
     if (run && !run.keys.some((k) => opened?.[k])) useStore.getState().setFoldOpen(sessionId, run.keys, true)
   }, [hit, runOf, folds, opened, sessionId])
-  /*
-   * A run opens with a fade of its rows (`cc-fade`) and closes with one (`cc-fade-out`, then the rows go): a short
-   * change of brightness, no travel, and under reduced motion the same rule the other fades follow (index.css). The
-   * press never waits: the line answers at once and the rows follow.
-   */
-  const [motion, setMotion] = useState<{ first: number; kind: 'in' | 'out' } | null>(null)
-  const motionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => () => clearTimeout(motionTimer.current), [])
-  useEffect(() => setMotion(null), [sessionId])
   const toggleFold = (fold: Fold, open: boolean) => {
-    if (motion?.kind === 'out') return
+    if (mine?.kind === 'out' && mine.first === fold.first) return
     clearTimeout(motionTimer.current)
+    // The person took the view off the end: opening or closing below it must not pull it back down to follow the end
+    stickToBottom.current = false
+    const fade = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const settle = () => {
+      if (fade) motionTimer.current = setTimeout(() => setMotion(null), FOLD_FADE_MS + 50)
+    }
     if (!open) {
       useStore.getState().setFoldOpen(sessionId, fold.keys, true)
-      setMotion({ first: fold.first, kind: 'in' })
-      motionTimer.current = setTimeout(() => setMotion(null), FOLD_FADE_MS + 50)
-      return
+      setMotion(fade ? { sessionId, first: fold.first, kind: 'in' } : null)
+      return settle()
     }
     // A run held open by the search hit in it closes the hit with it, or it would open again
     if (searchTarget && hit >= fold.first && hit <= fold.last) useStore.getState().clearSearchTarget(sessionId, searchTarget.at)
-    setMotion({ first: fold.first, kind: 'out' })
-    motionTimer.current = setTimeout(() => {
-      useStore.getState().setFoldOpen(sessionId, fold.keys, false)
-      setMotion(null)
-    }, FOLD_FADE_MS)
+    useStore.getState().setFoldOpen(sessionId, fold.keys, false)
+    setMotion(fade ? { sessionId, first: fold.first, kind: 'out' } : null)
+    settle()
   }
   /*
    * Never two rows under one key: a shared key leaves copies of a row behind in the DOM (#64, `rowKeys`). A row a fold
@@ -283,9 +288,10 @@ export function ChatStream({
   const fade = useEdgeFade(scrollRef, stickToBottom, [virtualizer.getTotalSize(), bottomPad, bottomPeek, yieldSpace, pending, questions.length, working])
 
   // Where a new day begins, and which bubble ends an answer and carries its time (answerBubble.ts)
+  const live = useMemo(() => liveRun(chat, runs, working), [chat, runs, working])
   const dayBreaks = useMemo(
-    () => dayBreaksOnPage(dayBreaksOf(chat), runs, runOf, (f) => !!folds.heads.get(f.first)?.open),
-    [chat, runs, runOf, folds],
+    () => dayBreaksOnPage(dayBreaksOf(chat), runs, chat.length, (f) => !!folds.heads.get(f.first)?.open),
+    [chat, runs, folds],
   )
   const answerEnds = useMemo(() => answerEndsOf(chat), [chat])
 
@@ -354,7 +360,7 @@ export function ChatStream({
             // A row inside a folded run is not drawn: it stands at no height (estimateSize, keys)
             if (folds.hidden[v.index]) return null
             const head = folds.heads.get(v.index)
-            const inMotion = motion !== null && v.index > motion.first && v.index <= (folds.heads.get(motion.first)?.fold.last ?? -1)
+            const inMotion = mine !== null && v.index > mine.first && v.index <= (folds.heads.get(mine.first)?.fold.last ?? -1)
             return (
             <div
               key={v.key}
@@ -382,13 +388,13 @@ export function ChatStream({
                     ? ''
                     : 'pb-3'
               } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
-                inMotion ? (motion.kind === 'in' ? 'cc-fade' : 'cc-fade-out') : ''
+                inMotion ? (mine.kind === 'in' ? 'cc-fade' : 'cc-fade-out') : ''
               } ${
-                chat[v.index]?.storedSeq === searchTarget?.seq
+                searchTarget !== null && chat[v.index]?.storedSeq === searchTarget.seq
                   ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
                   : ''
               }`}
-              data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
+              data-search-hit={searchTarget !== null && chat[v.index]?.storedSeq === searchTarget.seq ? 'true' : undefined}
               /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller
@@ -403,9 +409,9 @@ export function ChatStream({
               {head && (
                 <FoldLine
                   fold={head.fold}
-                  open={head.open && motion?.kind !== 'out'}
-                  // Live: the run the turn is in, which is the conversation's last rows
-                  step={working && head.fold.last === chat.length - 1 ? liveStep(chat, head.fold) : null}
+                  open={head.open && !head.closing}
+                  // Live: the run the turn is in
+                  step={head.fold === live ? liveStep(chat, head.fold) : null}
                   onToggle={() => toggleFold(head.fold, head.open)}
                 />
               )}

@@ -8,7 +8,8 @@ import { formatElapsed } from '../elapsed.js'
  *
  * A run is the rows in a row that may fold. These never fold, and a row of them ends the run, so the rows before and
  * after it fold separately:
- *  - what waits on the person: an approval's row, a question (its card stands after the list), a worktree proposal;
+ *  - what waits on the person: an approval's row, a question (its card stands after the list), a worktree proposal, an
+ *    `ask_project` call until it is answered (its line says whether the session it asked is waiting on the person);
  *  - what happened: every marker (an error line, a usage limit, a stop or restart cut, compaction, handoff, a tool's
  *    notice);
  *  - an app's view shown inline, the tool call that opened it;
@@ -24,7 +25,7 @@ export type Fold = {
   /** The index of its first and of its last row */
   first: number
   last: number
-  /** The key of each row (`foldKey`), which is how the run is remembered as open */
+  /** The keys of its rows (`foldKeys`), which is how the run is remembered as open */
   keys: string[]
   /** How many of each it holds, and how many tool calls failed */
   thoughts: number
@@ -34,9 +35,12 @@ export type Fold = {
   seconds: number | null
 }
 
-/** A row's name for the open state: the host's number when it has one (it survives a re-read), else the render key */
-export function foldKey(item: Pick<ChatItem, 'seq' | 'storedSeq'>): string {
-  return item.storedSeq !== undefined ? `s${item.storedSeq}` : `r${item.seq}`
+/**
+ * A row's names for the open state: the host's number when it has one (it survives a re-read), and the render key (a
+ * row streaming live has no host number until it is stored, and it must not close the run it is in when it gets one).
+ */
+export function foldKeys(item: Pick<ChatItem, 'seq' | 'storedSeq'>): string[] {
+  return item.storedSeq !== undefined ? [`s${item.storedSeq}`, `r${item.seq}`] : [`r${item.seq}`]
 }
 
 /** Whether the row folds into a run; `hasView` says whether a tool call opened an app view in the conversation */
@@ -45,6 +49,8 @@ export function foldable(item: ChatItem, hasView: (callId: string) => boolean): 
   if (item.kind !== 'tool') return false
   // A manager's worktree proposal waits on the person to take it (ChatRow `WorktreeProposalRow`)
   if (/propose_worktree_session$/.test(item.tool)) return false
+  // An ask_project call says, on its card, that the session it asked waits on the person: it stays until it is answered
+  if (/ask_project$/.test(item.tool) && item.result === undefined && item.ok === undefined) return false
   return !(item.callId && hasView(item.callId))
 }
 
@@ -67,7 +73,7 @@ export function foldRuns(chat: readonly ChatItem[], hasView: (callId: string) =>
       runs.push(open)
     }
     open.last = i
-    open.keys.push(foldKey(item))
+    open.keys.push(...foldKeys(item))
     runOf[i] = open.first
     if (item.kind === 'reasoning') open.thoughts++
     else {
@@ -90,25 +96,32 @@ export function foldIsOpen(fold: Fold, opened: Record<string, true> | undefined,
 }
 
 /**
- * What a live run is doing now, for its line (so a folded run still visibly moves): the tool call still without an
- * answer, else the last tool call, and "Thinking" when it ended on a thought. Null for a run that is not the last.
+ * What a live run is doing now, for its line (so a folded run still visibly moves): its last row, a tool call by its
+ * words (a Centralu call by its own label) and "Thinking" for a thought.
  */
 export function liveStep(chat: readonly ChatItem[], fold: Fold): string | null {
-  let last: ChatItem | undefined
-  for (let i = fold.last; i >= fold.first; i--) {
-    const item = chat[i]
-    if (item?.kind === 'tool' && item.result === undefined && item.ok === undefined) return toolStep(item)
-    last ??= item
-  }
+  const last = chat[fold.last]
   if (last?.kind === 'tool') return toolStep(last)
   return last ? 'Thinking' : null
 }
 
+/**
+ * The run the turn is in, if the turn is live: the last run, when only decided approvals stand after it (the tool the
+ * approval let through is still running, its row before the approval's).
+ */
+export function liveRun(chat: readonly ChatItem[], runs: readonly Fold[], working: boolean): Fold | null {
+  const run = runs.at(-1)
+  if (!working || !run) return null
+  for (let i = run.last + 1; i < chat.length; i++) if (chat[i]?.kind !== 'approval') return null
+  return run
+}
+
 function toolStep(item: Extract<ChatItem, { kind: 'tool' }>): string {
+  const name = item.centralu?.label ?? item.tool
   // One line: a command that runs over several is cut at its first, and the line's own width cuts the rest
   const title = item.title.split('\n').find((l) => l.trim() !== '')?.trim() ?? ''
   const more = item.title.trim().includes('\n') ? ' …' : ''
-  return !title || title === item.tool ? item.tool : `${item.tool}: ${title}${more}`
+  return !title || title === item.tool ? name : `${name}: ${title}${more}`
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
@@ -123,19 +136,25 @@ export function foldSummary(fold: Fold): string {
 }
 
 /**
- * A day divider that stands on a row a fold hides moves to the run's line, or the day would vanish with the row. A run
- * that holds a second day's break keeps only its first: the rest are on the page once it is open.
+ * A day divider that stands on a row a fold hides is not lost with it. A run that changes the day inside it leaves the
+ * rows after it in the new day, so the divider goes to the first row after the run (when that row has none of its own,
+ * which then says its own day); a run that ends the conversation has its line carry it.
  */
-export function dayBreaksOnPage(breaks: Map<number, string>, runs: readonly Fold[], runOf: Int32Array, isOpen: (fold: Fold) => boolean): Map<number, string> {
-  const hidden = runs.filter((f) => !isOpen(f))
-  if (hidden.length === 0) return breaks
-  const first = new Map(hidden.map((f) => [f.first, f]))
-  const out = new Map<number, string>()
-  for (const [i, label] of breaks) {
-    const head = runOf[i] ?? -1
-    if (head < 0 || !first.has(head) || i === head) {
-      out.set(i, label)
-    } else if (!out.has(head) && !breaks.has(head)) out.set(head, label)
+export function dayBreaksOnPage(breaks: Map<number, string>, runs: readonly Fold[], chatLength: number, isOpen: (fold: Fold) => boolean): Map<number, string> {
+  const out = new Map(breaks)
+  for (const fold of runs) {
+    if (isOpen(fold)) continue
+    let inside: string | undefined
+    for (let i = fold.first + 1; i <= fold.last; i++) {
+      const label = breaks.get(i)
+      if (label === undefined) continue
+      out.delete(i)
+      inside = label
+    }
+    if (inside === undefined) continue
+    const after = fold.last + 1
+    if (after < chatLength && !out.has(after)) out.set(after, inside)
+    else if (after >= chatLength && !out.has(fold.first)) out.set(fold.first, inside)
   }
   return out
 }

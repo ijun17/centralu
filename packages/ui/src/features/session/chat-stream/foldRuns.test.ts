@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatItem } from '../../../store/store.js'
-import { dayBreaksOnPage, foldIsOpen, foldKey, foldRuns, foldSummary, liveStep } from './foldRuns.js'
+import { dayBreaksOnPage, foldIsOpen, foldKeys, foldRuns, foldSummary, liveRun, liveStep } from './foldRuns.js'
 
 let n = 0
 // A row without its render key, whichever kind: the key is numbered here
@@ -49,6 +49,13 @@ describe('foldRuns: which rows fold', () => {
     expect(runOf[1]).toBe(-1)
   })
 
+  it('never folds an ask_project call until it is answered: its card says the session it asked waits on the person', () => {
+    const asking = tool({ tool: 'mcp__centralu__ask_project', result: undefined, ok: undefined })
+    expect(foldRuns([tool(), asking, tool()], none).runs).toHaveLength(2)
+    const answered = tool({ tool: 'mcp__centralu__ask_project', result: 'done', ok: true })
+    expect(foldRuns([tool(), answered, tool()], none).runs).toHaveLength(1)
+  })
+
   it("never folds a manager's worktree proposal, which waits on the person to take it", () => {
     const chat = [tool(), tool({ tool: 'mcp__centralu__propose_worktree_session' }), tool()]
     expect(foldRuns(chat, none).runs).toHaveLength(2)
@@ -61,15 +68,20 @@ describe('foldRuns: which rows fold', () => {
 })
 
 describe('foldRuns: how a run is remembered and drawn', () => {
-  it('names a row by the host number when it has one, so a re-read keeps the open state', () => {
-    expect(foldKey({ seq: 9, storedSeq: 4 })).toBe('s4')
-    expect(foldKey({ seq: 9 })).toBe('r9')
+  it('names a row by the host number when it has one (a re-read keeps the open state) and by its render key (a row stored while the run is open keeps it open)', () => {
+    expect(foldKeys({ seq: 9, storedSeq: 4 })).toEqual(['s4', 'r9'])
+    expect(foldKeys({ seq: 9 })).toEqual(['r9'])
   })
 
   it('is open when any row of it is, so a run that grows at either end stays open', () => {
     const [run] = foldRuns([tool({ storedSeq: 5 }), tool({ storedSeq: 6 })], none).runs
     expect(foldIsOpen(run!, undefined, null)).toBe(false)
     expect(foldIsOpen(run!, { s6: true }, null)).toBe(true)
+    // Opened while its row had no host number yet: the number arriving later does not close it
+    const [live] = foldRuns([tool({ seq: 70 })], none).runs
+    const opened = Object.fromEntries(live!.keys.map((k) => [k, true as const]))
+    const [stored] = foldRuns([tool({ seq: 70, storedSeq: 12 })], none).runs
+    expect(foldIsOpen(stored!, opened, null)).toBe(true)
     expect(foldIsOpen(run!, { s9: true }, null)).toBe(false)
   })
 
@@ -87,32 +99,50 @@ describe('foldRuns: how a run is remembered and drawn', () => {
     expect(foldSummary(run([tool({ at: 0 }), tool({ at: 252_000 })]))).toBe('2 tools · 4m 10s')
   })
 
-  it('moves a day divider off a row the fold hides onto its line', () => {
+  it('moves a day divider off a row the fold hides onto the first row after the run', () => {
     const chat = [said(), tool(), tool(), said()]
-    const { runs, runOf } = foldRuns(chat, none)
+    const { runs } = foldRuns(chat, none)
     const breaks = new Map([[2, 'Sunday']])
-    expect([...dayBreaksOnPage(breaks, runs, runOf, () => false)]).toEqual([[1, 'Sunday']])
+    expect([...dayBreaksOnPage(breaks, runs, chat.length, () => false)]).toEqual([[3, 'Sunday']])
     // Open, the divider stays on its own row
-    expect([...dayBreaksOnPage(breaks, runs, runOf, () => true)]).toEqual([[2, 'Sunday']])
+    expect([...dayBreaksOnPage(breaks, runs, chat.length, () => true)]).toEqual([[2, 'Sunday']])
+  })
+
+  it('leaves the next row its own divider, and lets a run that ends the conversation carry the day on its line', () => {
+    const chat = [said(), tool(), tool(), said()]
+    const { runs } = foldRuns(chat, none)
+    expect([...dayBreaksOnPage(new Map([[2, 'Sunday'], [3, 'Monday']]), runs, chat.length, () => false)]).toEqual([[3, 'Monday']])
+    const ending = [said(), tool(), tool()]
+    expect([...dayBreaksOnPage(new Map([[2, 'Sunday']]), foldRuns(ending, none).runs, ending.length, () => false)]).toEqual([[1, 'Sunday']])
   })
 })
 
-describe('liveStep', () => {
-  it('is the tool call still without an answer', () => {
+describe('liveStep and liveRun', () => {
+  it('is the last row of the run: the call by its words, Thinking for a thought', () => {
     const chat = [tool({ title: 'first' }), tool({ title: 'run2.sh before', result: undefined, ok: undefined })]
-    const [run] = foldRuns(chat, none).runs
-    expect(liveStep(chat, run!)).toBe('Bash: run2.sh before')
-  })
-
-  it('is the last call when all are answered, and Thinking when the run ends on a thought', () => {
-    const chat = [tool({ title: 'first' }), tool({ title: 'second' })]
-    expect(liveStep(chat, foldRuns(chat, none).runs[0]!)).toBe('Bash: second')
+    expect(liveStep(chat, foldRuns(chat, none).runs[0]!)).toBe('Bash: run2.sh before')
     const ending = [tool(), thought()]
     expect(liveStep(ending, foldRuns(ending, none).runs[0]!)).toBe('Thinking')
   })
 
-  it('keeps one line of a command that runs over several', () => {
+  it('does not stay on an earlier call still without an answer (a background agent) once the turn went on', () => {
+    const chat = [tool({ tool: 'Agent', title: 'Research', result: undefined, ok: undefined }), tool({ title: 'git status' })]
+    expect(liveStep(chat, foldRuns(chat, none).runs[0]!)).toBe('Bash: git status')
+  })
+
+  it('names a Centralu call by its own label, and keeps one line of a command that runs over several', () => {
+    const call = tool({ title: 'write the parser', centralu: { tool: 'start_agent', label: 'Started an agent' }, result: undefined, ok: undefined })
+    expect(liveStep([call], foldRuns([call], none).runs[0]!)).toBe('Started an agent: write the parser')
     const chat = [tool({ title: 'cd app\nnpm test', result: undefined, ok: undefined })]
     expect(liveStep(chat, foldRuns(chat, none).runs[0]!)).toBe('Bash: cd app …')
+  })
+
+  it('is live only while working, for the last run, and through decided approvals after it', () => {
+    const chat = [tool(), row({ kind: 'approval', requestId: 'r', summary: 'x', decision: 'allow' })]
+    const { runs } = foldRuns(chat, none)
+    expect(liveRun(chat, runs, true)).toBe(runs[0])
+    expect(liveRun(chat, runs, false)).toBeNull()
+    const answered = [tool(), said()]
+    expect(liveRun(answered, foldRuns(answered, none).runs, true)).toBeNull()
   })
 })
