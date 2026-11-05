@@ -211,7 +211,7 @@ come back to the desk
 
 #### FR-7. 프로젝트별·세션별 도구 선택
 
-- 세션 생성 대화상자에서 선택: **도구** (Claude Code / Codex) → **모델** → **권한 프리셋** (safe/normal/auto-approve) → 시작 프롬프트.
+- 세션 생성 대화상자에서 선택: **도구** (Claude Code / Codex) → **모델** → **권한 프리셋** (safe/normal/edits/auto-approve. 기본은 신뢰한 프로젝트에서 `auto`, 신뢰하지 않은 프로젝트에서 `normal`, 소유자 결정 2026-11-05) → 시작 프롬프트.
 - **권한 프리셋은 CLI의 전역 설정을 세션 단위로 덮어쓴다** (M0에서 검증 — §2 참조). 사용자의 전역 bypass 설정과 무관하게, Centralu에서 만든 세션은 선택한 프리셋대로 동작한다.
 - 모델·effort 메뉴는 도구가 노출하는 도구별 노브도 함께 다룬다: Claude effort 단계, **Codex `model_verbosity`** (issue #54, 2026-08-25 출시 — 실제 실행에서 출력 길이가 달라지는지 측정한 뒤 노출).
 - 프로젝트별 기본값 저장 ("이 프로젝트는 기본이 Codex + gpt-5.x").

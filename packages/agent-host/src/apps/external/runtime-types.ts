@@ -22,7 +22,11 @@ import type { RunLedger } from './runs.js'
  *   app      a broker call from another app (D-2) — the chain continues through the parent run id
  */
 export type AppCaller =
-  | { kind: 'view'; instanceId?: string }
+  /**
+   * A screen's call. `sessionId` is the conversation an inline view stands in (`InlineViews.owner`, set by `apps.invoke`):
+   * that view is rooted at that session, not at the person, for what an app's agent may run under (`AppCalls.agentCallers`)
+   */
+  | { kind: 'view'; instanceId?: string; sessionId?: string }
   | { kind: 'session'; sessionId: string }
   | { kind: 'app'; parentRunId: string }
 

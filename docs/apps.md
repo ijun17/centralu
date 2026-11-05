@@ -738,7 +738,7 @@ and "Send to builder".
   failing to make it does not undo the app). A project app's builder works in the **project root**,
   because file links and history catch-up assume it; a user-folder app's builder
   works in the app folder. The app's rules come as the session's role text, fixed when it is made.
-  Preset `normal`. Tool: the project's default, or the orchestrator's for a user-folder app. It is
+  Preset `auto`, the default every new session gets (owner decision 2026-11-05; `normal` before). Tool: the project's default, or the orchestrator's for a user-folder app. It is
   attached to its own app's tools, and gets one more tool, `check`. Carrying Centralu's own tools
   does not change which files it reads (#152): like any other session of its project, a Claude
   builder in a trusted project loads the project's `.claude/` and `CLAUDE.md` and the person's
@@ -1060,10 +1060,14 @@ gate happens in one place, the broker desk (`desk.ts`).
   undeclared is refused before anything runs. Declaring is not permission.
 - **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
   app: a project app's in its project (working folder: the project root), a user-folder app's like
-  a coordinator (no project, the orchestrator's empty folder). The preset is always `safe`,
-  whatever the calling session runs with and whatever the person's own settings say: a global
-  bypass is trust in the person's own instructions, not in instructions an app wrote. Reads run
-  without asking; writes and commands stop at an approval card in that session. Settings files: a project app's agent follows the
+  a coordinator (no project, the orchestrator's empty folder). The preset is `auto`, the default
+  every new session gets, never above the lowest preset among the sessions with a call open into
+  the app now, whatever run id the app cites: while a `safe` session's call is open (directly, through
+  `call_app`, or from a view inline in its conversation) every agent the app starts is `safe`. Only a
+  view opened in the window, with no session's call open, gives `auto`; a chain that can no longer be
+  followed gives `safe` (owner decision 2026-11-05; it was always `safe`, so writes and commands
+  stopped at an approval card). Nothing it does waits for the
+  person, though its text is the app's; the person may lower its preset in the session. Settings files: a project app's agent follows the
   project's trust like a worker; a user-folder app's agent reads only the person's own settings,
   never the orchestrator folder's files. The tool is `tool` if declared, else the default (the
   project's default tool; for a user-folder app, the orchestrator's). A tool that is not installed
