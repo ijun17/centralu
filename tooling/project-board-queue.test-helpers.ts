@@ -176,9 +176,9 @@ if (args[0] === 'pr' && args[1] === 'view') {
     const runs = Object.values(st.runs ?? {}).flat().filter((r) => r.id === id)
     const run = runs.sort((a, b) => (b.run_attempt ?? 1) - (a.run_attempt ?? 1))[0]
     const checks = run ? ((st.checks ?? {})[run.head_sha] ?? []).filter((c) => (c.check_suite ?? {}).id === run.check_suite_id) : []
-    // A shard that passed ran the scenarios in its step; a stand-in (st.standIns, by check name) only echoes, as build.yml's -skipped jobs do
+    // A shard that passed ran the scenarios in its step
     const stepsOf = (c) => c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }]
-      : /^e2e \(/.test(c.name) ? [{ name: 'Set up job', conclusion: 'success' }, (st.standIns ?? []).includes(c.name) ? { name: 'Run echo "Only documents changed"', conclusion: 'success' } : { name: 'pnpm e2e (shard ' + ((/(\d+\/\d+)\)$/.exec(c.name) || [])[1] || '1/1') + ')', conclusion: c.conclusion }]
+      : /^e2e \(/.test(c.name) ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm e2e (shard ' + ((/(\d+\/\d+)\)$/.exec(c.name) || [])[1] || '1/1') + ')', conclusion: c.conclusion }]
       : []
     out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: stepsOf(c) })) })
   }
