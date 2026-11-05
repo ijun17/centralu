@@ -7,7 +7,7 @@ import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
 import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
-import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, leftovers, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
+import { driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, leftovers, pathIn, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
 
 /**
  * The agent's browser (review of #1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
@@ -266,46 +266,94 @@ describe('a stored sign-in that stopped working, in a session', () => {
 })
 
 /**
- * Where no helper can be written (a data folder holding `;` on Windows), the agent's launcher would start the browser itself,
- * inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started
+ * A path holding the separator the agent's launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in
+ * it (#1688). A data folder with one has the helper made in the temporary folder instead; only where that cannot be either
+ * (or, on Windows, Node's own path has one) is there no helper, and then the agent's launcher would start the browser itself,
+ * inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started,
+ * naming the path and the character, and not offered as worth retrying
  */
-describe('no BROWSER helper', () => {
-  function noHelper() {
+describe('a path BROWSER cannot carry', () => {
+  function badData(name: string, archive = AGY_RELEASE.archives['windows-x86_64']) {
     const t = temp()
-    const dataDir = `${t.dir}/data;x`
+    const dataDir = pathIn(t.dir, name)
+    const spare = pathIn(t.dir, 'spare')
+    folder(spare)
     const home = agyHome(dataDir, AGY_RELEASE.version)
-    const archive = AGY_RELEASE.archives['windows-x86_64']
     fakeInstall(home, archive)
     fakeSignIn(home)
     const spawned: AgentSpawnSpec[] = []
+    // An agent that starts a session, should one be started
+    const script: PeerScript = async (method) => (method === 'initialize' ? { result: INIT } : method === 'session/new' ? { result: { sessionId: SID } } : { result: null })
     const spawn = (spec: AgentSpawnSpec) => {
       spawned.push(spec)
-      return new FakeAcpPeer(() => ({ hold: true }))
+      return new FakeAcpPeer(script)
     }
-    return { dataDir, home, archive, spawned, spawn }
+    return { dataDir, spare, home, archive, spawned, spawn }
   }
 
-  it('a session is refused before the agent starts, and leaves no folder', async () => {
-    const n = noHelper()
-    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64' }), n.spawn)
-    const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
-      () => null,
-      (e: unknown) => e,
-    )
-    expect(String((err as Error).message)).toMatch(/cannot start here/)
-    expect(n.spawned).toEqual([])
+  it('a data folder holding ; on Windows has the helper in the temporary folder, which works and is removed after', async () => {
+    const n = badData('data;x')
+    const folder = await browserFolder(n.home, 'win32', { spare: n.spare })
+    expect(folder.why).toBe('')
+    expect(folder.browser).not.toContain(';')
+    expect(folder.browser).toContain(pathIn(n.spare, 'centralu-agy-'))
+    const got = handedOver(folder)
+    expect(await runBrowser(folder.browser, ADDRESS)).toBe(0)
+    expect(await got).toBe(ADDRESS)
+    await folder.remove()
+    expect(inFolder(n.spare)).toEqual([])
     expect(leftovers(n.home, '.sign-in-')).toEqual([])
   })
 
-  it('a sign-in is refused before the agent starts, and opens nothing', async () => {
-    const n = noHelper()
+  it('a data folder holding %s has the helper in the temporary folder, on this OS too', async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    const folder = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: n.spare })
+    expect(folder.browser).not.toContain('data%sx')
+    expect(folder.browser).toContain(pathIn(n.spare, 'centralu-agy-'))
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+    await folder.remove()
+    expect(inFolder(n.spare)).toEqual([])
+  })
+
+  it('a session in a data folder holding ; starts, with the helper in the temporary folder', async () => {
+    const n = badData('data;x')
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { spare: n.spare } }), n.spawn)
+    const handle = await adapter.createSession(sessionOpts('agy-spare'), driven().emit)
+    expect(n.spawned).toHaveLength(1)
+    expect(n.spawned[0]?.env?.BROWSER).toContain(pathIn(n.spare, 'centralu-agy-'))
+    await handle.dispose()
+  })
+
+  it('a session is refused, not worth retrying, before the agent starts, naming the path and the character', async () => {
+    const n = badData('data')
+    const node = 'C:\tools;old\node.exe'
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { node, spare: n.spare } }), n.spawn)
+    const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
+      () => null,
+      (e: unknown) => e as Error & { code?: string; retryable?: boolean },
+    )
+    expect(err?.code).toBe('refused')
+    expect(err?.retryable).toBe(false)
+    expect(err?.message).toContain(node)
+    expect(err?.message).toContain('";"')
+    expect(n.spawned).toEqual([])
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+    expect(inFolder(n.spare)).toEqual([])
+  })
+
+  it('a sign-in is refused before the agent starts, names both folders when neither can carry it, and opens nothing', async () => {
+    const n = badData('data;x')
+    const spare = pathIn(n.spare, 'tmp%sx')
     const opened: string[] = []
-    const err = await runSignIn(n.home, n.archive, new AbortController().signal, { platform: 'win32', openUrl: (u) => opened.push(u), spawn: n.spawn }).then(
+    const err = await runSignIn(n.home, n.archive, new AbortController().signal, { platform: 'win32', helperPlaces: { spare }, openUrl: (u) => opened.push(u), spawn: n.spawn }).then(
       () => null,
       (e: unknown) => e,
     )
     expect(err).toBeInstanceOf(InstallFailure)
-    expect((err as InstallFailure).message).toMatch(/cannot sign in here/)
+    const message = (err as InstallFailure).message
+    expect(message).toContain(n.home.root)
+    expect(message).toContain(spare)
+    expect(message).toContain('";" or "%s"')
     expect(n.spawned).toEqual([])
     expect(opened).toEqual([])
     expect(leftovers(n.home, '.sign-in-')).toEqual([])

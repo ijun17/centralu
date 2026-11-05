@@ -97,7 +97,8 @@ that will run the agent, and `asks` for the limited credential (it brings in a p
    and every file is there, so a folder is whole or absent.
 6. **Tidy**: the temporary folder always; older version folders best effort (a running session may hold them on
    Windows). A stale `.install-*` or `.sign-in-*` an earlier host left (one killed mid-install) is removed when the next
-   host starts; an install or sign-in waits for that. Only when its owner is provably gone: each such folder's name
+   host starts; an install or sign-in waits for that (a helper's folder in the OS's temporary folder, §4.3, by the same
+   rule when the next one is made there). Only when its owner is provably gone: each such folder's name
    records the host process that made it (`.install-<pid>-<start>-<random>`, the start a hash of when that process
    began, `0` where `ps` cannot say, as on Windows), and a folder goes only when no process has that pid or the one that
    has it started at another time. The keeper's next host starts while the last one drains, and a second host on the
@@ -190,9 +191,9 @@ isolation environment, tied to no session: `initialize`, then `authenticate {met
 bound, past the agent's own 300 s, and the process kept until it answers.
 
 The agent never starts a browser itself, on any OS, and the address reaches the host and never `host.log`. Every
-Antigravity process (a sign-in, and each session, §4.4) gets its own private folder (`.sign-in-<owner>-<random>`, 0700)
-and `BROWSER` set to a helper there that writes its one argument to a file through a temporary name; the host reads it
-(and removes it, so each address is told once). `BROWSER` is always Centralu's, so one from the person's environment
+Antigravity process (a sign-in, and each session, §4.4) gets its own private folder (`.sign-in-<owner>-<random>`, 0700;
+in the OS's temporary folder where the data folder's path cannot be put in `BROWSER`, below) and `BROWSER` set to a
+helper there that writes its one argument to a file through a temporary name; the host reads it (and removes it, so each address is told once). `BROWSER` is always Centralu's, so one from the person's environment
 never reaches the agent (review of #1685, follow-up 8).
 
 - **The agent's launcher** is CPython 3.14's `webbrowser` (the binary is a PyInstaller build; its credential manager
@@ -214,12 +215,17 @@ never reaches the agent (review of #1685, follow-up 8).
   source of the same address, read by the sign-in and left out of the log.
 - The helper writes each address to a file of its own (`url-<run>`, through `part-<run>`) and exits 0 whatever
   happens: a non-zero exit would send the launcher on to its own default browser, inside the job.
-- Where no helper can be written (a path holding the separator `BROWSER` is split at, `;` on Windows and `:` elsewhere,
-  or `%s`, e.g. a data folder named `100%s`), the sign-in and every session refuse to start the agent, with a line in
-  `host.log` and an error that names why (`NO_HELPER`). Letting it start with no `BROWSER` was the other choice: its
-  launcher would then start the default browser itself, on Windows inside the host's job (the browser Stop ends), and a
-  sign-in that stopped working would hang the session start for two minutes again. A path Centralu can still use is
-  worth less than that, and the error says what to change (deep review of #1687, follow-up 4).
+- A path holding the separator `BROWSER` is split at (`;` on Windows, `:` elsewhere) or `%s` (e.g. a data folder named
+  `100%s`) cannot be in it. Where the data folder's path holds one, the helper's folder is made in the OS's temporary
+  folder instead (`centralu-agy-<owner>-<random>`, 0700; per user on Windows and macOS), so a data folder alone never
+  keeps the agent from starting (#1688). Where no helper can be written even so (the temporary folder's path holds one
+  too, or on Windows the path of the Node that runs the helper does), the sign-in and every session refuse to start the
+  agent, with a line in `host.log` and an error that names the path and the character in plain words
+  (`BrowserFolder.why`). A session's refusal is `refused`, not retryable, since a path does not change between tries;
+  the sign-in's is `failed`, as the setup line has no other word for it. Letting it start with no `BROWSER` was the
+  other choice: its launcher would then start the default browser itself, on Windows inside the host's job (the
+  browser Stop ends), and a sign-in that stopped working would hang the session start for two minutes again (deep
+  review of #1687, follow-up 4).
 - An address is opened once, and only the agent's own login request (`agentSignInUrl`, `sign-in.ts`): `https`,
   `accounts.google.com/o/oauth2/v2/auth`, `response_type=code`, the agent's OAuth client
   (`1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com`, public, measured in 1.4.3's login

@@ -55,6 +55,9 @@ export const tokenPath = (home: AgyHome) => join(home.geminiHome, 'antigravity-a
 /** The folders under the install's root whose names start with `prefix` (what an install or a sign-in left) */
 export const leftovers = (home: AgyHome, prefix: string) => (existsSync(home.root) ? readdirSync(home.root).filter((n) => n.startsWith(prefix)) : [])
 
+/** The names in a folder, or none when it is not there */
+export const inFolder = (path: string) => (existsSync(path) ? readdirSync(path) : [])
+
 export const exists = (path: string) => existsSync(path)
 export const readText = (path: string) => readFileSync(path, 'utf8')
 export const inVersion = (home: AgyHome, name: string) => join(home.versionDir, name)
