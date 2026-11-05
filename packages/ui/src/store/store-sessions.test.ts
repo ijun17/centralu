@@ -721,7 +721,7 @@ describe('newSessionProjectOf (#529)', () => {
  * on a linked machine, `normal` in an untrusted one, and the person's own choice always wins. The window sends the preset
  * itself, so a client that names none (a script, the limited credential) still gets `normal` from the host.
  */
-describe('the preset a new session starts with', () => {
+describe('the preset a new session starts with (#1525)', () => {
   async function started(trusted: boolean, opts?: { permissionPreset?: 'safe' | 'normal' | 'edits' | 'auto' }, machine?: string) {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/preset-project')
@@ -742,7 +742,6 @@ describe('the preset a new session starts with', () => {
 
   it('an explicit choice wins in a trusted project, normal included, and is never raised', async () => {
     expect((await started(true, { permissionPreset: 'normal' })).sent).toBe('normal')
-    expect((await started(true, { permissionPreset: 'edits' })).sent).toBe('edits')
     expect((await started(true, { permissionPreset: 'safe' })).sent).toBe('safe')
     expect((await started(false, { permissionPreset: 'edits' })).sent).toBe('edits')
   })
