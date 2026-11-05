@@ -3,6 +3,7 @@ import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
 import type { AcpProfile } from './profile.js'
+import { cursorProfile } from '../cursor-agent/index.js'
 
 /**
  * #1569: a tool whose model's provider refuses a turn (a usage limit, a quota) may retry on its own and send no frame
@@ -34,7 +35,7 @@ const script: PeerScript = (method) => {
   return { result: null }
 }
 
-async function start() {
+async function start(using: AcpProfile = profile) {
   const peers: FakeAcpPeer[] = []
   const events: NormalizedEvent[] = []
   const waiting: { pick(e: NormalizedEvent): boolean; resolve(e: NormalizedEvent): void }[] = []
@@ -49,7 +50,7 @@ async function start() {
     const seen = events.find(pick)
     return seen ? Promise.resolve(seen) : new Promise<NormalizedEvent>((resolve) => waiting.push({ pick, resolve }))
   }
-  const adapter = new FakeAdapter(profile, () => (peers.push(new FakeAcpPeer(script)), peers.at(-1)!), 60_000)
+  const adapter = new FakeAdapter(using, () => (peers.push(new FakeAcpPeer(script)), peers.at(-1)!), 60_000)
   const handle = await adapter.createSession({ sessionId: 's1', cwd: '/work', permissionPreset: 'normal', projectTrusted: true }, emit)
   return { peer: () => peers.at(-1)!, events, event, handle }
 }
@@ -126,5 +127,45 @@ describe('a provider refusal the tool only retries quietly', () => {
     await w.event((e) => e.type === 'turn_complete')
     expect(w.events.some(isError)).toBe(false)
     expect(w.peer().methods()).not.toContain('session/cancel')
+  })
+})
+
+/**
+ * #1969: out of quota, Cursor (agent 2026.10.22, signed in) answers every prompt with the plain text "Upgrade your plan to
+ * continue" and `end_turn`, with no error frame and nothing on stderr. The frames below are hand-written after that
+ * measurement (chunked as the agent chunks a reply): the shapes follow the recordings, no quota recording exists yet.
+ */
+describe('a provider refusal that arrives as the turn’s whole answer (Cursor out of quota)', () => {
+  const cursor: AcpProfile = { ...cursorProfile(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => '2026.10.22' }
+  const say = (w: Awaited<ReturnType<typeof start>>, ...chunks: string[]) => {
+    for (const text of chunks) w.peer().update(SID, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
+  }
+  const answered = async (chunks: string[]) => {
+    const w = await start(cursor)
+    w.handle.send('hello')
+    await w.peer().next(isPrompt)
+    say(w, ...chunks)
+    w.peer().release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'error' || e.type === 'turn_complete')
+    return w
+  }
+
+  it.each([[['Upgrade your plan', ' to continue']], [['  upgrade your PLAN to continue\n']]])('ends the turn as refused by the provider, in its words: %j', async (chunks) => {
+    const w = await answered(chunks)
+    expect(w.events.filter(isError)).toMatchObject([
+      { error: { code: 'internal', message: `Cursor's model refused the turn: ${chunks.join('').trim()}`, retryable: false } },
+    ])
+    expect(w.events.some((e) => e.type === 'turn_complete')).toBe(false)
+  })
+
+  it('leaves an answer that only contains the sentence as an ordinary answer', async () => {
+    const w = await answered(['The error reads "Upgrade your plan to continue" and comes from the billing page.'])
+    expect(w.events.some(isError)).toBe(false)
+    expect(w.events.some((e) => e.type === 'turn_complete')).toBe(true)
+  })
+
+  it('leaves a turn that answered more than the sentence as an ordinary answer', async () => {
+    const w = await answered(['Upgrade your plan to continue', ' Done.'])
+    expect(w.events.some(isError)).toBe(false)
   })
 })
