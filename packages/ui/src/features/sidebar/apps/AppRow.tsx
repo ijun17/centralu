@@ -168,7 +168,7 @@ export function AppRow({
         // A sibling of the row, not inside it: a button inside a button is neither valid nor reachable by keyboard
         <span className="absolute right-2 top-1/2 flex -translate-y-1/2">
           <IconButton
-            label={`${busy}. Stop it; it starts again the next time something needs it`}
+            label={`Stop ${app.title}: running ${app.info.busy}. It starts again the next time something needs it`}
             onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine })}
             testId={`app-stop-${app.key}`}
             align="right"

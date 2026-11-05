@@ -61,7 +61,7 @@ describe('an app holding busy (#1928)', () => {
     const html = render(busy(), [])
     expect(html).not.toContain('app-row-hint')
     expect(html).not.toContain('>Running')
-    expect(html).toMatch(/<button[^>]*aria-label="Running: merge queue, 1 item\. Stop it; it starts again the next time something needs it"[^>]*data-testid="app-stop-[^"]*"[^>]*><svg[^>]*><rect/)
+    expect(html).toMatch(/<button[^>]*aria-label="Stop X: running merge queue, 1 item\. It starts again the next time something needs it"[^>]*data-testid="app-stop-[^"]*"[^>]*><svg[^>]*><rect/)
     expect(html).not.toContain('>Stop<')
     // the reserve for the icon: 36px, not the 56px the text button needed
     expect(html).toContain('pr-9')

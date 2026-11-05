@@ -403,7 +403,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     const row = page.getByTestId(`app-row-${pid}/queue`)
     // No text on the row: the reason is the stop icon's name, and the title keeps the whole row (#1928)
     await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
-    await expect(page.getByTestId(`app-stop-${pid}/queue`)).toHaveAttribute('aria-label', /^Running: merge queue, 2 items\. Stop it; /)
+    await expect(page.getByTestId(`app-stop-${pid}/queue`)).toHaveAttribute('aria-label', /^Stop App queue: running merge queue, 2 items\. It starts again/)
     // Stop is on the row itself, so an app with no view to open is stopped without one
     await page.getByTestId(`app-stop-${pid}/queue`).click()
     await expect.poll(() => restarts(page)).toEqual([{ appId: 'queue', projectId: pid }])
