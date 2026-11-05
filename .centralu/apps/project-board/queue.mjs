@@ -63,6 +63,8 @@ export const MISSING_MS = 20 * 60_000
 export const UNCLEAN_MS = 30 * 60_000
 /** Failures in a row on one item, other than an outage, before the session hears about it. */
 export const ERROR_LIMIT = 3
+/** A 5xx on one item, poll after poll, that the queue paused for each time (1, 2, 4, 8, 15 minutes): about 45 minutes, then the session hears (an outage elsewhere would have let other polls succeed, which start the count over) */
+export const OUTAGE_LIMIT = 6
 export const MAX_EVENTS = 200
 export const MAX_DONE = 40
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])

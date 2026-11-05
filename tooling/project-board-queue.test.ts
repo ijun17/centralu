@@ -1895,6 +1895,19 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes()).toEqual([])
   })
 
+  // The queue pauses for each outage (1, 2, 4, 8, 15 minutes); a clock that steps 20 minutes a poll is past each pause at the next one
+  it('tells the session once after a 5xx that one pull request meets every time, six pauses running, not before', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }), { PROJECT_BOARD_QUEUE_STEP_MS: String(20 * 60_000) })
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    patchGh((s) => (s.checksError = 'HTTP 502: Bad Gateway (https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1)'))
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('error')
+    // Six polls failed with the 5xx, none was a strike before: not "3 times in a row"
+    expect(q.queue[0].reason.text).toContain('could not be read or acted on 6 times in a row')
+    await morePolls()
+    expect(notices()).toHaveLength(1)
+  })
+
   it('still sends an item to attention after three refusals from GitHub (HTTP 422)', async () => {
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -1909,7 +1922,9 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     const e = (kind: string, opts: object = {}) => new GitHubError(kind, 'x', opts)
     expect(isOutage(e('github', { status: 500 }))).toBe(true)
     expect(isOutage(e('github', { status: 503 }))).toBe(true)
-    expect(isOutage(e('github', { lost: true }))).toBe(true)
+    // A dropped connection (gh's "EOF") on a write, but not a refusal that printed no status: GraphQL's words for `gh pr ready` carry none
+    expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: Post "https://api.github.com/graphql": EOF', { lost: true }))).toBe(true)
+    expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: GraphQL: Pull request is not ready (convertPullRequestToDraft)', { lost: true }))).toBe(false)
     for (const kind of ['network', 'rate', 'auth', 'gh-missing']) expect(isOutage(e(kind))).toBe(true)
     for (const status of [0, 404, 409, 422]) expect(isOutage(e('github', { status })), String(status)).toBe(false)
     expect(isOutage(e('not-found', { status: 404 }))).toBe(false)

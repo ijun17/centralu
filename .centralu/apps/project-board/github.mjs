@@ -296,13 +296,18 @@ const firstLine = (e) =>
 // Failures that say nothing about the thing asked for: gh cannot reach GitHub at all, or may not for now.
 export const FATAL = new Set(['network', 'auth', 'gh-missing', 'rate'])
 
+/** What gh prints when the connection dropped with no answer (`Post "https://api.github.com/graphql": EOF`) */
+const DROPPED = /\bEOF\b|connection (?:reset|closed)|broken pipe/i
+
 /**
  * An outage, not a verdict on the thing asked for (2026-11-06: #1993 went to attention after three HTTP 500s from one
  * check-runs read that answered fine moments later): what FATAL names, GitHub failing (a 5xx), or a connection dropped
- * with no answer (`lost`, gh's "EOF"). The queue pauses and backs off on these and never counts them against an item;
- * a 4xx (a pull request gone, a refused write) is GitHub's answer about the item and still does.
+ * with no answer (`lost` with gh's "EOF", never a refusal that printed no status: GraphQL's own words for a refused
+ * `gh pr ready` carry none). The queue pauses and backs off on these and adds no strike against the item (a 5xx that
+ * one item meets every time still ends in attention, `OUTAGE_LIMIT`); a 4xx (a pull request gone, a refused write) is
+ * GitHub's answer about the item and counts.
  */
-export const isOutage = (e) => e instanceof GitHubError && (FATAL.has(e.kind) || e.status >= 500 || e.lost === true)
+export const isOutage = (e) => e instanceof GitHubError && (FATAL.has(e.kind) || e.status >= 500 || (e.lost === true && e.status === 0 && DROPPED.test(e.message)))
 
 /**
  * What a failed write says: GitHub's refusal when it answered with a client error (404, 409, 422), else `lost`: the

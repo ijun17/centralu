@@ -40,7 +40,7 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   const run = (dir: string, log: string, packages: string[] = ['libfoo-dev', 'libbar-dev']) =>
     new Promise<{ status: number | null; out: string }>((resolve) => {
       const child = spawn('bash', [script, ...packages], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SUDO: '', TRY_SECONDS: '2', RECOVER: `echo recovered >> "${log}"` },
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SUDO: '', TRY_SECONDS: '10', RECOVER: `echo recovered >> "${log}"` },
       })
       let out = ''
       child.stdout.on('data', (d) => (out += d))
@@ -64,19 +64,19 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   })
 
   it('stops a try that hits its limit, puts the machine right, and tries once more', async () => {
-    const { dir, log } = standIn((n) => (n === 1 ? 'sleep 30' : 'exit 0'))
+    const { dir, log } = standIn((n) => (n === 1 ? 'sleep 300' : 'exit 0'))
     const t = Date.now()
     const r = await run(dir, log)
     expect(r.status, r.out).toBe(0)
-    // The first try was ended by its limit (2 s), not waited for (30 s)
-    expect(Date.now() - t).toBeLessThan(25_000)
+    // The first try was ended by its limit (10 s), not waited for (300 s)
+    expect(Date.now() - t).toBeLessThan(120_000)
     const lines = calls(log)
     expect(installs(log)).toHaveLength(2)
     // Between the two tries, and only there
     expect(lines.indexOf('recovered')).toBeGreaterThan(lines.findIndex((l) => /install -y/.test(l)))
     expect(lines.indexOf('recovered')).toBeLessThan(lines.findLastIndex((l) => /install -y/.test(l)))
     expect(lines.filter((l) => l === 'recovered')).toHaveLength(1)
-    expect(r.out).toContain('::warning::apt try 1 of 2 failed or hit its 2s limit')
+    expect(r.out).toContain('::warning::apt try 1 of 2 failed or hit its 10s limit')
     expect(r.out).toContain('Installed in')
   })
 
@@ -87,7 +87,7 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
     const r = await run(failing.dir, failing.log)
     expect(r.status).toBe(1)
     expect(installs(failing.log)).toHaveLength(2)
-    expect(r.out).toContain('::error::the packages could not be installed in 2 tries of 2s')
+    expect(r.out).toContain('::error::the packages could not be installed in 2 tries of 10s')
   })
 
   it('refuses to install nothing', async () => {

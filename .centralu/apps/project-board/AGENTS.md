@@ -343,10 +343,14 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   failure beside any of these makes the run real.
 - **An outage is not a strike against the item** (2026-11-06: #1993 went to attention `error` after three HTTP 500s from one
   `check-runs` read that answered fine moments later). `GitHubError` carries the HTTP `status` gh printed, and
-  `isOutage` (github.mjs) is what `FATAL` names (network, rate, auth, gh missing), a 5xx, or a write whose answer never came
-  (`lost`). A poll or a batch step that fails so pauses the whole queue with a growing wait (kind `outage` for a 5xx) and
+  `isOutage` (github.mjs) is what `FATAL` names (network, rate, auth, gh missing), a 5xx, or a write whose connection dropped
+  with no answer (`lost` with gh's "EOF", and no status: a refusal in GraphQL's words, `gh pr ready`, carries none and stays a
+  refusal). A poll or a batch step that fails so pauses the whole queue with a growing wait (kind `outage` for a 5xx) and
   adds nothing to the item's `errors`; a 4xx (a pull request gone, a refused write, 404 or 422) still counts, and three in a
-  row still go to attention `error`. The inner places that read a refusal (a refused rerun, a refused dispatch) are unchanged.
+  row still go to attention `error`. A 5xx that one item meets every time (a poll that goes through starts the count over)
+  is counted apart (`outages`) and goes to attention after `OUTAGE_LIMIT` (6) of them, about 45 minutes of pauses, so one
+  item's broken read cannot hold the whole queue for ever. A batch counts the same. The inner places that read a refusal (a
+  refused rerun, a refused dispatch) are unchanged.
 - **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
   `verify` job fails, CI cancels the rest of that run at once (fail fast). The queue therefore never
   reads a run's conclusion alone: a `cancelled` run with a failed job is a failure.

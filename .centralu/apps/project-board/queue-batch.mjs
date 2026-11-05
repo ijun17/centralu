@@ -47,7 +47,7 @@ import {
   runJobSteps,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, OUTAGE_LIMIT, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, readBack, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
@@ -120,9 +120,16 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
       const fb = fresh.batches.find((x) => x.id === b.id)
       if (!fb || !BATCH_ACTIVE.has(fb.state)) return
       Object.assign(fb, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
-      if (fatal) return
-      fb.errors = (fb.errors ?? 0) + 1
-      if (fb.errors < ERROR_LIMIT) return
+      if (fatal) {
+        // As an item's: an outage is no strike, unless it is a 5xx that this batch meets every time
+        if (!(e.status >= 500)) return
+        fb.outages = (fb.outages ?? 0) + 1
+        if (fb.outages < OUTAGE_LIMIT) return
+        fb.errors = fb.outages
+      } else {
+        fb.errors = (fb.errors ?? 0) + 1
+        if (fb.errors < ERROR_LIMIT) return
+      }
       batchEvent(fresh, fb, `Batch ${fb.branch} could not be read or acted on ${fb.errors} times in a row (${message}); its pull requests go back to their own CI.`, at)
       // Not batched again on this head: their own runs may be cancelled (rerun on their own), and a
       // batch that failed three times would most likely fail again, batch after batch
@@ -383,7 +390,7 @@ async function runCi(b, ctx) {
     return { state: 'ci' }
   }
   if (d.state === 'ci') {
-    save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
+    save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
   // The full tier where nothing lands from less (`ci.landTier: full`, or a batch that changes the screen), and then the heavy jobs
@@ -398,7 +405,7 @@ async function runCi(b, ctx) {
   }
   if (gate.wait) {
     // A check still to come waits
-    save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
+    save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
   if (gate.drop === 'tier')
@@ -409,7 +416,7 @@ async function runCi(b, ctx) {
   if (d.state === 'green') {
     const run = runs[0] ?? null
     save((fq, fb) => {
-      Object.assign(fb, { state: 'landing', required, run: run ? { id: run.id, url: run.url, createdAt: run.createdAt ?? null } : null, greenAt: at, landed: 0, lastError: null, errors: 0, updatedAt: at, nextAt: at })
+      Object.assign(fb, { state: 'landing', required, run: run ? { id: run.id, url: run.url, createdAt: run.createdAt ?? null } : null, greenAt: at, landed: 0, lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: at })
       batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id}${tierPhrase(fb) ? `, ${tierPhrase(fb)}` : ''})` : tierPhrase(fb) ? ` (${tierPhrase(fb)})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
     })
     return { state: 'landing' }
@@ -536,7 +543,7 @@ async function landNext(b, ctx) {
     return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', why: `batch ${b.branch} stopped before ${n}: ${d.text}.`, then: d.subject ? fixable : undefined })
   }
   if (d.do === 'wait') {
-    save((fq, fb) => Object.assign(fb, d.patch ?? {}, { lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('waiting')).toISOString() }))
+    save((fq, fb) => Object.assign(fb, d.patch ?? {}, { lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: new Date(now + pollMs('waiting')).toISOString() }))
     return { state: 'landing' }
   }
   if (d.do === 'retarget') {
@@ -587,7 +594,7 @@ async function landNext(b, ctx) {
     Object.assign(it, { state: 'merged', mergedAt: at, commit: merged.mergeCommit?.oid ?? null, reason: null, noticeKey: null, updatedAt: at, title: pr.title })
     delete it.batch
     pushEvent(fq, it, { kind: 'merged', text, notify: true, at })
-    Object.assign(fb, { landed: k + 1, uncleanSince: null, lastError: null, errors: 0, updatedAt: at, nextAt: at })
+    Object.assign(fb, { landed: k + 1, uncleanSince: null, lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: at })
   })
   return { state: 'landing' }
 }
