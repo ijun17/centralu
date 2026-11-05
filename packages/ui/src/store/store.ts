@@ -23,6 +23,7 @@ export type { CommandRun } from './state/projects.js'
 export type { AppState, Draft, InlineView, PinnedView } from './state.js'
 export { gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
+import { cachedThemeFiles } from '../app/theme.js'
 export {
   gridScreenAppKeys,
   newSessionProjectOf,
@@ -220,7 +221,8 @@ export const useStore = create<AppState>((rawSet, get) => {
     appArrivals: [],
     appsSeen: {},
     themeFiles: [] as ThemeFileEntry[],
-    lastGoodThemes: {} as Record<string, ThemeFileEntry>,
+    // What the last run showed stands in for a custom theme whose file is broken when the window starts (`cachedThemeFiles`)
+    lastGoodThemes: cachedThemeFiles(),
     appQuestions: [] as AppQuestion[],
     appQuestionsVersion: 0,
     projectConsentsVersion: 0,

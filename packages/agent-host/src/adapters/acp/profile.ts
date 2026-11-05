@@ -104,4 +104,11 @@ export type AcpToolShape = {
    * other sessions' requests (a sub-agent's)
    */
   refusalOf?(line: string, conversation: string): string | null
+  /**
+   * The provider's words when the turn's whole answer (the agent's message text, joined) is a refusal sent as an ordinary
+   * reply: a finished turn (`end_turn`), no error frame, nothing on stderr (Cursor out of quota answers every prompt
+   * "Upgrade your plan to continue", #1969). The turn then ends as refused, as `refusalOf` ends one. Match the whole
+   * answer, never a reply that merely contains the words: a model may well quote them
+   */
+  refusalIn?(answer: string): string | null
 }

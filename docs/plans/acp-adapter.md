@@ -702,6 +702,7 @@ drops. `deleteExternalConversation`: OpenCode's `session/delete` / CLI; Cursor h
 | Model window | `size` of `usage_update` if it ever comes; none now | `usage_update.size` (200,000 for big-pickle) |
 | Cost per turn | — | `usage_update.cost`; not shown in PR 1 (no field for it) |
 | A provider refusing the turn (a usage limit, a quota; #1569) | no retry seen; the error ends the turn | retries quietly for about 70 s with no frame, then a JSON-RPC `-32603` with the provider's words (measured on 1.19.4 against a provider answering 429). Its log, sent to stderr by `--print-logs --log-level ERROR`, has the first failure at once: `AcpToolShape.refusalOf` reads it (a quota or usage limit of the session's own request; a rate limit is left to the tool's retries), sends `session/cancel` (which stops the retries and answers the prompt at once, measured), and the turn ends with those words when it answers |
+| A quota refusal sent as the answer (#1969) | out of quota, answers every prompt with the text "Upgrade your plan to continue" and `end_turn`: no error frame, nothing on stderr (measured on 2026.10.22). `AcpToolShape.refusalIn` reads it when it is the turn's whole answer (trimmed, any case), and the turn ends refused with those words, as above | not seen |
 
 ## 10. Tests (#1498 from day one)
 

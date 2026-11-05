@@ -7,6 +7,7 @@ describe('the kind of an error', () => {
     ['API Error: 529 {"type":"overloaded_error"}', 'overloaded'],
     ['Service temporarily unavailable (503)', 'overloaded'],
     ["You've hit your usage limit · resets 3pm", 'usage limit'],
+    ["Cursor's model refused the turn: Upgrade your plan to continue", 'usage limit'],
     ['429 rate_limit_error: too many requests', 'usage limit'],
     ['API Error: Connection refused (ECONNREFUSED)', 'network'],
     ['getaddrinfo ENOTFOUND api.anthropic.com', 'network'],
