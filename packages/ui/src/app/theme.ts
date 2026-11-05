@@ -193,15 +193,19 @@ export function applyCachedTheme(): void {
  */
 export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
   const out: Record<string, ThemeFileEntry> = {}
-  const choice = readStored(CACHE_KEY) as ThemeChoice | undefined
-  for (const theme of [choice?.dark, choice?.light]) {
-    if (!theme || typeof theme.id !== 'string' || THEME_PRESETS.some((p) => p.id === theme.id) || (theme.base !== 'dark' && theme.base !== 'light')) continue
+  const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
+  const choice = readStored(CACHE_KEY)
+  for (const theme of [field(choice, 'dark'), field(choice, 'light')]) {
+    const id = field(theme, 'id')
+    const base = field(theme, 'base')
+    if (typeof id !== 'string' || THEME_PRESETS.some((p) => p.id === id) || (base !== 'dark' && base !== 'light')) continue
     const tokens: Record<string, string> = {}
     for (const token of THEME_TOKENS) {
-      const value = (theme.tokens as Record<string, unknown> | undefined)?.[token.cssVar]
+      const value = field(field(theme, 'tokens'), token.cssVar)
       if (typeof value === 'string' && isValidTokenValue(token.key, value)) tokens[token.key] = value
     }
-    out[theme.id] = { id: theme.id, path: '', name: String(theme.name ?? theme.id), base: theme.base, tokens, problems: [], broken: false }
+    const name = field(theme, 'name')
+    out[id] = { id, path: '', name: typeof name === 'string' ? name : id, base, tokens, problems: [], broken: false }
   }
   return out
 }
