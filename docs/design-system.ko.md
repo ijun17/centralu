@@ -29,7 +29,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | `--radius-sm` (`rounded-sm`) | 3px | 체크박스, 인라인 코드 | 글줄 안의 작은 표시 |
 | `--radius-md` (`rounded-md`) | 4px | 버튼과 컨트롤, 키캡, 도구 카드의 도구 타일, 세션 표시 | 누르는 것의 기본 |
 | `--radius-lg` (`rounded-lg`) | 8px | 패널, 메뉴, 드롭다운, 대화상자, 도구 카드, 사이드바 타일 | 담는 것, 안에 든 것보다 한 단계 둥글게 |
-| `--radius-field` (`rounded-field`) | 10px | 상단 바의 검색칸, 질문의 선택지와 답 입력칸 | 입력칸이므로 캡슐처럼 완전히 둥글지 않다(*owner, 2026-10-18*, `SearchField.tsx`) |
+| `--radius-field` (`rounded-field`) | 10px | 사이드바 위쪽의 검색칸, 질문의 선택지와 답 입력칸 | 입력칸이므로 캡슐처럼 완전히 둥글지 않다(*owner, 2026-10-18*, `SearchField.tsx`) |
 | `--radius-field-key` (`rounded-field-key`) | 10 − 5 = 5px | 입력칸 안의 키캡(검색칸의 ⌘K) | 입력칸의 모서리에서 키 둘레의 틈을 뺀 값이라 두 곡선이 나란히 간다 |
 | `--radius-bubble` (`rounded-bubble`) | 14px | 두 화자의 말풍선, 고정된 메시지, 승인 카드와 질문 카드, 대화 자체의 카드(새 세션의 지난 대화) | 말한 것과 사람을 기다리는 것은 상자가 아니라 말로 읽힌다(*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
 | `--radius-full` (`rounded-full`) | 완전히 둥글게 | 상단 바의 캡슐, 카드의 종류 표시, 점, 스크롤바 손잡이 | 담는 것이 아니라 상태 |

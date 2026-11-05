@@ -32,7 +32,7 @@ Every corner is a step of this scale. Tailwind's own radii are cleared, so `roun
 | `--radius-sm` (`rounded-sm`) | 3px | checkboxes, inline code | A small mark inside a line of text |
 | `--radius-md` (`rounded-md`) | 4px | buttons and controls, keycaps, the tool tile in a tool card, a session's mark | The default for something pressed |
 | `--radius-lg` (`rounded-lg`) | 8px | panels, menus, dropdowns, dialogs, tool cards, sidebar tiles | A container, a step rounder than what is in it |
-| `--radius-field` (`rounded-field`) | 10px | the top bar's search field, a question's options and its answer box | An input, so not a capsule's full round (*owner, 2026-10-18*, `SearchField.tsx`) |
+| `--radius-field` (`rounded-field`) | 10px | the sidebar's search field, a question's options and its answer box | An input, so not a capsule's full round (*owner, 2026-10-18*, `SearchField.tsx`) |
 | `--radius-field-key` (`rounded-field-key`) | 10 − 5 = 5px | the keycap inside a field (the search field's ⌘K) | The field's corner less the gap around the key, so the two curves run parallel |
 | `--radius-bubble` (`rounded-bubble`) | 14px | both speakers' bubbles, the pinned message, approval and question cards, the conversation's own cards (a new session's past conversations) | What is said and what waits on the person read as speech, not as boxes (*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
 | `--radius-full` (`rounded-full`) | full | the top bar's capsules, a card's kind label, dots, the scrollbar thumb | A status, not a container |

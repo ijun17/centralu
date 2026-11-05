@@ -265,7 +265,7 @@
    *   sm      3px   small marks: checkboxes, inline code
    *   md      4px   controls, keycaps, tool tiles, a session's mark
    *   lg      8px   panels, menus, dialogs, tool cards
-   *   field  10px   what is typed into or picked from: the top bar's search field, a question's options and its
+   *   field  10px   what is typed into or picked from: the sidebar's search field, a question's options and its
    *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
    *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
    *                 approval and question cards, and the conversation's own cards (a new session's past

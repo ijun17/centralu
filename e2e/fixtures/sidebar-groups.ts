@@ -284,7 +284,7 @@ export function sidebarGroupTests(): void {
           }
         }
 
-        // Project rows: the arrow, the name and `⋯` (and, folded, the summary of what is hidden); the `+` is gone
+        // Project rows: the arrow, the name and `⋯` (and the summary of what its sessions are doing); the `+` is gone
         await expectCentred('project-header-alpha', ['project-fold-alpha', 'project-menu-alpha'])
         await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-menu-beta'])
         // Session rows at the three depths, the badges they carry, and the menu at their end
