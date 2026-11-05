@@ -1908,16 +1908,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(notices()).toHaveLength(1)
   })
 
-  it('still sends an item to attention after three refusals from GitHub (HTTP 422)', async () => {
-    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }))
-    await call('queue_merge', { pr: 77, owner: 'tester' })
-    patchGh((s) => (s.checksError = 'Unprocessable Entity (HTTP 422)'))
-    const q = await until((x) => stateOf(x) === 'attention', 'attention')
-    expect(q.queue[0].reason.kind).toBe('error')
-    expect(q.pause ?? null).toBeNull()
-    expect(notices()).toHaveLength(1)
-  })
-
+  // A 4xx stays the item's strike: three of them reach attention ('tells the session once when it can no longer read a queued pull request, after three tries')
   it('reads an outage from what GitHub answered, not from the item: a 5xx, a dropped connection and what FATAL names, never a 4xx', () => {
     const e = (kind: string, opts: object = {}) => new GitHubError(kind, 'x', opts)
     expect(isOutage(e('github', { status: 500 }))).toBe(true)
