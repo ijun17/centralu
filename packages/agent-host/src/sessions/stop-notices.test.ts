@@ -154,16 +154,17 @@ describe('a turn ends without finishing', () => {
     expect(w.store.mailbox.feedOf(addr(quiet), { limit: 10 })).toEqual([])
   })
 
-  it('a stop of a later turn leaves a question an earlier turn read: the session may have answered it in conversation', async () => {
+  it('a stop releases the questions of the turn it cut and leaves one an earlier turn read: the session may have answered it in conversation', async () => {
     const { asker, child, question } = await asked()
     // The child answered in conversation, not by a reply: the question is still open
     handleOf(child).answer('the release is on main')
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
-    // The person stops an unrelated turn of the child
+    // The person stops a later turn of the child, which a second question was delivered into
     working(child)
+    const now = ask(asker, child, 'and the tag?')
     handleOf(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
-    await new Promise((r) => setTimeout(r, 30))
-    expect(stopNotices(asker)).toEqual([])
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.facts.unanswered).toEqual([{ id: now.id, recipient: addr(child), why: 'stopped' }])
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedAt: null })
   })
 
