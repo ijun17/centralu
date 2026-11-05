@@ -27,6 +27,7 @@ import {
   instructionsFor,
   orchestratorToolSchemas,
   profileAllows,
+  orchestratorInstructions,
   readerFirst,
   readerInstructions,
   runOrchestratorTool,
@@ -301,6 +302,32 @@ describe('the reader set', () => {
     expect(servedInstructions('reader', DEFERRED_SERVER)).not.toContain('spawn_agent')
     expect(servedInstructions('reader', EAGER_DEVELOPER)).toContain('not your spawn_agent tool')
     expect(servedInstructions('reader', EAGER_DEVELOPER)).not.toContain('Agent tool')
+  })
+
+  // #1587: the orchestrator's light-work line is the same phrase from the same source, so it names each CLI's own tool too
+  it("names the CLI's own subagent tool in the orchestrator's light-work line, from the same phrase as the reader's", () => {
+    const light = (tool?: string) => orchestratorInstructions(tool).split('\n').find((l) => l.startsWith('For light work outside any project'))!
+    expect(light('Agent')).toBe('For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.')
+    expect(light('spawn_agent')).toContain('with the start_agent command, not your spawn_agent tool.')
+    expect(light()).toBe('For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command.')
+    for (const tool of ['Agent', 'spawn_agent']) {
+      expect(readerFirst(tool).join(' ')).toContain(`not your ${tool} tool`)
+      expect(instructionsFor('orchestrator', undefined, false, tool)).toContain(`not your ${tool} tool`)
+    }
+    expect(servedInstructions('orchestrator', EAGER_DEVELOPER)).toContain('not your spawn_agent tool')
+    expect(servedInstructions('orchestrator', EAGER_DEVELOPER)).not.toContain('Agent tool.')
+  })
+
+  // A kept process is judged by its prefix hash (launch-records): the words it was started with are in it, the CLI's tool name included
+  it("changes a seat's prefix hash with the subagent tool the instructions name, for the reader and for the orchestrator", () => {
+    for (const profile of ['reader', 'orchestrator'] as const) {
+      const a = residentCost(profile, { ...DEFERRED_SERVER, subagentTool: 'Agent' }).prefixHash
+      const b = residentCost(profile, { ...DEFERRED_SERVER, subagentTool: 'spawn_agent' }).prefixHash
+      expect(a, profile).not.toBe(b)
+      expect(residentCost(profile, { ...DEFERRED_SERVER, subagentTool: 'Agent' }).prefixHash, profile).toBe(a)
+    }
+    // Instructions with no tool to name are not the same words as with one
+    expect(residentCost('orchestrator', { ...DEFERRED_SERVER, subagentTool: undefined }).prefixHash).not.toBe(residentCost('orchestrator', DEFERRED_SERVER).prefixHash)
   })
 
   /*

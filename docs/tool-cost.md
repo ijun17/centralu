@@ -685,7 +685,7 @@ sessions, which had Centralu's tools and no instructions (#320), now get one sen
   person will follow." The last entry came
   after #561's tools (§10) joined the seat; it was measured on its own (below), the rest of this section without it.
   Each CLI is given the name of its own subagent tool in place of "Agent" (#1587): Codex's reads "not your spawn_agent tool"
-  (6 characters longer). That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
+  (6 characters longer), in the orchestrator's light-work line (#853) as well, which uses the same phrase. That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
 - The orchestrator (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
   person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or
   using another tool."

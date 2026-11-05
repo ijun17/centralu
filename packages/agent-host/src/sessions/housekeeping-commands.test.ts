@@ -10,7 +10,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { ORCHESTRATOR_INSTRUCTIONS } from './orchestrator-tools.js'
+import { orchestratorInstructions } from './orchestrator-tools.js'
 
 /**
  * The orchestrator's housekeeping and read commands (#1219, fourth slice): renaming a session, clearing its ended
@@ -198,7 +198,7 @@ describe('project_git_status and search_project_files', () => {
 describe('who may run them', () => {
   it('every command of the fourth slice is found through centralu_commands by the words the instructions give', async () => {
     const orc = await mgr.orchestrator()
-    const line = ORCHESTRATOR_INSTRUCTIONS.split(String.fromCharCode(10)).find((l) => l.startsWith('More commands'))
+    const line = orchestratorInstructions().split(String.fromCharCode(10)).find((l) => l.startsWith('More commands'))
     const query = /centralu_commands "([^"]+)"/.exec(line ?? '')?.[1] ?? ''
     expect(query).not.toBe('')
     const found = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query })).text
@@ -209,7 +209,7 @@ describe('who may run them', () => {
     ]
     for (const name of added) expect(found, name).toContain(`- ${name}:`)
     // And the instructions no longer say that deleting a session is the person's alone
-    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain("deleting it is the person's job")
+    expect(orchestratorInstructions()).not.toContain("deleting it is the person's job")
   })
 
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {

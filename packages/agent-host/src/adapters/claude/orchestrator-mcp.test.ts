@@ -51,6 +51,8 @@ describe('the Claude in-process server', () => {
   // #1587: the line names Claude's own subagent tool, and the adapter declares the same one for what the host counts and hashes
   it("names Claude's own subagent tool in the reader instructions", () => {
     expect(registered('reader').instructions).toContain('start_agent, not your Agent tool, for long work')
+    // The orchestrator's line about light work names the same tool
+    expect(registered('orchestrator').instructions).toContain('with the start_agent command, not your Agent tool.')
     expect(new ClaudeAdapter().capabilities.subagentTool).toBe('Agent')
     expect(CLAUDE_SUBAGENT_TOOL).toBe('Agent')
   })

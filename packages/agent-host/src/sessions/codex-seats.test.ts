@@ -149,7 +149,10 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
     // The role as the session is given it: the preamble (on by default, #564), then the role
     expect(text.startsWith(orchestratorRole())).toBe(true)
     expect(orchestratorRole().endsWith(ORCHESTRATOR_ROLE)).toBe(true)
-    expect(text).toContain(instructionsFor('orchestrator')!)
+    expect(text).toContain(instructionsFor('orchestrator', undefined, false, 'spawn_agent')!)
+    // #1587: its light-work line names Codex's own subagent tool, not Claude's
+    expect(text).toContain('with the start_agent command, not your spawn_agent tool.')
+    expect(text).not.toContain('Agent tool.')
   })
 
   it("an app's building session, after the role it was made with", async () => {

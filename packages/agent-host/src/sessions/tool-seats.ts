@@ -12,7 +12,7 @@ import {
   DELEGATE_TOOLS,
   MAIL_TOOLS,
   COMPACT_TOOLS,
-  ORCHESTRATOR_INSTRUCTIONS,
+  orchestratorInstructions,
   ORCHESTRATOR_TOOLS,
   READER_TOOLS,
   readerInstructions,
@@ -277,7 +277,10 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
     case 'builder': return BUILDER_INSTRUCTIONS
     // With an app attached at the start, the line on repository work (#957, #992 review)
     case 'reader': return readerInstructions(subagentTool, appsAttached)
-    default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
+    default: {
+      const text = orchestratorInstructions(subagentTool)
+      return commandsFor(profile, tier).length ? `${text}\n${COMMANDS_INSTRUCTION}` : text
+    }
   }
 }
 

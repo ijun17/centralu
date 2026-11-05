@@ -4,7 +4,7 @@ import type { ToolProfile } from '../apps/contract.js'
 import {
   COMMANDS_INSTRUCTION,
   DEFAULT_RARE_TIER,
-  ORCHESTRATOR_INSTRUCTIONS,
+  orchestratorInstructions,
   ORCHESTRATOR_TOOLS,
   RARE_COMMANDS,
   commandsFor,
@@ -51,8 +51,8 @@ describe('the tier', () => {
       expect(instructionsFor(p), p).toBe(instructionsFor(p, 'resident'))
     }
     expect(toolDefsFor('orchestrator').map((t) => t.name)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
-    expect(instructionsFor('orchestrator')).toBe(`${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}`)
-    expect(instructionsFor('orchestrator', 'resident')).toBe(ORCHESTRATOR_INSTRUCTIONS)
+    expect(instructionsFor('orchestrator')).toBe(`${orchestratorInstructions()}\n${COMMANDS_INSTRUCTION}`)
+    expect(instructionsFor('orchestrator', 'resident')).toBe(orchestratorInstructions())
   })
 })
 
@@ -64,7 +64,7 @@ describe('the commands tier', () => {
     const names = toolDefsFor('orchestrator').map((t) => t.name)
     for (const c of RARE) expect(names).not.toContain(c)
     expect(names).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run', 'send_to_session', 'read_session', 'recall', 'create_session', 'app_guide']))
-    expect(instructionsFor('orchestrator')).toBe(`${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}`)
+    expect(instructionsFor('orchestrator')).toBe(`${orchestratorInstructions()}\n${COMMANDS_INSTRUCTION}`)
     // Smaller in every request: the point of the tier
     const commands = residentCost('orchestrator', DEFERRED_SERVER)
     setRareTier('resident')
@@ -138,8 +138,8 @@ describe('the commands tier', () => {
       detachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', when: 'now' as const })),
     } as unknown as OrchestratorTools
     // The instructions name it as a command, as they name the other rare ones: a bare call would be refused first
-    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('the find_apps command lists them')
-    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/: find_apps lists/)
+    expect(orchestratorInstructions()).toContain('the find_apps command lists them')
+    expect(orchestratorInstructions()).not.toMatch(/: find_apps lists/)
     const found = await runOrchestratorTool(tools, 'centralu_run', { command: 'find_apps', args: {} }, orchestrator)
     expect(found.text).toContain('Attach one with centralu_run(command="attach_app", args={app: "<the name before ·>"})')
     const attached = await runOrchestratorTool(tools, 'centralu_run', { command: 'attach_app', args: { app: 'Board/board' } }, orchestrator)
