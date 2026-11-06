@@ -210,7 +210,7 @@ the dead method it alone called. Line counts are measured and written in each pu
 | # | Pull request | Files | Planned |
 |---|---|---|---|
 | 1 | **This document** | `docs/plans/host-big-files.md` | +about 250 |
-| 2 | **`memory.ts` dead code and copies** (§1 dead, `found()`, `statSync`/`lstatSync`, the mode formula, `detach`, one pid allocation) | `os/memory.ts` | about −90 |
+| 2 | **`memory.ts` dead code and copies** (§1 dead, `at()`, `statAt`, `runIn`, `nextPid`, `findProgram` returning the entry) | `os/memory.ts` | −45 (landed, §5.1) |
 | 3 | **`messages.ts` dead code and copies** (§2 dead, `changedIds`, group-by, hidden check) | `mail/messages.ts`, `frame.ts`, `asked-by.ts`, three tests | about −75 |
 | 4 | `remote-agents.ts` dead code and `patch`/tail helpers (§3) | `sessions/remote-agents.ts`, lint allowlist | about −40 |
 | 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers; the two drifts with contract cases first | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | about −25 net |
@@ -219,6 +219,20 @@ the dead method it alone called. Line counts are measured and written in each pu
 | 8 | Moves: `memory.ts` into its seven modules; then the `messages.ts` modules after #2067; then the three `remote-agents.ts` modules after turn-owned-by-no-one | | moved, +20–40 per module |
 
 This round stops after 1–3.
+
+### 5.1 What landed
+
+- **2, `memory.ts`** (1,729 to 1,684 lines; 54 added, 99 removed; the audit's "about −90" counted five items that did not
+  survive a second look): the `Timer` re-export and import, the stale one-line doc above `SyncProgram`, `Fd.closed`
+  (set once, right before `fds.delete`), `Watch.errors` (nothing emits on it; `on` returns the watcher), `Proc.child`,
+  the second `os: memory` handed to a program, the `windows ? 'EPERM'` arm of `fileForWrite` (`noFollow` is set only
+  where `O_NOFOLLOW` is not 0, and it is 0 on Windows), the `touch` after `link` in the same-entry rename (`link` touches
+  the same folder), the `includes` in the timer cancel (`indexOf` of `-1` splices nothing at `>>> 0` either way), and
+  `findProgram` returning the registered program so `startProcess` has no `EACCES` branch no one reaches. The copies:
+  five `Found` literals through `at()`, `statSync`/`lstatSync` through `statAt`, `readdirSync` is `readdir` with its
+  overloads, `run`/`runShell` through `runIn`, and `nextPid`. Left out after reading them again: `readFile`'s second check
+  (it narrows the node's type, so removing it needs a cast), `rename`'s detach (`rename('.', x)` notifies today, `unlinkEntry`
+  would not), the mode formula (one line saved) and the signal gate (moves to `rules.ts` with `real.ts` in PR 5).
 
 ## 6. Proposals that change behaviour (the owner decides; in no pull request here)
 
