@@ -8,9 +8,16 @@ export type HostScenario = {
   helpers: readonly string[]
   /** What is sent to the recorded session, one turn each */
   turns: readonly string[]
-  /**
-   * A second project on the host, with one session that has had this first message (what ask_project reaches). Its project is named
-   * `sidekick`, which a prompt may use, and the first project is trusted (an untrusted one may not give work outside itself)
-   */
-  otherProject?: { first: string }
+  /** The kinds of card the host may raise in the run, which the recording script allows; any other fails it (none by default) */
+  cards?: readonly string[]
+  /** The recorded session's project is trusted by the person (a call that gives work outside it waits for that) */
+  trusted?: boolean
+  /** The host also has a second project (`{other}` in a prompt is its name), for a tool that reaches another project */
+  otherProject?: boolean
+  /** First message of a session in the second project (a call to it needs one the person has opened) */
+  otherSession?: string
+  /** A text longer than this many characters is cut in the recording (a bulky output that only fills the context): the tool's own figures stay */
+  cutText?: number
+  /** Events of the recorded session the run waits for once the turns have ended, in order (the host starts turns and compactions of its own) */
+  then?: readonly { type: string; label: string }[]
 }

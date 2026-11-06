@@ -210,7 +210,7 @@ describe('a turn’s end (§9.3): each case answers the ReportedAs the table giv
     const w = turnWorld()
     w.clock.t += 10
     const request = w.mail.send(A, { to: [ORC], text: 'please check CI', needsReply: true })
-    const seq = w.turns.begin('orc', { workMessage: request.message.id, starter: request.message.id, asker: A })
+    const seq = w.turns.begin('orc', { workMessage: request.message.id, starter: request.message.id })
     w.store.mailbox.markDelivered(ORC, [request.message.id], w.clock.t, seq)
     w.end('orc')
     expect(reportRecorder(w.mail, w.store.mailbox, w.turns)('a', 'orc', draft({ answer: 'what I told the person' }))).toBe('mailed')

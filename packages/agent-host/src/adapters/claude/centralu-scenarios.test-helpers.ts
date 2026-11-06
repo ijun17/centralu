@@ -20,8 +20,10 @@ export const CLAUDE_CENTRALU_SCENARIOS: readonly HostScenario[] = [
   {
     name: 'centralu-ask',
     helpers: [],
-    otherProject: { first: 'Reply with exactly: ready' },
-    turns: ['Use ask_project to ask the project named sidekick this question: what is 2+2? Answer in one word. Then tell me what it answered.'],
+    otherProject: true,
+    otherSession: 'Reply with exactly: ready',
+    trusted: true,
+    turns: ['Use ask_project to ask the project named {other} this question: what is 2+2? Answer in one word. Then tell me what it answered.'],
   },
   {
     // A Centralu tool that fails: a session that does not exist

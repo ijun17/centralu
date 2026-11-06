@@ -84,7 +84,7 @@ export function deliveryWorld(opts: { heartbeat?: number | null; delivery?: Mail
   box.turns = new MailTurns(store.mailbox, {
     now: () => clock.t,
     ...(opts.keepOpen ? { keepOpen: opts.keepOpen } : {}),
-    askerOf: (sessionId, messageId) => (sessionId === 'orc' ? store.mailbox.message(messageId)?.sender : undefined),
+    askerIn: (sessionId, turn) => mail.requestsIn(mail.sessionAddress(sessionId), turn)[0]?.asker ?? null,
   })
   const mailTurns = box.turns
   const delivery = new MailDelivery(mail, store.mailbox, sessions, {

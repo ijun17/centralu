@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { removeDir, temporaryClaudeConfig, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
@@ -44,6 +44,19 @@ class Window {
   private readonly pending = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
   private readonly listeners = new Set<(e: Event) => void>()
 
+  /** The cards a scenario expects (by kind); any other is refused and fails the run */
+  expected: readonly string[] = []
+  /** Cards the scenario did not expect, for the run to fail with */
+  readonly unexpected: string[] = []
+
+  private card(e: Event): void {
+    const kind = String((e as { detail?: { kind?: string } }).detail?.kind)
+    const allow = this.expected.includes(kind)
+    if (!allow) this.unexpected.push(kind)
+    console.error(`[record] ${allow ? 'allowed' : 'refused'} a card of ${kind}`)
+    this.rpc('agents.respondApproval', { sessionId: e.sessionId, requestId: (e as { requestId?: string }).requestId, decision: allow ? 'allow' : 'deny' }).catch((err: Error) => console.error(`[record] the host refused the answer to the card: ${err.message}`))
+  }
+
   async open(port: number, token: string): Promise<void> {
     this.socket = new WebSocket(`ws://127.0.0.1:${port}`)
     await new Promise<void>((resolve, reject) => {
@@ -59,6 +72,8 @@ class Window {
           else p?.reject(new Error(f.error?.message ?? 'host error'))
         } else if (f.kind === 'event' && f.event) {
           this.events.push(f.event)
+          // A card a session raises (a tool that reaches another project asks the person first) is allowed: a recording needs the call to go through
+          if (f.event.type === 'approval_request') this.card(f.event)
           for (const l of this.listeners) l(f.event)
         }
       })
@@ -137,11 +152,11 @@ async function main(): Promise<number> {
   let config: { finish(): void } = { finish() {} }
   let host: ChildProcess | null = null
   // What the run in progress has made, for an interrupted run to take away (the copy of the sign-in is in `data`)
-  const made: string[] = []
+  const open_: string[] = []
   const stop = () => {
     host?.kill('SIGKILL')
     config.finish()
-    for (const dir of [...made, data]) rmSync(dir, { recursive: true, force: true })
+    for (const dir of [...open_, data]) rmSync(dir, { recursive: true, force: true })
     process.exit(130)
   }
   process.once('SIGINT', stop)
@@ -152,7 +167,7 @@ async function main(): Promise<number> {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
       mkdirSync(raw, { recursive: true })
-      made.push(folder, raw)
+      open_.push(folder, raw)
       const window = new Window()
       try {
         const token = randomBytes(24).toString('hex')
@@ -161,9 +176,18 @@ async function main(): Promise<number> {
         const started = await startHost(data, home, raw, token, (child) => (host = child))
         await window.open(started.port, token)
         const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
-        const open = async (prompt: string, name?: string, where: { id: string; cwd: string } = { id: project.id, cwd: folder }): Promise<string> => {
-          const opened = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: where.id, cwd: where.cwd, tool: toolName, model: tool.model, ...(tool.effort ? { effort: tool.effort } : {}), permissionPreset: 'auto', ...(name ? { name } : {}) })
-          const id = opened.id ?? opened.sessionId!
+        window.expected = scenario.cards ?? []
+        if (scenario.trusted) await window.rpc('projects.setTrusted', { projectId: project.id, trusted: true })
+        // A second project when the scenario reaches one: its folder's name is the project's
+        let otherProject: { id: string } | null = null
+        const other = scenario.otherProject ? realpathSync(mkdtempSync(join(tmpdir(), 'frames-record-other-'))) : null
+        if (other) {
+          open_.push(other)
+          otherProject = await window.rpc<{ id: string }>('projects.add', { path: other })
+        }
+        const open = async (prompt: string, where?: { projectId: string; cwd: string }): Promise<string> => {
+          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: where?.projectId ?? project.id, cwd: where?.cwd ?? folder, tool: toolName, model: tool.model, ...(tool.effort ? { effort: tool.effort } : {}), permissionPreset: 'auto' })
+          const id = made.id ?? made.sessionId!
           await turn(id, prompt)
           return id
         }
@@ -173,21 +197,14 @@ async function main(): Promise<number> {
           const e = await done
           if (e.type === 'error') throw new Error(`the turn "${text.slice(0, 30)}" failed: ${JSON.stringify(e.error)}`)
         }
+        const said = (text: string) => (other ? text.replaceAll('{other}', basename(other)) : text)
         for (const helper of scenario.helpers) await open(helper)
-        if (scenario.otherProject) {
-          // The project ask_project reaches: a folder of its own, with a session that has already spoken
-          // Named by its folder, so the folder is called what the prompt calls it. The caller is trusted: work given outside an untrusted project waits for the person
-          const parent = realpathSync(mkdtempSync(join(tmpdir(), 'frames-record-other-')))
-          made.push(parent)
-          const sidekick = join(parent, 'sidekick')
-          mkdirSync(sidekick)
-          await window.rpc('projects.setTrusted', { projectId: project.id, trusted: true })
-          const other = await window.rpc<{ id: string }>('projects.add', { path: sidekick })
-          await open(scenario.otherProject.first, undefined, { id: other.id, cwd: sidekick })
-        }
-        const main = await open(scenario.turns[0]!)
-        for (const text of scenario.turns.slice(1)) await turn(main, text)
+        if (scenario.otherSession && other && otherProject) await open(scenario.otherSession, { projectId: otherProject.id, cwd: other })
+        const main = await open(said(scenario.turns[0]!))
+        for (const text of scenario.turns.slice(1)) await turn(main, said(text))
+        for (const next of scenario.then ?? []) await window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)
         // The recording of the session the scenario keeps: the one whose process made the tool calls
+        if (window.unexpected.length) throw new Error(`the host raised cards the scenario does not expect (refused): ${window.unexpected.join(', ')}`)
         const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
         const frames = files.flatMap((f) => readFileSync(join(raw, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
         const adapter = await import(`../packages/agent-host/src/adapters/${toolName}/index.js`).then((m) => (toolName === 'claude' ? new m.ClaudeAdapter() : new m.CodexAdapter()) as { installedVersion?(): Promise<string | undefined> })
@@ -195,7 +212,7 @@ async function main(): Promise<number> {
         const dir = join(ADAPTERS, toolName, 'recordings', `${tool.prefix}-${version.replace(/^codex-cli /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
         const header = { header: { tool: toolName, version, scenario: scenario.name, preset: 'auto', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10), host: true } }
-        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder)].map((l) => JSON.stringify(l)).join('\n') + '\n')
+        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder, undefined, { cutText: scenario.cutText })].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] ${toolName} ${scenario.name} (through a host): ${frames.length} frames -> ${dir}`)
       } catch (e) {
         failed++
@@ -206,6 +223,8 @@ async function main(): Promise<number> {
         await new Promise((r) => setTimeout(r, 1500))
         host?.kill('SIGKILL')
         await removeDir(folder)
+        for (const dir of open_.splice(2)) await removeDir(dir)
+        open_.length = 0
         if (!keepRaw) await removeDir(raw)
       }
     }

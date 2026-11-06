@@ -31,7 +31,7 @@ function notingTools(handed: Handed[]): OrchestratorTools {
     readSession: async (...args: Parameters<OrchestratorTools['readSession']>) => (handed.push({ tool: 'read_session', args: args[0] }), base.readSession(...args)),
     startAgent: note('start_agent', child),
     agentSession: note('agent_session', child),
-    askProject: note('ask_project', { ok: true as const, state: 'done' as const, project: 'sidekick', sessionId: 'other-1', sessionName: 'other', answer: 'noted', readable: [], outside: [] }),
+    askProject: note('ask_project', { ok: true as const, state: 'done' as const, project: 'frames-record-other', sessionId: 'other-1', sessionName: 'other', answer: 'noted', readable: [], outside: [] }),
   }
 }
 
@@ -44,7 +44,8 @@ async function replay(name: string) {
     name,
     preset: 'auto',
     async run(d) {
-      for (const text of spec.turns) {
+      for (const raw of spec.turns) {
+        const text = raw.replaceAll('{other}', 'frames-record-other')
         // As the host sends a person's message: named, so the CLI says it back on the input
         d.session().send(text, { id: centraluInputId() })
         await d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, (e) => e.type === 'turn_complete' || e.type === 'error')
@@ -100,8 +101,8 @@ describe(`Claude Code calling Centralu's tools through a host (${recordedVersion
   it('centralu-ask: ask_project into a trusted project returns the other project’s session’s answer, as a success with no card', async () => {
     const { events } = await replay('centralu-ask')
     const ask = calls(events).find((c) => c.summary.centralu?.tool === 'ask_project')!
-    expect(ask.input).toMatchObject({ project: 'sidekick' })
-    expect(results(events).find((r) => r.callId === ask.callId)).toMatchObject({ ok: true, summary: expect.stringContaining('sidekick answered') })
+    expect(ask.input).toMatchObject({ project: 'frames-record-other' })
+    expect(results(events).find((r) => r.callId === ask.callId)).toMatchObject({ ok: true, summary: expect.stringContaining('frames-record-other answered') })
     expect(of(events, 'approval_request')).toEqual([])
   })
 
@@ -129,7 +130,7 @@ describe('what the adapter hands Centralu’s tools when the CLI calls them', ()
   })
 
   it('centralu-ask: ask_project reaches its tool with the project and the task', async () => {
-    expect(await handed('centralu-ask')).toMatchObject([{ tool: 'ask_project', args: { project: 'sidekick', task: 'what is 2+2? Answer in one word.' } }])
+    expect(await handed('centralu-ask')).toMatchObject([{ tool: 'ask_project', args: { project: 'frames-record-other', task: 'what is 2+2? Answer in one word.' } }])
   })
 
   it('centralu-failed: read_session reaches its tool with the id the model gave', async () => {
