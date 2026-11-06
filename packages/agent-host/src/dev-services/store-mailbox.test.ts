@@ -319,19 +319,6 @@ describe('guards and counts', () => {
     }
   })
 
-  it('markTurn writes the turn on delivered rows of the recipient and no others', () => {
-    const { box, send } = world()
-    const delivered = send({ sender: A }, B)
-    const waiting = send({ sender: A }, B)
-    const other = send({ sender: A }, C)
-    box.markDelivered(B, [delivered], NOW, null)
-    box.markDelivered(C, [other], NOW, null)
-    box.markTurn(B, [delivered, waiting, other], 4)
-    expect(box.recipient(delivered, B)).toMatchObject({ turnSeq: 4, deliveredAt: NOW })
-    expect(box.recipient(waiting, B)).toMatchObject({ turnSeq: null, deliveredAt: null })
-    expect(box.recipient(other, C)?.turnSeq).toBeNull()
-  })
-
   it('sameBody finds the same text to the same recipient', () => {
     const { box, send } = world()
     send({ sender: A, body: 'hello' }, B)

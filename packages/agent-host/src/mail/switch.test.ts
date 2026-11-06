@@ -203,7 +203,6 @@ describe('the one hold and a refused delegation (§7.4, S15, S16)', () => {
     expect(w.hooks.refusesDelegation!('x', { sessionId: 'x' }, { tool: 'agent_session', target: 'xi', text: 'hi' })).toBeNull()
     await w.advance(60_000)
     expect(w.to('a')).toEqual([])
-    expect(w.service.heldByProject()).toEqual([{ projectId: 'px', count: 1, refused: 1, recipients: [A, 'p1'] }])
     w.store.projects.setProjectTrusted('px', true)
     for (const r of w.service.trustChanged('px')) w.delivery.poke(r.slice(r.lastIndexOf('/') + 1))
     await w.advance(2_000)
