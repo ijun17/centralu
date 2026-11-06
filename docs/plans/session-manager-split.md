@@ -216,6 +216,12 @@ Manager line counts are after each pull request.
   are public `readonly`. `attachInlineViews` takes `mgr.apps`. `AgentVersionService` gets the two notes as their own
   dependency, `notes: mgr.sessionSettings`, required, so a construction that forgets them does not compile: as optional
   members of `sessions` they would have gone quiet with the stubs, with nothing failing. The probe script §2 names is gone.
+- **5b, the stubs the link tests call** (`manager.ts` 2,911 to 2,828): the other 16, `addProject`, `setAgentInstructions`,
+  `listProjects`, `useLinkedSessions`, `useLinkedApps`, `askFromMachine`, `remoteAgentParent`, `forwarding`,
+  `observeLinked`, `sendFromHub`, `hostReader`, `trashSession`, `uiPreferences`, `setUiPreferences`, `toolProfileOf` and
+  `loadMessages`. `tools` and `machineAsks` are public `readonly`. A test that spied on the manager's stub spies on the
+  module's method (`vi.spyOn(mgr.tools, 'toolProfileOf')`), which every caller now reaches, and `rpc.test.ts`'s fake
+  manager carries `projectRegistry`. The stubs left are the eight verbs of D1.
 
 ### 6.2 Work in flight
 

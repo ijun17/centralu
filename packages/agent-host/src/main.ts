@@ -666,26 +666,26 @@ const links = new Links(linkDepsFor(store, {
   // The orchestrator also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
   broadcast: (e) => {
     events.push(e)
-    mgr.observeLinked(e)
+    mgr.linkedHost.observeLinked(e)
   },
   terminal: screens.push,
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
   // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)
-  ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
+  ownerOf: (sessionId) => mgr.linkedHost.remoteAgentParent(sessionId),
   /*
    * The reverse direction (#550, docs/plans/remote-hub.md §12.7): who this hub is, offered to a machine whose switch is
    * on, and the allowlist a machine's call is answered from (ask_project into this computer's projects, nothing else)
    */
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
   // When agents compact: this hub's setting governs the machines it links (#1376)
-  autoCompact: () => autoCompactOf(mgr.uiPreferences()),
+  autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts mid-swap
   autoUpdate: () => hubUpdatesMachines({ build: BUILD, current: APP_VERSION, autoApply: autoApplyUpdates.read(), draining: hostDrain.draining }),
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
     projects: () => mgr.projectsForMachines(),
-    ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
+    ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
     selfName: hubName,
   }),
 }))
@@ -696,9 +696,9 @@ const links = new Links(linkDepsFor(store, {
 const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts) })
 mgr.useLinkedHubs(hubs)
 mgr.useHubName(hubName)
-mgr.useLinkedSessions((id) => links.knowsSession(id))
+mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
-mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
+mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 // The orchestrator reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
 // The orchestrator's list_machines reads the list Settings shows (#1220)
@@ -744,7 +744,7 @@ const usedCredentials = new UsedCredentials()
 const usedCredentialsFile = launch.serveState ? new UsedCredentialsFile(usedCredentialsPath(launch.serveState, realOs()), usedCredentials, realOs()) : null
 usedCredentialsFile?.load()
 const router: Router = new Router({
-  forwarding: (method, params) => mgr.forwarding(method, params),
+  forwarding: (method, params) => mgr.linkedHost.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
     // A deleted project gives back the user-folder app it had become, once the session archive cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),

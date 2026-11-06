@@ -276,14 +276,14 @@ describe('starting another agent in the same project', () => {
 
   it("carries the project's instructions for started agents after the task, as they stand when the child is made (#1161 item 2)", async () => {
     const s = await session('normal')
-    w.mgr.setAgentInstructions(w.caller.id, '  Make your own worktree.\nNever use git stash.\n')
+    w.mgr.projectRegistry.setAgentInstructions(w.caller.id, '  Make your own worktree.\nNever use git stash.\n')
     const first = await startRunning(s, 'implement the parser')
     await w.until(() => !!handleOf(first)?.sent.length)
     const task = handleOf(first)!.sent[0]!
     expect(task).toContain("[The person's standing instructions for agents started in this project, from the project's settings on this computer:]\n\nMake your own worktree.\nNever use git stash.")
     expect(task.indexOf('implement the parser')).toBeLessThan(task.indexOf('Make your own worktree.'))
     // Cleared, the next child's task has no such part
-    w.mgr.setAgentInstructions(w.caller.id, ' ')
+    w.mgr.projectRegistry.setAgentInstructions(w.caller.id, ' ')
     const second = await startRunning(s, 'write the docs')
     await w.until(() => !!handleOf(second)?.sent.length)
     expect(handleOf(second)!.sent[0]).not.toContain('standing instructions')
@@ -325,7 +325,7 @@ describe('starting another agent in the same project', () => {
     const option = (id: string, efforts: string[] = ['low', 'high']): ModelOption => ({ id, label: id, efforts, defaultEffort: 'low', tiers: [] })
     beforeEach(() => {
       w.adapters.get('codex')!.listModels = async () => [option('gpt-big', ['low', 'high', 'xhigh']), option('gpt-small')]
-      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'xhigh' }, light: { model: 'gpt-small' } } } })
+      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'xhigh' }, light: { model: 'gpt-small' } } } })
     })
 
     it('starts the person\'s model and effort for that tool and difficulty, and the card names both', async () => {
@@ -351,7 +351,7 @@ describe('starting another agent in the same project', () => {
     })
 
     it('a chosen model the tool no longer lists is refused with the list, and says whose choice it was', async () => {
-      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-retired' } } } })
+      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-retired' } } } })
       const s = await session()
       const r = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-retired". Its models: gpt-big, gpt-small') })
@@ -360,7 +360,7 @@ describe('starting another agent in the same project', () => {
     })
 
     it('credits the setting only with what the setting chose: its effort, not an effort the caller named', async () => {
-      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'turbo' } } } })
+      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'turbo' } } } })
       const s = await session()
       const own = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(own).toMatchObject({ ok: false, error: expect.stringContaining('gpt-big has no effort "turbo"') })
@@ -545,7 +545,7 @@ describe('starting another agent in the same project', () => {
         made = child.id
         return child
       })
-      vi.spyOn(w.mgr, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
+      vi.spyOn(w.mgr.trash, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => vi.mocked(w.mgr.createSession).mock.calls.length > 0)
       w.store.projects.setProjectTrusted(w.caller.id, false)
@@ -669,7 +669,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
     await w.until(() => !!agentCard(s))
-    await w.mgr.trashSession(s)
+    await w.mgr.trash.trashSession(s)
     expect(await p).toMatchObject({ ok: false })
     expect(childrenOf(s)).toEqual([])
     expect(w.store.children.listAgentStartRequests()).toEqual([])
@@ -1386,7 +1386,7 @@ describe('starting another agent in the same project', () => {
     allowProject()
     const s = await session()
     const c = await startRunning(s)
-    await w.mgr.trashSession(s)
+    await w.mgr.trash.trashSession(s)
     expect(handleOf(c)!.interrupted).toBe(0)
     expect(w.mgr.listSessions().find((x) => x.id === c)?.askedBy).toBe(s)
   })
@@ -1475,7 +1475,7 @@ describe('starting another agent in the same project', () => {
       expect(existsSync(a!)).toBe(true)
       const first = childrenOf(orch.id)[0]!.id
       writeFileSync(join(a!, 'notes.md'), 'what it found')
-      await w.mgr.trashSession(first)
+      await w.mgr.trash.trashSession(first)
       expect(existsSync(a!)).toBe(true)
       await w.mgr.trash.purgeSession(first)
       expect(existsSync(a!)).toBe(false)
@@ -1500,7 +1500,7 @@ describe('starting another agent in the same project', () => {
     it('counts its own children against the ceiling and says so in its words', async () => {
       const { orch, tools } = await orchestratorTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
-      w.mgr.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       await tools.startAgent({ task: 'first lookup', wait: false })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('1 agents you started are already working') })
     })

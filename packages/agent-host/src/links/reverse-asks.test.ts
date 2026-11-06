@@ -80,7 +80,7 @@ async function hubHost(machinePort: number, o: { name?: string; reverse?: boolea
           reverse: reverseCalls({
             allowed: (id) => store.machines.linkedMachineAsks(id),
             projects: () => mgr.projectsForMachines(),
-            ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
+            ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
             selfName: () => name,
           }),
         }
@@ -88,7 +88,7 @@ async function hubHost(machinePort: number, o: { name?: string; reverse?: boolea
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
     broadcast: (e) => {
       server.broadcast(e)
-      mgr.observeLinked(e)
+      mgr.linkedHost.observeLinked(e)
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),

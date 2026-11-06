@@ -39,7 +39,7 @@ async function setup() {
   const store = new Store()
   const f = fake()
   const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(f)]]), () => {})
-  const project = await mgr.addProject(process.cwd())
+  const project = await mgr.projectCreation.addProject(process.cwd())
   const session = await mgr.createSession({
     projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal',
   })

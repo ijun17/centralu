@@ -504,7 +504,7 @@ describe('requests to a busy session (#677)', () => {
       w.mgr.setProjectTrusted(w.caller.id, false)
       expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       w.mgr.setProjectTrusted(w.caller.id, true)
-      w.mgr.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       // B's earlier child is at rest; one running child fills a ceiling of one
       const runner = await w.mgr.startAgent(b, { task: 'keep busy', wait: false })
       expect(runner).toMatchObject({ ok: true })
@@ -518,7 +518,7 @@ describe('requests to a busy session (#677)', () => {
      */
     it('follows the agent depth: a requester at it is refused fork and fork_read under auto, and allowed once it is raised', async () => {
       w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       const top = await session('auto')
       const middle = await w.mgr.startAgent(top, { task: 'middle job', wait: false })
       if (!middle.ok) throw new Error(middle.error)
@@ -531,7 +531,7 @@ describe('requests to a busy session (#677)', () => {
       await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
       await w.mgr.send(a, "the person's own work")
 
-      w.mgr.setUiPreferences({ agentDepth: 1 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 1 })
       const setting = 'How deep agents may start agents'
       expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x' })).toMatchObject({
         choices: expect.arrayContaining([{ choice: 'fork', available: false, why: expect.stringContaining(setting) }]),
@@ -544,7 +544,7 @@ describe('requests to a busy session (#677)', () => {
       }
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
 
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read it', ifBusy: 'fork_read' })
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
@@ -552,10 +552,10 @@ describe('requests to a busy session (#677)', () => {
       handleOf(fork.id).answer('read')
       expect(await forking).toMatchObject({ ok: true, via: 'fork', forkedFrom: a })
       // The fork is two levels down, and keeps that when B is deleted
-      w.mgr.setUiPreferences({ agentDepth: 3 })
-      await w.mgr.trashSession(b)
+      w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+      await w.mgr.trash.trashSession(b)
       expect(await w.mgr.startAgent(fork.id, { task: 'deeper', wait: false })).toMatchObject({ ok: true })
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       expect(await w.mgr.startAgent(fork.id, { task: 'deeper still', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
     })
 
@@ -655,7 +655,7 @@ describe('requests to a busy session (#677)', () => {
 
     it('two forks at once take one place under a ceiling of one', async () => {
       const { a, b } = await busyChild()
-      w.mgr.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       const calls = [
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'one', ifBusy: 'fork_read' }),
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'two', ifBusy: 'fork_read' }),

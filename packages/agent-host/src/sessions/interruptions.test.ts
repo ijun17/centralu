@@ -149,7 +149,7 @@ function host(o: { updateResume?: UpdateResumeFolder } = {}) {
 }
 
 async function parentAndChild(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -206,7 +206,7 @@ describe('a turn the network stopped (#698)', () => {
 
   it('is kept across a restart, and cleared when the session works again', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.ownTurnFails(ECONNREFUSED)
@@ -237,7 +237,7 @@ describe('a turn the network stopped (#698)', () => {
 
 /** A parent that starts a child and waits for its answer in the same call */
 async function waitingParent(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -274,7 +274,7 @@ describe('a caller waiting on the turn (#698)', () => {
 describe('errors that did not end a running turn (#698)', () => {
   it('a crash is not a network stop, whatever its stderr says', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.emit({ type: 'error', sessionId: s.id, error: { code: 'adapter_crashed', message: `${ECONNREFUSED}. stderr: fetch failed`, retryable: true } })
@@ -284,7 +284,7 @@ describe('errors that did not end a running turn (#698)', () => {
 
   it('an error at rest stops no turn, so it offers nothing to continue', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.answer('done')
@@ -320,7 +320,7 @@ describe('a turn its tool interrupted (#698)', () => {
 
   it("the person's Stop is not an interruption to flag: they know", async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.emit({ type: 'state_change', sessionId: s.id, state: 'waiting_input', reason: 'interrupted' })
@@ -332,7 +332,7 @@ describe('a turn its tool interrupted (#698)', () => {
 describe('a turn a quit stopped (#698)', () => {
   it('a start that resets a session mid-turn to idle leaves a line in its conversation and marks it quit', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'a long job')
     expect(store.sessions.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
@@ -348,7 +348,7 @@ describe('a turn a quit stopped (#698)', () => {
 
   it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and settles the task', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     // The person's task is written as the RPC writes it, before the first message goes in; this host's mail is not wired
     hostMail(store, mailSessionsOf(a.mgr, () => true), { hostId: MAIL_HOST }).hooks.personWork!.started(s.id, 'a long job')
@@ -373,7 +373,7 @@ describe('a turn a quit stopped (#698)', () => {
 
   it('a session at rest is left alone by the next start', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'short')
     a.claude.handles.get(s.id)!.answer('done')
@@ -390,7 +390,7 @@ describe('a turn a quit stopped (#698)', () => {
     const gone = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const orphan = await a.mgr.startAgent(gone, { task: 'other work', wait: false })
     if (!orphan.ok) throw new Error(orphan.error)
-    await a.mgr.trashSession(gone)
+    await a.mgr.trash.trashSession(gone)
 
     const b = host()
     await eventually(() => reportsTo(parent, child).length === 1)
@@ -793,7 +793,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it('lists only what is in a turn when the host stops: not a session the person stopped, nor one at rest; a stop not for an update lists nothing', async () => {
     const f = folder()
     const a = host({ updateResume: f })
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const open = async () => (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const [cut, stopped, rest] = [await open(), await open(), await open()]
     for (const id of [cut, stopped]) await a.mgr.send(id, 'a long job')
@@ -864,7 +864,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it("work the person owns is not reported to their Inbox as stopped: its one report is the continued turn's end (#1618 review D3)", async () => {
     const f = folder()
     const a = host({ updateResume: f })
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     hostMail(store, mailSessionsOf(a.mgr, () => true), { hostId: MAIL_HOST }).hooks.personWork!.started(s.id, 'a long job')
     await a.mgr.send(s.id, 'a long job')
@@ -922,7 +922,7 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
   }
   /** A session that started a dev server in the background with a Bash call and ended its turn, the server still running */
   async function withDevServer(h: ReturnType<typeof host>) {
-    const project = await h.mgr.addProject(root)
+    const project = await h.mgr.projectCreation.addProject(root)
     const id = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     await h.mgr.send(id, 'start the dev server')
     const handle = h.claude.handles.get(id)!
@@ -1042,7 +1042,7 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
   it('lists only a session holding something, and only for an update: an empty one and a quit list nothing', async () => {
     const f = memoryUpdateFolder()
     const a = host({ updateResume: f })
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const empty = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const busy = (await withDevServer(a)).id
     await stopForUpdate(a)
@@ -1115,7 +1115,7 @@ describe('the session a report names', () => {
 
 describe('a tool reconnecting for too long (#698)', () => {
   async function working(a: ReturnType<typeof host>) {
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     return { id: s.id, h: a.claude.handles.get(s.id)! }
@@ -1154,7 +1154,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
     const clocks = () => (a.mgr as unknown as { interruptions: { reconnecting: Map<string, unknown> } }).interruptions.reconnecting
     expect(clocks().has(id)).toBe(true)
-    await a.mgr.trashSession(id)
+    await a.mgr.trash.trashSession(id)
     expect(clocks().has(id)).toBe(false)
   })
 

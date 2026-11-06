@@ -211,7 +211,7 @@ describe('background work across a host swap (#648)', () => {
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     a.claude.last.emit({ type: 'background_tasks', sessionId: s.id, live: [shell] })
     expect(store.settings.appSetting(`background_tasks:${s.id}`)).not.toBeNull()
-    await a.mgr.trashSession(s.id)
+    await a.mgr.trash.trashSession(s.id)
     expect(store.settings.appSetting(`background_tasks:${s.id}`)).toBeNull()
   })
 

@@ -333,7 +333,7 @@ describe('a deleted session can be recovered from the past-conversations list', 
     expect(listed.imported).toBe(true)
     expect(listed.importedAs).toBe(s.id)
 
-    await m.trashSession(s.id)
+    await m.trash.trashSession(s.id)
 
     /*
       A deleted session **must be recoverable** from the past-conversations list. Blocking it here

@@ -39,7 +39,7 @@ describe("a machine's ask, read again once the asked session is awake (#550)", (
       await held
       return create(opts, emit)
     })
-    const p = w.mgr.askFromMachine(machine, { caller, project: w.target.name, task: 'export the sprites', depth: 1 })
+    const p = w.mgr.machineAsks.ask(machine, { caller, project: w.target.name, task: 'export the sprites', depth: 1 })
     await w.until(() => waking)
     // Either the call settles or the task reaches the woken session, whichever comes first
     let settled = false
@@ -53,7 +53,7 @@ describe("a machine's ask, read again once the asked session is awake (#550)", (
 
   it('refuses an unnamed session with when each last moved, as an ask here does', async () => {
     w.store.messages.appendMessages([{ sessionId: target, seq: 1, role: 'assistant', kind: 'text', payload: { text: 'done' }, ts: Date.UTC(2026, 0, 2, 3, 4) }])
-    const r = await w.mgr.askFromMachine(machine, { caller, project: w.target.name, session: 'missing', task: 'export', depth: 1 })
+    const r = await w.mgr.machineAsks.ask(machine, { caller, project: w.target.name, session: 'missing', task: 'export', depth: 1 })
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('"lastActive":"2026-01-02 03:04"') })
   })
 

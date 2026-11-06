@@ -261,8 +261,8 @@ describe('the turn a child’s report starts in its caller', () => {
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     // The parent cannot read mail, so the old way tells it, and the notice starts its turn
-    const real = w.mgr.toolProfileOf.bind(w.mgr)
-    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
     handleOf(child)!.answer('done')
     await w.until(() => (handleOf(parent)?.sent.length ?? 0) === 1)
     expect(turnsOf(w.store, parent).map((t) => [t.startedBy, t.messageId])).toEqual([['report', null]])

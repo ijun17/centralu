@@ -1941,7 +1941,7 @@ describe('on the session manager (#1451)', () => {
     expect(world.mgr.listSessions().find((s) => s.id === id)).toBeDefined()
 
     // Off: a second session at rest is left alone
-    world.mgr.setUiPreferences({ autoCompact: { controlled: false } })
+    world.mgr.prefs.setUiPreferences({ autoCompact: { controlled: false } })
     h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
     h.emitEvent({ type: 'compaction', sessionId: id, failed: false })
     h.finishTurn()

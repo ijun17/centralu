@@ -77,7 +77,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it('auto children cascade into agents and projects, including untrusted callers and targets, as deep as the agent depth', async () => {
     // A child starts agents and asks projects only from an agent depth of 2 (#867)
-    w.mgr.setUiPreferences({ agentDepth: 2 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
     const parent = await session()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const first = await start(parent)
@@ -155,7 +155,7 @@ describe('auto Centralu boundaries (#603)', () => {
     }
 
     it('at the default 1, an auto child cannot start agents nor ask a project, and is told the setting and where it is', async () => {
-      expect(w.mgr.uiPreferences().agentDepth).toBeUndefined()
+      expect(w.mgr.prefs.uiPreferences().agentDepth).toBeUndefined()
       const child = await chainTo(1)
       const r = await start(child)
       expect(r).toEqual({
@@ -172,7 +172,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
     // Every value, each against the level right above it and the first one at it
     it.each([1, 2, 3])('at %i, auto sessions above it start agents and the first one at it is refused', async (limit) => {
-      w.mgr.setUiPreferences({ agentDepth: limit })
+      w.mgr.prefs.setUiPreferences({ agentDepth: limit })
       const above = await chainTo(limit - 1)
       const r = await start(above)
       expect(r).toMatchObject({ ok: true, state: 'working' })
@@ -213,7 +213,7 @@ describe('auto Centralu boundaries (#603)', () => {
      */
     it('a session working on a task a linked machine asked counts at the depth the hub sent, until that turn ends', async () => {
       const s = await session('auto')
-      await w.mgr.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
+      await w.mgr.linkedHost.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       expect(await w.mgr.askProject(s, { project: w.target.id, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       handle(s).answer('done')
@@ -224,7 +224,7 @@ describe('auto Centralu boundaries (#603)', () => {
     // The mark goes with the turn that consumed the hub's task, not with another turn that happens to end first (#935 review)
     it('a turn end that is not the hub task’s leaves the depth in place', async () => {
       const s = await session('auto')
-      await w.mgr.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
+      await w.mgr.linkedHost.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
       // A turn ends without the hub's input being the one it consumed
       handle(s).answer('an earlier turn', false)
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
@@ -235,19 +235,19 @@ describe('auto Centralu boundaries (#603)', () => {
 
     it('an instruction a linked machine’s orchestrator sends is not an ask: the session keeps its own depth', async () => {
       const s = await session('auto')
-      await w.mgr.sendFromHub(s, 'an instruction', 'Orchestrator on Hub mac')
+      await w.mgr.linkedHost.sendFromHub(s, 'an instruction', 'Orchestrator on Hub mac')
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
     it('deleting the middle of a chain does not let the grandchild start agents; its depth outlives the parent (#897 review)', async () => {
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       const top = await session('auto')
       const middle = await start(top)
       if (!middle.ok) throw new Error(middle.error)
       const bottom = await start(middle.sessionId)
       if (!bottom.ok) throw new Error(bottom.error)
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
-      await w.mgr.trashSession(middle.sessionId)
+      await w.mgr.trash.trashSession(middle.sessionId)
       expect(w.mgr.listSessions().some((s) => s.id === middle.sessionId)).toBe(false)
       expect(w.mgr.listSessions().find((s) => s.id === bottom.sessionId)?.askedBy).toBe(middle.sessionId)
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
@@ -258,11 +258,11 @@ describe('auto Centralu boundaries (#603)', () => {
     })
 
     it('is read at each call: lowering it refuses the next start, raising it allows it again', async () => {
-      w.mgr.setUiPreferences({ agentDepth: 3 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
       const grandchild = await chainTo(2)
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       expect(await start(grandchild)).toMatchObject({ ok: false, error: expect.stringContaining(DEPTH_SETTING) })
-      w.mgr.setUiPreferences({ agentDepth: 3 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
       expect(await start(grandchild)).toMatchObject({ ok: true })
     })
   })
@@ -329,15 +329,15 @@ describe('auto Centralu boundaries (#603)', () => {
     // Sweep zero through twice the old ceiling, including its immediate neighbours.
     for (let n = 0; n < 9; n++) expect((await start(id)).ok).toBe(true)
     for (let ceiling = 1; ceiling <= 9; ceiling++) {
-      w.mgr.setUiPreferences({ agentCeiling: ceiling })
-      expect(w.mgr.uiPreferences().agentCeiling).toBe(ceiling)
+      w.mgr.prefs.setUiPreferences({ agentCeiling: ceiling })
+      expect(w.mgr.prefs.uiPreferences().agentCeiling).toBe(ceiling)
       expect(await start(id)).toMatchObject({ ok: false, error: expect.stringContaining('9 agents') })
     }
-    w.mgr.setUiPreferences({ agentCeiling: 10 })
+    w.mgr.prefs.setUiPreferences({ agentCeiling: 10 })
     expect((await start(id)).ok).toBe(true)
-    w.mgr.setUiPreferences({ agentCeiling: 0 })
+    w.mgr.prefs.setUiPreferences({ agentCeiling: 0 })
     expect((await start(id)).ok).toBe(true)
-    w.mgr.setUiPreferences({ agentCeiling: null })
+    w.mgr.prefs.setUiPreferences({ agentCeiling: null })
     expect((await start(id)).ok).toBe(true)
   })
 
@@ -348,7 +348,7 @@ describe('auto Centralu boundaries (#603)', () => {
       w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       for (let n = 0; n < 4; n++) expect((await start(id)).ok).toBe(true)
       expect((await start(id)).ok).toBe(false)
-      w.mgr.setUiPreferences({ agentCeiling: 0 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 0 })
       expect((await start(id)).ok).toBe(true)
     },
   )

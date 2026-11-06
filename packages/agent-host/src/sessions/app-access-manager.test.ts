@@ -382,7 +382,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
   it('when the original is removed, the successor holds the apps under its own trust', async () => {
     const s = await withTwoApps('claude')
     const heir = await handOff(s, 'claude', true)
-    await mgr.trashSession(s.id)
+    await mgr.trash.trashSession(s.id)
     expect(claude.startServers.get(heir.id)).toEqual(['app-board', 'app-ledger'])
     // Revoking the pair's consent takes them from the successor as from any session that attached them
     await rpc('projectConsents.revoke', { fromProjectId: alpha, toProjectId: beta, kind: 'apps' })
@@ -423,7 +423,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
   it('copies an "Allow once" answer when the original goes: it is a move', async () => {
     const s = await withOnceApp()
     const heir = await handOff(s, 'claude', true)
-    await mgr.trashSession(s.id)
+    await mgr.trash.trashSession(s.id)
 
     expect(claude.startServers.get(heir.id)).toEqual(['app-board'])
     expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)

@@ -108,7 +108,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
     broadcast: (e) => {
       events.push(e)
       server.broadcast(e)
-      mgr.observeLinked(e)
+      mgr.linkedHost.observeLinked(e)
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
@@ -123,7 +123,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
     ...o.deps,
   }
   const links = new Links(deps)
-  mgr.useLinkedSessions((id) => links.knowsSession(id))
+  mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
@@ -433,7 +433,7 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
     expect(await call).toMatchObject({ ok: true })
     const owed = () => (hub.mgr as unknown as { children: { linkedReports: Map<string, unknown> } }).children.linkedReports.size
     await eventually(() => owed() === 1)
-    const said = async () => (await hub.mgr.loadMessages('h1', 50)).map((m: any) => JSON.stringify(m.payload)).join(' ')
+    const said = async () => (await hub.mgr.record.loadMessages('h1', 50)).map((m: any) => JSON.stringify(m.payload)).join(' ')
     return { remote, hub, owed, said }
   }
 
@@ -754,7 +754,7 @@ describe('the person’s Disconnect and Connect (#1134)', () => {
   it('disconnects it without unlinking it and connects it again, whatever the switch says', async () => {
     for (const autoReconnect of [true, false]) {
       const remote = await remoteHost()
-      const p = await remote.mgr.addProject(folder())
+      const p = await remote.mgr.projectCreation.addProject(folder())
       const hub = await hubHost(() => lineFor(remote.port), { autoReconnect })
       await eventually(() => hub.row().status === 'connected')
 
@@ -773,7 +773,7 @@ describe('the person’s Disconnect and Connect (#1134)', () => {
 
   it('its sessions keep running there while it is not connected, and what they said is read once it is back', async () => {
     const remote = await remoteHost()
-    const p = await remote.mgr.addProject(folder())
+    const p = await remote.mgr.projectCreation.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
     await eventually(() => hub.row().status === 'connected')
     const s = await hub.call('agents.createSession', { projectId: `m1.${p.id}`, cwd: p.path, tool: 'claude' })
@@ -788,7 +788,7 @@ describe('the person’s Disconnect and Connect (#1134)', () => {
      * scripted agent), and a turn ends in `waiting_input`, not `idle`. A loaded runner then read the history after the
      * reconnect before the reply was in it (a full-tier failure of #1238)
      */
-    await eventually(async () => (await remote.mgr.loadMessages(there, 200)).some((m: any) => m.payload?.text === 'echo: while you were away'))
+    await eventually(async () => (await remote.mgr.record.loadMessages(there, 200)).some((m: any) => m.payload?.text === 'echo: while you were away'))
     await eventually(() => remote.mgr.listSessions().find((x) => x.id === there)?.state === 'waiting_input')
     await expect(hub.call('messages.load', { sessionId: s.id })).rejects.toMatchObject({ data: { reason: 'unreachable' } })
 
@@ -905,7 +905,7 @@ describe("an agent's call on a machine nothing here will connect is answered at 
       await eventually(() => hub.row().status === 'unreachable')
     }
     const opens = hub.tunnel().opens
-    const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-app')!.name
+    const name = (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === 'p-app')!.name
     const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
     return { remote, hub, opens, name, reader }
   }

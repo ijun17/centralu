@@ -43,7 +43,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
 
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
 async function parentAndChild(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -165,11 +165,11 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
   it('held over the work of an asked session (ask_project, #1460), it stays owed in the next host, which tells the end once', async () => {
     const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
     const a = host()
-    const here = await a.mgr.addProject(root)
+    const here = await a.mgr.projectCreation.addProject(root)
     await a.mgr.setProjectTrusted(here.id, true)
     const otherRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cc-report-marks-target-')))
     onTestFinished(() => rmSync(otherRoot, { recursive: true, force: true }))
-    const there = await a.mgr.addProject(otherRoot)
+    const there = await a.mgr.projectCreation.addProject(otherRoot)
     store.permissions.setProjectConsent(here.id, there.id, 'delegate')
     const parent = (await a.mgr.createSession({ projectId: here.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const child = (await a.mgr.createSession({ projectId: there.id, cwd: otherRoot, tool: 'claude', permissionPreset: 'normal' })).id
@@ -265,12 +265,12 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
   it('goes with the child or the parent when either is trashed', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    await a.mgr.trashSession(child)
+    await a.mgr.trash.trashSession(child)
     expect(store.children.listReportMarks()).toEqual([])
 
     const second = await parentAndChild(a)
     expect(store.children.listReportMarks()).toEqual([{ sessionId: second.child, callerSessionId: second.parent }])
-    await a.mgr.trashSession(second.parent)
+    await a.mgr.trash.trashSession(second.parent)
     expect(store.children.listReportMarks()).toEqual([])
     expect(a.mgr.waitsOn(parent)).toEqual([])
   })

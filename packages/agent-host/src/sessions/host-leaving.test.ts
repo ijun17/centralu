@@ -89,7 +89,7 @@ beforeEach(async () => {
   claude = new Adapter()
   const other = Object.assign(new Adapter(), { tool: 'claude-two' as ToolName })
   mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, tmpdir(), { processes })
-  projectId = (await mgr.addProject(tmpdir())).id
+  projectId = (await mgr.projectCreation.addProject(tmpdir())).id
 })
 afterEach(async () => {
   await mgr.disposeAll()

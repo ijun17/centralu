@@ -52,8 +52,8 @@ const turnEnds = async (child: string, text: string) => {
 }
 /** The owner's seat cannot read mail */
 const scoped = (parent: string) => {
-  const real = w.mgr.toolProfileOf.bind(w.mgr)
-  vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+  const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+  vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
 }
 
 describe('a turn ends, the owner reads mail', () => {
@@ -211,8 +211,8 @@ describe('the seats of the mailbox’s policy', () => {
     const { parent } = await parentAndChild()
     expect(w.mgr.mailSeats(() => true).mailTool(parent)).toBe(true)
     expect(w.mgr.mailSeats(() => true).mailCommand(parent)).toBe(false)
-    const real = w.mgr.toolProfileOf.bind(w.mgr)
-    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'orchestrator' : real(id)))
+    const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'orchestrator' : real(id)))
     expect(w.mgr.mailSeats(() => true).mailCommand(parent)).toBe(true)
     expect(w.mgr.mailSeats(() => false).mailCommand(parent)).toBe(false)
   })
@@ -288,7 +288,7 @@ describe('an owner whose seat cannot read mail', () => {
 describe('work handed on', () => {
   /** The parent's child hands a part of its work on to a child of its own, without waiting */
   async function handOn() {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild()
     const started = await w.mgr.startAgent(child, { task: 'write the tests', wait: false })
     const grandchild = started.ok ? started.sessionId : ''
@@ -319,7 +319,7 @@ describe('work handed on', () => {
     const { parent, child, grandchild } = await handOn()
     await turnEnds(child, 'handed the tests on')
     expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'waiting' })])
-    await w.mgr.trashSession(grandchild)
+    await w.mgr.trash.trashSession(grandchild)
     expect(read.taskRow(taskOf(child, grandchild).id, grandchild)).toMatchObject({ settled: 'gone' })
     // It wrote the files itself, in a turn the owner started
     await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
@@ -372,7 +372,7 @@ describe('work handed on', () => {
     const { parent, child, grandchild } = await handOn()
     scoped(parent)
     await turnEnds(child, 'handed the tests on')
-    await w.mgr.trashSession(grandchild)
+    await w.mgr.trash.trashSession(grandchild)
     await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     handleOf(child)!.answer('wrote the tests myself')
@@ -382,7 +382,7 @@ describe('work handed on', () => {
   })
 
   it('a helper sent more in the work is that work’s: the owner is not told finished while it works', async () => {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild()
     await turnEnds(child, 'first')
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
@@ -516,21 +516,21 @@ describe('the work ends with the session that did it', () => {
     handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
     await turnEnds(child, 'watcher started')
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    await w.mgr.trashSession(child)
+    await w.mgr.trash.trashSession(child)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'gone' })
     expect(reportsIn(parent, child).map((x) => x.facts.outcome)).toEqual(['paused'])
   })
 
   it('archiving a child at work stops its turn, and that end is not reported as the work finished: the task is gone', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.trashSession(child)
+    await w.mgr.trash.trashSession(child)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'gone' })
     expect(reportsIn(parent, child)).toEqual([])
   })
 
   it('the person archiving the caller: its task is withdrawn and the child goes on', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.trashSession(parent)
+    await w.mgr.trash.trashSession(parent)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'withdrawn' })
     expect(w.mgr.sessionInfo(child)).toBeDefined()
   })

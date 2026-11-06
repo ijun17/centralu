@@ -47,7 +47,7 @@ async function setup(opts: { reports?: boolean; stoppable?: boolean } = {}) {
   const handles: Fake[] = []
   const events: NormalizedEvent[] = []
   const mgr = new SessionManager(new Store(), new Map([['claude', fakeAdapter(handles, opts)]]), (e) => events.push(e))
-  const project = await mgr.addProject(process.cwd())
+  const project = await mgr.projectCreation.addProject(process.cwd())
   const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
   const info = () => mgr.listSessions().find((s) => s.id === session.id)!
   const tasks = (live: BackgroundTask[], ended?: BackgroundTask[], h = handles.at(-1)!) =>

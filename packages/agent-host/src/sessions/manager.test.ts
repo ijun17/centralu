@@ -1020,7 +1020,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
 
   it('says so when the adapter does not support it — quietly deleting only our side would be half a delete', async () => {
     const { m, s } = await setupWith(new FakeAdapter())
-    await expect(m.trashSession(s.id, false, true)).rejects.toThrow(/does not support/)
+    await expect(m.trash.trashSession(s.id, false, true)).rejects.toThrow(/does not support/)
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
   })
 

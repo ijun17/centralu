@@ -103,7 +103,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
 
 async function session() {
   const a = host()
-  const project = await a.mgr.addProject(root)
+  const project = await a.mgr.projectCreation.addProject(root)
   const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
   const h = a.claude.handles.get(s.id)!
   const info = () => a.mgr.listSessions().find((x) => x.id === s.id)!
@@ -230,7 +230,7 @@ describe('a session at rest stays at rest (#428)', () => {
     a.h.turn()
     a.h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
     expect(JSON.parse(store.settings.appSetting(CARD_RESTS_KEY)!)).toEqual({ [a.s.id]: 'waiting_input' })
-    await a.mgr.trashSession(a.s.id)
+    await a.mgr.trash.trashSession(a.s.id)
     expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
 
     const c = await session()

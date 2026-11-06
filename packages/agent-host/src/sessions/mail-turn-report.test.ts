@@ -104,7 +104,7 @@ describe('new work sent by mail after the first was reported', () => {
   })
 
   it('a parent whose child sent more by mail is told waiting while that task is owed, and finished at the real end', async () => {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const a = await w.callerSession()
     const b = await startAgent(a, 'build X')

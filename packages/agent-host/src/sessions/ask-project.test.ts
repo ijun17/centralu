@@ -227,7 +227,7 @@ describe('asking another project', () => {
   }
 
   it('refuses an empty project without consent, adapter discovery or session creation, including under auto', async () => {
-    await w.mgr.trashSession(targetSession)
+    await w.mgr.trash.trashSession(targetSession)
     const caller = await w.callerSession()
     await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
     const create = vi.spyOn(w.mgr, 'createSession')
@@ -417,7 +417,7 @@ describe('asking another project', () => {
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
     await w.until(() => !!w.card(caller))
     expect(w.card(caller)!.detail).toMatchObject({ session: { id: targetSession, name: 'Sprites' } })
-    await w.mgr.trashSession(targetSession)
+    await w.mgr.trash.trashSession(targetSession)
     w.mgr.respondApproval(caller, w.card(caller)!.requestId, 'allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('no longer available') })
     expect(w.mgr.listSessions().filter((s) => s.projectId === w.target.id)).toEqual([])
@@ -451,7 +451,7 @@ describe('asking another project', () => {
     await w.mgr.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
     handleOf(targetSession)!.answer('old history')
     w.store.sessions.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
-    if (ownerState !== 'live') await w.mgr.trashSession(caller)
+    if (ownerState !== 'live') await w.mgr.trash.trashSession(caller)
     if (ownerState === 'purged') await w.mgr.trash.purgeSession(caller)
     await w.mgr.disposeAll()
     const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }

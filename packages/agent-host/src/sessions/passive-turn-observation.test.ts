@@ -112,7 +112,7 @@ describe("observing a person's turn never owns it", () => {
   it("deleting the observed session ends its reader without stopping the reader's session", async () => {
     const { observer, target } = await setup()
     const waiting = w.mgr.agentSession(observer, { sessionId: target, action: 'wait' })
-    await w.mgr.trashSession(target)
+    await w.mgr.trash.trashSession(target)
     expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('deleted') })
     expect(handle(observer).interrupted).toBe(0)
     expect(w.mgr.waitsOn(observer)).toEqual([])

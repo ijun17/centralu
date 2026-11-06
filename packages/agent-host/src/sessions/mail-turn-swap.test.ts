@@ -62,7 +62,7 @@ async function deliverTo(m: HostMail, address: string): Promise<void> {
 }
 
 async function parentAndChild(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   await h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -140,7 +140,7 @@ const marksOf = (h: ReturnType<typeof host>) => (h.mgr as unknown as { children:
 describe('a parent that waits for what it handed on, across a swap', () => {
   it('keeps its mark with the swap, and its end is reported once, at the real end', async () => {
     const a = host()
-    a.mgr.setUiPreferences({ agentDepth: 3 })
+    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -178,7 +178,7 @@ describe('a parent that waits for what it handed on, across a swap', () => {
 
   it('a kept session at rest whose helper is gone has no pause to keep: its mark is dropped as before', async () => {
     const a = host()
-    a.mgr.setUiPreferences({ agentDepth: 3 })
+    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -205,7 +205,7 @@ describe('a rollback to an earlier build, then forward', () => {
    */
   it.each([false, true])('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause (unread note: %s)', async (unread) => {
     const a = host()
-    a.mgr.setUiPreferences({ agentDepth: 3 })
+    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -299,7 +299,7 @@ describe('the turn of a session the keeper kept', () => {
 describe('a mail turn cut by a plain restart (#1916)', () => {
   it('ends lost under the next host, and the asker is told its question was cut, once; the question is not given again', async () => {
     const a = host()
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     await a.mgr.setProjectTrusted(project.id, true)
     const asker = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const helper = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id

@@ -51,7 +51,7 @@ const children = (mgr: SessionManager, id: string) => mgr.listSessions().filter(
 
 /** A `safe` session (which still asks in a trusted project) whose start_agent card stands */
 async function asking(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
   const call = h.mgr.startAgent(parent, { task: 'long work', wait: false })
@@ -119,7 +119,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('hidden by the caller\'s own turn after the call answered "pending", comes back when that turn ends', async () => {
     const a = host()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const project = await a.mgr.addProject(root)
+    const project = await a.mgr.projectCreation.addProject(root)
     a.mgr.setProjectTrusted(project.id, true)
     const parent = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
     await a.mgr.send(parent, 'do the work, with a helper')

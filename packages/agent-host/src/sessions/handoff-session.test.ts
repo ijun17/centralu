@@ -121,7 +121,7 @@ const named = (name: string) => mgr.listSessions().filter((s) => s.name === name
  * that is above `safe`, asks
  */
 async function world(preset: 'safe' | 'normal' | 'auto' = 'normal', targetPreset: 'safe' | 'normal' | 'auto' = 'normal') {
-  const project = await mgr.addProject(root)
+  const project = await mgr.projectCreation.addProject(root)
   mgr.setProjectTrusted(project.id, true)
   const target = (await mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: targetPreset, model: 'opus' })).id
   mgr.rename(target, 'Long run')

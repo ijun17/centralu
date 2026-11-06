@@ -108,7 +108,7 @@ async function crashedDuringWait(a: ReturnType<typeof host> = host(), hubDepth?:
   store.projects.setProjectDefaultTool(projectId, 'codex')
   const s = (await a.rpc('agents.createSession', { projectId, cwd: root, tool: 'codex' })) as SessionInfo
   if (hubDepth === undefined) await a.mgr.send(s.id, 'do the work')
-  else await a.mgr.sendFromHub(s.id, 'do the work', 'Orchestrator on Hub mac', { depth: hubDepth })
+  else await a.mgr.linkedHost.sendFromHub(s.id, 'do the work', 'Orchestrator on Hub mac', { depth: hubDepth })
   await vi.advanceTimersByTimeAsync(1)
   const notify = state.handlers!.onNotification
   notify({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1', items: [], status: 'inProgress' } } })

@@ -238,7 +238,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(o.toolProfile).toBe('builder')
     expect(o.orchestratorTools).toBeDefined()
     expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
-    expect(mgr.toolProfileOf(builder!.id)).toBe('builder')
+    expect(mgr.tools.toolProfileOf(builder!.id)).toBe('builder')
     // The list the bridge (Codex) asks for is the same profile
     const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
     expect(tools.map((t) => t.name)).toEqual(['check'])
@@ -279,7 +279,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     // An ordinary session has the reader set (#320) — read-only, and no check in it
-    expect(mgr.toolProfileOf(worker.id)).toBe('reader')
+    expect(mgr.tools.toolProfileOf(worker.id)).toBe('reader')
     expect(claude.last().toolProfile).toBe('reader')
     expect(((await rpc('orchestrator.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     await expect(mgr.runOrchestratorTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)

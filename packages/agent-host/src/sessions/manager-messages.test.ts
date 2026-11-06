@@ -423,7 +423,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(rawAtts.map((a) => a.data)).toEqual([undefined, undefined])
 
     // Only a file that still exists gets its bytes attached when served to the screen.
-    const served = (await mgr.loadMessages(s.id, 50)).find((r) => r.role === 'user')!
+    const served = (await mgr.record.loadMessages(s.id, 50)).find((r) => r.role === 'user')!
     const atts = (served.payload as { attachments: { name: string; data?: string }[] }).attachments
     expect(atts[0]?.data).toBe(Buffer.from('PNG bytes').toString('base64'))
     expect(atts[1]?.data).toBeUndefined()
@@ -449,7 +449,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', name: '/elsewhere/gone.png', note: 'the file is gone' })
 
     // What a reload serves: the bytes read back from the copy, and the reason as it was
-    const served = (await mgr.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
+    const served = (await mgr.record.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
     expect(served[0]?.data).toBe(PNG)
     expect(served[1]).toMatchObject({ data: '', note: 'the file is gone' })
   })

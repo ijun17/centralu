@@ -1276,7 +1276,7 @@ and its tools stay there).
 
 ### 12.3 Step 1, as built (2026-10-12)
 
-- **On the machine.** `SessionManager.hostReader()` is the orchestrator's `listSessions`, `readSession` and `recall`
+- **On the machine.** `LinkedHost.hostReader()` is the orchestrator's `listSessions`, `readSession` and `recall`
   over the hub's view: no calling session (nothing to leave out as "itself"), and orchestrator and coordinator
   sessions out of scope, so `host.readSession` refuses one by id as "not a session this machine shares". A read is
   capped at 200 lines and a search at 50 hits per call, five times the tools' defaults, so one call cannot ask a
@@ -1313,7 +1313,7 @@ machine, `takeInTurns` at every limit). No live model read through it, and no re
   text as the person, so marking it a relay would only hide the words from a worktree manager it was meant for. The
   machine records the sender as `_hub-orchestrator`, an id no host makes; the windows show only its name.
 - **`reportBack`** across machines: the hub's links already relay the machine's events, qualified, to its windows;
-  `main.ts` also hands them to `SessionManager.observeLinked`, which watches the sessions the orchestrator asked about.
+  `main.ts` also hands them to `LinkedHost.observeLinked`, which watches the sessions the orchestrator asked about.
   The watch starts before the send (the machine's first events can reach the hub before its answer) and is put back
   if the send fails. It reads nothing until the machine's `user_message` of that instruction (from the hub's
   orchestrator, the same text): a link relays one machine's events in order, so a turn end before it is an earlier

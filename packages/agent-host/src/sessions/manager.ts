@@ -299,13 +299,13 @@ export class SessionManager {
   /** The external app runtime as the sessions meet it: attached apps, on-demand access, the broker (session-app-wiring.ts) */
   readonly apps: SessionAppWiring
   /** The tools a session receives: its profile, its bundle, the reader's set (session-tools.ts) */
-  private readonly tools: SessionTools
+  readonly tools: SessionTools
   /** A handoff's note: written, read by a successor, swept when nobody owns it (handoff-notes.ts) */
   readonly handoffNotes: HandoffNotes
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** A linked machine's sessions asking this computer's projects (#550) */
-  private readonly machineAsks: MachineAsks
+  readonly machineAsks: MachineAsks
   /** This computer's name as a linked machine's session reads it (#550); main.ts gives the host name */
   private hubName: () => string = () => 'this computer'
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -558,7 +558,7 @@ export class SessionManager {
             if (!(err instanceof MailNotAtRest)) throw err
           }),
     })
-    const compactSetting = () => autoCompactOf(this.uiPreferences())
+    const compactSetting = () => autoCompactOf(this.prefs.uiPreferences())
     const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
     this.selfCompaction = new SelfCompaction({
       sessions: () => this.listSessions(),
@@ -784,11 +784,6 @@ export class SessionManager {
     this.housekeepingFlow.useRpc(rpc)
   }
 
-  /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
-  addProject(...a: Parameters<ProjectCreation['addProject']>): ReturnType<ProjectCreation['addProject']> {
-    return this.projectCreation.addProject(...a)
-  }
-
   /**
    * The start gate for new agent sessions (#686, `memory-gate.ts`): wired by main.ts, and by the tests that are about
    * it. Without one every start goes ahead, so a test machine short of memory does not queue unrelated tests' children.
@@ -857,7 +852,7 @@ export class SessionManager {
     const leavesFirst = [...mine].sort(
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
-    for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
+    for (const s of leavesFirst) await this.trash.trashSession(s.id).catch(() => {})
     const root = this.projectRegistry.projectRow(projectId)?.path
     this.store.trash.deleteProject(projectId)
     // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
@@ -909,21 +904,6 @@ export class SessionManager {
     return this.launches.refreshLaunchSettings(projectId, true)
   }
 
-  /** `ProjectRegistry.setAgentInstructions` (project-registry.ts), kept on the manager for its callers */
-  setAgentInstructions(...a: Parameters<ProjectRegistry['setAgentInstructions']>): ReturnType<ProjectRegistry['setAgentInstructions']> {
-    return this.projectRegistry.setAgentInstructions(...a)
-  }
-
-  /** `SessionLayout.useLinkedSessions` (session-layout.ts), kept on the manager for its callers */
-  useLinkedSessions(...a: Parameters<SessionLayout['useLinkedSessions']>): ReturnType<SessionLayout['useLinkedSessions']> {
-    return this.layout.useLinkedSessions(...a)
-  }
-
-  /** `SessionLayout.useLinkedApps` (session-layout.ts), kept on the manager for its callers */
-  useLinkedApps(...a: Parameters<SessionLayout['useLinkedApps']>): ReturnType<SessionLayout['useLinkedApps']> {
-    return this.layout.useLinkedApps(...a)
-  }
-
   /** The linked machines' sessions, for the central orchestrator's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
   private linkedReader: LinkedSessions | null = null
 
@@ -939,14 +919,6 @@ export class SessionManager {
   /** This computer's name, as a linked machine's session reads it in an answer or a refusal (#550) */
   useHubName(name: () => string): void {
     this.hubName = name
-  }
-
-  /**
-   * A linked machine's session asks a project of this computer (#550, the reverse direction, `hub.askProject`): this
-   * computer's card for the pair, then the task in an existing ordinary session here (sessions/machine-asks.ts)
-   */
-  askFromMachine(...a: Parameters<MachineAsks['ask']>): ReturnType<MachineAsks['ask']> {
-    return this.machineAsks.ask(...a)
   }
 
   /** The projects a linked machine's session may name (`hub.projects`, #550) */
@@ -972,36 +944,6 @@ export class SessionManager {
   /** Withdraws one approved pair (#550): that session's next ask into that project raises the card again */
   withdrawMachineAsk(machineId: string, sessionId: string, projectId: string): void {
     if (this.store.machines.forgetMachineAskConsent(machineId, sessionId, projectId)) this.emit({ type: 'project_consents_changed' })
-  }
-
-  /** `LinkedHost.remoteAgentParent` (linked-host.ts), kept on the manager for its callers */
-  remoteAgentParent(...a: Parameters<LinkedHost['remoteAgentParent']>): ReturnType<LinkedHost['remoteAgentParent']> {
-    return this.linkedHost.remoteAgentParent(...a)
-  }
-
-  /** `LinkedHost.forwarding` (linked-host.ts), kept on the manager for its callers */
-  forwarding(...a: Parameters<LinkedHost['forwarding']>): ReturnType<LinkedHost['forwarding']> {
-    return this.linkedHost.forwarding(...a)
-  }
-
-  /** `LinkedHost.observeLinked` (linked-host.ts), kept on the manager for its callers */
-  observeLinked(...a: Parameters<LinkedHost['observeLinked']>): ReturnType<LinkedHost['observeLinked']> {
-    return this.linkedHost.observeLinked(...a)
-  }
-
-  /** `LinkedHost.sendFromHub` (linked-host.ts), kept on the manager for its callers */
-  sendFromHub(...a: Parameters<LinkedHost['sendFromHub']>): ReturnType<LinkedHost['sendFromHub']> {
-    return this.linkedHost.sendFromHub(...a)
-  }
-
-  /** `LinkedHost.hostReader` (linked-host.ts), kept on the manager for its callers */
-  hostReader(...a: Parameters<LinkedHost['hostReader']>): ReturnType<LinkedHost['hostReader']> {
-    return this.linkedHost.hostReader(...a)
-  }
-
-  /** `ProjectRegistry.listProjects` (project-registry.ts), kept on the manager for its callers */
-  listProjects(...a: Parameters<ProjectRegistry['listProjects']>): ReturnType<ProjectRegistry['listProjects']> {
-    return this.projectRegistry.listProjects(...a)
   }
 
   listSessions(): SessionInfo[] {
@@ -1555,11 +1497,6 @@ export class SessionManager {
     }
   }
 
-  /** `SessionTrash.trashSession` (session-trash.ts), kept on the manager for its callers */
-  trashSession(...a: Parameters<SessionTrash['trashSession']>): ReturnType<SessionTrash['trashSession']> {
-    return this.trash.trashSession(...a)
-  }
-
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
 
@@ -1958,7 +1895,7 @@ export class SessionManager {
 
   /** Where a session's agent compacts the next time its process starts, as the launch decides it (`agents.autoCompact`, #1376) */
   autoCompactFor(sessionId: string): { controlled: boolean; share: number; tokens: number | null } {
-    return autoCompactPlan(autoCompactOf(this.uiPreferences()), this.modelWindows, this.sessionOf(sessionId))
+    return autoCompactPlan(autoCompactOf(this.prefs.uiPreferences()), this.modelWindows, this.sessionOf(sessionId))
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
@@ -1975,16 +1912,6 @@ export class SessionManager {
       unknown: true as const,
     }))
     return { ...m.worktree, ...state }
-  }
-
-  /** `UiPreferenceStore.uiPreferences` (ui-preferences.ts), kept on the manager for its callers */
-  uiPreferences(...a: Parameters<UiPreferenceStore['uiPreferences']>): ReturnType<UiPreferenceStore['uiPreferences']> {
-    return this.prefs.uiPreferences(...a)
-  }
-
-  /** `UiPreferenceStore.setUiPreferences` (ui-preferences.ts), kept on the manager for its callers */
-  setUiPreferences(...a: Parameters<UiPreferenceStore['setUiPreferences']>): ReturnType<UiPreferenceStore['setUiPreferences']> {
-    return this.prefs.setUiPreferences(...a)
   }
 
   /**
@@ -2405,7 +2332,7 @@ export class SessionManager {
       linkedTasksRunning: (...a) => self.linkedReports.ownTasksRunning(...a),
       listCommands: (...a) => self.toolQueries.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
-      loadMessages: (...a) => self.loadMessages(...a),
+      loadMessages: (...a) => self.record.loadMessages(...a),
       migrateApprovedMcpServers: (...a) => self.orchestratorSlot.proposals.migrateApprovedMcpServers(...a),
       mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
@@ -2503,7 +2430,7 @@ export class SessionManager {
       },
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
-      toolProfileOf: (...a) => self.toolProfileOf(...a),
+      toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
       canReadMail: (...a) => self.canReadMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
@@ -2513,7 +2440,7 @@ export class SessionManager {
       toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
       toolRefusal: (...a) => self.toolRefusal(...a),
       refusal: (...a) => self.toolRegistry.refusal(...a),
-      trashSession: (...a) => self.trashSession(...a),
+      trashSession: (...a) => self.trash.trashSession(...a),
       purgeSession: (...a) => self.trash.purgeSession(...a),
       archiveBusy: (...a) => self.trash.archiveBusy(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
@@ -2525,7 +2452,7 @@ export class SessionManager {
       get turnObservers() {
         return self.turnObservers
       },
-      uiPreferences: (...a) => self.uiPreferences(...a),
+      uiPreferences: (...a) => self.prefs.uiPreferences(...a),
       untilCard: (...a) => self.cards.untilCard(...a),
       updateCentraluAsked: (...a) => self.updatesAsked.updateCentraluAsked(...a),
       untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
@@ -2598,7 +2525,7 @@ export class SessionManager {
    * swap is still the session's, and mail is for the session
    */
   canReadMail(sessionId: string): boolean {
-    const profile = this.toolProfileOf(sessionId)
+    const profile = this.tools.toolProfileOf(sessionId)
     return profile === 'reader' || profile === 'orchestrator'
   }
 
@@ -2606,7 +2533,7 @@ export class SessionManager {
   mailSeats(orchestratorHasMailCommand: () => boolean): { mailTool(id: string): boolean; mailCommand(id: string): boolean } {
     return {
       mailTool: (id) => this.canReadMail(id),
-      mailCommand: (id) => this.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
+      mailCommand: (id) => this.tools.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
     }
   }
 
@@ -2634,11 +2561,6 @@ export class SessionManager {
   /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */
   readsSession(readerId: string, targetId: string): boolean {
     return this.tools.readsSession(readerId, targetId)
-  }
-
-  /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */
-  toolProfileOf(...a: Parameters<SessionTools['toolProfileOf']>): ReturnType<SessionTools['toolProfileOf']> {
-    return this.tools.toolProfileOf(...a)
   }
 
   /** The tools given to an orchestrator (FR-11), built over this manager (`orchestrator-seat.ts`) */
@@ -2742,11 +2664,6 @@ export class SessionManager {
     if (cleared) this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
     this.sessionSettings.markRead(sessionId, seq)
     return { cleared, newer }
-  }
-
-  /** `SessionRecord.loadMessages` (session-record.ts), kept on the manager for its callers */
-  loadMessages(...a: Parameters<SessionRecord['loadMessages']>): ReturnType<SessionRecord['loadMessages']> {
-    return this.record.loadMessages(...a)
   }
 
 

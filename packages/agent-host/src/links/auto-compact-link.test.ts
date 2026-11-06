@@ -30,7 +30,7 @@ async function machineHost(o: { older?: boolean } = {}) {
   const onRpc: typeof handler = (method, ...rest) =>
     o.older && (method === 'agents.autoCompact' || method === 'prefs.set')
       ? method === 'prefs.set'
-        ? Promise.resolve(mgr.uiPreferences())
+        ? Promise.resolve(mgr.prefs.uiPreferences())
         : Promise.reject(new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`))
       : handler(method, ...rest)
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc, build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION } })
@@ -52,7 +52,7 @@ async function hubHost(machinePort: number) {
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
     broadcast: (e) => {
       server.broadcast(e)
-      mgr.observeLinked(e)
+      mgr.linkedHost.observeLinked(e)
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
@@ -60,12 +60,12 @@ async function hubHost(machinePort: number) {
     tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
-    autoCompact: () => autoCompactOf(mgr.uiPreferences()),
+    autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()
-  mgr.setUiPreferences({ autoCompact: { share: 0.5 } })
+  mgr.prefs.setUiPreferences({ autoCompact: { share: 0.5 } })
   links.start()
   cleanups.push(async () => {
     await links.stop()
@@ -78,23 +78,23 @@ async function hubHost(machinePort: number) {
 describe('when agents compact on a linked machine (#1376)', () => {
   it("the hub's setting reaches the machine at connect, and again when the hub changes it", async () => {
     const machine = await machineHost()
-    expect(machine.mgr.uiPreferences().autoCompact).toBeUndefined()
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toBeUndefined()
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.5)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.share === 0.5)
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
 
     // The person turns Centralu's control off on the hub: the machine hands control back too
     await hub.router.handle('prefs.set', { patch: { autoCompact: { controlled: false } } })
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.controlled === false)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.controlled === false)
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
 
     // The notices' settings are the hub's too (#1492), also the one that follows the share
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 } } })
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeFirst === 0.4)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 })
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.nudgeFirst === 0.4)
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 })
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeSecond: null } } })
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeSecond === null)
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.nudgeSecond === null)
   })
 
   it('a hub that lowers its share under a second reminder it chose before still gets the whole setting accepted by the machine (#1504 review)', async () => {
@@ -102,19 +102,19 @@ describe('when agents compact on a linked machine (#1376)', () => {
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeFirst: 0.2, nudgeSecond: 0.45 } } })
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeSecond === 0.45)
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.nudgeSecond === 0.45)
     // The share alone moves under the second one: the hub takes the second down with it, and the machine takes all of it
     await hub.router.handle('prefs.set', { patch: { autoCompact: { share: 0.4 } } })
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.4)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.4, idleShare: 0.3, nudge: true, nudgeFirst: 0.2, nudgeSecond: 0.35 })
-    expect(hub.mgr.uiPreferences().autoCompact).toEqual(machine.mgr.uiPreferences().autoCompact)
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.share === 0.4)
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.4, idleShare: 0.3, nudge: true, nudgeFirst: 0.2, nudgeSecond: 0.35 })
+    expect(hub.mgr.prefs.uiPreferences().autoCompact).toEqual(machine.mgr.prefs.uiPreferences().autoCompact)
   })
 
   it("a linked session's menu asks the machine what its next start passes", async () => {
     const machine = await machineHost()
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
-    await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.5)
+    await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.share === 0.5)
     const answer = await hub.router.handle('agents.autoCompact', { sessionId: 'm1.w1' })
     // The machine has read no window of this model yet: it passes nothing, and says so
     expect(answer).toEqual({ controlled: true, share: 0.5, tokens: null })
@@ -125,6 +125,6 @@ describe('when agents compact on a linked machine (#1376)', () => {
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await expect(hub.router.handle('agents.autoCompact', { sessionId: 'm1.w1' })).rejects.toThrow('Unknown method: agents.autoCompact')
-    expect(machine.mgr.uiPreferences().autoCompact).toBeUndefined()
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toBeUndefined()
   })
 })

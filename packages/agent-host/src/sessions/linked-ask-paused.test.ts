@@ -67,7 +67,7 @@ async function hub(o: { tasks?: boolean } = {}) {
   mgr.useLinkedReader(reader)
   cleanup.push(() => void mgr.disposeAll())
 
-  const event = (e: Record<string, unknown>) => mgr.observeLinked({ sessionId: 'm1.w1', ...e } as never)
+  const event = (e: Record<string, unknown>) => mgr.linkedHost.observeLinked({ sessionId: 'm1.w1', ...e } as never)
   const tasks = (live: BackgroundTask[], ended?: BackgroundTask[]) => event({ type: 'background_tasks', live, ...(ended ? { ended } : {}) })
   /** A turn of the machine's session: it works, and ends */
   const turn = () => {
@@ -104,7 +104,7 @@ async function hub(o: { tasks?: boolean } = {}) {
     setAway: (why: string) => (away = why),
     dropLink: () => {
       linked = false
-      mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
+      mgr.linkedHost.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
     },
   }
 }
