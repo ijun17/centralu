@@ -3,12 +3,12 @@ import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj, tryParseJson } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
-import { win32 } from 'node:path'
 import { hostname } from 'node:os'
 import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, SshRunFailure, type SshExpectedLine, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
+import { systemTool } from '../os.js'
 import { sleep } from '../timing.js'
 
 /**
@@ -1297,8 +1297,7 @@ function ansiText(bytes: Buffer): string | null {
     ansiDecoder = null
     if (process.platform !== 'win32') return null
     try {
-      const root = process.env.SystemRoot && win32.isAbsolute(process.env.SystemRoot) ? process.env.SystemRoot : 'C:\\Windows'
-      const out = execFileSync(win32.join(root, 'System32', 'reg.exe'), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      const out = execFileSync(systemTool(['reg.exe']), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
       const page = /\bACP\s+REG_SZ\s+(\d+)/.exec(out)?.[1]
       if (page) ansiDecoder = new TextDecoder(CODE_PAGE_NAMES[page] ?? `windows-${page}`, { fatal: true })
     } catch {
