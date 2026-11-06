@@ -38,7 +38,7 @@ keys save someone who knows them.
 
 `pnpm ux` starts its own dev server (port 5196, `UX_PORT`) and runs in the desktop app's engine: WebKit
 on macOS and Linux, Chromium on Windows (`e2e/ux/engine.ts`; `E2E_BROWSER` names one). On Windows, Playwright's
-WebKit keeps only the text types of a drag, so the tasks that drag fail there (#2022). Locally, `pnpm ux` takes the e2e lock like
+WebKit keeps only the text types of a drag, so the tasks that drag fail there (#2022). The baseline is WebKit on Linux, so a comparison from Windows crosses engines. Locally, `pnpm ux` takes the e2e lock like
 any Playwright run (CONTRIBUTING.md, "One `pnpm e2e` per machine") and waits for another run. CI runs it on every full run (the merge queue's batches, main) in the `ux tasks` job
 (`.github/workflows/build.yml`): a task over its budget fails the job, the table and the comparison
 with `e2e/ux/baseline.json` go to the job's summary, and the JSON is kept as the `ux-report`
