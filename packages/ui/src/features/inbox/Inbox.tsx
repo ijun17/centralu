@@ -22,6 +22,9 @@ import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 import { MailSection } from './MailSection.jsx'
 import { MailThread } from './MailThread.jsx'
+import { ProtoOneList } from './ProtoOneList.jsx'
+
+const PROTO = typeof localStorage === 'undefined' ? null : localStorage.getItem('cc.proto.inbox')
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
@@ -152,7 +155,8 @@ export function Inbox() {
           The conversation's shapes (owner, 2026-10-18): a 14px card, its rows rounded inside a 4px inset, the row the
           keys are on filled (no edge bar), the row's actions as capsules.
         */}
-        {!mailThread && (
+        {!mailThread && (PROTO === 'a' || PROTO === 'b') && <ProtoOneList option={PROTO} items={items} settled={settled} />}
+        {!mailThread && PROTO !== 'a' && PROTO !== 'b' && (
           <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
             <h2 className="text-sm font-medium text-ink">Waiting</h2>
             <span className="readout text-xs text-ink-faint">{items.length}</span>
@@ -173,7 +177,7 @@ export function Inbox() {
               toggle(false)
             }}
           />
-        ) : items.length === 0 ? (
+        ) : PROTO === 'a' || PROTO === 'b' ? null : items.length === 0 ? (
           hasMail ? null : (
           <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
             Nothing waiting
@@ -265,7 +269,7 @@ export function Inbox() {
             ))}
           </ul>
         )}
-        {!mailThread && <MailSection />}
+        {!mailThread && PROTO !== 'a' && PROTO !== 'b' && <MailSection />}
       </div>
     </>
   )
