@@ -9,6 +9,17 @@ the core owns and what stays per tool (§3); the seam (§4); how the core reache
 recorded frames test it (§6); the pull requests (§7); Antigravity on it (§8). A record like the rest of `plans/`, so not
 mirrored in Korean. This document lands in the first code pull request (owner rule); nothing on screen changes.
 
+**Status (2026-11-06).** PRs 1, 2, 3 and 5–8 landed (frame tap #1665; recordings #1972, #2041, #2042; process seam #1668; ACP
+ledger #1674; Codex #1733 and Claude #1838 on `MidTurnLedger`; decision order #1858), and so did Antigravity (#1680) and the
+owner's Stop decisions of 2026-11-01 (#1849). Claude's own copy of the process start went with #2054 (its keeper spawn and
+adopt stay as they are: the keeper is being removed, #1895); ACP's `pathsOf` and `editPaths` became one with #2052 (PR 9's
+`core/events.ts` is not built: the hygiene helpers are already shared and each adapter calls them, so a wrapper would add
+lines and no reuse); Q4's upper bound for Claude and ACP is #2057. **Open: PR 4** (`tool-process.ts` on `Os`). The host watch
+(`HOST_WATCH`, `endsWithHost`) stays outside `Os` (§5), and every tool starts behind it on macOS and Linux, so `Os` would
+cover only the Windows start; its worth is in the adapter tests moving onto `memoryOs`, which is a larger change than a move
+and is a proposal, not a step yet. The `stopConfirmMs` setting stays: the adapters' tests set it (20 ms to see the notice,
+60 s to keep it away).
+
 Measured against main at `ef5bb172c` (2026-10-27), #1626 (`centralu/kp1618-resume`) and #1650
 (`centralu/os-interface`), by reading the code; nothing was run. Paths are under `packages/agent-host/src/adapters/`
 unless they say otherwise. Line numbers are main's.
