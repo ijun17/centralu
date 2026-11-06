@@ -592,14 +592,14 @@ fn keeper_with_a_fake_host(data: &Path, script: &str) -> (Arc<Keeper>, PathBuf, 
 }
 
 /// The keeper's side of `stop {forUpdate}`, run on a thread as the dispatcher runs it: whether it stopped, the answer the
-/// window read, whether the host was still alive when that answer arrived, and how long the answer took
+/// window read (a window's when `window`), whether the host was still alive when that answer arrived, and how long the answer took
 fn stop_for_update_of(k: &Arc<Keeper>, host: u32, window: bool, wait: Duration) -> (bool, Value, bool, Duration) {
     use std::io::BufRead;
     let (mut keeper_end, window_end) = UnixStream::pair().unwrap();
     let started = Instant::now();
     let stopping = {
         let k = k.clone();
-        thread::spawn(move || k.stop_for_update(&mut keeper_end, window, wait))
+        thread::spawn(move || k.stop_for_update(&mut keeper_end, if window { Ok(()) } else { Err("a test's caller".into()) }, wait))
     };
     window_end.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let mut line = String::new();

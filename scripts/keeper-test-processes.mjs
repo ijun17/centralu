@@ -89,7 +89,6 @@ export function request(sock, body, timeoutMs = 8000) {
 /** The keeper's `status` view */
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 
-/** What the keeper holds, from `keeper.sock`: the child socket answers only the keeper's hosts (#538) */
 /**
  * Copies the bundled host from `from` to `to` as a host of a build before #1895 step 3: the same code, but it does not say it
  * stops for an update (`stopsForUpdate`). A keeper holding its children hands them on in a handoff only for such a host
@@ -104,6 +103,7 @@ export function copyEarlierHost(from, to) {
   writeFileSync(main, earlier)
 }
 
+/** What the keeper holds, from `keeper.sock`: the child socket answers only the keeper's hosts (#538) */
 export const heldChildren = (data) => request(join(data, 'keeper.sock'), { op: 'children' }).then((r) => r.children ?? [])
 
 /** pid, parent and process group of every process, from one `ps` (the same flags on macOS and Linux) */

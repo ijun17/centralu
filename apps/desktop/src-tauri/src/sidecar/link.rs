@@ -87,8 +87,12 @@ fn is_news(before: Option<&(HostStatus, HostBuild)>, status: &HostStatus, after:
     before.is_none_or(|(was, built)| was != status || built != after)
 }
 
-/// How long "Quit completely" waits for a stop for an update under way: the request's own bound and the keeper's exit
-const QUIT_WAITS_FOR_THE_UPDATE_STOP: Duration = Duration::from_secs(45);
+/// How long "Quit completely" waits for a keeper on its way out (a stop for an update under way, or a switch that stops
+/// instead): the host's wait and its grace after TERM, the children's grace, and a margin for the keeper's exit
+const QUIT_WAITS_FOR_THE_UPDATE_STOP: Duration = crate::host_proc::STOP_FOR_UPDATE_WAIT
+    .saturating_add(crate::host_proc::STOP_GRACE)
+    .saturating_add(centralu_keeper_core::keeper::children::STOP_GRACE)
+    .saturating_add(Duration::from_secs(20));
 
 #[derive(Default)]
 struct LinkState {
@@ -634,13 +638,13 @@ impl KeeperLink {
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        let mid_update = match self.state.lock() {
+        let (mid_update, keeper_pid) = match self.state.lock() {
             Ok(mut st) => {
                 st.shutting_down = true;
                 st.quit_after_stop |= st.stopping_for_update;
-                st.stopping_for_update
+                (st.stopping_for_update, st.view.as_ref().map(|v| v.keeper.pid))
             }
-            Err(_) => false,
+            Err(_) => (false, None),
         };
         if mid_update {
             // "Quit completely" while "Apply now" has the keeper stopping for an update, its socket already gone: the quit
@@ -651,7 +655,25 @@ impl KeeperLink {
                 return Ok(());
             }
         }
-        client::stop(&self.sock)
+        let alive = |pid: u32| centralu_keeper_core::os::pid_alive(pid);
+        let stopped = match client::stop(&self.sock) {
+            // No answer, its socket gone, and the keeper still running: it is on its way out (a switch that stops for an update
+            // instead of handing over removes the socket first, `handoff::give`), so the quit waits for it rather than fail
+            Err(e) if !self.sock.exists() && keeper_pid.is_some_and(alive) => {
+                let pid = keeper_pid.unwrap_or_default();
+                crate::host_proc::wait_until(QUIT_WAITS_FOR_THE_UPDATE_STOP, || !alive(pid));
+                if alive(pid) { Err(e) } else { Ok(()) }
+            }
+            other => other,
+        };
+        // A quit that failed leaves the window open, attaching on as before, and a later "Apply now" relaunching
+        if stopped.is_err() {
+            if let Ok(mut st) = self.state.lock() {
+                st.shutting_down = false;
+                st.quit_after_stop = false;
+            }
+        }
+        stopped
     }
 
     /// Stops the keeper and everything it holds, like `stop`, but stays: the attach loop (`run`)
@@ -796,6 +818,36 @@ mod update_stop_tests {
         assert!(e.starts_with("Not relaunched: a build switch is under way"), "{e}");
         assert!(!e.contains("background mode"), "{e}");
         assert!(!ops.lock().unwrap().iter().any(|op| op == "relaunching"), "an older keeper's path was taken too: {:?}", ops.lock().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /**
+     * Review of #1895 step 3: a switch whose keeper stops for an update instead of handing over removes its socket and runs
+     * on for up to the stop's bound, with no stop for an update of this window's under way. "Quit completely" then found no
+     * socket and failed, and the window, already marked shutting down, never attached again.
+     */
+    #[test]
+    fn a_quit_while_the_keeper_is_on_its_way_out_waits_for_it_to_exit() {
+        let dir = scratch("leaving");
+        let link = link_to(&dir.join("keeper.sock"));
+        let mut leaving = std::process::Command::new("/bin/sleep").arg("1").spawn().unwrap();
+        link.state.lock().unwrap().view.as_mut().unwrap().keeper.pid = leaving.id();
+        // Reaped as it ends, so its pid reads as gone
+        let reaper = std::thread::spawn(move || leaving.wait());
+        let asked_at = Instant::now();
+        assert_eq!(link.stop(), Ok(()), "the quit failed");
+        assert!(asked_at.elapsed() >= Duration::from_millis(500), "the quit did not wait for the keeper to exit");
+        let _ = reaper.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A quit that fails leaves the window open: it attaches on, rather than sit with no keeper until the app restarts
+    #[test]
+    fn a_quit_that_fails_leaves_the_window_attaching() {
+        let dir = scratch("unreachable");
+        let link = link_to(&dir.join("keeper.sock"));
+        assert!(link.stop().is_err());
+        assert!(!link.shutting_down(), "the window stopped attaching after a quit that did not happen");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -501,17 +501,17 @@ impl Keeper {
      * Returns whether it stopped: the caller then ends the process. A window's only (`window`), as `system_ending` is: any
      * other process of this user could otherwise cut every turn and have it continued as if Centralu had been updated.
      */
-    pub(super) fn stop_for_update(self: &Arc<Self>, stream: &mut UnixStream, window: bool, wait: Duration) -> bool {
+    pub(super) fn stop_for_update(self: &Arc<Self>, stream: &mut UnixStream, window: Result<(), String>, wait: Duration) -> bool {
         if self.handed_over.load(Ordering::SeqCst) {
             reply(stream, &json!({ "ok": false, "error": HANDED_OVER }));
             return false;
         }
         {
             let Ok(mut st) = self.state.lock() else { return false };
-            if let Some(why) = stop_for_update_refusal(&st, window) {
+            if let Some(why) = stop_for_update_refusal(&st, window.is_ok()) {
                 drop(st);
-                if !window {
-                    log("refused a stop for an update to a process that is not a Centralu window");
+                if let Err(not) = &window {
+                    log(&format!("refused a stop for an update to a process that is not a Centralu window: {not}"));
                 }
                 reply(stream, &json!({ "ok": false, "error": why }));
                 return false;
@@ -591,9 +591,9 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
     });
 }
 
-/// Ends the keeper once it has stopped for an update. A test runs the dispatcher inside its own binary: there this panics on the
+/// Ends the keeper once it has stopped for an update (this op, and a handoff that stops instead). A test runs the dispatcher inside its own binary: there this panics on the
 /// request's thread instead, so a stop that should not have happened fails the test rather than end the run as if it passed
-fn exit_after_stop() -> ! {
+pub(in crate::keeper) fn exit_after_stop() -> ! {
     #[cfg(test)]
     panic!("the keeper would exit here");
     #[cfg(not(test))]
@@ -644,7 +644,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
         },
         "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
-            let window = k.is_window(&stream);
+            let window = k.judge_window(&stream);
             if k.stop_for_update(&mut stream, window, host_proc::STOP_FOR_UPDATE_WAIT) {
                 drop(stream);
                 exit_after_stop();
