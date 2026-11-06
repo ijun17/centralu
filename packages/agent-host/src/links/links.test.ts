@@ -64,6 +64,8 @@ async function remoteHost(
   store = new Store(),
   o: {
     version?: string
+    /** The build's commit; `dev` is a build made from a commit (`pnpm remote-dev`) */
+    commit?: string
     activity?: () => HostActivity
     immediate?: boolean
     /** A message sent into a running turn waits for the next one (`scriptedAdapters`) */
@@ -94,7 +96,7 @@ async function remoteHost(
     port,
     token: TOKEN,
     onRpc: without(createRpcHandler(mgr, adapters, { ...(o.activity ? { activity: o.activity } : {}), ...(o.credentials ? { serveCredentials: (nonce?: string) => reportOf(() => o.credentials!(nonce))() } : {}) }), o.without ?? [], o.onCall),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
+    build: { commit: o.commit ?? 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
@@ -398,6 +400,15 @@ describe('a hub linked to another host (#82)', () => {
     const u = await ui(second.port)
     expect(second.links.list().map((m) => m.id)).toEqual(['m1'])
     expect(await u.call('sessions.list')).toEqual([expect.objectContaining({ id: 'm1.w1', unreachable: true })])
+  })
+
+  // A dev build is no release to be older than another (versions.ts): its hello says so (`commit: dev`), and so does its connection line, which the link reads first
+  it('does not hold a dev build below the minimum version at versions_differ, as its hello would not', async () => {
+    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.1', commit: 'dev' })
+    const install = { managed: true, current: { version: '0.1.0-beta.1', node: '22.14.0', source: { kind: 'dev' as const, commit: 'abcdef1', dirty: false } }, previous: null, node: '22.14.0' }
+    const hub = await hubHost(() => lineFor(remote.port, { version: '0.1.0-beta.1', install }))
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
   })
 
   it('connects to a remote on another app version when the protocol matches, naming the older side so an update is offered; another protocol is held (#689)', async () => {

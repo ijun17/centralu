@@ -1058,8 +1058,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`${shimNames(this.record.remote).centralu} serve\` is running there`)
       return this.retryLater()
     }
-    // The versions are checked before the link is opened (plan §4)
-    const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
+    // The versions are checked before the link is opened (plan §4); a dev build there (`pnpm remote-dev`) is one before its hello says so too
+    const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: endpoint.line.install?.current?.source?.kind === 'dev' })
     if (!mayConnect(versions)) return
     if (readsOnly) {
       this.setStatus('unreachable', `The versions on ${this.name} agree now; Auto reconnect is off, so ${WAITS_FOR_PERSON}`)
