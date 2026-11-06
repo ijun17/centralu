@@ -32,9 +32,15 @@ export const Markdown = memo(function Markdown({
   projectId = null,
   sessionId = null,
   linkSessionId = null,
+  tone = 'normal',
 }: {
   text: string
   projectRoot: string | null
+  /**
+   * `muted` is for text that is the path to the answer rather than the answer (a reasoning row, #58): one step down
+   * the ink rule, and every ink `.cc-md` sets on its own (bold, links, headings, table headers) follows it down.
+   */
+  tone?: MarkdownTone
   /** The project of the file the link opens — the owner of projectRoot (#182) */
   projectId?: string | null
   /** The session whose reply this is; null where a local image is not to be read */
@@ -51,7 +57,7 @@ export const Markdown = memo(function Markdown({
   const split = useRef<MarkdownSplit | null>(null)
   if (split.current?.text !== text) split.current = advanceSplit(split.current, text)
   return (
-    <div className="cc-md max-w-[80ch] text-ink/90" data-testid="markdown">
+    <div className={`cc-md max-w-[80ch] ${TONE_CLASS[tone]}`} data-testid="markdown">
       {piecesOf(split.current).map((piece, i) => (
         <Fragment key={i}>
           {i > 0 && '\n'}
@@ -67,6 +73,18 @@ export const Markdown = memo(function Markdown({
     </div>
   )
 })
+
+export type MarkdownTone = 'normal' | 'muted'
+
+/*
+ * `.cc-md` gives bold, links, headings and table headers an ink of their own, which beats an ink inherited from the
+ * root, so `muted` names each of them. Code chips keep the text's ink, as in a reply; a table's cells are already muted.
+ * Written out whole: Tailwind finds a class by its text.
+ */
+const TONE_CLASS: Record<MarkdownTone, string> = {
+  normal: 'text-ink/90',
+  muted: 'text-ink-muted [&_strong]:text-ink-muted [&_a]:text-ink-muted [&_h1]:text-ink-muted [&_h2]:text-ink-muted [&_h3]:text-ink-muted [&_h4]:text-ink-muted [&_th]:text-ink-muted',
+}
 
 /*
  * GitHub's Markdown, except that only a double tilde strikes text through (owner, 2026-10-18). GFM's default also

@@ -147,12 +147,13 @@ export const ChatRow = memo(function ChatRow({
      * A reasoning summary (#58). It is the path to the body, not the body itself, so it is
      * dimmed one step to ink-muted — following the ink rule exactly, where brightness signals
      * importance. Codex's summary arrives as **bold heading** markdown, so this is still
-     * rendered through Markdown, just left quiet with no background color.
+     * rendered through Markdown, just left quiet with no background color. The tone is Markdown's
+     * own: its root sets the ink of the body, so a colour put on this wrapper never reached it.
      */
     return (
-      <div className="min-w-0 text-md text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
+      <div className="min-w-0" data-testid="msg-reasoning">
         {/* A row stored before the host kept two reasoning items apart has their headings run together (#1464) */}
-        <Markdown text={splitRunTogetherHeadings(item.text)} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} />
+        <Markdown text={splitRunTogetherHeadings(item.text)} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} tone="muted" />
       </div>
     )
   }
@@ -408,12 +409,12 @@ export function ToolCard({
          */
         <div className="flex w-full items-center">
           <button
-            className="flex shrink-0 items-center py-2 pl-3 pr-2.5 text-left"
+            className="flex min-w-0 shrink items-center py-2 pl-3 pr-2.5 text-left"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             data-testid="tool-card-toggle"
           >
-            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+            <span className="readout max-w-48 min-w-0 truncate rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted" title={item.tool}>
               {item.tool}
             </span>
           </button>
@@ -454,7 +455,7 @@ export function ToolCard({
           title={item.title}
         >
           {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
-          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+          <span className="readout max-w-48 min-w-0 truncate rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted" title={item.tool}>
             {item.tool}
           </span>
           <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">

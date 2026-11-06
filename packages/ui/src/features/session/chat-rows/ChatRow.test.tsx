@@ -112,13 +112,18 @@ describe('ChatRow: what the agent said', () => {
     const { html, text } = row({ kind: 'assistant', seq: 2, text: 'Done with **all** of it' })
     expect(testIds(html)[0]).toBe('msg-assistant')
     expect(html).toContain('<strong>all</strong>')
+    // A reply keeps its own ink, not the reasoning row's
+    expect(html).toContain('cc-md max-w-[80ch] text-ink/90')
+    expect(html).not.toContain('text-ink-muted')
     expect(text).toBe('Done with all of it')
   })
 
   it('renders a reasoning summary dimmed, through markdown too', () => {
     const { html, text } = row({ kind: 'reasoning', seq: 2, text: '**Planning** the change' })
     expect(testIds(html)[0]).toBe('msg-reasoning')
-    expect(html).toContain('text-ink-muted [&amp;_strong]:text-ink-muted')
+    // The tone is on Markdown's own root, whose ink the body takes; a colour on the row around it never reached the words
+    expect(html).toContain('cc-md max-w-[80ch] text-ink-muted [&amp;_strong]:text-ink-muted')
+    expect(html).not.toContain('text-ink/90')
     expect(text).toBe('Planning the change')
   })
 

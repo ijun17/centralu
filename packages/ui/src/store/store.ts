@@ -229,6 +229,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     skillProposals: [] as { name: string; content: string; why?: string }[],
     history: {},
     subagentSteps: {},
+    foldOpen: {},
     resuming: {},
     wakeError: {},
     wakeLocked: {},

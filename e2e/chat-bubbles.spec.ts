@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { emitEvent, newSession, setup } from './fixtures/control.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * The conversation as a chat (owner, 2026-10-18): the agent's words stand in an answer bubble on the left, drawn in
@@ -138,10 +139,13 @@ test("the person's message stands 24px from its neighbours and its time 4px unde
 
 test("the conversation's scrollbar is drawn over its content, and the native one takes no width", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'a long one')
-  for (let i = 0; i < 40; i++) {
-    await emitEvent(page, 0, { type: 'tool_call', callId: `c${i}`, summary: { tool: 'Bash', title: `step ${i}`, paths: [] } })
-  }
+  const sid = await newSession(page, 'alpha', 'a long one')
+  // Long enough to scroll: answers, since the tool calls between them fold into a line (#2007)
+  await page.evaluate((s) => {
+    const store = (window as any).__store
+    const rows = Array.from({ length: 40 }, (_, i) => ({ kind: 'assistant', seq: 100 + i, text: `step ${i} `.repeat(40) }))
+    store.setState({ chat: { ...store.getState().chat, [s]: rows } })
+  }, sid)
   const bar = page.getByTestId('chat-scrollbar')
   await expect(bar).toBeVisible()
   const scroller = page.getByTestId('chat-stream')
@@ -186,4 +190,87 @@ test('a heading that opens a bubble piece has its room inside the bubble and lea
       }),
     )
     .toEqual({ gap: 0, roomAtLeast12: true })
+})
+
+/**
+ * A reasoning row is dimmed to ink-muted all the way down (#58). `Markdown`'s root sets its own ink, so a colour
+ * put on the row around it never reached the words, and thinking read in the answer's ink. The ink of the body and of
+ * what `.cc-md` colours by itself (bold, a link, a heading) is compared with the muted ink, and with the answer's.
+ */
+test('a reasoning row is drawn in ink-muted, bold, links and headings included, and not in the answer ink', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const md = '## Heading\n\nPlain words with **bold**, a [link](https://example.com) and `code`.'
+  await page.evaluate(
+    ({ s, text }) => {
+      const store = (window as any).__store
+      const items = [
+        { kind: 'user', seq: 1, text: 'question' },
+        { kind: 'reasoning', seq: 2, text },
+        { kind: 'assistant', seq: 3, text },
+      ]
+      store.setState({ chat: { ...store.getState().chat, [s]: items } })
+    },
+    { s: sid, text: md },
+  )
+  const reasoning = page.getByTestId('msg-reasoning')
+  const answer = page.getByTestId('msg-assistant')
+  await openFolds(page)
+  await expect(reasoning).toContainText('Plain words')
+
+  // The tokens' own value, as the browser resolves it, whatever the theme is
+  const muted = await page.evaluate(() => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--color-ink-muted)'
+    document.body.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  })
+  const colors = (row: import('@playwright/test').Locator) =>
+    row.evaluate((el) => {
+      const ink = (selector: string) => getComputedStyle(el.querySelector(selector)!).color
+      return { body: ink('[data-testid=markdown]'), strong: ink('strong'), link: ink('a'), heading: ink('h2'), code: ink('code') }
+    })
+  const dimmed = await colors(reasoning)
+  expect(dimmed).toEqual({ body: muted, strong: muted, link: muted, heading: muted, code: muted })
+  // The answer is still its own, brighter ink
+  expect((await colors(answer)).body).not.toBe(muted)
+})
+
+/**
+ * Dimming the row moved its colour into `Markdown` and dropped the wrapper's `text-md` with it. The size is the body
+ * size all the same, since `.cc-md` sets it on the root: a reasoning row's text is as large as `--text-md` and as the
+ * answer's, as it was when the wrapper carried the class.
+ */
+test('a reasoning row keeps the body size of text', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  await page.evaluate(
+    ({ s }) => {
+      const store = (window as any).__store
+      const items = [
+        { kind: 'reasoning', seq: 2, text: 'Plain words\n\nSecond paragraph' },
+        { kind: 'assistant', seq: 3, text: 'Plain words\n\nSecond paragraph' },
+      ]
+      store.setState({ chat: { ...store.getState().chat, [s]: items } })
+    },
+    { s: sid },
+  )
+  await openFolds(page)
+  await expect(page.getByTestId('msg-reasoning')).toContainText('Second paragraph')
+  const sizes = await page.evaluate(() => {
+    const probe = document.createElement('span')
+    probe.style.fontSize = 'var(--text-md)'
+    document.body.append(probe)
+    const body = getComputedStyle(probe).fontSize
+    probe.remove()
+    const of = (id: string) => {
+      const style = getComputedStyle(document.querySelector(`[data-testid=${id}] p`)!)
+      return { size: style.fontSize, lineHeight: style.lineHeight }
+    }
+    return { body, reasoning: of('msg-reasoning'), answer: of('msg-assistant') }
+  })
+  expect(sizes.reasoning.size).toBe(sizes.body)
+  expect(sizes.reasoning).toEqual(sizes.answer)
 })

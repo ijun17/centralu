@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { newSession, setup as setupProjects } from './fixtures/control.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * A native subagent's steps under the card that launched it (#222).
@@ -37,6 +38,7 @@ test('a subagent\'s steps stay out of the conversation and open under its launch
   await emit(page, step({ type: 'tool_result', callId: 'toolu_sub', ok: true, summary: 'tooling/boundaries.test.ts' }))
   await emit(page, step({ type: 'message_delta', role: 'assistant', text: 'The boundaries test holds.' }))
 
+  await openFolds(page)
   const card = page.getByTestId('tool-card').filter({ hasText: 'Research the boundaries' })
   // The conversation holds the launch card alone — not the subagent's Bash, not its words
   await expect(card).toBeVisible()
@@ -84,6 +86,7 @@ test('only a launch card offers steps, and one with none recorded says so', asyn
   await emit(page, { type: 'tool_call', callId: 'toolu_old_agent', summary: { tool: 'Agent', title: 'An agent from before', paths: [] } })
   await emit(page, { type: 'tool_result', callId: 'toolu_old_agent', ok: true, summary: '3 tool uses · 12s\n\nDone.' })
 
+  await openFolds(page)
   await expect(page.getByTestId('tool-card').filter({ hasText: 'git status' }).getByTestId('subagent-steps-toggle')).toHaveCount(0)
   const old = page.getByTestId('tool-card').filter({ hasText: 'An agent from before' })
   await old.getByTestId('subagent-steps-toggle').click()
@@ -102,6 +105,7 @@ test("a session's subagent steps go to the session archive and back from Setting
   await emit(page, step({ type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'rg boundaries', paths: [] } }))
   await emit(page, { type: 'turn_complete' })
 
+  await openFolds(page)
   const card = page.getByTestId('tool-card').filter({ hasText: 'Research the boundaries' })
   await card.getByTestId('subagent-steps-toggle').click()
   const list = card.getByTestId('subagent-steps-list')

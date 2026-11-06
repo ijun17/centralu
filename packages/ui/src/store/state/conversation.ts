@@ -130,6 +130,15 @@ export type ConversationSlice = {
    * detaches and draws again comes back as it was left (open, loaded), not collapsed and reading again.
    */
   subagentSteps: Record<string, Record<string, SubagentSteps>>
+  /**
+   * The runs of thinking and tool calls the person has opened, per session (#2007): the keys of the rows of each opened
+   * run (`foldKey`), and a run is open when any of its rows' keys is here. Kept here, not in the fold line, so a run the
+   * virtual list detaches and draws again, or a session left and come back to, is as it was left. Any-of rather than
+   * the first row's key alone, because a run grows at both ends (a live row at the end, an older page at the start).
+   */
+  foldOpen: Record<string, Record<string, true>>
+  /** Opens or closes the run made of these rows */
+  setFoldOpen(sessionId: string, keys: readonly string[], open: boolean): void
   /** Opens or closes a launch card's steps; the first opening reads them */
   toggleSubagentSteps(sessionId: string, callId: string): void
   /** Reads the next page of a launch card's steps */

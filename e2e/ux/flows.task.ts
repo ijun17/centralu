@@ -117,7 +117,7 @@ uxTask({
   task: 'Open a file the agent named',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['The path in a tool card ("Read: /repo/packages/…") is a link (#543 item 6); it cost the tree walk below before'],
+  notes: ['The path in a tool card ("Read: /repo/packages/…") is a link (#543 item 6); it cost the tree walk below before; the card stands in a folded run, so it is one press more (#2007)'],
   start: async (page) => {
     await demo(page)
     await page.evaluate(
@@ -132,13 +132,16 @@ uxTask({
       },
       { path: STYLES, sid: await sessionId(page, OPEN) },
     )
-    await expect(page.getByTestId('tool-card').getByTestId('file-link')).toBeVisible()
+    await expect(page.getByTestId('fold-line').last()).toBeVisible()
   },
   run: async (u, page) => {
+    // The call stands in a run folded into one line (#2007): one press opens it, then the path is a link
+    await u.click(page.getByTestId('fold-line').last())
     await u.click(page.getByTestId('tool-card').getByTestId('file-link'))
   },
   goal: viewing,
-  budget: { operators: 7, M: 1, seconds: 3.5 },
+  // One press more than before: the folded run opens first (#2007, owner's decision). `H M P B B M P B B`, 5.55 s
+  budget: { operators: 9, M: 2, seconds: 5.6 },
 })
 
 uxTask({

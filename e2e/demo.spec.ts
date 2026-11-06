@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * The screen for looking at by hand (`?demo`) — user request, 2026-09-10.
@@ -19,6 +20,7 @@ test('?demo has something to see the moment it opens', async ({ page }) => {
   await expect(page.getByTestId('session-name')).toBeVisible()
   // A past conversation exists too (including a tool card)
   await expect(page.getByTestId('chat-stream')).toContainText('rainbow ring')
+  await openFolds(page)
   await expect(page.getByTestId('tool-card').first()).toBeVisible()
   // The dashboard's donut and the evidence panel's git changes are also filled in
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()

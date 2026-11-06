@@ -18,6 +18,7 @@ type HistoryActions = Pick<
   | 'loadHistory'
   | 'loadHistoryAt'
   | 'loadOlder'
+  | 'setFoldOpen'
   | 'toggleSubagentSteps'
   | 'loadMoreSubagentSteps'
   | 'trashSubagentSteps'
@@ -160,6 +161,19 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
         toast: `Could not load past conversation: ${(e as Error).message}`,
       }))
     }
+  },
+
+  setFoldOpen(sessionId, keys, open) {
+    set((s) => {
+      const cur = s.foldOpen[sessionId] ?? {}
+      if (open ? keys.every((k) => cur[k]) : !keys.some((k) => cur[k])) return {}
+      const next = { ...cur }
+      for (const k of keys) {
+        if (open) next[k] = true
+        else delete next[k]
+      }
+      return { foldOpen: { ...s.foldOpen, [sessionId]: next } }
+    })
   },
 
   toggleSubagentSteps(sessionId, callId) {
