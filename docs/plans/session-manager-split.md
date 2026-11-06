@@ -235,7 +235,7 @@ Manager line counts are after each pull request.
   `send` and `respondApproval` were no stubs, so D1 did not keep them: the router and the tests call `mgr.inputs.send`.
   `parts()` gains the `approvalRules` getter; `rpc.test.ts`'s fake manager carries `inputs`. Deep tier: the link tests
   send and approve.
-- **9, processes** (`manager.ts` 2,377 to 1,972; `sessions/session-processes.ts`, 458 lines, a move of 405):
+- **9, processes** (`manager.ts` 2,377 to 1,972; `sessions/session-processes.ts`, 459 lines, a move of 405):
   `resumeSession` (one wake at a time, `resuming`), `forkConversation`, `switchTool`, `toolRefusal`, `sleepSession`
   (`sleeping`), `restartSession`, `sessionIdle`, `waitsOn`, `untilWakeWithdrawn` (`leaving`), `handleSink`,
   `noticeTrustRestart`, `endTurnWithProcess` and the launch settings a process holds (`running`), as they were, on
@@ -243,6 +243,8 @@ Manager line counts are after each pull request.
   `createdInTrusted`, go with them. `AgentVersionService` and `SessionSleeper` read the list from `sessions` and the
   process from a required `processes` dependency (`processes: mgr.processes`), so a construction that leaves it out does
   not compile. `parts()` gains the `starts` and `inputs` getters and `refuseWhileLettingGo`, which stays with host tenure.
+  A failed fork's reason is read with `errorMessage(err)` instead of `(err as Error).message` (lint counts a moved assertion
+  as new): the same text for anything with a `message`, and the thrown value's text, not `undefined`, for anything else.
 
 ### 6.2 Work in flight
 
