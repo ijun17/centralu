@@ -1983,6 +1983,12 @@ export class SessionManager {
    * child's own background work (#721) counts only while the child is in a turn: that work may run for minutes or
    * for good (a dev server), and the report wakes the caller when it comes.
    */
+  /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.stoppedTurnAnswer`, at most 600 characters), or null when it said none */
+  stoppedWords(sessionId: string): string | null {
+    if (!this.meta.has(sessionId)) return null
+    return this.reports.stoppedTurnAnswer(sessionId).preview || null
+  }
+
   waitsOn(sessionId: string): string[] {
     const ids = new Set<string>()
     for (const d of this.children.delegations.values()) if (d.callerId === sessionId && !d.settled) ids.add(d.sessionId)

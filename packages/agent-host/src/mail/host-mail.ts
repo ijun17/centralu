@@ -38,11 +38,13 @@ export type HostMailSessions = {
   waitsOn?(id: string): string[]
   /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`SessionManager.quitTold`) */
   quitTold?(id: string): { told: string[]; held: string[] }
+  /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`SessionManager.stoppedWords`) */
+  stoppedWords?(id: string): string | null
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mailSeats(orchestratorHasMailCommand)
@@ -58,6 +60,7 @@ export function mailSessionsOf(
     mailSessions: () => mgr.mailSessions(),
     waitsOn: (id) => mgr.waitsOn(id),
     quitTold: (id) => mgr.quitTold(id),
+    stoppedWords: (id) => mgr.stoppedWords(id),
   }
 }
 
@@ -127,6 +130,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
       // Not one a quit cut either: it waits for the person's Continue, and a notice would start a turn with nobody there
       return !s || (!inTurn(s.state) && !wentWithItsProcess(s.interruption))
+    },
+    stoppedWords: (address) => {
+      const party = parseAddress(address)
+      return party?.kind === 'session' ? (sessions.stoppedWords?.(party.sessionId) ?? null) : null
     },
     waitsOn: (sender, stopped) => {
       const [from, to] = [parseAddress(sender), parseAddress(stopped)]

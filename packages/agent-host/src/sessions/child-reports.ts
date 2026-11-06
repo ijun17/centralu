@@ -410,7 +410,7 @@ export class ChildReports {
    * The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn
    * before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does
    */
-  private stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
+  stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
     const span = this.host.children.latestTurnRows(sessionId)
     if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }
     const rows = this.host.store.messages.loadMessages(sessionId, 200)
