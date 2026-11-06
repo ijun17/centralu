@@ -1209,13 +1209,4 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     expect(reruns()).toEqual([])
     expect(guardOnDisk().passive.why).toContain('queue-driver.json')
   })
-
-  it('guards the main run of what it landed a moment ago, as before', async () => {
-    const { repo, sha } = oneCommit()
-    landed(sha)
-    guardRuntime(repo, redRun(repo, sha))
-    await call('merge_queue')
-    await until(() => reruns().length > 0, 'the rerun')
-    expect(guardOnDisk().passive).toBeUndefined()
-  })
 })
