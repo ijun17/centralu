@@ -1719,20 +1719,31 @@ the params with the method's schema and reads the answer with its result schema,
     session's next turn, written by the agent before the compaction ("Continue with step 3 of the plan in docs/x.md: ..."; at most 4,000 characters, longer is refused with
     nothing asked). It is held with the compact Centralu sends and **goes when the compact turn has ended**, after the tool has reported the
     compaction in it (not at the report: the turn is still running then, and a message sent into it would join it): an ordinary turn of the session's own
-    (`SessionEvents.deliverMail`: Centralu's channel, no user row, a line "Centralu sent the agent its next step after the compaction"), so its end raises the
-    done notice and is the work's.
+    (`SessionEvents.deliverMail`: Centralu's channel, no user row, a conversation line that says what happened: "Centralu sent the agent its next step after the
+    compaction", or "... its next step: nothing was compacted" for a refused request, or that it was told to go on after a host change), so its end raises the done notice and is the work's.
     **Only to a session at rest, after what was queued has gone first.** The compact turn's end is not the moment: the person's message typed during it sits in
     the tool's queue and the mailbox delivers mail the moment the session rests, and a step sent beside either is folded into their turn (real run E2: the person's
-    message ran inside the `then` turn and the "came first" line was missing). So the step waits `THEN_SETTLE_MS` (3 s) after the end; a turn that begins in that time is
-    theirs, the step follows its end with a line saying their message came first and weighs more, and a step sent at all goes only when the session can take a turn
-    (`SelfCompactionHost.ready`: `mailReceiver` is `ready`: no turn, card or limit, the host not leaving). Else the end of the turn that runs, or the sweep, tries
-    again; the step stays in the store meanwhile. The same gate stands in front of the claim, so a step that is not sent is not claimed. Mail that waits for longer than the
-    moment (the mailbox's 30-second gap between wakes) is not waited for.
+    message ran inside the `then` turn and the "came first" line was missing). So the host **looks at what waits** (`SelfCompactionHost.queued`, from the manager) when the turn ends:
+    the inputs the tool holds that no turn has answered (`SessionHandle.queuedInputs`: Claude counts what it wrote to the CLI and no result has named yet, and what is
+    still in its own queue, never a quiet note; Codex counts `MidTurnLedger.waiting`, the inputs behind a compact or review turn and the writes not yet answered, which at
+    a compact's end are already written when the end is said), and mail that wakes the session and waits for it (`MessageService.wakingFor`, `MailHooks.waiting`: due or still
+    in the 2-second debounce, held-out and quiet mail not counted). **Nothing waits: the step goes at once.** Something does: it waits, a turn that begins is theirs, and the
+    step follows that turn's end with a line saying their message came first and weighs more. A step goes only when the session can take a turn (`SelfCompactionHost.ready`:
+    `mailReceiver` is `ready`: no turn, card or limit, the host not leaving); else the end of the turn that runs, or the sweep, tries again, and the step stays in the store
+    meanwhile. The same gate stands in front of the claim, so a step that is not sent is not claimed. **Two bounds remain, both named in the code.** A queue the host can see but
+    that never starts a turn (mail held back by the mailbox's own rules, a stuck queue) holds the step for `THEN_QUEUE_MAX_MS` (60 s) at most. **The one guess:** a tool that
+    cannot say what it holds (`queuedInputs` absent, as an ACP agent) gets `THEN_SETTLE_MS` (3 s) after the compact turn's end for a queued turn to start, which is what the
+    first version did for every tool, at the price of 3 s on each step and a wrong order when the queued turn started later than that.
     **A refused request still sends it.** When nothing is compacted (the context under the floor, no size read since the last compaction, the tool refused the compact or
     Centralu could not send it, or the tool never reported it within `COMPACT_STALE_MS`, 30 minutes; the sweep checks that, and a compaction reported after it does not
     bring a second step), the agent was told to end its turn and nothing else would wake it. So `then` goes all the same, as a turn that opens with one line: the
     request did not compact the conversation, why, and that asking again before anything changed gets the same answer. That turn counts as a cycle for the warning below.
-    It is the one loop this opens: an agent that asks again at once is refused again and gets its step again, bounded by that warning only.
+    **A repeat costs a tool call, not a turn.** The size of a refusal is remembered (`refusedAt`, per session, in memory). A `compact_self` with a `then` that comes again with the
+    context within `REFUSED_AGAIN_TOKENS` (2,000) of it, by the size of the turn's last model request, else the tool's reading (two requests with no size read since a
+    compaction are the same), is answered in the tool result: "Not compacted (reason); nothing has changed since your last request, so no new turn is made for it. Continue in
+    this turn." Nothing is stored or counted, and the session is never blocked. A step that did real work and grew the context asks the usual way, and a compaction forgets the
+    refusal. This also bounds the loop the context notice could make on Codex, where the context read 43.8k right after a compaction and 119k on the next turn (Codex kept a big
+    user message), so the 46% notice fired again at once: a repeat at the same size costs a call. The warning below remains the bound for a context that does change.
     **The person's interrupt sends nothing.** Of the turn that asked, of the compact turn **before or after** the tool reported the compaction in it, or of the turn that ran
     first, or when a turn ends in an error (an errored or rate-limited session is not sent a turn): the session is **told it did not happen**, quietly, with the text
     of its `then` so it can carry on by itself: `SessionHandle.nudge` (Claude: quiet input read with its next input; Codex: steered into a running turn only, so a note

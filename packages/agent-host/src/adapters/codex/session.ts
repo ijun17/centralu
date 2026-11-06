@@ -465,6 +465,11 @@ export class CodexSession implements SessionHandle {
     this.ledger.send(text, opts?.id)
   }
 
+  /** Inputs waiting to start a turn: behind a compact or review turn, or written and not answered (`MidTurnLedger.waiting`) */
+  queuedInputs(): number {
+    return this.ledger.waiting
+  }
+
   /**
    * A note steered into the regular turn that is running, starting nothing (#1492). `turn/start` would do it only while a turn is
    * running: with none, it starts a turn of its own (Codex sends a request's token count just before `turn/completed`, so a note for

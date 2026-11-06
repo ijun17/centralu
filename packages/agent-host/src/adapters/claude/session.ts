@@ -548,6 +548,14 @@ export class ClaudeSession implements SessionHandle {
     this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
   }
 
+  /**
+   * Inputs that will run as a turn and have not: waiting in the queue the CLI reads, or read and not named by a finished turn's result (`personInputs`). Quiet
+   * inputs start no turn and a local note is no message, so neither counts
+   */
+  queuedInputs(): number {
+    return this.queue.filter((input) => !input.quiet && !input.parentNote).length + this.personInputs.size
+  }
+
   /** A note read with the next message or at the running turn's next tool round, starting nothing (#1492): quiet input, stamped as Centralu's */
   nudge(text: string): boolean {
     if (this.closed) return false

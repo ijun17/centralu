@@ -169,3 +169,27 @@ describe('a wake that is tracked', () => {
     expect(seen.at(-1)).toBe('fail')
   })
 })
+
+describe('the inputs the CLI holds (`queuedInputs`, #2036)', () => {
+  it('counts a message written and not yet named by a result, never a quiet note, so the host can send its own after them', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await session(events)
+    // The first message is unanswered until a result names it
+    expect(handle.queuedInputs?.()).toBe(1)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(0)
+    // A quiet note starts no turn and is no message
+    handle.send('<centralu-nudge/>', { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(0)
+    // The person’s message sent during a turn waits until a turn answers it
+    handle.send('a message of the person', { origin: { kind: 'human' } })
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(1)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(0)
+    await handle.dispose()
+  })
+})

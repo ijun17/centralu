@@ -192,6 +192,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
+    waiting: (id) => service.wakingFor(addressOf(id)),
     // The person's warning, written as the mailbox writes its own (delivery.ts `warnIfRunning`): one a clock hour for the session, and nothing waits for it
     compactCycles: (id, count) => {
       const hour = Math.floor(now() / HOUR_MS) * HOUR_MS

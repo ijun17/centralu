@@ -119,6 +119,8 @@ export type MailHooks = {
   openWork?(sessionId: string): { unanswered: string[]; owed: string[] }
   /** A session went through `count` compaction cycles in the hour (`compact_self` with `then`, #2024): the person gets one warning, the mailbox's, once per clock hour */
   compactCycles?(sessionId: string, count: number): void
+  /** Mail that wakes the session waits for it (due or not yet): its turn is coming, and a note of the host's (`compact_self`'s `then`) follows it */
+  waiting?(sessionId: string): boolean
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
@@ -563,8 +565,14 @@ export class SessionManager {
       },
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
-      sendThen: (id, text) =>
-        this.events.deliverMail(id, { text, quiet: false, line: 'Centralu sent the agent its next step after the compaction', label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }),
+      sendThen: (id, text, line) =>
+        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }),
+      // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
+      queued: (id) => {
+        const held = this.handles.get(id)?.queuedInputs?.()
+        const mail = this.mailHooks?.waiting?.(id) ?? false
+        return mail || (held === undefined ? null : held > 0)
+      },
       keep: settingThenKeep(this.store.settings),
       warnCycles: (id, count) => this.mailHooks?.compactCycles?.(id, count),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,

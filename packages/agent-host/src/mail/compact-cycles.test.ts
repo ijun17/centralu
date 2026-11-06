@@ -34,3 +34,21 @@ describe('compact cycles warning (#2024)', () => {
     expect(warnings()).toHaveLength(3)
   })
 })
+
+describe('mail waiting for a session (#2036), the host’s check before it sends `compact_self`’s next step', () => {
+  it('counts mail that wakes the session, due or still in the debounce, and not once it was delivered', async () => {
+    world = hostWorld()
+    world.delivery.start()
+    expect(world.hooks.waiting?.('b')).toBe(false)
+    world.mail.send(at('a'), { to: [at('b')], text: 'the build is green' })
+    // Sent just now: not due yet (the mailbox waits a moment before it wakes the receiver), and still a turn that is coming
+    expect(world.store.mailbox.hasDue(at('b'), world.clock.t)).toBe(false)
+    expect(world.hooks.waiting?.('b')).toBe(true)
+    // Another session’s mailbox is its own
+    expect(world.hooks.waiting?.('c')).toBe(false)
+    // Delivered: nothing waits any more
+    await world.advance(10_000)
+    expect(world.delivered.length).toBeGreaterThan(0)
+    expect(world.hooks.waiting?.('b')).toBe(false)
+  })
+})

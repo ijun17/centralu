@@ -228,8 +228,8 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     `WARN_COMPACT_CYCLES_PER_HOUR = 6` cycles of `compact_self` with `then` (its next step sent after the compaction, or after a refusal that said why) in an hour: one notice in the
     Inbox naming the session and the count (`facts.compactCycles`, S20), at most once per clock hour per session (`compactcycles:` key). The session
     keeps working; nothing is held, refused or delayed for it. The cycles are counted in the store (`compact_cycles:<session>`), so a swap does not
-    start the count again. A request the floor refuses still sends its `then` (with the reason), so an agent that asks again at once loops without compacting: this
-    warning is the only bound on it, and a count past 6 is either that or real work that grew the context back each time.
+    start the count again. A request the floor refuses still sends its `then` (with the reason); asked again at the same context size it is answered in the tool result and makes no
+    turn, so a count past 6 is real work that changed the context each time, or a context that kept moving.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
   - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
