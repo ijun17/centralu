@@ -232,3 +232,39 @@ test('a reasoning row is drawn in ink-muted, bold, links and headings included, 
   // The answer is still its own, brighter ink
   expect((await colors(answer)).body).not.toBe(muted)
 })
+
+/**
+ * Dimming the row moved its colour into `Markdown` and dropped the wrapper's `text-md` with it. The size is the body
+ * size all the same, since `.cc-md` sets it on the root: a reasoning row's text is as large as `--text-md` and as the
+ * answer's, as it was when the wrapper carried the class.
+ */
+test('a reasoning row keeps the body size of text', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  await page.evaluate(
+    ({ s }) => {
+      const store = (window as any).__store
+      const items = [
+        { kind: 'reasoning', seq: 2, text: 'Plain words\n\nSecond paragraph' },
+        { kind: 'assistant', seq: 3, text: 'Plain words\n\nSecond paragraph' },
+      ]
+      store.setState({ chat: { ...store.getState().chat, [s]: items } })
+    },
+    { s: sid },
+  )
+  await expect(page.getByTestId('msg-reasoning')).toContainText('Second paragraph')
+  const sizes = await page.evaluate(() => {
+    const probe = document.createElement('span')
+    probe.style.fontSize = 'var(--text-md)'
+    document.body.append(probe)
+    const body = getComputedStyle(probe).fontSize
+    probe.remove()
+    const of = (id: string) => {
+      const style = getComputedStyle(document.querySelector(`[data-testid=${id}] p`)!)
+      return { size: style.fontSize, lineHeight: style.lineHeight }
+    }
+    return { body, reasoning: of('msg-reasoning'), answer: of('msg-assistant') }
+  })
+  expect(sizes.reasoning.size).toBe(sizes.body)
+  expect(sizes.reasoning).toEqual(sizes.answer)
+})

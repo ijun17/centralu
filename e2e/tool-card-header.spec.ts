@@ -6,7 +6,7 @@ import { emitEvent, newSession, setup } from './fixtures/control.js'
  * and the long part (the title, the session's name, the tool's own name) is cut with an ellipsis, its whole text in the
  * tooltip. A Centralu call's header used to wrap, so the chevron dropped to a second line under a long session name.
  */
-const LONG_NAME = '무한모드 정산 잔여 E2E 검증과 릴리스 전 마지막 점검 항목 모두 정리하기'
+const LONG_NAME = '릴리스 전에 확인할 항목을 하나도 빠짐없이 정리하는 아주 긴 세션 이름'
 const LONG_PATH = `Read: /tmp/alpha/${'very-long-directory-name/'.repeat(8)}file.ts`
 
 for (const width of [1280, 900, 480, 360]) {
