@@ -86,7 +86,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         <Fold open={view.canReply !== false}>
           <Reply />
         </Fold>
-        {confirming !== null && (
+        {/* The row folds in and out like the reply box; its text does not depend on the outcome asked, so it stays whole while it folds closed */}
+        <Fold open={confirming !== null}>
           <div className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
             <span className="min-w-0">{thread.assignee ? partyName(thread.assignee) : 'The session'} is working on this. Stop its work and close this?</span>
             <Button
@@ -94,6 +95,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
               variant="danger"
               className="ml-auto shrink-0"
               onClick={() => {
+                if (confirming === null) return
                 const outcome = confirming
                 setConfirming(null)
                 void close(outcome)
@@ -106,7 +108,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
               Cancel
             </Button>
           </div>
-        )}
+        </Fold>
         {/* Closing is at once: the session that was working on it is told, and its turn is not stopped (only a host of an older build stops it, and asks first) */}
         <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
           <Button size="sm" variant="quiet" onClick={() => (closeStopsWork(view) ? setConfirming('finished') : void close('finished'))} data-testid="mail-finish">
