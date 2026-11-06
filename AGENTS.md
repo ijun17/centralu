@@ -60,6 +60,8 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
 - Store migrations add first and remove later: a step may not break the previous build, which
   can still be serving during a host swap (`Store.migrate()`, `docs/agent-host.md`).
 - The host logs to stderr only. stdout carries one handshake line with a secret.
+- An adapter's tests replay recorded frames of a real run (`adapters/*/recordings`, `adapters/frames/`), not
+  hand-written ones: a fake holds what you believe the tool sends. Record first (docs/agent-host.md §3 step 3).
 - Tests that wait on wall-clock time fail under load. Wait for an event, or give generous bounds.
 - A framed button, pick-one toggle, small caps label, capsule or text field is a shared component
   (`Button`, `Segmented`, `Badge`, `Pill`, `TextInput`/`TextField` in `packages/ui/src/components/`),

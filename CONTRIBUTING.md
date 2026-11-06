@@ -433,6 +433,10 @@ Then ask these against your change. Put anything you could not check in **Not ex
   a release bump ([#625](https://github.com/ijun17/centralu/pull/625)).
 - **Can it wait forever?** A script waited on workflows that might never run
   ([#622](https://github.com/ijun17/centralu/pull/622)).
+- **Does an adapter change rest on what the tool really sends?** A fix tested on a fake's value passed
+  every test and did nothing on the real Codex, which answers another status
+  ([#2031](https://github.com/ijun17/centralu/pull/2031)). Add or cite a recording of a real run
+  ([agent-host.md §3](docs/agent-host.md#3-procedure-for-adding-a-new-tool-c3--the-reason-this-document-exists) step 3).
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).

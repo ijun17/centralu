@@ -1005,7 +1005,13 @@ interface AdapterCapabilities {
 1. `adapters/<tool>/`을 만들고 `AgentAdapter`를 구현한다 (이벤트 변환 + detect + capability).
 2. `@cc/protocol`의 `ToolName`에 도구를 넣고 `TOOL_META` 항목을 준다 — 표시 이름, 한 글자
    마크, 설치 명령, 로그인 명령. 그다음 `main.ts`의 `adapters` Map에 어댑터를 등록한다.
-3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증. 새 도구는 `adapters/frames/`의
+3. **어댑터 테스트를 쓰기 전에 실제 실행을 녹화한다 (필수).** 계약 테스트는 녹화한 raw 프레임 → NormalizedEvent 스냅샷을
+   검증한다. 손으로 쓴 프레임으로는 부족하다. 작성자가 도구가 보낸다고 믿은 값이 담기기 때문이다 (#2031: 가짜는 `idle`로
+   답했지만 실제 Codex는 `systemError`로 답해서, 수정은 모든 테스트를 통과하고도 실제 충돌에서는 아무것도 하지 않았다).
+   새 도구는 최소한 다음 녹화와 함께 들어온다: 일반 턴, 승인이 있는 도구 호출, 거절되거나 실패한 턴, 중단된 턴, 긴 답,
+   압축(도구에 있으면), 재개한 세션, 어댑터가 분기하는 각 응답(상태, 오류 종류). 도구가 보내는 것에 기대는 기존 어댑터의
+   변경은 그것을 보여 주는 녹화를 더하거나 가리킨다. 녹화 없이 가짜에 옮겨 적은 값은 근거가 아니다. CLI 버전이 오르면
+   다시 녹화하고, 그 차이가 리뷰 대상이다. 새 도구는 `adapters/frames/`의
    도구 중립 프레임 도구로 녹화한다 (#1498): 녹화기(`CC_RECORD_FRAMES`), 스크러버(`scripts/frames-scrub.mts`), 프로토콜의
    `FrameCodec`을 쓰는 재생기, `SessionHandle` 수준에서 도는 시나리오. 그래서 픽스처는 어댑터 자신이 보내고 받은 그대로다
    (ACP 어댑터의 것은 `scripts/frames-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).
