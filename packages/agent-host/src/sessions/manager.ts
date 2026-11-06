@@ -8,7 +8,7 @@ import { matchProjects } from './ask-project.js'
 import { AskedGate } from './asked-gate.js'
 import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
-import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import { MailNotAtRest, type MailSessions, type ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
@@ -21,6 +21,7 @@ import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
+import { OverloadRetry } from './overload-retry.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { MachineFlow, type MachineOps } from './machine-flow.js'
@@ -251,6 +252,8 @@ export class SessionManager {
   private readonly reports: ChildReports
   /** A session's `interruption` kept with its events, the reconnect clocks, and a quit's stop (interruption-watch.ts) */
   private readonly interruptions: InterruptionWatch
+  /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts, #1693) */
+  private readonly overloadRetry: OverloadRetry
   /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
   private readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
@@ -514,6 +517,29 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
+    this.overloadRetry = new OverloadRetry({
+      meta: this.meta,
+      leaving: () => this.handingOver || this.disposing,
+      compactTurn: (id) => this.selfCompaction.compactTurn(id),
+      running: (id) => this.handles.has(id),
+      note: (e) => this.events.onEvent(e),
+      // Through Centralu's channel, as an update's continue: sent only while the retry still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
+      send: (id, text, gate) =>
+        this.events
+          .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, {
+            leaving: () => this.handingOver || this.disposing,
+            // The last check before the tool is given the note (deliverMail asks it once, right before): passed, the turn is the tool's
+            atRest: () => {
+              const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle')
+              if (stands) gate.handed()
+              return stands
+            },
+          })
+          // Stopped or taken over while it waited: nothing was sent, and nothing failed
+          .catch((err: unknown) => {
+            if (!(err instanceof MailNotAtRest)) throw err
+          }),
+    })
     const compactSetting = () => autoCompactOf(this.uiPreferences())
     const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
     this.selfCompaction = new SelfCompaction({
@@ -1988,7 +2014,11 @@ export class SessionManager {
   }
 
   interrupt(sessionId: string): void {
-    const handle = this.requireHandle(sessionId)
+    // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop.
+    // Once the retry's note is with the tool it runs a turn, which the Stop stops like any
+    const took = this.overloadRetry.cancel(sessionId)
+    const waiting = took === 'waiting' || took === 'sending'
+    const handle = waiting ? this.handles.get(sessionId) : this.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
@@ -1996,7 +2026,8 @@ export class SessionManager {
     // A stop takes off what a hub gave the tool for turns to come (#1604): the tool drops what it still holds queued, and says it
     // was not delivered (#1640), so no turn runs for it after the Stop
     this.children.dropInputOrigins(sessionId)
-    handle.interrupt()
+    if (waiting) this.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
+    else handle?.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
     // only ends that caller's wait; work left running past the bound has its own Stop.
     for (const d of this.children.delegations.values()) {
@@ -2299,6 +2330,9 @@ export class SessionManager {
       inputsHeld: (...a) => self.inputsHeld(...a),
       get interruptions() {
         return self.interruptions
+      },
+      get overloadRetry() {
+        return self.overloadRetry
       },
       get keeperOpts() {
         return self.keeperOpts
@@ -2718,6 +2752,8 @@ export class SessionManager {
 
   private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
+    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's
+    this.overloadRetry.stopAll()
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
     /*
@@ -2774,6 +2810,8 @@ export class SessionManager {
     // A compact now would reach a process the next host is meant to take over, as a sleep would (#568)
     this.stopSelfCompaction()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
+    // Ends as a quit's does, before the host is marked as leaving (#1693)
+    this.overloadRetry.stopAll()
     this.handingOver = true
     this.leaveHost('Centralu is restarting')
     await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.merges.mergeChecks])

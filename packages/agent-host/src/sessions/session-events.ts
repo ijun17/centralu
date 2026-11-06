@@ -20,6 +20,7 @@ import type { ChildReports } from './child-reports.js'
 import { HUB_SENDER, type DelegationHost } from './delegation-flow.js'
 import { truncate } from './external-conversations.js'
 import type { InterruptionWatch } from './interruption-watch.js'
+import type { OverloadRetry } from './overload-retry.js'
 import type { QueuedRequests } from './queued-requests.js'
 import type { RoutedCards } from './routed-cards.js'
 import type { SessionRecordHost } from './session-record.js'
@@ -53,6 +54,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
+    /** A turn the provider ended for want of capacity, waiting to be continued (overload-retry.ts) */
+    readonly overloadRetry: OverloadRetry
     /** Refuses a session whose worktree is being removed */
     notBeingRemoved: (sessionId: string) => void
     readonly queue: QueuedRequests
@@ -165,6 +168,9 @@ export class SessionEvents {
       if (!m || !e.ended?.length) return
       return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
     }
+    // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693)
+    if (e.type === 'error') e = this.host.overloadRetry.hold(e)
+    if (e.sessionId) this.host.overloadRetry.observe(e)
     const unborn = e.sessionId && !this.host.meta.has(e.sessionId) ? this.host.record.unborn.get(e.sessionId) : undefined
     if (unborn) {
       unborn.push(e)
@@ -554,6 +560,23 @@ export class SessionEvents {
   }
 
   /**
+   * What goes into a session's conversation (`deliverNow`), after the retry of a turn the provider ended for want of capacity (#1693) is
+   * taken away: a message into the session carries the work on itself, and wins over a retry note on its way (a restart waited out
+   * while it is sent). Taken away first, before any wait: the retry's own send checks it right before it hands the note to the tool.
+   * If the message is then refused, the turn it was meant to carry on is over, and the error the retry stood in for ends it.
+   */
+  async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
+    const sessionId = args[0]
+    const held = this.host.overloadRetry.supersede(sessionId)
+    try {
+      await this.deliverNow(...args)
+    } catch (e) {
+      if (held !== null) this.host.overloadRetry.lost(sessionId, held)
+      throw e
+    }
+  }
+
+  /**
    * The body of send() — takes one more flag for **whether this is an instruction or a relay** (#120).
    *
    * While the gate only looked at the sender's profile, a report from a manager or coordinator just
@@ -563,7 +586,7 @@ export class SessionEvents {
    * exposed on send(), which anything else can call — a boundary that can be flipped on by accident
    * is not a boundary.
    */
-  async deliver(
+  async deliverNow(
     sessionId: string,
     text: string,
     attachments: Attachment[] | undefined,

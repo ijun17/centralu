@@ -2091,6 +2091,30 @@ Implementation rules:
   Claude Code's notices carry `from: 'Claude Code'` and a label (`hook` — `for you`, `notice`, `model switch`,
   `refusal`). The explanation is the host's because recognizing a notice means knowing the tool's wording; the screen
   only draws what it is given, and Codex's own words stay one click away.
+- **A turn the provider ends for want of capacity is retried by the host** (#1693, `sessions/overload-retry.ts`). Codex ends
+  a turn with `TurnError.codexErrorInfo: "serverOverloaded"` ("Selected model is at capacity"; the turns of the issue had run
+  14 to 44 minutes) with no `Reconnecting…` of its own first, and the adapter marks that error alone with
+  `data: {reason: 'server_overloaded'}` (never a usage limit or any other error; the marker comes from Codex's kind, not from
+  the sentence). The host does not let it end the turn: the session stays `working` (so whoever gave the turn is told nothing
+  yet), a `notice` (label `retry`) says "in 30 s (retry 1 of 4)", and after the wait the turn is continued through Centralu's
+  channel (`deliverMail`: no message of the person's, as an update's continue). The waits are 30 s, 2, 5 and 10 minutes. A
+  fifth failure ends the turn as before, with "Centralu retried this turn 4 times" added. The count starts over when the turn
+  finishes, the person sends a message or stops it, or it ends any other way. **Stop** cancels the wait and ends the turn as
+  a Stop does, also while the note is on its way (it is handed to the tool only if the retry still stands). Once the note is
+  handed to the tool the turn is the tool's: a Stop stops that turn like any, and a message joins it like any message into a running
+  turn. **A message of the person's** before that takes the retry away first, so theirs goes in and the note does not; if
+  theirs is refused, the error the retry stood in for ends the turn. The note asks the agent to check what already happened before repeating a step, and is
+  Centralu's own in the history read-back (`isCentraluNote`: the catch-up never stores it as the person's message). **The
+  host leaving** (a quit or a swap): the wait lives in that host only and nothing is stored. The turn's end was the error the
+  host swallowed, which a kept process does not replay, so the leaving host ends the turn with that error now ("Centralu was
+  going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. It says so before the host is marked as leaving, so the
+  end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
+  no process when the time comes ends the same way. Known gap: a hard crash of the host during the wait leaves a kept Codex
+  session `working` (the next host adopts an idle process; #2020). Known gap: a hub's `ask_project` task marks its depth for the input
+  (`hub_ask_depth:`), and Codex fails the tracked input when the turn fails, before the host sees the error, which takes the
+  mark down; the continued turn then runs at depth 0 (#2015). **Claude** is not covered: its CLI retries a 529 itself
+  ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
+  on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - **What both adapters do the same way is written once, in `adapters/session-kit.ts`** (#428), since copies of it
   drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an

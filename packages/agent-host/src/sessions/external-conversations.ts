@@ -9,7 +9,7 @@ import type {
 } from '@cc/protocol'
 import type { AgentAdapter, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import { isUpdateContinueNote } from '../adapters/input-receipts.js'
+import { isCentraluNote } from '../adapters/input-receipts.js'
 
 /**
  * Maximum number of lines of conversation to load. The older side is cut off first.
@@ -35,10 +35,10 @@ const SYNC_LIMIT = 600
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
 
 /**
- * Centralu's own Continue note read back (`isUpdateContinueNote`). It went in through Centralu's channel and left its notice
+ * Centralu's own Continue note read back (`isCentraluNote`). It went in through Centralu's channel and left its notice
  * line, so it is never stored as a message of the person's, wherever the anchor falls (#1626 review)
  */
-const ownNote = (h: HistoryMessage): boolean => h.role === 'user' && isUpdateContinueNote(h.text)
+const ownNote = (h: HistoryMessage): boolean => h.role === 'user' && isCentraluNote(h.text)
 
 /**
  * A line read back from the tool into a stored row. An event (a tool call, its result, a compaction point) becomes the
