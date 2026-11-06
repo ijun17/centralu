@@ -177,8 +177,8 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
   })
 })
 
-describe(`what the adapter makes of the CLI's real turns, the tools Centralu's screens draw (${recordedVersion()})`, () => {
-  const run = (name: string) => replay(recordedVersion(), name)
+describe(`what the adapter makes of the CLI's real turns, the tools Centralu's screens draw (newest of each scenario)`, () => {
+  const run = (name: string) => replay(recordedVersion(name), name)
   const calls = (events: NormalizedEvent[]) => of(events, 'tool_call')
   const results = (events: NormalizedEvent[]) => of(events, 'tool_result')
 
