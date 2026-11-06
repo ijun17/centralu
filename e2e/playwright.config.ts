@@ -36,8 +36,19 @@ const RECOVERY_SPEC = /(recovery|older-host)\.spec\.ts/
  */
 const LINKED_PORT = 5179
 const LINKED_URL = `http://127.0.0.1:${LINKED_PORT}`
-// The replay suite (#1498) plays recorded sessions on a host of the same kind, so it shares this project: the real web platform, one worker
-const LINKED_SPEC = /(^|[\\/])(linked-hosts(-webkit)?|replay)\.spec\.ts$/
+const LINKED_SPEC = /(^|[\\/])linked-hosts(-webkit)?\.spec\.ts$/
+
+/**
+ * The replay suite (#1498) plays recorded sessions on a host of the same kind as the linked suite's (the real web platform
+ * against a real host, the page reaching it through a relay on 5182, e2e/fixtures/replay-host.ts), with its own server
+ * and one worker for the same reasons. Its own project and the first in the list, not a spec of the linked project: a
+ * shard is a run of tests in the order of the projects (`--shard` cuts that list into equal runs), so the replay's
+ * 50 or more tests of a few seconds each fell in the last shard with the linked project's, which then ran out of time (#2049).
+ * Listed first, they are in the first shard instead.
+ */
+const REPLAY_PORT = 5181
+const REPLAY_URL = `http://127.0.0.1:${REPLAY_PORT}`
+const REPLAY_SPEC = /(^|[\\/])replay\.spec\.ts$/
 
 /**
  * The engine the suite runs in. Unset (`pnpm e2e`), Chromium, with the scenarios that most depend
@@ -92,7 +103,9 @@ export default defineConfig({
   globalTeardown: './web-server-report.ts',
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
-    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...leftOut] },
+    // Before the app project, which holds most of the tests: see REPLAY_SPEC
+    { name: 'replay', testMatch: REPLAY_SPEC, testIgnore: leftOut, use: { baseURL: REPLAY_URL }, workers: 1 },
+    { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, REPLAY_SPEC, ...leftOut] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
     // One worker: the relay port (5178) is baked into this project's UI build, so two of its
     // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
@@ -130,6 +143,14 @@ export default defineConfig({
       url: LINKED_URL,
       // Must match LINKED_TOKEN and LINKED_RELAY_PORT in e2e/fixtures/linked-hosts.ts
       env: { VITE_HOST_TOKEN: 'e2e-linked-token', VITE_HOST_URL: 'ws://127.0.0.1:5180' },
+      reuseExistingServer: false,
+      timeout: 60000,
+    },
+    {
+      command: `${SERVE(REPLAY_URL)} pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${REPLAY_PORT} --strictPort`,
+      url: REPLAY_URL,
+      // Must match REPLAY_TOKEN and REPLAY_RELAY_PORT in e2e/fixtures/replay-host.ts
+      env: { VITE_HOST_TOKEN: 'e2e-replay-token', VITE_HOST_URL: 'ws://127.0.0.1:5182' },
       reuseExistingServer: false,
       timeout: 60000,
     },

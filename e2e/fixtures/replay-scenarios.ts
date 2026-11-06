@@ -4,7 +4,7 @@ import { recordedScenarios, recordingFile, REPLAYED } from '../../packages/agent
 import { inFolder, loadRecording, type Recording } from '../../packages/agent-host/src/adapters/frames/replay.test-helpers.js'
 import { scenariosFor } from '../../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import { openFolds } from './folds.js'
-import { openSession, type ReplayHost, replayedToTheEnd, replayProblems, replayStarts, startReplayHost } from './replay-host.js'
+import { openSession, type ReplayHost, type ReplayRun, startReplayHost } from './replay-host.js'
 
 /**
  * The UI against what the tools really sent (#1498, step 2): each entry of `REPLAYS` is a recording played through the
@@ -116,6 +116,9 @@ const text = (s: string) =>
     .replace(/\s+/g, ' ')
     .trim()
 
+/** How the polls wait: looked at again soon (a turn that has not ended is not looked at after a second), for as long as a replay on a loaded machine may take */
+const POLL = { timeout: 15_000, intervals: [50, 100, 250] }
+
 /** Stands for the mark of Centralu's own tools and an app's where the cards are listed: it is an icon, with no words */
 const MARK = '<mark>'
 
@@ -129,7 +132,7 @@ async function settled(page: Page, answers: Answers): Promise<void> {
   const card = page.getByTestId('approval-card')
   const question = page.getByTestId('question-card')
   for (;;) {
-    await expect.poll(async () => ((await card.count()) + (await question.count()) > 0 ? 'card' : (await page.getByTestId('activity-row').count()) === 0 ? 'idle' : 'busy')).not.toBe('busy')
+    await expect.poll(async () => ((await card.count()) + (await question.count()) > 0 ? 'card' : (await page.getByTestId('activity-row').count()) === 0 ? 'idle' : 'busy'), POLL).not.toBe('busy')
     if ((await question.count()) > 0) {
       const pick = answers.picks.shift()
       if (!pick) throw new Error(`a card asked ${await question.innerText()} and the recording holds no answer to it`)
@@ -146,7 +149,7 @@ async function settled(page: Page, answers: Answers): Promise<void> {
   }
 }
 
-async function play(page: Page, replay: Replay, held: Held, host: ReplayHost): Promise<void> {
+async function play(page: Page, replay: Replay, held: Held, run: ReplayRun): Promise<void> {
   const answers: Answers = { cards: [...(replay.cards ?? [])], picks: [...held.answers] }
   const input = page.getByTestId('prompt-input')
   for (const [i, step] of held.steps.entries()) {
@@ -162,9 +165,9 @@ async function play(page: Page, replay: Replay, held: Held, host: ReplayHost): P
     }
     if (step.kind === 'restart') {
       // The next prompt goes to the new process: it is there once the adapter has started another
-      const started = replayStarts(host.host)
+      const started = run.starts()
       await page.getByTestId('restart-session').click()
-      await expect.poll(() => replayStarts(host.host)).toBe(started + 1)
+      await expect.poll(() => run.starts(), POLL).toBe(started + 1)
       await expect(page.getByTestId('restart-spinning')).toHaveCount(0)
       continue
     }
@@ -186,11 +189,11 @@ async function expectPane(page: Page, held: Held): Promise<Seen> {
   const prompts = held.steps.flatMap((s) => (s.kind === 'prompt' ? [s.text] : []))
   const words = [...held.said]
   const bubbles = held.order.map((kind) => (kind === 'prompt' ? prompts.shift()! : words.shift()!)).map(text).filter(Boolean)
-  await expect.poll(async () => (await page.locator('[data-testid=msg-user] [data-mine-bubble], [data-testid=msg-assistant]').allInnerTexts()).map(text)).toEqual(bubbles)
+  await expect.poll(async () => (await page.locator('[data-testid=msg-user] [data-mine-bubble], [data-testid=msg-assistant]').allInnerTexts()).map(text), POLL).toEqual(bubbles)
   if (held.tools.length > 0) {
     // Tool calls fold into one line a run (#2023): none is drawn until its line is opened, and the lines count them all
     await expect(page.getByTestId('tool-card')).toHaveCount(0)
-    await expect.poll(async () => (await page.getByTestId('fold-summary').allInnerTexts()).reduce((n, t) => n + Number(/(\d+) tools?/.exec(t)?.[1] ?? 0), 0)).toBe(held.tools.length)
+    await expect.poll(async () => (await page.getByTestId('fold-summary').allInnerTexts()).reduce((n, t) => n + Number(/(\d+) tools?/.exec(t)?.[1] ?? 0), 0), POLL).toBe(held.tools.length)
     seen.folds = await folds(page)
     await openFolds(page)
   }
@@ -202,7 +205,7 @@ async function expectPane(page: Page, held: Held): Promise<Seen> {
   await expect(page.getByTestId('centralu-call-mark')).toHaveCount(held.tools.filter((t) => t.marked).length)
   // "Context compacted here · 21.3k → 3.3k"
   const size = (n: number) => `${(n / 1000).toFixed(1)}k`
-  await expect.poll(async () => (await page.getByTestId('msg-mark').filter({ hasText: /compacted/i }).allInnerTexts()).map(text)).toEqual(held.compactions.map((c) => `Context compacted here · ${size(c.before)} → ${size(c.after)}`))
+  await expect.poll(async () => (await page.getByTestId('msg-mark').filter({ hasText: /compacted/i }).allInnerTexts()).map(text), POLL).toEqual(held.compactions.map((c) => `Context compacted here · ${size(c.before)} → ${size(c.after)}`))
   return seen
 }
 
@@ -357,6 +360,24 @@ const NOT_PLAYED: Record<string, string> = {
   'claude/question-declined': 'the screen has no Stop while a question card is open: it is answered by an option or by words, which the question scenario plays',
 }
 
+/** Every scenario a project is made for, in one host that the tests of a worker share */
+const everyScenario = (): string[] => [...new Set(REPLAYED.flatMap((row) => recordedScenarios(row)))]
+
+const replayTest = test.extend<object, { replayHost: ReplayHost }>({
+  replayHost: [
+    // eslint-disable-next-line no-empty-pattern -- Playwright reads which fixtures a function uses from its first parameter
+    async ({}, use) => {
+      const host = await startReplayHost(everyScenario())
+      try {
+        await use(host)
+      } finally {
+        await host.cleanup()
+      }
+    },
+    { scope: 'worker', timeout: 60_000 },
+  ],
+})
+
 export function replayTests(): void {
   test('every recording has an entry, or a reason why none is played', () => {
     const recorded = REPLAYED.flatMap((row) => recordedScenarios(row).map((name) => `${row.tool}/${name}`))
@@ -366,33 +387,36 @@ export function replayTests(): void {
   })
 
   for (const replay of REPLAYS) {
-    test(`${replay.tool} ${replay.scenario}: the pane shows what the recording holds`, async ({ page }) => {
+    replayTest(`${replay.tool} ${replay.scenario}: the pane shows what the recording holds`, async ({ page, replayHost: host }) => {
       test.setTimeout(120_000)
       const row = REPLAYED.find((r) => r.tool === replay.tool)!
       const recording = loadRecording(recordingFile(row, replay.scenario))
-      const host = await startReplayHost([replay.scenario])
+      const run = host.run()
       // The recording's `<cwd>` is the folder the session runs in, as the replay reads it
       const held = inFolder(HELD[replay.tool]!(recording), host.folder(replay.scenario))
+      let sessionId: string | undefined
       try {
         // The conversation draws only the rows in sight: a tall page holds the whole of a recorded session
         await page.setViewportSize({ width: 1280, height: 3000 })
         await page.goto('/')
         // Under the preset it was recorded with, as the adapter's own replay test drives it
         const preset = PermissionPreset.safeParse(recording.header.preset)
-        await openSession(page, host, replay.scenario, replay.tool, preset.success ? preset.data : (scenariosFor(replay.tool).find((s) => s.name === replay.scenario)?.preset ?? 'normal'))
-        await play(page, replay, held, host)
+        sessionId = await openSession(page, host, replay.scenario, replay.tool, preset.success ? preset.data : (scenariosFor(replay.tool).find((s) => s.name === replay.scenario)?.preset ?? 'normal'))
+        await play(page, replay, held, run)
         const seen = await expectPane(page, held)
         await replay.shows?.(page, held, seen)
         // Every recorded frame was given to the adapter
-        await expect.poll(() => replayedToTheEnd(host.host)).toBe(true)
+        await expect.poll(() => run.toTheEnd(), POLL).toBe(true)
       } catch (err) {
-        console.log(`--- host stderr ---\n${host.host.stderr()}`)
+        console.log(`--- host stderr ---
+${run.stderr()}`)
         throw err
       } finally {
-        await host.cleanup()
+        // The host stays for the next test, so this one ends its own session, which ends the process
+        if (sessionId) await run.end(sessionId).catch(() => undefined)
       }
-      // The host has stopped, so nothing it would say is still to come: the adapter sent nothing the recording does not hold
-      expect(replayProblems(host.host)).toEqual([])
+      // The process has ended, so nothing it would say is still to come: the adapter sent nothing the recording does not hold
+      expect(run.problems()).toEqual([])
     })
   }
 }
