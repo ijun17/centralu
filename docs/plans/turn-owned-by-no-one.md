@@ -218,8 +218,10 @@ paths ended (`SessionManager.mailStopTold`, `MessageService.oldPathEnded`). Each
 true once the report is mailed, relayed or left for the mailbox to deliver); a held session it told is marked told, one it did not (a
 report already settled, the person's own turn, an error with no mark, #1377) gets the stop notice then. At the start a quit is the same
 (`SessionManager.quitTold`): the older path usually ran before the mailbox's release, so the release reads whether it told the requester;
-one told later (a requester the keeper kept or an update cut) is held until it is. The hold is in memory: a restart in between leaves the
-rows released and untold, and the sender's next notice lists them. A host that is leaving writes no stop notice (`SessionManager.mailStopped`): its sessions are cut by the leaving, and the next
+one told later (a requester the keeper kept or an update cut) is held until it is. A path that has not ended within 10 minutes
+(`OLD_PATH_WAIT_MS`) counts as not having told, and a later stop of a session and sender while an earlier one is held is told at once: a double
+notice at worst, never a lost one. The words a held notice quotes are taken at the release. The hold is in memory: a restart in between leaves
+the rows released and untold, and the sender's next notice lists them. A host that is leaving writes no stop notice (`SessionManager.mailStopped`): its sessions are cut by the leaving, and the next
 host continues them or finds them marked. A turn that ends while Centralu is continuing a cut turn is not a stop, so a continued turn
 that fails at once is not told either; this is the one gap P1 leaves (a continue that fails before the tool accepted it).
 
@@ -305,7 +307,8 @@ per request already; unchanged.
 
 **Built in P2.** `MessageService.requestsIn(orchestrator, turn)` is the one reading: the requests (and reminders with `facts.asker`) whose
 row names the open turn, plus the turn's work message when the delivery began it (its rows are marked only once the tool took them, so
-without it the first step of a turn could come before the rows say whose it is); a row held from the orchestrator (a policy or loop hold, or
+without it the first step of a turn could come before the rows say whose it is; it counts whatever became of its row, such as a half-done
+delivery held `uncertain` at the next start under a turn the keeper kept); any other row held from the orchestrator (a policy or loop hold, or
 quiet mail held for a spent budget) does not count, since it did not join the turn. `MailTurns.current().asker` and `askedBy` read it
 (`MailTurns` keeps no asker; `askerIn` reads the rows each time). The words gate (`inOpenTurn`) uses the same rule, so a request's words
 are shown exactly where the gate is its sender's; this is narrower than before in one case: an earlier request of the same asker, given in

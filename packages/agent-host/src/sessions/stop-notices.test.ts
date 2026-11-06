@@ -243,6 +243,8 @@ describe('who is not told, or told another way', () => {
     const q = ask(asker, child, 'which branch?')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => read.reportsOn(read.tasks(addr(asker), child)[0]!.id).length === 1)
+    // Marked told once the report path that sent it has ended
+    await w.until(() => read.row(q.id, addr(child))?.toldAt != null)
     expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'limit', toldAt: expect.any(Number) })
     expect(stopNotices(asker)).toEqual([])
   })

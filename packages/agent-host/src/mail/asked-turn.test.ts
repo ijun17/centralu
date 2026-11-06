@@ -82,6 +82,16 @@ describe('the asker is read from the turn’s request rows (§4.2)', () => {
     expect(askerOf(next)).toMatchObject({ messageId: request.id, sessionId: 'a', turn: seq })
   })
 
+  it('a turn whose delivery a dying host left half done stays its request’s: the work message is held uncertain at the next start, and the kept turn is still gated', async () => {
+    const { w, request, seq } = await requestTurn()
+    w.store.mailbox.undeliver(ORC, [request.id], w.row(request.id, ORC)!.deliveredAt!)
+    w.store.mailbox.markUncertain(ORC, [request.id])
+    expect(w.row(request.id, ORC)).toMatchObject({ held: 'uncertain', turnSeq: null })
+    w.stop()
+    const next = started(hostWorld({ store: w.store, clock: w.clock, kept: new Set(['orc']) }))
+    expect(askerOf(next)).toMatchObject({ messageId: request.id, sessionId: 'a', turn: seq })
+  })
+
   it('a reminder for an asker (`facts.asker`) given into the turn makes it that asker’s', async () => {
     const w = started()
     w.service.notice(ORC, { body: 'A reminder of a request.', facts: { asker: A }, dedupeKey: 'reminder:test' })

@@ -13,7 +13,7 @@ import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
-import type { HandedOverMessage, StopWhy } from '../mail/messages.js'
+import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -157,7 +157,7 @@ import { crashedInSystemEnd, cutBySystemEnd, type SystemEnd } from '../lifecycle
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import type { Ended } from '../lifecycle/update-ended.js'
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
-import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE, wentWithItsProcess } from './interruptions.js'
+import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
 import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
@@ -1053,7 +1053,17 @@ export class SessionManager {
    */
   mailStopTold(sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]): void {
     if (held.length === 0) return
-    void Promise.allSettled(sends).then((ended) => {
+    // A path that does not end within the wait counts as not having told: a double notice at worst, never none
+    const bounded = sends.map((send) =>
+      Promise.race([
+        send,
+        new Promise<undefined>((resolve) => {
+          const timer = setTimeout(() => resolve(undefined), OLD_PATH_WAIT_MS)
+          timer.unref?.()
+        }),
+      ]),
+    )
+    void Promise.allSettled(bounded).then((ended) => {
       const told = new Set(ended.flatMap((r) => (r.status === 'fulfilled' && r.value !== undefined ? [r.value] : [])))
       for (const who of held) this.mailOldPathEnded(sessionId, who, told.has(who))
     })

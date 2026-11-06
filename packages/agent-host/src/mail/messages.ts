@@ -14,6 +14,7 @@ import {
   type NewRecipient,
   type RecipientRow,
   type ReleaseWhy,
+  type RowKey,
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
@@ -164,7 +165,7 @@ export class MessageService {
    * Stops whose notice to a sender waits for an older report path to end (`sessionStopped`'s `held`), by stopped session and sender, with whether it
    * would wake. In memory: a restart in between leaves the rows released and untold, and the sender's next notice lists them
    */
-  private readonly oldPathsOpen = new Map<string, { quiet: boolean }>()
+  private readonly oldPathsOpen = new Map<string, { quiet: boolean; at: number; rows: RowKey[]; said: string | null }>()
 
   constructor(
     private readonly records: MailboxRecords,
@@ -870,8 +871,7 @@ export class MessageService {
             released++
             if (gave.has(m.sender) || this.opts.waitsOn?.(m.sender, address)) waiting.add(m.sender)
             if (told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
-            else if (held?.includes(m.sender)) this.oldPathsOpen.set(oldPathKey(address, m.sender), { quiet: quiet || !waiting.has(m.sender) })
-            else senders.add(m.sender)
+            else if (!held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, quiet || !waiting.has(m.sender))) senders.add(m.sender)
           }
         }
       },
@@ -891,9 +891,23 @@ export class MessageService {
     this.oldPathsOpen.delete(key)
     this.run(() => {
       const now = this.now()
-      if (told) this.records.markTold(this.records.releasedUntold(sender).filter((r) => r.recipient === stopped), now)
-      else this.tellUnanswered(sender, open.quiet || (parseAddress(sender)?.kind === 'session' && this.opts.atRest?.(sender) === false), now)
+      if (told) this.records.markTold(open.rows, now)
+      else this.tellUnanswered(sender, open.quiet || (parseAddress(sender)?.kind === 'session' && this.opts.atRest?.(sender) === false), now, new Map([[stopped, open.said]]))
     })
+  }
+
+  /**
+   * Holds a released row's notice for an older report path (`oldPathEnded`), with the stopped session's words as they are now, so a late notice
+   * quotes the cut turn. One stop of a pair is held at a time: a later stop's rows are told now (a double notice at worst, never a lost one)
+   */
+  private holdFor(stopped: string, sender: string, messageId: string, quiet: boolean): boolean {
+    const key = oldPathKey(stopped, sender)
+    const open = this.oldPathsOpen.get(key)
+    const now = this.now()
+    if (open && open.at !== now) return false
+    if (open) open.rows.push({ messageId, recipient: stopped })
+    else this.oldPathsOpen.set(key, { quiet, at: now, rows: [{ messageId, recipient: stopped }], said: this.opts.stoppedWords?.(stopped) ?? null })
+    return true
   }
 
   /**
@@ -1039,11 +1053,13 @@ export class MessageService {
 
   /**
    * Whether a message was given in the recipient's open turn (§4.2): its row names the turn, or it is the work message of a turn the delivery began,
-   * whose rows are marked once the tool took them. Not a row held from the recipient: what it was not woken for has not joined the turn
+   * whose rows are marked once the tool took them. Not another row held from the recipient: what it was not woken for has not joined the turn
    */
   private inOpenTurn(m: Pick<MailRow, 'id'>, row: RecipientRow | undefined, turn: TurnRead | null): boolean {
-    if (!turn || !row || (row.held !== null && row.held !== 'released')) return false
-    return row.turnSeq === turn.turnSeq || (turn.by === 'mail' && turn.messageId === m.id)
+    if (!turn || !row) return false
+    // The work message is the turn's whatever became of its row: a delivery a dying host left half done is held `uncertain` at the next start, and the turn the keeper kept is still that request's
+    if (turn.by === 'mail' && turn.messageId === m.id) return true
+    return row.turnSeq === turn.turnSeq && (row.held === null || row.held === 'released')
   }
 
   /** The message that started `sender`'s turn, when a message did (not the person, not the session itself): what a send in that turn is caused by (§8.2 step 6) */
@@ -1096,18 +1112,20 @@ export class MessageService {
    * without telling the person are not listed all at once.
    * `quiet`: the notice wakes no one
    */
-  private tellUnanswered(sender: string, quiet: boolean, since: number): void {
+  private tellUnanswered(sender: string, quiet: boolean, since: number, said: ReadonlyMap<string, string | null> = new Map()): void {
     const kind = parseAddress(sender)?.kind
-    // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
-    // Nor what an older report path may still tell (`oldPathEnded`)
+    // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them.
+    // Nor what an older report path may still tell (`oldPathEnded`), for a while: a path that never ends does not keep a row untold for good
+    const now = this.now()
+    const waiting = new Set([...this.oldPathsOpen.values()].filter((o) => now - o.at < OLD_PATH_WAIT_MS).flatMap((o) => o.rows.map((r) => `${r.messageId}/${r.recipient}`)))
     const rows = this.records
       .releasedUntold(sender)
-      .filter((r) => !this.oldPathsOpen.has(oldPathKey(r.recipient, sender)) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
+      .filter((r) => !waiting.has(`${r.messageId}/${r.recipient}`) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
     // A session reads what the stopped session last said, as its words (the person reads it in the conversation itself)
     const stopped = kind === 'session' ? [...new Set(unanswered.filter((u) => isStop(u.why)).map((u) => u.recipient))].slice(0, QUOTED_STOPS) : []
-    const words = new Map(stopped.flatMap((r) => { const said = this.opts.stoppedWords?.(r); return said ? [[r, said] as const] : [] }))
+    const words = new Map(stopped.flatMap((r) => { const w = said.has(r) ? said.get(r) : this.opts.stoppedWords?.(r); return w ? [[r, w] as const] : [] }))
     this.centralu(sender, {
       kind: 'notice',
       body: unansweredText(unanswered.map((u) => ({ ...u, name: this.reach.labelOf(u.recipient) })), kind === 'person', words),
@@ -1258,6 +1276,9 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
 
 /** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders an older report path told of this stop or may still tell */
 export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; held?: readonly string[] }
+
+/** How long a stop notice waits for an older report path before it is told anyway (`oldPathEnded`, `SessionManager.mailStopTold`) */
+export const OLD_PATH_WAIT_MS = 10 * MINUTE_MS
 
 /** A stopped session and a sender of questions to it, as one key */
 const oldPathKey = (stopped: string, sender: string): string => `${stopped}|${sender}`

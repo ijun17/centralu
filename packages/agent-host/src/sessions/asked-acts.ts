@@ -203,8 +203,8 @@ export function stepKind(name: string, args: Record<string, unknown>): 'undoable
 
 /**
  * The step as the person would be asked about it, or null for a read, which is free and leaves no record. `thread` is the thread of the turn (the
+ * session's request): a post in it is the answer, and so is free; so is mail to the person. A post in another thread, or mail to anyone else,
  * reaches someone else (`stepKind`). The thread is compared as the mail tool takes it, trimmed; with none (a turn of two askers) no post is the answer
- * reaches someone else (`stepKind`). The thread is compared as the mail tool takes it, trimmed
  */
 export function askedAct(name: string, args: Record<string, unknown>, thread: string | null): AskedStep | null {
   if (READS.has(name)) return null
