@@ -179,3 +179,36 @@ test('opening a run keeps the line where it was under the pointer', async ({ pag
   await expect(line).toHaveAttribute('aria-expanded', 'true')
   await expect.poll(async () => Math.round((await line.boundingBox())!.y - before)).toBe(0)
 })
+
+test('opening the run at the end of a conversation does not pull the view down after it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const rows: Row[] = [user(1)]
+  for (let i = 0; i < 10; i++) rows.push(said(10 + i, `line ${i} `.repeat(30)))
+  // The last run ends the conversation and the view stands at the end, where it follows what comes
+  rows.push(thought(30), tool(31), tool(32), tool(33))
+  await seed(page, sid, rows)
+  const line = page.locator('[data-testid=fold-line][data-fold-at="11"]')
+  await expect(line).toBeVisible()
+  const before = (await line.boundingBox())!.y
+  await line.click()
+  await expect(line).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('tool-card')).not.toHaveCount(0)
+  // The line is where the person pressed it; the opened cards are below it
+  await expect.poll(async () => Math.round((await line.boundingBox())!.y - before)).toBe(0)
+})
+
+test('an ask_project call stays on the page until it is answered, then folds with the run', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const ask = { tool: 'mcp__centralu__ask_project', title: 'Ask the sprite project', callId: 'ask1', result: undefined, ok: undefined }
+  await seed(page, sid, [user(1), said(2), tool(3), tool(4, ask), tool(5), said(6)])
+  // Two runs, the call between them
+  await expect(page.getByTestId('fold-line')).toHaveCount(2)
+  await expect(page.getByTestId('tool-card')).toHaveCount(1)
+  await expect(page.getByTestId('tool-card')).toContainText('Ask the sprite project')
+
+  await seed(page, sid, [user(1), said(2), tool(3), tool(4, { ...ask, result: 'done', ok: true }), tool(5), said(6)])
+  await expect(page.getByTestId('fold-line')).toHaveCount(1)
+  await expect(page.getByTestId('tool-card')).toHaveCount(0)
+})
