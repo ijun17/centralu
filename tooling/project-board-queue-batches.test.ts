@@ -347,6 +347,22 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(notices().filter((e) => e.kind === 'attention' && String(e.text).includes('batch of one'))).toEqual([])
   })
 
+  it('batches a pull request again too when it was a draft for a while as its batch waited to land (#2098)', async () => {
+    const second = ghRun('success', 1, ONE, { id: 951, head_branch: 'queue/batch-2', event: 'workflow_dispatch', check_suite_id: 6001 })
+    // GitHub has not computed the merge state yet: the landing waits, and the pull request turns into a draft meanwhile
+    runtime(tieredState({ prs: { '77': ghPr(77, { mergeStateStatus: 'UNKNOWN' }) } }), TIERS)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'landing', 'the batch waiting to land')
+    patchGh((st) => (st.prs['77'] = ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' })))
+    await until(() => batchesOnDisk()[0]?.state === 'stopped', 'the batch stopped')
+    patchGh((st) => {
+      st.prs['77'] = ghPr(77)
+      st.on['dispatch:queue/batch-2'] = { runs: { [ONE]: [second] }, checks: { [ONE]: fullChecks(6001) } }
+    })
+    await until((x) => stateOf(x) === 'merged' && batchesOnDisk()[1]?.state === 'done', 'the merge')
+    expect(notices().filter((e) => e.kind === 'attention' && String(e.text).includes('batch of one'))).toEqual([])
+  })
+
   it('lands a pull request whose own run was the quick tier through a batch of one, never from that run', async () => {
     runtime(tieredState(), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })

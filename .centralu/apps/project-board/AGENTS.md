@@ -998,6 +998,8 @@ and refuses with every reason at once, sending nothing.
   machine's merge queue holds (its file: as itself, a stack's top, or a lower under a queued top, #2098) stays ready
   (#1673): the queue never merges a draft it did not make, so drafting it would stall it. The answer
   says so, and that the new one moves onto the default branch with `rebase_stack` once it landed.
+  A title whose squash subject ("Title (#NNNN)", `longSubject`, queue.mjs, the helper `queue_merge` uses) is over 72 characters is
+  refused with the same words, not warned: the queue refused #2090 and #2092 for it only after they were open (#2098).
   A batch that is dropped because a member was a draft for a while (`open_pr` made it a lower), on the head the batch tested, does
   not mark that member `batchless` or `alone` (queue-batch.mjs `runCi`): marked ready again with no push, it is batched again, not
   sent to its session as "full-tier" (#2098, 2026-11-07: #2094 under batch-487).

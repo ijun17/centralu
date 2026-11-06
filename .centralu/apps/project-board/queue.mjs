@@ -34,6 +34,8 @@ export function longSubject(pr) {
   const length = [...subject].length
   return length > SUBJECT_MAX ? { subject, length } : null
 }
+/** What queue_merge and open_pr say of a title that is too long: the squash subject, its length and the limit (#2098) */
+export const longSubjectText = (long) => `the squash subject "${long.subject}" is ${long.length} characters, over ${SUBJECT_MAX}. Shorten the title.`
 /**
  * How long the board app is kept running for an item in attention `subject` (queueBusy). That attention waits for a title
  * edit, which only a poll sees, and every other attention waits for a push or a person and does not hold the app. Bounded, since a

@@ -489,6 +489,19 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(again.data.drafted).toBe(5)
   })
 
+  // #2098: queue_merge refused #2090 and #2092 for this much later, and each had to be renamed by hand
+  it('refuses a title whose squash subject would be over 72 characters, in the words queue_merge uses, and opens nothing', async () => {
+    runtime()
+    const fits = `feat(apps): ${'x'.repeat(52)}` // 64 + " (#9999)" = 72
+    const long = `feat(apps): ${'x'.repeat(53)}`
+    const refused = await call('open_pr', { ...PR, title: long })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toContain(`the squash subject "${long} (#9999)" is 73 characters, over 72. Shorten the title.`)
+    expect(writes()).toEqual([])
+    const ok = await call('open_pr', { ...PR, title: fits })
+    expect(ok.isError, ok.text).toBe(false)
+  })
+
   it('refuses a pull request with an empty Not exercised, a bad title or a heading the template lacks, sending nothing', async () => {
     runtime()
     const empty = await call('open_pr', { ...PR, notExercised: '  ' })
