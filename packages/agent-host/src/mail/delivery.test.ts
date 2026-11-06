@@ -1,6 +1,6 @@
 /**
  * Delivery to a receiver at rest, on the message tables (docs/plans/mailbox.md §8, §7.5, M3a): who is woken when, what is written before and after
- * the tool takes the input, what waits, the turn a wake begins, and the guards (the pair loop guard, the token guard, the host-wide cap).
+ * the tool takes the input, what waits, the turn a wake begins, and the warning to the person that holds nothing (#2014).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MailNotAtRest } from './delivery.js'
@@ -151,7 +151,7 @@ describe('a delivery that fails', () => {
     await settle()
     expect(w.rowOf(message.id, B).deliveredAt).not.toBeNull()
     // The cancelled turn counts for no guard
-    expect(w.turns.mailStartedSince(0)).toBe(1)
+    expect(w.store.mailbox.mailStartedSince(0)).toBe(1)
   })
 })
 
@@ -396,119 +396,91 @@ describe('the turn a wake begins (§8.2, D17)', () => {
   })
 })
 
-describe('the pair loop guard (§7.5)', () => {
-  /** Two sessions asking each other back, every answer a question again, until the 22nd round is held: its message */
-  const runAway = async (w: ReturnType<typeof started>) => {
+describe('the warning to the person (#2014, §7.5)', () => {
+  /** Two sessions asking each other back, every answer a question again: `rounds` mail-started turns between them. The last message */
+  const askBack = async (w: ReturnType<typeof started>, rounds: number) => {
     let last = w.send(A, { to: [B], text: 'round 0' }).message.id
     await w.advance(2_000)
-    for (let i = 1; i < 21; i++) {
+    for (let i = 1; i < rounds; i++) {
       w.endTurn(i % 2 === 1 ? 'b' : 'a')
       last = w.send(i % 2 === 1 ? B : A, { replyTo: last, text: `round ${i}`, needsReply: true }).message.id
       await w.advance(2_000)
     }
-    expect(w.to('a').length + w.to('b').length).toBe(21)
-    w.endTurn('b')
-    const held = w.send(B, { replyTo: last, text: 'round 21', needsReply: true })
-    await w.advance(2_000)
-    expect(w.rowOf(held.message.id, A).held).toBe('loop')
-    return held
+    return last
   }
+  const warnings = (w: ReturnType<typeof started>) => w.store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.facts.pairTurns !== undefined || m.facts.hostCap === true)
 
-  it('the person’s word to either session counts the pair anew, to the sender as much as to the receiver', async () => {
+  it('mail between two sessions past 20 turns in an hour is delivered as usual; the person is warned once, with the pair and the count; no session is woken for it', async () => {
     const w = started({ delivery: { minWakeGapMs: 0 } })
-    await runAway(w)
-    w.send(PERSON, { to: [B], text: 'carry on' })
-    await w.advance(2_000)
-    w.endTurn('b')
-    const next = w.send(B, { to: [A], text: 'round 22', needsReply: true })
-    await w.advance(2_000)
-    expect(w.rowOf(next.message.id, A)).toMatchObject({ held: null })
-    expect(w.rowOf(next.message.id, A).deliveredAt).not.toBeNull()
+    let last = await askBack(w, 21)
+    expect(w.to('a').length + w.to('b').length).toBe(21)
+    expect(w.rowOf(last, B)).toMatchObject({ held: null })
+    const told = warnings(w)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.facts.pairTurns).toEqual({ sessions: [A, B].sort(), turns: 21 })
+    expect(told[0]!.body).toContain('started 21 turns of each other')
+    // Rounds go on past it, each delivered, and the hour's warning is not written again
+    for (let i = 21; i < 26; i++) {
+      w.endTurn(i % 2 === 1 ? 'b' : 'a')
+      last = w.send(i % 2 === 1 ? B : A, { replyTo: last, text: `round ${i}`, needsReply: true }).message.id
+      await w.advance(2_000)
+      const to = i % 2 === 1 ? A : B
+      expect(w.rowOf(last, to)).toMatchObject({ held: null })
+      expect(w.rowOf(last, to).deliveredAt).not.toBeNull()
+    }
+    expect(warnings(w)).toHaveLength(1)
+    expect(w.to('a').length + w.to('b').length).toBe(26)
   })
 
-  it('mail between two sessions that started more than 20 turns in an hour is held loop; Centralu’s report is not; Resume lets it go', async () => {
+  it('the person’s word to either session counts the pair anew: no warning', async () => {
     const w = started({ delivery: { minWakeGapMs: 0 } })
-    const held = await runAway(w)
-    // Centralu's report is never held by it
-    const task = w.mail.task(B, A, { text: 'job', origin: 'agent_session', delivered: true })
-    w.mail.report(task.id, { outcome: 'finished', body: 'done' })
+    const last = await askBack(w, 15)
+    w.send(PERSON, { to: [A], text: 'carry on' })
     await w.advance(2_000)
-    expect(w.to('b').at(-1)!.input.text).toContain('kind="report"')
-    w.delivery.resumeRoot(w.message(held.message.id).rootId)
-    await w.advance(31_000)
-    // Let go by the person's word, it is not held again (§7.5)
-    expect(w.rowOf(held.message.id, A)).toMatchObject({ held: 'released' })
-    expect(w.rowOf(held.message.id, A).deliveredAt).not.toBeNull()
+    w.endTurn('a')
+    let reply = last
+    for (let i = 0; i < 10; i++) {
+      w.endTurn(i % 2 === 0 ? 'b' : 'a')
+      reply = w.send(i % 2 === 0 ? B : A, { to: [i % 2 === 0 ? A : B], text: `again ${i}`, needsReply: true }).message.id
+      await w.advance(2_000)
+    }
+    expect(w.rowOf(reply, B).deliveredAt).not.toBeNull()
+    expect(warnings(w)).toHaveLength(0)
   })
-})
 
-describe('the token guard (§7.5)', () => {
-  it('a session whose mail-started turns used its budget is told of a session’s mail without a turn, held budget; the person’s words still wake it', async () => {
+  it('three empty mail-started turns in a row do not stop a session’s mail from waking it, and hold nothing', async () => {
     const w = started({ delivery: { minWakeGapMs: 0 } })
     for (let i = 0; i < 3; i++) {
       w.send(A, { to: [B], text: `ping ${i}`, needsReply: false })
       await w.advance(2_000)
       w.endTurn('b', false)
     }
-    expect(w.turns.budgetSpent('b')).toBe(true)
     const m = w.send(A, { to: [B], text: 'ping 4', needsReply: false })
     await w.advance(2_000)
-    expect(w.rowOf(m.message.id, B).held).toBe('budget')
-    w.send(PERSON, { to: [B], text: 'are you ok?' })
-    await settle()
+    expect(w.rowOf(m.message.id, B).held).toBeNull()
+    expect(w.to('b')).toHaveLength(4)
     expect(w.to('b').at(-1)!.input.quiet).toBe(false)
-    w.delivery.resumeSession('b')
-    expect(w.turns.budgetSpent('b')).toBe(false)
   })
-})
 
-describe('the host-wide cap (§7.5)', () => {
   /** `n` mail-started turns of `session` in this hour, each started by a session's message */
   const turnsOf = (w: ReturnType<typeof deliveryWorld>, session: string, n: number) => {
     const starter = w.send(C, { to: [A], text: `starter for ${session}`, needsReply: false }).message.id
     for (let i = 0; i < n; i++) w.store.mailbox.startTurn({ sessionId: session, turnSeq: 100 + i, messageId: null, starterId: starter, startedBy: 'mail', startedAt: w.clock.t })
   }
 
-  it('over 120 mail-started turns in the hour, a wake waits for a session over its share; the person is told once; the person’s words, a report and a session under its share go', async () => {
-    const w = started({ delivery: { hostCap: 12, hostShare: 4 } })
-    turnsOf(w, 'b', 10)
-    turnsOf(w, 'c', 2)
-    const capped = w.send(A, { to: [B], text: 'one more', needsReply: false })
-    const quiet = w.send(A, { to: [C], text: 'for a quiet session', needsReply: false })
-    await w.advance(2_000)
-    expect(w.rowOf(capped.message.id, B).deliveredAt).toBeNull()
-    expect(w.rowOf(quiet.message.id, C).deliveredAt).not.toBeNull()
-    const told = w.store.mailbox.feedOf(PERSON, { limit: 10 }).filter((m) => m.facts.hostCap === true)
-    expect(told).toHaveLength(1)
-    // The person's words go through it, and carry what waited
-    w.send(PERSON, { to: [B], text: 'go on' })
-    await settle()
-    expect(w.rowOf(capped.message.id, B).deliveredAt).not.toBeNull()
-  })
-
-  it('a wake it defers waits until the hour has room, not tried again meanwhile, and then goes', async () => {
-    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const w = started({ delivery: { hostCap: 12, hostShare: 4 } })
+  it('past 120 mail-started turns on the host in the hour, mail still wakes its receiver at once, and the person is told once', async () => {
+    const w = started({ delivery: { warnHostTurns: 12 } })
     turnsOf(w, 'b', 12)
-    const capped = w.send(A, { to: [B], text: 'one more', needsReply: false })
-    const tries = vi.spyOn(w.mail, 'drain')
-    await w.advance(30 * 60_000)
-    expect(w.rowOf(capped.message.id, B).deliveredAt).toBeNull()
-    // Looked at by the sweep, not every second; said once
-    expect(tries.mock.calls.filter(([to]) => to === B).length).toBeLessThan(100)
-    expect(said.mock.calls.filter((c) => String(c[0]).includes('mail-started turns this hour'))).toHaveLength(1)
-    await w.advance(31 * 60_000)
-    expect(w.rowOf(capped.message.id, B).deliveredAt).not.toBeNull()
-    said.mockRestore()
-  })
-
-  it('a report goes through it', async () => {
-    const w = started({ delivery: { hostCap: 5, hostShare: 2 } })
-    turnsOf(w, 'a', 6)
-    const task = w.mail.task(A, B, { text: 'job', origin: 'agent_session', delivered: true })
-    const r = w.mail.report(task.id, { outcome: 'finished', body: 'done' })
+    const one = w.send(A, { to: [B], text: 'one more', needsReply: false })
     await w.advance(2_000)
-    expect('message' in r && w.rowOf(r.message.id, A).deliveredAt).not.toBeNull()
+    expect(w.rowOf(one.message.id, B).deliveredAt).not.toBeNull()
+    w.endTurn('b')
+    const two = w.send(A, { to: [C], text: 'and another', needsReply: false })
+    await w.advance(2_000)
+    expect(w.rowOf(two.message.id, C).deliveredAt).not.toBeNull()
+    const told = warnings(w)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.body).toContain('turns on this computer in the last hour')
   })
 
   it('the turns a person’s words or a report started do not count toward it', async () => {
@@ -520,12 +492,12 @@ describe('the host-wide cap (§7.5)', () => {
     w.mail.report(task.id, { outcome: 'finished', body: 'done' })
     await w.advance(31_000)
     expect(turnRows(w.store, 'b')).toHaveLength(2)
-    expect(w.turns.mailStartedSince(0)).toBe(0)
+    expect(w.store.mailbox.mailStartedSince(0)).toBe(0)
   })
 })
 
 describe('what is held is said to the Inbox', () => {
-  it('a hold for the one hold or the depth is announced for the person', async () => {
+  it('a hold for the one hold is announced for the person', async () => {
     const w = started()
     const told: string[] = []
     w.mail.onChange((c) => void (c.recipients.includes(PERSON) && told.push(c.messageId)))

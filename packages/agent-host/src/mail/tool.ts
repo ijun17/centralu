@@ -4,7 +4,7 @@ import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
-import { CITE_MS, type HoldReason, type MessageService, type ReadItem, type SendResult } from './messages.js'
+import { CITE_MS, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
 
@@ -176,14 +176,13 @@ export class MailTool {
     else if (r.quiet) lines.push(`It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`)
     else if (m.kind === 'message' && m.needsReply) lines.push(`It waits for a reply; the reply will reach you as mail.`)
     else if (m.kind === 'message' && !answered) lines.push('It needs no reply.')
-    for (const h of r.held) lines.push(this.heldLine(h.why, m.senderProject, m.depth))
+    if (r.held.length > 0) lines.push(this.heldLine(m.senderProject))
     if (r.held.length === 0 && !r.quiet) lines.push('What comes back arrives in your mailbox, and wakes you if you are at rest.')
     return lines.join(' ')
   }
 
-  /** S4's held lines */
-  private heldLine(why: HoldReason, project: string | null, depth: number): string {
-    if (why === 'loop') return `Held: it is the ${depth}th hop in a row of mail passed on to another session (depth ${depth}); it waits until the person lets it go.`
+  /** S4's held line: the one hold (§7.4) */
+  private heldLine(project: string | null): string {
     const p = project ?? 'your project'
     return `Held: your project ${p} is not trusted, so mail you send outside it waits until the person trusts ${p}. Centralu shows the person how. Nothing is lost: it is delivered then, in order. If the person dismisses it, you are told.`
   }
@@ -206,7 +205,7 @@ export class MailTool {
       ...v.needReply.map((i) => `reply     ${i.message.id} from ${i.relation} ${this.name(i.message.sender)}, ${this.age(i.message.createdAt)} ago${i.row?.readAt === null ? ', unread' : ''}`),
       ...v.unread.map((i) => `unread    ${i.message.id} ${i.message.kind} from ${i.relation} ${this.name(i.message.sender)}, ${this.age(i.message.createdAt)} ago${i.withheld ? ' (a request: its words are shown in the turn it starts)' : ''}`),
       ...v.waiting.map((w) => `you asked ${w.message.id} ${this.name(w.row.recipient)}, ${this.age(w.message.createdAt)} ago: ${w.row.answerId ? 'answered, the answer held for the person' : 'not answered'}`),
-      ...v.held.map((h) => `held      ${h.message.id} to ${this.name(h.row.recipient)}: ${h.why === 'loop' ? 'waits until the person lets it go (depth)' : `waits until the person trusts ${h.message.senderProject ?? 'your project'}`}`),
+      ...v.held.map((h) => `held      ${h.message.id} to ${this.name(h.row.recipient)}: ${h.why === 'loop' ? 'waits until the person lets it go' : `waits until the person trusts ${h.message.senderProject ?? 'your project'}`}`),
     ]
     return lines.join('\n')
   }
