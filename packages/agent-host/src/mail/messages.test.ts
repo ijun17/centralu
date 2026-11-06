@@ -594,6 +594,12 @@ describe('reading (§8.4)', () => {
     // A held row reads as a phantom to its recipient, and whole to its sender
     const held = w.send(X, { to: [C], text: 'held for trust' }).message
     expect(refusedFor(() => w.mail.read(C, { id: held.id }))).toBe('unknown_message')
+    // Found on the way up a chain, it is a phantom without words or facts, and its sender reads it whole
+    const up = w.send(A, { to: [C], text: 'held ancestor' }).message
+    const down = w.send(A, { replyTo: up.id, to: [C], text: 'reply' }).message
+    w.records.hold(C, [up.id], 'policy')
+    expect(w.mail.read(C, { id: down.id }).items.map((i) => [i.message.id, i.phantom ?? null, i.message.body])).toEqual([[up.id, 'held', ''], [down.id, null, 'reply']])
+    expect(w.mail.read(A, { id: down.id }).items.map((i) => [i.phantom ?? null, i.message.body])).toEqual([[null, 'held ancestor'], [null, 'reply']])
   })
 
   it('read of a long chain returns the last nine ancestors and where to read on with before; a message that is no longer kept is one line', () => {

@@ -211,7 +211,7 @@ the dead method it alone called. Line counts are measured and written in each pu
 |---|---|---|---|
 | 1 | **This document** | `docs/plans/host-big-files.md` | +about 250 |
 | 2 | **`memory.ts` dead code and copies** (§1 dead, `at()`, `statAt`, `runIn`, `nextPid`, `findProgram` returning the entry) | `os/memory.ts` | −45 (landed, §5.1) |
-| 3 | **`messages.ts` dead code** (§2 dead: `turnStarted`, `feed`, `heldByProject`, the alias, stale text; with the store's `markTurn`) | `mail/messages.ts`, `frame.ts`, `asked-by.ts`, three tests | −37 source, −35 test (landed, §5.1) |
+| 3 | **`messages.ts` dead code** (§2 dead: `turnStarted`, `feed`, `heldByProject`, the alias, stale text; with the store's `markTurn`) | `mail/messages.ts`, `frame.ts`, `asked-by.ts`, three tests | −37 source, −29 test (landed, §5.1) |
 | 4 | `remote-agents.ts` dead code and `patch`/tail helpers (§3) | `sessions/remote-agents.ts`, lint allowlist | about −40 |
 | 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers; the two drifts with contract cases first | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | about −25 net |
 | 6 | The start gate of a remote agent calls `agentStartGateError` (drift 1), a bug with a failing test | `remote-agents.ts`, test | about −9 |
@@ -233,15 +233,16 @@ This round stops after 1–3.
   overloads, `run`/`runShell` through `runIn`, and `nextPid`. Left out after reading them again: `readFile`'s second check
   (it narrows the node's type, so removing it needs a cast), `rename`'s detach (`rename('.', x)` notifies today, `unlinkEntry`
   would not), the mode formula (one line saved) and the signal gate (moves to `rules.ts` with `real.ts` in PR 5).
-- **3, `messages.ts`** (1,392 to 1,355 lines; tests lose 35): `turnStarted`, `feed` and
+- **3, `messages.ts`** (1,392 to 1,355 lines; tests lose 29): `turnStarted`, `feed` and
   `heldByProject`, which nothing in production calls (greps in §2), the `MailCalls` alias, the "before slice M3a" claim
   in the file doc, and the doc of `isHidden`, which sat above `citeKey`'s; two docs in `frame.ts` and `asked-by.ts` that
   named a method that is not there. `MailboxRecords.markTurn` (5 lines and its store test), which only
   `turnStarted` called, stays: `store/mailbox.ts` is the deep tier (a store path), so its removal is a pull request of
   its own (`markDelivered` already writes `turn_seq`). The tests that called only the three go: `turnStarted`'s, `feed`'s
-  page test, `heldByProject`'s two uses, and the two `feed` assertions in the phantom test (the `read`
-  refusal beside them still pins that a held row is not readable by its recipient; `feedOf`'s paging stays pinned in
-  `store-mailbox.test.ts`). Left out after reading the code again: `changedIds` and a group-by helper (the helper costs
+  page test, `heldByProject`'s two uses, and the two `feed` assertions in the phantom test. Their property, an
+  ancestor held from its reader reads as a phantom with no words or facts and whole to its sender, nothing else pinned (the
+  reviewer's finding), so the test now pins it through `read`'s chain and fails when `item()` answers `not_sent` for a held
+  row; `feedOf`'s paging stays pinned in `store-mailbox.test.ts`. Left out after reading the code again: `changedIds` and a group-by helper (the helper costs
   as many lines as the copies it replaces), `sweep`, `watchedTo` and `labelOf` (each has a test that calls it), the `export`
   keyword on unimported types (no line saved), and everything marked kept in §2.
 
