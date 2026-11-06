@@ -270,8 +270,10 @@ describe(`what the adapter makes of the CLI's real turns, the tools Centralu's s
   it('long-output: a result the CLI cut is kept as the CLI handed it, a preview that names where the whole output was saved', async () => {
     const { events } = await run('long-output')
     const [result] = results(events)
-    expect(result).toMatchObject({ ok: true, summary: expect.stringContaining('Output too large') })
-    expect(result!.summary.length).toBeLessThan(5000)
+    expect(result).toMatchObject({ ok: true, summary: expect.stringContaining('Output too large'), output: expect.stringContaining('Full output saved to') })
+    // What the CLI handed over is a short preview of 6000 lines, not the lines
+    expect(result!.output!.length).toBeLessThan(5000)
+    expect(result!.output).not.toContain('line 6000')
     expect(ended(events)).toBe(1)
   })
 

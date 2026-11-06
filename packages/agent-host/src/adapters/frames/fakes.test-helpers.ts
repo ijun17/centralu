@@ -32,7 +32,7 @@ export function fakeCentraluTools(): OrchestratorTools {
   return tools as OrchestratorTools
 }
 
-/** An attached app with one read tool and one tool that fails, as `SessionApps` hands them to an adapter */
+/** An attached app with one read-only tool, as `SessionApps` hands them to an adapter */
 export function fakeApps(): SessionApps {
   const server = 'app-weather'
   const tools = [
@@ -50,8 +50,8 @@ export function fakeApps(): SessionApps {
     call: async (_server, tool, args) => ({ content: [{ type: 'text', text: tool === 'forecast' ? `Forecast for ${String(args.city)}: sunny, 21 degrees.` : `No such tool: ${tool}` }], isError: tool !== 'forecast' }),
     noteCall: () => {},
     callEnded: () => {},
-    readOnly: () => true,
-    unasked: () => true,
+    readOnly: (_server, tool) => tools.find((t) => t.name === tool)?.annotations.readOnlyHint === true,
+    unasked: (_server, tool) => tools.find((t) => t.name === tool)?.annotations.readOnlyHint === true,
     cancelAll: () => {},
     close: () => {},
   }

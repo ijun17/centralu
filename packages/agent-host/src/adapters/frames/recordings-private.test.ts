@@ -48,9 +48,9 @@ function machineWords(): [string, RegExp][] {
   } catch {
     // No user name to look for
   }
-  // The machine's name, as the user name: off CI, where a runner's name is a common word
+  // The machine's name, as a host in a path or an address (`\\\\name\\share`, `user@name`, `name.local`): a bare word could be a month ("Jun") in a listing. Off CI, where a runner's name is a common word
   const machine = hostname().split('.')[0] ?? ''
-  if (machine.length >= 3 && !process.env.CI) words.push(['this machine’s name', new RegExp(`\\b${escape(machine)}\\b`, 'i')])
+  if (machine.length >= 3 && !process.env.CI) words.push(['this machine’s name', new RegExp(`[\\\\/@]${escape(machine)}\\b|\\b${escape(machine)}\\.(?:local|lan|home|internal)\\b`, 'i')])
   for (const form of new Set([homedir(), homedir().replace(/\\/g, '/'), homedir().replace(/\\/g, '\\\\')])) {
     if (form.length > 3) words.push(['this machine’s home folder', new RegExp(escape(form), 'i')])
   }
