@@ -110,6 +110,11 @@ export class OverloadRetry {
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancel(id)
   }
 
+  /** Whether a retry waits for its time: the turn the error stood in for goes on, so what hangs on that turn (a hub task's depth) is not over */
+  stands(sessionId: string): boolean {
+    return this.waiting.get(sessionId)?.phase === 'waiting'
+  }
+
   /** Takes a pending retry away, for the person's Stop or an end of the turn: where it was, or null when none stood. Handed, the tool's turn is running and is the caller's to stop */
   cancel(sessionId: string): RetryPhase | null {
     this.used.delete(sessionId)
