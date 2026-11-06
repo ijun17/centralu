@@ -99,3 +99,59 @@ describe('scrubbing Claude Code’s frames', () => {
     expect(JSON.parse(streamed.join(''))).toEqual({ command: 'Get-Content "<home>/Docs/a.txt"', content: 'one\ntwo' })
   })
 })
+
+describe('scrubbing Codex’s frames', () => {
+  const MAC_CWD = '/private/var/folders/ab/cdef123456/T/run-1'
+  const macRun = (frames: ReturnType<typeof line>[]) => scrub(frames, MAC_CWD, '/Users/alice', { tmp: '/var/folders/ab/cdef123456/T', user: 'alice' }) as { dir: string; msg: Record<string, unknown> }[]
+
+  it('says nothing of the bridge’s credential, address, program or file in a thread’s config, nor of the folders its trust map lists', () => {
+    const [started] = macRun([
+      line('out', {
+        id: 'r-1',
+        method: 'thread/start',
+        params: {
+          cwd: MAC_CWD,
+          config: {
+            mcp_servers: { centralu: { command: '/opt/homebrew/Cellar/node/26.1.0/bin/node', args: ['/Users/alice/work/packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'], env: { CC_HOST_URL: 'ws://127.0.0.1:55501', CC_BRIDGE_TOKEN: 'ccb1:5f87ace6-4f22-4f28-a061-ce47a1ce47a1:FSTY7D4gMKh9Gu3w6VXv3rP-Jfox', CC_SESSION_ID: '988fabc8-f6d7-4ba3-950a-7db6e6ab3792' } } },
+            projects: { [MAC_CWD]: { trust_level: 'untrusted' }, '/private/var/folders/ab/cdef123456': { trust_level: 'untrusted' }, '/private/var/folders/ab': { trust_level: 'untrusted' } },
+          },
+        },
+      }),
+    ]).map((f) => f.msg)
+    const text = JSON.stringify(started)
+    expect(text).not.toMatch(/FSTY7D4g|55501|alice|cdef123456|\/ab\b|homebrew/)
+    expect(text).toContain('"CC_BRIDGE_TOKEN":"<secret>"')
+    expect(text).toContain('"command":"<node>"')
+    expect(text).toContain('"args":["<bridge>"]')
+    const projects = (((started!.params as { config: { projects: object } }).config.projects) as Record<string, unknown>)
+    expect(Object.keys(projects)).toContain('<cwd>')
+  })
+
+  it('keeps the skills that ship with Codex and numbers the person’s own, with nothing else of them', () => {
+    const [answer] = macRun([
+      line('in', {
+        id: 'r-2',
+        result: {
+          data: [
+            {
+              cwd: MAC_CWD,
+              skills: [
+                { name: 'imagegen', description: 'Generate images', path: '/Users/alice/.codex/skills/.system/imagegen/SKILL.md', scope: 'system', enabled: true, pluginId: null },
+                { name: 'my-private-skill', description: 'Does the thing alice does', path: '/Users/alice/.agents/skills/my-private-skill/SKILL.md', scope: 'user', enabled: true, pluginId: null },
+              ],
+            },
+          ],
+        },
+      }),
+    ]).map((f) => f.msg)
+    const skills = ((answer!.result as { data: { skills: { name: string; description: string; path: string }[] }[] }).data[0]!).skills
+    expect(skills[0]).toMatchObject({ name: 'imagegen', description: 'Generate images' })
+    expect(skills[1]).toMatchObject({ name: 'skill-1', description: '', path: '<skill>' })
+    expect(JSON.stringify(answer)).not.toMatch(/my-private-skill|alice/)
+  })
+
+  it('numbers the mailbox’s ids and drops the run’s folder suffix from a name made of it', () => {
+    const [seen] = macRun([line('in', { id: 'r-3', result: { text: 'Sent hub-5b0933ff.m_01M6QZP77M7RJ0EEHDRB14Z371 to x; project frames-record-centralu-read-3e7fwc' } })]).map((f) => f.msg)
+    expect(JSON.stringify(seen)).toBe(JSON.stringify({ id: 'r-3', result: { text: 'Sent hub-00000001.m_00000000000000000000000001 to x; project frames-record-centralu-read' } }))
+  })
+})

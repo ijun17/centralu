@@ -621,8 +621,15 @@ describe('state and gauges', () => {
     expect(out[0]).toMatchObject({ type: 'tool_call', summary: { tool: 'ping', title: 'probe: ping' } })
   })
 
-  // Hand-written until Centralu's own calls are recorded: its tools say what they did instead, with the mark the card draws them by (#730)
-  it('Centralu’s own tools are drawn by what they did', () => {
+  it('Centralu’s own tools are drawn by what they did, with the mark the card draws them by (#730)', () => {
+    const { out } = real('centralu-read', 'item/started', (p) => dig(p, 'item.server') === 'centralu' && dig(p, 'item.tool') === 'read_session')
+    expect(out[0]).toMatchObject({ summary: { tool: 'read_session', title: 'Listed sessions', centralu: { tool: 'read_session', label: 'Listed sessions' } } })
+    const sent = real('centralu-mail', 'item/started', (p) => dig(p, 'item.tool') === 'mail' && dig(p, 'item.arguments.action') === 'send')
+    expect(sent.out[0]).toMatchObject({ summary: { tool: 'mail', centralu: { tool: 'mail' } } })
+  })
+
+  // Hand-written: a call named list_sessions, which no recording holds (in them the model lists through read_session)
+  it('a call of the old list_sessions is drawn the same way', () => {
     expect(n('item/started', { item: { type: 'mcpToolCall', id: 'm2', server: 'centralu', tool: 'list_sessions', status: 'inProgress' } })[0]).toMatchObject({
       summary: { tool: 'list_sessions', title: 'Listed sessions', centralu: { tool: 'list_sessions', label: 'Listed sessions' } },
     })

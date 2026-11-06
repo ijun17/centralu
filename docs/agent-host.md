@@ -2241,6 +2241,10 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    `initialize` is refused, `thread/resume` answers `active` for a running turn and `systemError` for a failed one. A scenario with
    `settings: 'mcp'` runs against an MCP server of its own in the private `CODEX_HOME`. Codex 0.160's default tool set offers no
    plan tool, so no plan update is recorded.
+   Codex's calls to Centralu's own tools need a real host behind the bridge, so they are recorded through one
+   (`scripts/frames-record-host.mts`: the host from source in a temporary data folder, its own `HOME` and `CODEX_HOME`, driven over
+   its WebSocket like a window; `codex/centralu-scenarios.test-helpers.ts`) and replayed by `codex/centralu.test.ts`, which does
+   not compare a thread's `config` and tool instructions (the bridge's address and credential, words that change with the build).
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

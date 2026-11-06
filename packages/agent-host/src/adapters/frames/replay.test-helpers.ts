@@ -94,15 +94,18 @@ export const jsonRpcCodec: FrameCodec = {
 
 /**
  * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
- * answer, a file change, a command's output). `cwd`: that folder
+ * answer, a file change, a command's output). `cwd`: that folder. `ignoreParams`: parameters of a request that are not compared, for a
+ * recording whose values are not the replay's (the bridge's address and credential in a thread's `config`, the tools' instructions
+ * in `developerInstructions`: words that change with the build)
  */
-export const codexCodec = (cwd: string): FrameCodec => {
+export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[] } = {}): FrameCodec => {
   /** The id a run makes up for an input (`clientUserMessageId`), which the app-server says back on the input's item */
   const ownId = (params: unknown): string | undefined => {
     const id = (params as { clientUserMessageId?: unknown } | undefined)?.clientUserMessageId
     return typeof id === 'string' ? id : undefined
   }
-  const withoutOwnId = (params: unknown): unknown => (params && typeof params === 'object' ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId')) : params)
+  const withoutOwnId = (params: unknown): unknown =>
+    params && typeof params === 'object' ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId' && !opts.ignoreParams?.includes(k))) : params
   return {
     match(sent, want, ids) {
       const recorded = inFolder(want, cwd)
