@@ -187,6 +187,12 @@ describe('cutting a bulky text out of a recording', () => {
     expect(JSON.stringify([out, delta]).length).toBeLessThan(1000)
   })
 
+  it('scrubs the text first, so the start that stays holds no path of the person’s', () => {
+    const [kept] = scrub([line('in', { method: 'item/commandExecution/outputDelta', params: { delta: `${HOME}\\Docs\\a.txt and ${'z'.repeat(5000)}` } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice', cutText: 2000 }).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(kept)).toContain('<home>/Docs/a.txt and zzz')
+    expect(JSON.stringify(kept)).not.toContain('alice')
+  })
+
   it('cuts nothing unless asked to', () => {
     const big = 'y'.repeat(5000)
     const [kept] = scrub([line('in', { id: 'r-1', result: { text: big } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice' }).map((f) => (f as { msg: Record<string, unknown> }).msg)

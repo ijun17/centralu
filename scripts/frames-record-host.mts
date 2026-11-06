@@ -37,6 +37,19 @@ class Window {
   private readonly pending = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
   private readonly listeners = new Set<(e: Event) => void>()
 
+  /** The cards a scenario expects (by kind); any other is refused and fails the run */
+  expected: readonly string[] = []
+  /** Cards the scenario did not expect, for the run to fail with */
+  readonly unexpected: string[] = []
+
+  private card(e: Event): void {
+    const kind = String((e as { detail?: { kind?: string } }).detail?.kind)
+    const allow = this.expected.includes(kind)
+    if (!allow) this.unexpected.push(kind)
+    console.error(`[record] ${allow ? 'allowed' : 'refused'} a card of ${kind}`)
+    this.rpc('agents.respondApproval', { sessionId: e.sessionId, requestId: (e as { requestId?: string }).requestId, decision: allow ? 'allow' : 'deny' }).catch((err: Error) => console.error(`[record] the host refused the answer to the card: ${err.message}`))
+  }
+
   async open(port: number, token: string): Promise<void> {
     this.socket = new WebSocket(`ws://127.0.0.1:${port}`)
     await new Promise<void>((resolve, reject) => {
@@ -53,10 +66,7 @@ class Window {
         } else if (f.kind === 'event' && f.event) {
           this.events.push(f.event)
           // A card a session raises (a tool that reaches another project asks the person first) is allowed: a recording needs the call to go through
-          if (f.event.type === 'approval_request') {
-            console.error(`[record] allowed a card of ${String((f.event as { detail?: { kind?: string } }).detail?.kind)}`)
-            void this.rpc('agents.respondApproval', { sessionId: f.event.sessionId, requestId: (f.event as { requestId?: string }).requestId, decision: 'allow' })
-          }
+          if (f.event.type === 'approval_request') this.card(f.event)
           for (const l of this.listeners) l(f.event)
         }
       })
@@ -156,6 +166,7 @@ async function main(): Promise<number> {
         const started = await startHost(data, home, raw, token, (child) => (host = child))
         await window.open(started.port, token)
         const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
+        window.expected = scenario.cards ?? []
         if (scenario.trusted) await window.rpc('projects.setTrusted', { projectId: project.id, trusted: true })
         // A second project when the scenario reaches one: its folder's name is the project's
         let otherProject: { id: string } | null = null
@@ -183,6 +194,7 @@ async function main(): Promise<number> {
         for (const text of scenario.turns.slice(1)) await turn(main, said(text))
         for (const next of scenario.then ?? []) await window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)
         // The recording of the session the scenario keeps: the one whose Codex process made the tool calls
+        if (window.unexpected.length) throw new Error(`the host raised cards the scenario does not expect (refused): ${window.unexpected.join(', ')}`)
         const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
         const frames = files.flatMap((f) => readFileSync(join(raw, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
         const codexVersion = (await import('../packages/agent-host/src/adapters/codex/index.js').then((m) => new m.CodexAdapter().installedVersion())) ?? 'unknown'

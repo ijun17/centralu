@@ -10,6 +10,8 @@ export type CentraluScenario = {
   helpers: readonly string[]
   /** What is sent to the recorded session, one turn each */
   turns: readonly string[]
+  /** The kinds of card the host may raise in the run, which the recording script allows; any other fails it (none by default) */
+  cards?: readonly string[]
   /** The recorded session's project is trusted by the person (a call that gives work outside it waits for that) */
   trusted?: boolean
   /** The host also has a second project (`{other}` in a prompt is its name), for a tool that reaches another project */

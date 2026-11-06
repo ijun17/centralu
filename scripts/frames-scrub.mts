@@ -233,7 +233,6 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
   const names = (list: unknown, pick: (name: string) => string) => (Array.isArray(list) ? list.map((n) => (typeof n === 'string' ? pick(n) : n)) : list)
   const walk = (v: unknown, key?: string): unknown => {
     if (typeof v === 'string') {
-      if (cutText !== undefined && v.length > cutText) return `${v.slice(0, 200)}…<cut ${v.length - 200} characters>`
       if (key === 'sessionId' || key === 'subagentSessionId') return stable('ses', v)
       if (key === 'toolCallId') return stable('call', v)
       if (key === 'messageId') return stable('msg', v)
@@ -251,7 +250,9 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       // Codex: the machine's system, as `initialize` answers with it
       if (key === 'userAgent') return v.replace(/\([^)]*\d+\.\d+[^)]*; [\w-]+\)/, '(<os>; <arch>)')
       if (key === 'signature' && v.length > 40) return '<signature>'
-      return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      const scrubbed = mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      // Cut after scrubbing: the start that stays has lost its paths and ids like the rest
+      return cutText !== undefined && scrubbed.length > cutText ? `${scrubbed.slice(0, 200)}…<cut ${scrubbed.length - 200} characters>` : scrubbed
     }
     if (Array.isArray(v)) {
       // Size, not secrecy: the picture of the window as a grid, and the connectors' tools, are the bulk of a context reading and of the init lists

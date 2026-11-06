@@ -60,6 +60,8 @@ async function host(d: Driver, spec: CentraluScenario, hostSent: (method: string
 async function replay(name: string) {
   const dir = recordedVersion()
   const recording = loadRecording(recordedFolders(CODEX_RECORDINGS).find((f) => f.dir === dir)!.file(name))
+  // A file is the recording of the scenario it is named for
+  expect(recording.header.scenario).toBe(name)
   const spec = CENTRALU_SCENARIOS.find((s) => s.name === name)!
   // What the host sent the session on its own in the recording: the turns it starts from mail, the nudges and the compact command
   const hostSent = (method: string) => recordedFrames(name).flatMap((f) => (f.dir === 'out' && f.msg.method === method ? [String(((f.msg.params as { input?: { text?: string }[] }).input ?? [])[0]?.text ?? '')] : []))
@@ -147,7 +149,7 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     const used = of(events, 'context_update').map((c) => c.used)
     expect(Math.max(...used)).toBeGreaterThan(120_000)
     expect(used.at(-1)).toBeLessThan(10_000)
-    // Only the last event of the compaction turn is its own: the turns before it ended as turns of the session
+    // The compaction turn's own end is not in the recording (it was cut when the compaction item completed): the two turns before it ended as the session's
     expect(of(events, 'turn_complete')).toHaveLength(2)
   })
 
@@ -159,7 +161,8 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(of(events, 'tool_result').filter((r) => r.summary.includes('compacts this conversation')).length).toBe(asked.length)
   })
 
-  it('centralu-wake: guards the input the mailbox starts a turn with — the turn runs, reads the mail by thread, and ends, as a second turn of the session', async () => {
+  // The adapter ignores the input's origin (Codex has no stamp for it), so this guards how the answer's turn is run and drawn, not the origin
+  it('centralu-wake: guards a turn the host starts at rest — it runs as a second turn of the session, reads the mail by thread, and ends', async () => {
     const { events } = await replay('centralu-wake')
     expect(of(events, 'turn_complete')).toHaveLength(2)
     const mail = calls(events).filter((c) => c.tool === 'mail')
@@ -175,7 +178,8 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
   it('centralu-agent-session: guards the child-session cards — start, send and wait are three calls of Centralu’s, and the wait returns the answer to both messages', async () => {
     const { events } = await replay('centralu-agent-session')
     expect(calls(events).map((c) => c.tool)).toEqual(['start_agent', 'agent_session', 'agent_session'])
-    expect(calls(events).every((c) => c.centralu !== undefined)).toBe(true)
+    expect(calls(events).map((c) => c.centralu?.label)).toEqual(['Started an agent', 'Sent more to an agent', 'Waited for an agent'])
+    expect(calls(events)[2]!.centralu?.sessionId).toBe(calls(events)[1]!.centralu?.sessionId)
     const results = of(events, 'tool_result')
     expect(results.every((r) => r.ok)).toBe(true)
     expect(results.at(-1)!.summary).toContain('one')
@@ -184,7 +188,7 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
 
   it('centralu-ask-project: guards ask_project’s card and its answer — the other project’s session answers and the answer is the result', async () => {
     const { events } = await replay('centralu-ask-project')
-    expect(calls(events)).toMatchObject([{ tool: 'ask_project', centralu: { tool: 'ask_project' } }])
+    expect(calls(events)).toMatchObject([{ tool: 'ask_project', title: 'frames-record-other', centralu: { tool: 'ask_project', label: 'Asked a project' } }])
     expect(of(events, 'tool_result')).toMatchObject([{ ok: true, summary: expect.stringContaining('pong') }])
   })
 
@@ -192,6 +196,8 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     const { events } = await replay('centralu-ask-untrusted')
     expect(calls(events)).toMatchObject([{ tool: 'ask_project' }])
     const [result] = of(events, 'tool_result')
+    // The host's refusal reaches the app-server as a failed call, and the card ends not ok
+    expect(result!.ok).toBe(false)
     expect(result!.summary).toContain('untrusted_project')
     expect(result!.summary).toContain('Nothing was started')
     expect(of(events, 'turn_complete')).toHaveLength(1)
