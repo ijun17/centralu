@@ -40,13 +40,19 @@ The class holds 91 fields and about 70 methods. Grouped by the state a method re
 
 | Role | Lines | What | Importers outside the file |
 |---|---|---|---|
-| The connection line and the answers `serve` prints | ~270 | `ConnectionLine`, `RemoteCredential`, `RemoteInstall`, `RemoteAutostart`, `HostStart`, `parseConnectionLine`, `credentialsOf`, `parseAutostart`, `parseDetachLine`, `parseRevoke`, the two errors `StartedNotServing` and `SwitchUnderWay`, `hubNameForRemote` | `linked-machine-connection`, `autostart`, `update`, `links-registry`, `stored`, tests |
-| The command sent to the remote, per shell | ~410 | `RemoteSpec`, `dataDirError`, `wslDistroError`, `powershell`, the stdin framing (~105 lines: `STDIN_*`, `readStdin`, `powershellScript`), `connectionCommand` … `revokeCommand`, `remoteCommand`, `remoteScript`, `MANAGED_SH/PS`, `shimNames`, `npmInstall` | `install`, `update`, `autostart`, `probe`, `links-registry`, `remote-dev`, tests |
-| The ssh transport | ~420 | `Tunnel`, `DirectTunnel`, `SshTunnel`, the `SSH_*_MS` bounds, `accepts`, `portFree`, `freePort` | `linked-machine-connection`, `links-registry`, `stored` |
+| The connection line and the answers `serve` prints | ~270 | `ConnectionLine`, `RemoteCredential`, `RemoteInstall`, `RemoteAutostart`, `HostStart`, `parseConnectionLine`, `credentialsOf`, `parseAutostart`, `parseDetachLine`, `parseRevoke`, the two errors `StartedNotServing` and `SwitchUnderWay` | `linked-machine-connection`, `autostart`, `update`, `links-registry`, `stored`, tests |
+| The command sent to the remote, per shell | ~410 | `RemoteSpec`, `dataDirError`, `wslDistroError`, `powershell`, the stdin framing (~105 lines: `STDIN_*`, `readStdin`, `powershellScript`), `connectionCommand` … `revokeCommand`, `remoteCommand`, `remoteScript`, `MANAGED_SH/PS`, `shimNames`, `npmInstall`, `hubNameForRemote`, `thisHubName`, `hubKeyOf`, `pairLabel` | `install`, `update`, `autostart`, `probe`, `links-registry`, `remote-dev`, tests |
+| The ssh transport | ~420 | `Tunnel`, `Endpoint`, `HostStart`, `RemoteRun`, `DirectTunnel`, `SshTunnel`, the `SSH_*_MS` bounds, `accepts`, `portFree`, `freePort` | `linked-machine-connection`, `links-registry`, `stored` |
 | What ssh said back, as text | ~150 | `lastLine`, CLIXML, `unescapeBytes`, the ANSI code page | `autostart`, `install`, `linked-machine-ops`, `probe`, `ssh-config`, `update` |
 
-The four roles share nothing but types: the command builders do not read the transport, the transport calls the
-builders and the parsers, and the text readers are pure but for one `reg.exe` call.
+The roles lean on each other in one direction only, if the names are placed so: `connection-line` reads `shimNames`,
+`npmInstall` and the `RemoteSpec` type of the command part (the words it tells the person), and the command part reads
+`hubNameForRemote` (for `--from` and the pair label). So `hubNameForRemote`, `thisHubName`, `hubKeyOf` and `pairLabel` go
+to the command part, with `RemoteSpec`, `shimNames` and `npmInstall`; the connection line imports them, and the command part
+imports nothing of the line. The transport (`Tunnel`, `Endpoint`, `HostStart`, `RemoteRun`, `DirectTunnel`, `SshTunnel`)
+imports both and is imported by neither. `parseRevoke` and `parseDetachLine` stay with the line (they read what `serve`
+prints), `revokeCommand` and `detachCommand` with the commands. The text readers are pure but for one `reg.exe` call,
+which is behind `os.ts`. Order of the moves: text, commands, line, so no two new modules import each other.
 
 ## 2. One job done twice
 
@@ -66,28 +72,29 @@ written twice; it is B1 below.
 
 | # | Job | A | B | Difference → situation | Verdict | Fix |
 |---|---|---|---|---|---|---|
-| B1 | Which `SystemRoot` a Windows system program starts from | `os.ts` `systemTool` (a drive path, #428) | `links/tunnel.ts` `ansiText`: `win32.isAbsolute` | A `SystemRoot` that is a share (`\\host\share`) or a rooted path with no drive is run from for `reg.exe`, which every other system program refuses | Confirmed | PR 1, with a test that fails before |
-| B2 | A call from the window to a machine that is down | `router.ts` `byKey`, `byView`, `byMachine` pass `ctx` to `forward` | `router.ts` `reorderProjects`, `deleteRule`: `forward(m, …)` with no `ctx`; `merge` drops it on the way | `ctx` absent means "an agent's call". The window's `projects.reorder` and `approvals.deleteRule` try to connect a down machine and wait up to 10 s (`CALL_WAIT_MS`), and a refused delete says "ask the person to connect it" to the person | Confirmed | PR 2, with a test that fails before |
-| B3 | Say a disconnected machine is not connected | `linked-sessions.ts` `list`: `waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE` | `recall`: `"(not reachable right now)"` always | The model reads "not reachable" for a machine the person disconnected and retries, where `list` tells it to ask the person | Confirmed (wording) | PR 4 |
-| B4 | Ask a machine for `host.hubAuto` | `linked-machine-ops.ts` `hubAuto`: never connects, maps "Unknown method" to `'older'` | `linked-sessions.ts` `hubAuto` through `viaMachine`: waits for the link, returns the raw error | An older machine is `older` to the window and "Unknown method: host.hubAuto …" to the model | Confirmed (wording) | PR 5 |
-| B5 | What becomes `previous` after an update | `update.ts:316`: `was.current` unless the versions are equal | `dev-build.ts:67`: `isDevVersion(was.current) ? was.previous : was.current` | Updating from a dev build `X.local.2` to `X` keeps the dev build as `previous`, so Rollback leads back to a dev build, which `dev-build.ts` says never happens | Plausible (needs a run on a dev remote) | after a run |
-| B6 | Reset the backoff when a host answers | `remote-client.ts:330` `attempt = 0` at every `hello_ok` | `linked-machine-connection.ts` `STABLE_MS` (60 s): "a host that answers and stops again at once reset it every time" | The link learned this lesson and the client did not: a host that says hello and drops at once is redialled every 200 ms for good, each hello repeating the list reads, `offerAsks`, `watchCredentials` and a `machine_resync` | Plausible | after a run |
-| B7 | The remote's `dev` flag | `doOpen` → `check({ dev: false })` | `onHello` → `dev: h.build.commit === 'dev'` | Before the hello a dev remote is judged as a release (`older`, `isSupportedVersion`); after, as a dev build. The gate flips only for a dev build below `MIN_SUPPORTED_VERSION`, which `pnpm remote-dev` does not make | Plausible (edge) | none; noted |
+| B1 | Which `SystemRoot` a Windows system program starts from | `os.ts` `systemTool` (a drive path, #428) | `links/tunnel.ts` `ansiText`: `win32.isAbsolute` | A `SystemRoot` that is a share (`\\host\share`) or a rooted path with no drive is run from for `reg.exe`, which every other system program refuses | Confirmed | #2092, with a test that fails before |
+| B2 | A call from the window to a machine that is down | `router.ts` `byKey`, `byView`, `byMachine` pass `ctx` to `forward` | `router.ts` `reorderProjects`, `deleteRule`: `forward(m, …)` with no `ctx`; `merge` drops it on the way | `ctx` absent means "an agent's call". The window's `projects.reorder` and `approvals.deleteRule` try to connect a down machine and wait up to 10 s (`CALL_WAIT_MS`), and a refused delete says "ask the person to connect it" to the person | Confirmed | #2093, with a test that fails before. The stall is a machine that is down with Auto reconnect on (10,006 ms on main, 46 ms with the fix); a disconnected one got the wrong sentence |
+| B3 | Say a disconnected machine is not connected | `linked-sessions.ts` `list`: `waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE` | `recall`: `"(not reachable right now)"` always | The model reads "not reachable" for a machine the person disconnected and retries, where `list` tells it to ask the person | Confirmed (wording) | #2095 |
+| B4 | Ask a machine for `host.hubAuto` | `linked-machine-ops.ts` `hubAuto`: never connects, maps "Unknown method" to `'older'` | `linked-sessions.ts` `hubAuto` through `viaMachine`: waits for the link, returns the raw error | An older machine is `older` to the window and "Unknown method: host.hubAuto …" to the model | Confirmed (wording) | #2097 (one reading, `hub-auto.ts`) |
+| B5 | Reset the backoff when a host answers | `remote-client.ts:330` `attempt = 0` at every `hello_ok` | `linked-machine-connection.ts` `STABLE_MS` (60 s): "a host that answers and stops again at once reset it every time" | A real host behind a proxy that cuts the connection 50 ms after its hello, `redials: 5`, 8 s: 30 connections, 30 hellos, `gaveUp` never. Such a host is redialled every 200 ms for good, the link never reads the connection line again, and each hello repeats the list reads, `offerAsks`, `watchCredentials` and a resync | Confirmed (run) | #2104 |
+| B6 | The remote's `dev` flag | `doOpen` → `check({ dev: false })` | `onHello` → `dev: h.build.commit === 'dev'` | A real remote host with `commit: 'dev'` at beta.1 (below `MIN_SUPPORTED_VERSION`): the line check holds it at `versions_differ` as the older side though its hello would let it in; a release at that version is held, as it should be. Until the hello the row also names a dev build as older (the Update offer appears, then goes) | Confirmed (run) | #2106: the line says it (`install.current.source`) |
+| B7 | "Not installed" | `tunnel.ts` ×2: the marker **or** exit 127 | `autostart`, `update`, `remote-dev`: the marker only | A POSIX remote whose launcher is there and whose Node is gone exits 127 (`env: node: No such file or directory`) with no marker: the row says "Centralu is not installed … run npm i -g centralu" and hides the remote's words. The lookup already prints the marker when nothing is found | Confirmed (a fake ssh with the launcher's own 127) | #2102 |
+| B8 | The data folder rule | `data-dir.ts` `chooseDataDir` (`CC_DATA_DIR`, else `~/.centralu`, `~/.centralu-dev` for `CC_DEV=1`) | `remote-dev.ts` `hubDataDir`: no `CC_DEV` | `CC_DEV=1` without `CC_DATA_DIR`: `pnpm remote-dev` opens the real `~/.centralu` store, not the dev hub's | Confirmed | #2100 |
 
 ### 2.3 Harmless duplication (same result today, could drift)
+
+D4 and D10 of the first draft were not harmless: they are B7 and B8.
 
 | # | Job | Places | If merged |
 |---|---|---|---|
 | D1 | Settling before a call | `linked-sessions.ts` `settle` / `reach` / `attempt`; `router.ts` `forward`; `lastWords` and `read` of `linked-sessions.ts` hand-expand `reach` + `catch { cause(err) }`. The `else if (m.attemptUnderWay) m.settled?.()` fallback is reachable only from test doubles | ~-20 |
 | D2 | The sentence `ssh could not reach <target>: …`, which `away.ts` `SSH_FAILED` reads back | `tunnel.ts` ×3, `linked-machine-ops.ts` ×1 | ~-8 |
 | D3 | The ssh arguments `-T -o BatchMode=yes -o ConnectTimeout=15 --` | `tunnel.ts` ×3 (`startHost`, `exec`, `connectionLine`); `probe.ts` with 10 s | ~-12 |
-| D4 | "Not installed" | `tunnel.ts` ×2: marker or exit 127; `autostart`, `update`, `remote-dev`: marker only | 0 to -10 |
 | D5 | The last JSON line of a command's stdout | `tunnel.ts` ×3 (`parseConnectionLine`, `parseDetachLine`, `parseRevoke`), `autostart.ts`, `update.ts` ×2: three filters, three rules for `v` | ~-45 |
-| D6 | `Unknown method` | `linked-machine-connection.ts` and `linked-views.ts` (`startsWith('Unknown method: <name>')`), `linked-machine-ops.ts` (`/^Unknown method/`), `linked-hubs.ts` (`/Unknown method/i`, unanchored) | ~-10 |
+| D6 | `Unknown method` | `linked-machine-connection.ts` and `linked-views.ts` (`startsWith('Unknown method: <name>')`), `linked-machine-ops.ts` (`/^Unknown method/`, now read once in `hub-auto.ts`), `linked-hubs.ts` (`/Unknown method/i`, unanchored), `transport/method-rights.ts:430` (`Unknown method ${method}`, no colon: a fourth spelling) | ~-10 |
 | D7 | `<machine>.` as a prefix | `Qualifier.owns`, `splitQualified`, `qualifiedWith`, `awayFor`, `orchestrator-seat`, `view-host`: `"m1."` is owned by one and local to another | ~-25 |
 | D8 | The lookup a list is read within | `linked-sessions.ts` `boundedAsk` (4 s) and `linked-hubs.ts` `projects` repeat `LOOKUP_MS` and `projectsOf`'s work; the hub path loses the cause | ~-15 |
 | D9 | Backoff arithmetic | `remote-client.ts`, `linked-machine-connection.ts`, `update.ts` (a hand-written `setTimeout` promise beside `sleep`). The client and the link are layered by design (`gaveUp` hands over), not two loops | ~-12 |
-| D10 | The data folder rule | `data-dir.ts`, `remote-dev.ts` `hubDataDir` (no `CC_DEV`), `MANAGED_SH/PS` and `DATA_SH/PS` in `install.ts`, `remote-install.mjs` (cannot be shared: it runs on the remote) | ~-10 |
 | D11 | A hidden session | `hiddenKind`, `linked-host.ts`, `launch-inputs.ts`, `readerFacts`; and the "ordinary session" test of `ask-project-flow.ts`, `machine-asks.ts`, `linked-sessions.ts` | ~-10 |
 
 ### 2.4 Dead code in `links/`
@@ -98,13 +105,19 @@ something used only in their own file (the audit lists them by file; the type-on
 `DirectTunnel` is used by tests alone, and with it the "absent" branches of `Tunnel.exec` and `startHost` (about 20
 lines): it is the fake transport of the link tests, so it stays.
 
+### 2.4a Checked and not a duplicate
+
+- **What becomes `previous` after an update** (`update.ts` against `dev-build.ts`): the two never see the same input. An update
+  runs the switch from the new version and keeps the old `current`; a dev build over a dev build keeps the release before
+  both. That an update from a dev build leaves the dev build as the way back is a policy, and an owner question (§6).
+
 ### 2.5 Between `links/` and the rest of the host
 
 - **Two ways to send a request to a machine** are D1: the router's window path and the agent path differ on purpose
-  (`ctx`), B2 is where one path forgot it. `sessions/linked-host.ts`, `machine-asks.ts` and the apps code reach a machine
+  (`ctx`), B2 is where one path forgot it (#2093). `sessions/linked-host.ts`, `machine-asks.ts` and the apps code reach a machine
   through `LinkedSessions` and the router, not by their own `call`.
 - **Two reconnect loops** are layered, not twice: the client redials the same forward a few times (D9), then the link
-  reads the connection line and may start a host. B6 is the one place the layers disagree.
+  reads the connection line and may start a host. B5 was the one place the layers disagreed.
 - **Two id tables**: `Qualifier` (ids and events) and `machine-ids.ts` (numbers folded by slot) are different jobs.
   The prefix test is D7.
 - **#1987** (a child on a linked computer cannot mail its parent) is not a drift. `mail/tool.ts:141` refuses `parent`
@@ -113,17 +126,16 @@ lines): it is the fake transport of the link tests, so it stays.
 
 ## 3. The shape it ends in
 
-`LinkedMachineConnection` stays the one object the registry, the router and `LinkedMachine` hold, and keeps the link
-itself (the first row of §1.1): about 700 lines, from 1,502. The roles that own their state move to a class of their own
-in `links/`, each taking a small host type of what it reads, getters never copies (the `parts()` rule of
-`session-manager-split.md`), and the connection holds them as `readonly` fields. `LinkedMachine`'s `protected` seams
-become the module's public methods (`this.credentials.revoke(id)`), not new forwards. `tunnel.ts` keeps the transport
-(about 420 lines); the other three roles are modules the importers name directly. No re-export from `tunnel.ts`: a
-caller imports the module that does the work, and `tsc` proves the move.
+The target, if every role of §1 became a module, is the map: `LinkedMachineConnection` keeps the link itself (the first
+row of §1.1), about 700 lines from 1,502, and each role that owns its state is a class of its own in `links/`, taking a
+small host type of what it reads, getters never copies (the `parts()` rule of `session-manager-split.md`), held as a
+`readonly` field; `LinkedMachine`'s `protected` seams become the module's public methods; `tunnel.ts` keeps the transport
+(about 420 lines) and the other three roles are modules the importers name directly, with no re-export from `tunnel.ts`.
 
-Expected size: the deletions of §2 take about 250 lines out of `links/`. The two big files give about 1,450 lines to eight
-modules, which add about 25 lines each of their own (host type and imports). The folder ends smaller only if the
-deletions land; the moves are for the reader and for merge conflicts, as in `session-manager-split.md` D2.
+**What is done of it** is smaller (§4, decision D1): the deletions of §2 (about 250 lines out of `links/`), the text
+readers out of `tunnel.ts`, and the two roles cross-machine mail needs as modules (`session-mirror`, `call-reach`).
+Each module adds about 25 lines of its own (host type and imports), so a move that ends no smaller and serves no feature
+is not made; the rest stays a map.
 
 ## 4. The pull requests
 
@@ -131,30 +143,32 @@ Each is a fix with a test that fails without it, a deletion, or a move of code a
 what lint counts as new in a new file (`!` and `as` it counted already in the old one: written as the same thing without
 the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allowlist.txt`) follow the code.
 
-| # | Pull request | Type | Lines (removed / added, tests apart) |
-|---|---|---|---|
-| 1 | **This document; B1**: `reg.exe` starts by `systemTool` | fix | 3 / 2 (+59 test, +document) |
-| 2 | **B2**: the window's merged writes carry their `ctx` | fix | 8 / 8 (+35 test) |
-| 3 | **`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts` | move | 148 / 150 (+ 6 import lines) |
-| 4 | **B3**: `recall` names a disconnected machine as such | fix | small |
-| 5 | **B4 and D1**: one way to ask `host.hubAuto`; `settle`, `reach` and `attempt` the one path for `lastWords` and `read` | deletion | ~-30 |
-| 6 | **`machine-credentials.ts`** out of the connection (§1.1, row 2) | move | ~285 |
-| 7 | **`connection-line.ts`** out of `tunnel.ts` (§1.2, row 1) with D5's one reader | move + deletion | ~270, then ~-45 |
-| 8 | **`host-starts.ts`**: the limit on starts, pure, with its own test | move | ~75 |
-| 9 | **`remote-command.ts`** (and `powershell-stdin.ts`) out of `tunnel.ts` | move | ~410 |
-| 10 | **`session-mirror.ts`** (the shown and hidden sessions) and the dead `hidden` set | move + deletion | ~90 |
-| 11 | **`call-reach.ts`** and **`machine-offers.ts`** | move | ~130, ~65 |
-| 12 | D2, D3, D6, D7, D9, D10, D11 as small deletions, one pull request each | deletion | ~-110 together |
+| # | Pull request | State | Type | Lines (removed / added, tests apart) |
+|---|---|---|---|---|
+| 1 | **This document; B1**: `reg.exe` starts by `systemTool` | #2092 | fix | 3 / 2 (+59 test, +document) |
+| 2 | **B2**: the window's merged writes carry their `ctx` | #2093 | fix | 8 / 8 (+35 test) |
+| 3 | **B3**: `recall` names a disconnected machine as such | #2095 | fix | 1 / 1 (+5 test) |
+| 4 | **B4**: one reading of `host.hubAuto` (`hub-auto.ts`) | #2097 | fix | 6 / 10 (+20 new file, +28 test) |
+| 5 | **B8**: `pnpm remote-dev` reads the dev hub's data folder | #2100 | fix | 4 / 4 (+9 test) |
+| 6 | **B7**: exit 127 is not "not installed" | #2102 | fix | 2 / 2 (+10 test) |
+| 7 | **B5**: the client's redials come back for a host that stays up | #2104 | fix | 1 / 13 (+26 test) |
+| 8 | **B6**: a dev remote is judged as one before its hello | #2106 | fix | 2 / 2 (+12 test) |
+| 9 | **`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts` | branch `centralu/links-split-ssh-text`, opened once #2092 lands | move | 148 / 150 (+6 import lines) |
+| 10 | **Deletions**: D1's one way to settle, D2, D3, D5, D6, D7, D9, D11, the dead `hidden` set and the doc comments that sit above the wrong method; one pull request each | next | deletion | ~-250 together |
+| 11 | **`session-mirror.ts`** (the shown and hidden sessions) | after the deletions; #2067 needs it | move | ~90 |
+| 12 | **`call-reach.ts`** | after the deletions; #2067 needs it | move | ~130 |
+| 13 | **The reverse-calls allowlist** as the one table a machine's calls to the hub pass | with #2067 | move | small |
 
-Order: the fixes first (1, 2, 4), the deletions next (5, 12), then the moves from the most separate to the most
-entangled. 6 first (it has a single seam, `revokeCredential`), 11 last (it reads the status machine). 1, 2 and 4 are
-independent of each other; 3 stacks on 1 (it moves the code 1 changed); 6 to 11 each stack on nothing but main.
+Decided (D1, §7): the deletions land first. Of the moves, only those that end smaller, or that cross-machine mail (#2067)
+needs, are done: 9 (it removes a file's worth of non-transport code from `tunnel.ts` and one OS touch from `links/`), 11, 12
+and 13. The rest of the split of §1 (the credentials, `connection-line`, `remote-command`, `host-starts`, `machine-offers`,
+`switch-watch`) is **not done**: each adds about 25 lines and would move code with no one to read it differently. They stay
+in §1 as the map of the roles, for when a feature needs one of them to be a module.
 
 ### 4.1 Deep tier
 
-`tunnel.ts` is deep (`tooling/tier.test.ts`, "a linked machine's tunnel"), so PRs 1, 3, 7 and 9 are expected to be, and
-`pnpm tier` decides each. PRs 2, 4 and 5 touch the router and the link's answers; each says in its description what a
-reviewer exercises with two hosts.
+Everything in `links/` is deep (`.centralu/tiers.json`, "processes"): every pull request above was tiered deep by
+`pnpm tier`. Each says in its description what a reviewer runs with two hosts.
 
 ### 4.2 Keeping it from growing back
 
@@ -164,8 +178,9 @@ for the remote goes into `remote-command.ts`, a line it prints into `connection-
 
 ## 5. Work in flight and what this leaves for later
 
-- **Nothing open touches `links/`** on 2026-11-07, so moves can land at once (CONTRIBUTING: a move-only pull request lands
-  when nothing is in its way).
+- **Open pull requests touching `links/`** on 2026-11-07 are this stack's own and are independent of each other (each is
+  based on main), so a move-only pull request can land when they have (CONTRIBUTING: a move-only pull request lands when
+  nothing is in its way).
 - **#1895, option C**: no keeper holding code. Nothing here touches the keeper or `apps/desktop`.
 - **#2067, mail across linked machines**, planned after this cleanup and not built here. Where the split helps:
   `session-mirror.ts` is the one place that says which of a machine's sessions the hub shows, so a mail receipt that comes
@@ -182,14 +197,13 @@ for the remote goes into `remote-command.ts`, a line it prints into `connection-
 
 | Proposal | What changes for the person | Lines saved | Risk |
 |---|---|---|---|
-| Reset the client's backoff on `STABLE_MS`, not at the hello (B6) | A host that answers and drops at once is no longer redialled every 200 ms for good | ~-3 | Low; needs a run on a flapping remote |
-| Judge the remote as a dev build before the hello when the line says so (B7) | A dev remote below the minimum version connects as it does after the hello | ~+6 | Low; the line does not say it today |
-| `Unknown method` anchored the same way in `linked-hubs.ts` (D6) | A hub error that only mentions the phrase is no longer read as "from before" | ~0 | Low |
+| `Unknown method` read one way in `linked-hubs.ts`, `method-rights.ts` and the rest (D6) | A hub error that only mentions the phrase is no longer read as "from before" | ~0 | Low |
+| Keep a dev build as the way back after an update from it (`update.ts`), or lead back to the release before it as a dev-over-dev build does (`dev-build.ts`) | Rollback after an update from a dev build goes to the release, not to the dev build | ~-4 | Low; a policy, and the two operations never see the same input |
 | Drop `DirectTunnel` and the optional `exec` / `startHost` of `Tunnel` | None; the link tests' fake transport becomes a real fake ssh | ~-30 | Medium: rewrites the test world |
 
 ## 7. Decisions for the owner
 
 | # | Question | Default taken until decided |
 |---|---|---|
-| D1 | Do the moves (PRs 3, 6 to 11) add ~25 lines each for the reader and conflicts, or stop after the deletions? | Fixes and deletions first; the moves stop when PR 6 has landed, until decided |
+| D1 | The moves of §1 add about 25 lines each | **Decided** (the owner's rule, via the parent session, 2026-11-07): the deletions first; of the moves, only those that end smaller or that #2067 needs; the rest stop |
 | D2 | Re-export from `tunnel.ts` for the callers, or migrate them in the same pull request? | Migrate (no compatibility shim); `tsc` proves it |
