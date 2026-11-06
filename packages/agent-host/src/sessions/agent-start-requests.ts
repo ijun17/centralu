@@ -107,7 +107,7 @@ export class AgentStartRequests {
     const rec = this.host.children.agentStarts.get(requestId)
     if (!rec || rec.ended) return
     this.endAgentStart(requestId, { error, person })
-    this.host.withdrawHostAsk(requestId)
+    this.host.hostCards.withdrawHostAsk(requestId)
   }
 
   /**
@@ -131,7 +131,7 @@ export class AgentStartRequests {
       return
     }
     void (async () => {
-      const decision = await this.host.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
+      const decision = await this.host.hostCards.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
       // The host is leaving again: the row stays for the next one
       if (decision === null && (this.host.handingOver || this.host.disposing)) return
       const consent = this.starts.agentConsentFrom(req.callerId, req.projectId, decision)

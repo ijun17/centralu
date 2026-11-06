@@ -10,7 +10,7 @@ export type { PreferencesRequest }
 export type PreferencesAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the preference commands reach of the session manager: its cards */
-export type PreferencesFlowHost = Pick<HostCards, 'askHost'>
+export type PreferencesFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> }
 
 /** Control and format characters (bidi overrides among them): a line the model reads would not show what they hide */
 const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029]/u
@@ -460,7 +460,7 @@ export class PreferencesFlow {
 
   /** The preferences card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal, stays = 'it stays off'): Promise<string | null> {
-    const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return `The person did not approve it, so ${stays}. Do not ask again unless they tell you to.`
     if (decision === null) return 'The card was withdrawn before the person answered, so that change was not made.'
     return null

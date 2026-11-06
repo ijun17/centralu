@@ -194,10 +194,12 @@ export class HostRequests {
     const flow = new TrashFlow({
       // The window's own purge commands name no calling session: the card is always raised for them
       meta: new Map(),
-      askHost: async (_caller, detail, cardSignal): Promise<HostAskAnswer> => {
-        const answer = await this.card(method, 'raw' in detail ? detail.raw : '', from, cardSignal ?? signal)
-        asked.push(answer)
-        return answer.decision
+      hostCards: {
+        askHost: async (_caller, detail, cardSignal): Promise<HostAskAnswer> => {
+          const answer = await this.card(method, 'raw' in detail ? detail.raw : '', from, cardSignal ?? signal)
+          asked.push(answer)
+          return answer.decision
+        },
       },
     })
     let purged = 0

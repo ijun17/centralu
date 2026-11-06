@@ -867,8 +867,6 @@ export class SessionManager {
         ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal),
         done: (tool, input) => self.askedGate.cliDone(id, tool, input),
       }),
-      compactSelf: (id, focus, then) => self.selfCompaction.request(id, focus, then),
-      compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
         try {
           self.selfCompaction.observe(e, ended)
@@ -881,19 +879,15 @@ export class SessionManager {
           console.error(`[compact] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
         }
       },
-      listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
         return self.inputs.agentRuns
       },
       answerRoutedCard: (...a) => self.cards.answerRoutedCard(...a),
       answerQuestion: (...a) => self.inputs.answerQuestion(...a),
-      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       appProjectTarget: (...a) => self.projectCreation.appProjectTarget(...a),
       registerMadeFolder: (...a) => self.projectCreation.registerMadeFolder(...a),
       applyStateHint: (...a) => self.events.applyStateHint(...a),
-      askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askProject: (...a) => self.askProject(...a),
-      askHost: (...a) => self.hostCards.askHost(...a),
       get appsHub() {
         return self.apps.appsHub
       },
@@ -903,8 +897,8 @@ export class SessionManager {
       get apps() {
         return self.apps
       },
+      askHost: (...a) => self.hostCards.askHost(...a),
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
       backgroundTasksKey: (...a) => self.launches.backgroundTasksKey(...a),
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
       busyAnswer: (...a) => self.queue.busyAnswer(...a),
@@ -951,12 +945,10 @@ export class SessionManager {
       get children() {
         return self.children
       },
-      checkMergedInBackground: (...a) => self.merges.checkMergedInBackground(...a),
       userAppFolders: () => {
         const rt = self.apps.appsHub?.rt
         return rt ? Object.keys(self.store.adoption.adopted()).map((appId) => rt.userAppDir(appId)) : []
       },
-      cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
       get lettingGo() {
         return self.tenure.lettingGo()
       },
@@ -992,7 +984,6 @@ export class SessionManager {
         return self.externals
       },
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
-      forgetCardRest: (id) => self.cardRests.forget(id),
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       mailPoke: (id) => {
         try {
@@ -1037,8 +1028,6 @@ export class SessionManager {
       },
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
-      grantReads: (...a) => self.delegationFlow.grantReads(...a),
-      handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
       handleSink: () => self.processes.handleSink(),
       get processes() {
         return self.processes
@@ -1101,10 +1090,8 @@ export class SessionManager {
       get linkedReader() {
         return self.linkedReader
       },
-      linkedTasksRunning: (...a) => self.linkedReports.ownTasksRunning(...a),
       listCommands: (...a) => self.toolQueries.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
-      loadMessages: (...a) => self.record.loadMessages(...a),
       migrateApprovedMcpServers: (...a) => self.orchestratorSlot.proposals.migrateApprovedMcpServers(...a),
       mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
@@ -1137,7 +1124,6 @@ export class SessionManager {
         return self.merges.prCheckedAt
       },
       projectInfo: (...a) => self.projectRegistry.projectInfo(...a),
-      projectOrigin: (...a) => self.files.projectOrigin(...a),
       projectRow: (...a) => self.projectRegistry.projectRow(...a),
       projectTrusted: (...a) => self.projectRegistry.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
@@ -1177,7 +1163,6 @@ export class SessionManager {
         return self.processes.resuming
       },
       routedCards: (...a) => self.cards.routedCards(...a),
-      rulesFor: (...a) => self.approvalRules.rulesFor(...a),
       get running() {
         return self.processes.running
       },
@@ -1194,7 +1179,6 @@ export class SessionManager {
       skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.processes.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
-      startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
       stopBackgroundTask: (...a) => self.sessionSettings.stopBackgroundTask(...a),
       stopWatchingReconnect: (...a) => self.interruptions.stopWatchingReconnect(...a),
       get store() {
@@ -1210,7 +1194,6 @@ export class SessionManager {
       },
       nameOf: (...a) => self.reports.nameOf(...a),
       toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
-      toolRefusal: (...a) => self.processes.toolRefusal(...a),
       refusal: (...a) => self.toolRegistry.refusal(...a),
       trashSession: (...a) => self.trash.trashSession(...a),
       purgeSession: (...a) => self.trash.purgeSession(...a),
@@ -1237,7 +1220,6 @@ export class SessionManager {
       get versionHint() {
         return self.versionHint
       },
-      withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
       get worktreeRoot() {
         return self.worktreeRoot
       },
@@ -1265,6 +1247,7 @@ export class SessionManager {
       linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
+      listAgents: (...a) => this.delegationFlow.listAgents(...a),
       createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
       askAppProject: (sessionId, spec, signal) => this.projectCreation.askAppProject(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),

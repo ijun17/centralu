@@ -53,7 +53,7 @@ export type { MachineRequest }
 export type MachineAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the machine commands reach of the session manager: its cards */
-export type MachineFlowHost = Pick<HostCards, 'askHost'> & Pick<DelegationHost, 'tellSession'>
+export type MachineFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> } & Pick<DelegationHost, 'tellSession'>
 
 /** Who a message from Centralu itself is from, in a session's conversation (as `agent-start-requests.ts`) */
 const HOST_SENDER = '_centralu'
@@ -433,7 +433,7 @@ export class MachineFlow {
 
   /** The machine card, allow or deny only (`MACHINE_CHANGE`): the refusal the orchestrator reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal): Promise<string | null> {
-    const decision = await this.host.askHost(sessionId, { kind: 'other', about: MACHINE_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: MACHINE_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it, so nothing changed. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing changed.'
     return null

@@ -186,13 +186,13 @@ class Hub {
       linkedReader: reader,
       meta: new Map([[caller.id, caller]]),
       settleLinkedTurn: (id: string) => this.reports.observe({ type: 'turn_complete', sessionId: id }),
-      linkedTasksRunning: (id: string) => this.reports.ownTasksRunning(id),
+      linkedReports: { ownTasksRunning: (id: string) => this.reports.ownTasksRunning(id) },
       tellSession: async (_to: string, text: string, _ref: unknown, _quiet: unknown, forModel?: string) => void (this.told.push(text), this.toldModel.push(forModel ?? text)),
       autoBoundaryOpen: () => false,
       emit: () => {},
       uiPreferences: () => ({}),
-      askHost: async () => 'allow',
-      projectOrigin: async () => 'https://github.com/me/app',
+      hostCards: { askHost: async () => 'allow' },
+      files: { projectOrigin: async () => 'https://github.com/me/app' },
     } as unknown as RemoteAgentsHost, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
     this.agents.restore()
   }

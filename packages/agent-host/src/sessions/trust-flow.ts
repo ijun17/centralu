@@ -10,7 +10,7 @@ export type { TrustRequest }
 export type TrustAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the trust commands reach of the session manager: its cards */
-export type TrustFlowHost = Pick<HostCards, 'askHost'>
+export type TrustFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> }
 
 /** A folder, quoted and escaped but not cut: the end of a path is what tells two projects apart */
 const shownPath = (path: string): string => plainQuoted(path, 4096)
@@ -439,7 +439,7 @@ export class TrustFlow {
 
   /** The trust card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal: AbortSignal | undefined, notDone: string): Promise<string | null> {
-    const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return `The person did not approve it, so nothing was ${notDone}. Do not ask again unless they tell you to.`
     if (decision === null) return `The card was withdrawn before the person answered, so nothing was ${notDone}.`
     return null

@@ -10,6 +10,7 @@ import type { SessionRecordHost } from './session-record.js'
 import type { SessionStartsHost } from './session-start.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { WorktreeHost } from './worktree-sessions.js'
+import type { SessionProcesses } from './session-processes.js'
 
 /**
  * What a session's settings reach of the session manager (#1143), typed as the manager declares each member. The
@@ -23,7 +24,7 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   Pick<SessionEventsHost, 'queue' | 'requireHandle'> &
   Pick<WorktreeHost, 'resuming'> & {
     /** Why a tool cannot run the session under a preset, or null (`SessionProcesses.toolRefusal`) */
-    toolRefusal: (m: SessionInfo, tool?: string, preset?: PermissionPreset) => string | null
+    readonly processes: Pick<SessionProcesses, 'toolRefusal'>
   }
 
 /**
@@ -42,7 +43,7 @@ export class SessionSettings {
     const m = this.host.openSession(sessionId)
     // Checked before anything is changed: a preset the tool cannot keep would be saved, shown as in force, and refuse the
     // session's next wake
-    const refused = s.permissionPreset ? this.host.toolRefusal(m, m.tool, s.permissionPreset) : null
+    const refused = s.permissionPreset ? this.host.processes.toolRefusal(m, m.tool, s.permissionPreset) : null
     if (refused) throw unfitError(refused)
 
     // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
