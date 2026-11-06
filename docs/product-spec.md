@@ -242,11 +242,11 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   - Conversation record loaded immediately from local logs/SQLite (shown read-only first)
   - Session processes are **resumed where resume is possible** (Claude Agent SDK resume, `codex resume`); where not, offer "view the record only + start a new session"
 - Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").
-  In the desktop app the process no longer dies with the host (#280 step 2): the keeper holds agents, terminals and
-  project commands, so a host crash, restart or build switch leaves a running turn going, and the next host
-  re-attaches to it — a waiting approval comes back, a terminal keeps its screen, a dev server keeps running. Only a
-  call to Centralu's own tools (orchestrator, app tools) that was running when the host crashed is lost; the turn is
-  stopped with an error naming it, so the person can send the message again.
+  From #280 step 2 to #1895 step 3 the desktop keeper held agents, terminals and project commands, so a host crash,
+  restart or build switch left a running turn going. Since #1895 step 3 (owner decision 2026-11-03, option C) it holds
+  none: a host crash ends the turn, which shows stopped with Continue, as on every other machine; an update stops the
+  host on purpose and the next host continues the turns it ended, with a note to the agent, and opens the terminals and
+  Run commands again.
 - Crash safety: the snapshot is saved on every state change, not at exit.
 - **Background mode** (#280, decision 1 — a setting, off by default). Off: quitting the app stops the host and its
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
@@ -269,9 +269,10 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   which says it stops agents, terminals and running commands, restarts the keeper on this build and reconnects
   the window. "Could not switch builds" is kept for a switch whose host did not reach the build. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
 - **Applying an update** (#352). Once an update is installed, the update line offers **Apply now**: the app
-  relaunches itself into the new version, the keeper holds the host and every agent through the relaunch whatever
-  background mode says, and the new window switches the keeper and the host to its build by itself when nothing can
-  be lost (asking at once when something can). **Automatic updates** (Settings → Updates, on unless the person turned it
+  relaunches itself into the new version. Since #1895 step 3 the keeper first stops the host for the update and exits,
+  and the relaunched window starts the new build's keeper: running turns go on once the host is back, and terminals and
+  Run commands start again. (Before, the keeper held the host and every agent through the relaunch, and the new window
+  switched the keeper and the host to its build.) **Automatic updates** (Settings → Updates, on unless the person turned it
   off; owner decision 2026-10-20) checks for a newer version, installs it as soon as it is found and applies it once no session is working or waiting for
   an approval or a question, no terminal or command is running, and nobody is typing. Switching by itself only goes
   forward: a window of an older build than the one running (a backed-up app opened later) never switches by itself,

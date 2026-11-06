@@ -109,6 +109,10 @@ pub(super) struct State {
     pub(super) drained: Option<Value>,
     /// The current host's `{"swap":{"keepsAgents":..}}` report.
     pub(super) keeps_agents: Option<bool>,
+    /// The current host said it takes the keeper's stop lines on its stdin (`{"swap":{"stopsForUpdate":true}}`, #1895 step
+    /// 3): only then is "Apply now" a stop for an update here (`view.stops_for_update`). A host of an earlier build takes
+    /// them only from a window, and would be stopped as a quit
+    pub(super) host_stops_for_update: bool,
     /// Until when an announced relaunch (#352) holds the keeper with no window attached. Cleared by
     /// the next attach, which is told it is the window that relaunch started.
     pub(super) relaunch_until: Option<Instant>,
@@ -146,6 +150,7 @@ impl State {
             swapping: false,
             drained: None,
             keeps_agents: None,
+            host_stops_for_update: false,
             relaunch_until: None,
             reattach_until: None,
         }
@@ -396,7 +401,7 @@ impl Keeper {
             swap: st.swap.clone(),
             keeps_agents: st.keeps_agents,
             rights: Some(if full { "full" } else { "limited" }.to_string()),
-            stops_for_update: true,
+            stops_for_update: st.host_stops_for_update,
         }
     }
 
@@ -499,9 +504,9 @@ impl Keeper {
         }
         {
             let Ok(mut st) = self.state.lock() else { return };
-            if st.stopping || st.swapping {
+            if let Some(why) = stop_for_update_refusal(&st) {
                 drop(st);
-                return reply(stream, &json!({ "ok": false, "error": "the keeper is already stopping or switching builds" }));
+                return reply(stream, &json!({ "ok": false, "error": why }));
             }
             st.stopping = true;
         }
@@ -514,6 +519,20 @@ impl Keeper {
         reply(stream, &json!({ "ok": true }));
         log(&format!("stopped for an update (pid {})", self.info.pid));
         std::process::exit(0);
+    }
+}
+
+/// Why this keeper cannot stop for an update now, or None (#1895 step 3). Nothing is stopped when it cannot: the window says
+/// why and stays
+pub(super) fn stop_for_update_refusal(st: &State) -> Option<&'static str> {
+    if st.stopping {
+        Some(switch::KEEPER_STOPPING)
+    } else if st.swapping {
+        Some(switch::SWITCH_IN_PROGRESS)
+    } else if !st.host_stops_for_update {
+        Some("the running host cannot be stopped for an update by the keeper")
+    } else {
+        None
     }
 }
 
@@ -623,6 +642,9 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         "switch" => switch(k, &mut stream, &req),
         "upgrade" => upgrade(k, &mut stream, &req),
         "restart" => {
+            if k.state.lock().map(|st| st.stopping).unwrap_or(true) {
+                return reply(&mut stream, &json!({ "ok": false, "error": switch::KEEPER_STOPPING }));
+            }
             if k.state.lock().map(|st| st.swapping).unwrap_or(false) {
                 return reply(&mut stream, &json!({ "ok": false, "error": "a build switch is in progress" }));
             }

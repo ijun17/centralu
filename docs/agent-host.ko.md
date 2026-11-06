@@ -1071,9 +1071,9 @@ interface AdapterCapabilities {
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → under the keeper: agents, terminals and commands keep running there; the new
-                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
-                → without a keeper: session processes die → a new streamEpoch → UIs resync
+host restarts   → under a keeper that holds children (before #1895 step 3, §4.3): agents, terminals and commands
+                  keep running there; the new host re-attaches to them mid-turn → a new streamEpoch → UIs resync
+                → otherwise (since step 3 under the keeper too): session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)

@@ -533,3 +533,18 @@ fn only_the_accepted_window_executable_gets_the_token() {
     assert_eq!(v["view"]["rights"], json!("limited"));
     let _ = fs::remove_dir_all(&data);
 }
+
+/// #1895 step 3: "Apply now" stops only a host that said it takes the keeper's stop lines (an earlier build's would be
+/// stopped as a quit), and never a keeper already on its way out or mid-switch, which then stops nothing
+#[test]
+fn a_stop_for_update_needs_a_host_that_takes_it_and_a_keeper_at_rest() {
+    let mut st = State::new(BuildSource::dev(), Settings::default());
+    assert!(stop_for_update_refusal(&st).is_some(), "a host that has not said it takes the line");
+    st.host_stops_for_update = true;
+    assert_eq!(stop_for_update_refusal(&st), None);
+    st.swapping = true;
+    assert_eq!(stop_for_update_refusal(&st), Some(SWITCH_IN_PROGRESS));
+    st.swapping = false;
+    st.stopping = true;
+    assert_eq!(stop_for_update_refusal(&st), Some(KEEPER_STOPPING));
+}

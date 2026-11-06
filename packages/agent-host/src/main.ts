@@ -937,8 +937,11 @@ try {
 start.at('ready')
 // This line is parsed by the supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
-// What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
-if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
+/*
+ * What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts), and that this host
+ * takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through the keeper
+ */
+if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null, stopsForUpdate: true } }))
 /*
  * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready, where the steps a
  * swap left for later run: by then the host it replaced is gone, so a host failing before ready never leaves the

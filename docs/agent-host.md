@@ -2358,9 +2358,9 @@ it, is the surface check in the table above: a `dropped` limitation there is exa
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → under the keeper: agents, terminals and commands keep running there; the new
-                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
-                → without a keeper: session processes die → a new streamEpoch → UIs resync
+host restarts   → under a keeper that holds children (before #1895 step 3, §4.3): agents, terminals and commands
+                  keep running there; the new host re-attaches to them mid-turn → a new streamEpoch → UIs resync
+                → otherwise (since step 3 under the keeper too): session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
@@ -2882,9 +2882,10 @@ by ticket, not by connection: only that window was given it, and a window that r
 
 The card rides on the `other` detail, `{ kind: 'other', raw: <question>, about: 'centralu_apply' }`, rather than a
 new kind or a new `centralu_update` action: a released window parses events strictly and drops one whose detail it
-cannot parse, while `other` with its text has been read by every build. The question says what the relaunch costs: the
-agents keep running, and the new window switches the host at once, which stops a Centralu tool call still running
-after 10 s in any session (an agent waiting on its children included). One window relaunches: one ticket goes per request, and the
+cannot parse, while `other` with its text has been read by every build. The question says what the relaunch costs: since
+#1895 step 3 the host restarts, so running turns in every session, the asker's included, stop and go on once it is back,
+and terminals and Run commands start again (`CENTRALU_APPLY_QUESTION`; before, it said the agents keep running and the new
+window's switch cuts a Centralu tool call still running after 10 s). One window relaunches: one ticket goes per request, and the
 keeper's relaunch is the single owner of the switch the new window makes. A replayed request or go starts nothing (the
 host is no longer asking, or the window no longer holds the ticket), a linked machine's apply events never reach a
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows
@@ -2932,11 +2933,10 @@ serves none. Stopping them at once instead was not done: a host of 0.1.0-beta.48
 (`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
 turns, and they would have ended as a quit's. Checked end to end by `scripts/keeper-children-integration.mjs`.
 
-The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. The
-relaunch itself loses nothing a keeper holds, but the relaunched window then switches the host by itself, and that
-switch is what a busy host can lose: a Centralu tool call still running after the 10 s drain (a `start_agent` or
-`agent_session` wait, an `ask_project`, an app tool) is cut and has to be tried again, and a host that cannot hand
-agents over stops running turns. An orchestrator with working children is almost always inside such a wait, so
+The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
+update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
+lose: a Centralu tool call still running (a `start_agent` or `agent_session` wait, an `ask_project`, an app tool) is cut and has to be
+tried again, and running turns are cut and continued. An orchestrator with working children is almost always inside such a wait, so
 dropping the busy rule would cut those waits on every automatic apply. An agent's explicit apply makes that choice for
 itself, as a person pressing the button does, and its own call is answered before the switch begins.
 

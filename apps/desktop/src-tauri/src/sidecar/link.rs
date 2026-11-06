@@ -218,18 +218,23 @@ impl KeeperLink {
         if let Ok(mut st) = self.state.lock() {
             st.shutting_down = true;
         }
-        if let Err(e) = client::stop_for_update(&self.sock) {
-            // Still attached and nothing stopped: this window goes on attaching as before
+        let asked = client::stop_for_update(&self.sock);
+        if let Err(e) = &asked {
+            // Refused, and still answering: it stopped nothing, and this window goes on attaching as before
             if client::alive(&self.sock) {
                 if let Ok(mut st) = self.state.lock() {
                     st.shutting_down = false;
                 }
+                return Err(e.clone());
             }
-            return Err(e);
+            // No answer, but its socket is gone: it is on its way out (it removes the socket first), so the relaunch goes on
+            // once it has, rather than leave this window with neither a keeper nor a host
+            eprintln!("[window] the keeper did not answer the stop for an update ({e}); relaunching once it has exited");
         }
         // It answers just before it exits: the next keeper waits for its lock, but the relaunch need not race it
         if let Some(pid) = keeper_pid {
-            crate::host_proc::wait_until(Duration::from_secs(5), || !centralu_keeper_core::os::pid_alive(pid));
+            let wait = if asked.is_ok() { Duration::from_secs(5) } else { crate::host_proc::STOP_FOR_UPDATE_WAIT };
+            crate::host_proc::wait_until(wait, || !centralu_keeper_core::os::pid_alive(pid));
         }
         Ok(())
     }

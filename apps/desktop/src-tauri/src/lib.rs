@@ -138,11 +138,12 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * "Apply now" (#352): relaunches the app from its bundle, which `centralu install` has just
  * replaced, so the new window is the new build.
  *
- * The keeper is told first, so the window closing is not "the last window left" even with
- * background mode off; the new window attaches within the keeper's grace and is told it is the
- * relaunched one, then applies the switch (keeper, then host) by itself when nothing can be lost.
- * A keeper too old to hold on is acceptable only with background mode on, where a window closing
- * never stopped anything; with it off this refuses, rather than cutting every turn.
+ * A keeper of #1895 step 3 is asked to stop the host for an update and exit (`announce_relaunch`): the relaunched
+ * window starts the new build's keeper, and its host continues what this one ended. An older keeper is told instead,
+ * so the window closing is not "the last window left" even with background mode off; the new window attaches within the
+ * keeper's grace and is told it is the relaunched one, then applies the switch (keeper, then host) by itself when nothing
+ * can be lost. A keeper too old to hold on is acceptable only with background mode on, where a window closing never
+ * stopped anything; with it off this refuses, rather than cutting every turn.
  *
  * A window that starts its host itself has no keeper to hold it: it stops the host for an update
  * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
