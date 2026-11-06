@@ -354,11 +354,6 @@ impl Supervisor {
         true
     }
 
-    /// Tells the keeper the window is about to relaunch (#352). A keeper of #1895 step 3 stops the host for an update and
-    /// exits (`stopsForUpdate`): the relaunched window starts the new build's keeper, and its host continues what this one
-    /// ended. An older keeper holds the host and agents until the new window attaches, whatever background mode says. Errs
-    /// when the keeper cannot (one older than #352 answers "unknown op"; one that could not stop says why, and stopped
-    /// nothing).
     /**
      * What "Apply now" does before the relaunch (#352, #1895): Ok once the relaunch may go on, else why not, as the update line
      * shows it. Where this window starts its host itself, it stops it for an update. A keeper of #1895 step 3 is asked to do

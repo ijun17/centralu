@@ -753,7 +753,8 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             drained: None,
             keeps_agents: snap.keeps_agents,
             // Not passed on (#1895 step 3): until the host says it again at its next start, "Apply now" asks this keeper to hold
-            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it
+            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it. And a keeper that took
+            // children over here hands them on again at its next switch (`held_children_on_handoff`), unless a new host started
             host_stops_for_update: false,
             // Not passed on: a handoff starts from an attached window's switch, which already
             // spent any relaunch grace (#352)
