@@ -577,6 +577,11 @@ export type OrchestratorTools = {
     action: 'check' | 'install' | 'apply',
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
+  /**
+   * Whether `readSession` reads this session of this host for the seat: the one read rule (#984, #1941), which a stop notice's quote of a session's
+   * words asks too (security-boundaries.md). Absent: it reads none
+   */
+  mayRead?(sessionId: string): boolean
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions); `project` narrows by name or id */
   listSessions(opts?: { project?: string }): Promise<OrchestratedSession[]>
   /**

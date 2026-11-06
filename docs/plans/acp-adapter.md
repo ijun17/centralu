@@ -751,6 +751,13 @@ frames stay here and say so, as #1498 asks.
 | resume after a host restart (no keeper) | recorded (load, resume) | recorded |
 | adoption after a host swap | fake peer | fake peer |
 | not logged in | — | recorded |
+| a command that fails, and a read of a missing file (`tool-error`) | recorded (the command's exit code is in the tool's `metadata`; the frame says `completed`) | not recorded: the plan was out of quota |
+| a command whose output the tool cuts (`long-output`) | recorded (the tool keeps the whole output in a file and says so in the card) | not recorded: out of quota |
+| a long Markdown answer (`markdown`) | recorded | not recorded: out of quota |
+| a Stop while a command runs (`interrupt-tool`) | recorded (an update came after the first cancel, so the adapter sent it once more; the recording cannot say which one stopped the command) | not recorded: out of quota |
+| Centralu's tools through the stdio bridge (`centralu-mail`, `centralu-agents`: `mail`, `recall`, `read_session`, `start_agent`) | recorded, with the real bridge process and `scripts/frames-bridge-host.mts` answering as the host | earlier hand-run recording of `recall` only (`centralu-tool`) |
+| the plan out of quota (`out-of-quota`) | — | recorded |
+| a tool of another MCP server | not attached: the adapter gives an ACP agent Centralu's bridge alone (`AcpSession.mcpServers`) | not attached |
 | sub-agents | — | PR 2 |
 
 ### 10.5 Refreshing

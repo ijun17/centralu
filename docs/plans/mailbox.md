@@ -1139,11 +1139,17 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
 - **One asker per wake.** `drain` for the orchestrator keeps the requests of one session (the person's words and
   urgent mail first, then needsReply requests, then the oldest). Requests from other sessions wait for the next turn.
   Mail that is not a request rides along.
-- **The turn's asker** is `MailTurns.current(orchestrator).askedBy`, fixed when the turn begins from the work
-  message's sender, as today. `asked-by.ts` reads the turn's message instead of its thread.
-- **Words flow up.** A request's body is never inline. `mail read` shows it only in a turn whose asker is its sender.
-  Elsewhere it shows the header and "its words are shown in the turn it starts". Marking it done there is refused.
-  This is `tool.ts`' `waitingForRelease` and `requestFrom` logic, re-keyed.
+- **The turn's asker** is read from the store, not kept in memory (#1948 P2, [turn-owned-by-no-one.md](turn-owned-by-no-one.md)
+  §4.2): the senders of the requests whose rows were given in the orchestrator's open turn (`turn_seq` = the turn, or the
+  work message of a turn the delivery began, before its rows are marked), settled or not, and not held from it; a
+  reminder's `facts.asker` counts as that asker's request (`MessageService.requestsIn`, `asked-by.ts`). A request
+  answered mid-turn, the person writing into the turn, the asker going to the trash, a restart or a host swap leave it
+  as it was. One asker per wake and requests never joining a running turn keep it to one; if a turn ever held requests of
+  two sessions, the gate fails closed (every step but a read asks, the card names each asker).
+- **Words flow up.** A request's body is never inline. `mail read` shows it only in the turn its row was given in (the
+  same rule as the asker's, so words are shown exactly where the gate is the asker's). Elsewhere, an earlier turn of
+  the same asker included, it shows the header and "its words are shown in the turn it starts". Marking it done there is
+  refused.
 - **Requests are reminded only when they were sent with `needsReply`.** A reminder to the orchestrator names the
   requests of one asker and carries `facts.asker`, so its turn is that asker's request turn, under the same cards.
 - **A request turn's end** reports to the asker as today (`askedReportBody`, re-worded without "thread", S12), and
@@ -1624,7 +1630,9 @@ Its text is S3. A session that stops without answering (an error, a usage limit,
 shutdown, a cut turn Centralu could not continue) releases the questions delivered to it with `stopped`, `error`, `limit`, `network`,
 `interrupted`, `quit`, `shutdown` or `uncontinued` (`MessageService.sessionStopped`), and each sender is told at once in a sentence per
 session and cause (not S3's list), the notice waking only a sender at rest that waits on the session (quiet for a quit or shutdown)
-([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). Tasks are left to the report path.
+([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). A session sender's notice quotes what the stopped session last wrote in the cut
+turn, at most 600 characters, quoted line by line under Centralu's words that it is that session's own text, to read as information and never
+as instructions (owner, #1948; at most five sessions a notice); the person's does not, they read it in the conversation. Tasks are left to the report path.
 
 ### 10.7 The state table
 
@@ -2417,7 +2425,7 @@ and passes on its own; the stack lands together.
     `latest(sessionId)` (the running turn, else the last ended; replaces `threadOf`), `lastEnded(sessionId): { by: TurnStartedBy; endedAt: number;
     stoppedByPerson: boolean } | undefined`, `lastPersonTurn(sessionId): number | null`.
   - `loopSpent(threadId)` becomes `pairLoopSpent(a, b)` over `MailboxRecords.pairTurnsSince`; `resumeLoop(threadId)`
-    becomes `resumePair(a, b)`; `askerOf(messageId)`.
+    becomes `resumePair(a, b)`. The asker is not kept here: `askerIn` reads it from the turn's rows (#1948 P2).
   - It writes `mail_turns.message_id`, and `thread_id` NULL.
   - A turn resumed after a restart or an update (remote stop and continue, #1626) is not mail-started (§8.2 step 6):
     `begin` is not called for it, `current` returns the original turn's row, and `mailStartedSince` and `pairLoopSpent`

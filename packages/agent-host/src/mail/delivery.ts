@@ -478,7 +478,7 @@ export class MailDelivery {
     const quiet = !drained.wake
 
     // A turn mail starts is known before the session's first event of it, and forgotten if the tool does not take the input
-    const turn = quiet ? undefined : this.turns?.begin(sessionId, { workMessage: drained.workMessage, starter: this.starterOf(drained), asker: drained.asker })
+    const turn = quiet ? undefined : this.turns?.begin(sessionId, { workMessage: drained.workMessage, starter: this.starterOf(drained) })
     const cancelTurn = () => {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }

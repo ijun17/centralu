@@ -2279,7 +2279,37 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    is tapped, so a recording holds its stream-json as the SDK read and wrote it, and `claude/replay.test.ts` plays it
    through the real SDK and adapter (`streamJsonCodec`). A test that reads one message takes it from a recording
    (`claude/recorded.test-helpers.ts`); a hand-written message stays only for what no real run sends or cheaply can
-   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings.
+   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings. A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
+   Codex's are made by `pnpm exec tsx scripts/frames-record.mts codex` (its smallest model, in a settings folder of its own:
+   `CODEX_HOME` holds a copy of the sign-in alone, which is put back into the person's file if Codex refreshed it) and kept in
+   `adapters/codex/recordings/codex-<version>/`; `codex/replay.test.ts` plays them through the real adapter (`codexCodec`: JSON-RPC
+   with the recorded `<cwd>` read as the replay's folder), and `normalize.test.ts` and `compact.test.ts` take their
+   notifications from them (`codex/recorded.test-helpers.ts`). The tests that mock the whole client stay hand-written: they set
+   up races (a response before its notification, a late `turn/start` answer) that no recording can be made to repeat.
+   Antigravity's are made by `scripts/frames-record.mts antigravity` against the installed `agy acp` (a data folder, `--gemini-dir`
+   and home of its own, with a copy of the sign-in token alone), and a version the adapter does not yet pin is kept beside the pinned
+   one ([plans/antigravity-acp.md](plans/antigravity-acp.md) §10.1).
+   A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
+   A conversation whose app-server outlives a host (a swap under the keeper) is recorded from the swap on
+   (`codex/swap-scenarios.test-helpers.ts`, `adopt-running` and `adopt-failed`) and replayed by `codex/adopt.test.ts`: the second
+   `initialize` is refused, `thread/resume` answers `active` for a running turn and `systemError` for a failed one. A scenario with
+   `settings: 'mcp'` runs against an MCP server of its own in the private `CODEX_HOME`. Codex 0.160's default tool set offers no
+   plan tool, so no plan update is recorded.
+   Codex's calls to Centralu's own tools need a real host behind the bridge, so they are recorded through one
+   (`scripts/frames-record-host.mts`: the host from source in a temporary data folder, its own `HOME` and `CODEX_HOME`, driven over
+   its WebSocket like a window; `codex/centralu-scenarios.test-helpers.ts`) and replayed by `codex/centralu.test.ts`, which does
+   not compare a thread's `config` and tool instructions (the bridge's address and credential, words that change with the build).
+   Past the host's own rules, the same script records the situations a host creates around a session: a context filled past
+   `COMPACT_FLOOR_TOKENS` by four commands' output so `compact_self` really compacts (`centralu-compact-real`: the nudge steered into a
+   running turn, refused by the app-server when the turn was ending, then `thread/compact/start` and the context falling from 124k to 6k;
+   a bulky output is cut in the recording, `cutText`); a session woken by mail (`centralu-wake`); `agent_session` send and wait;
+   and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
+   session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
+   compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

@@ -22,6 +22,10 @@
  *   what the CLI says of the person's setup (account, plugins, connectors, commands, skills, agents) keeps only what ships
  *   with the CLI; a path under a placeholder folder reads with `/`; the folder's name as Claude Code files it
  *   (`C--Users-name-…`) is a placeholder too; the deltas of a streamed answer or tool input are scrubbed joined, as chunks are;
+ * - Codex's app-server: its ids are UUIDs (kept in shape and numbered, as Claude's) and the provider's `msg_`, `rs_`, `call_` ids;
+ *   the host's name (`remoteControl/status/changed`), the account's plan and how much of its allowance was used are replaced;
+ * - Centralu's bridge in a Codex thread's config (`frames-record-host.mts`): the node program, the bridge file, the host's port and the
+ *   session's credential are placeholders;
  * - stderr is dropped.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -39,11 +43,14 @@ const BUILTIN_AGENTS = new Set(['general-purpose', 'Explore', 'Plan', 'statuslin
 /** The deltas of a streamed answer, and the field of each that holds the piece */
 const DELTA_FIELDS: Record<string, string> = { text_delta: 'text', thinking_delta: 'thinking', input_json_delta: 'partial_json' }
 
-const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g
+const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b|\bccb\d+:[\w-]+:[\w-]{16,}/g
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g
 /** Another person's home or temp folder: what the machine's own folders did not already cover */
 const FOREIGN: readonly [RegExp, string][] = [
   [/(?:\/private)?\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+\/T(?=[/\\\s"'`]|$)/g, '<tmp>'],
+  // The folders above the temp folder, as a tool lists the ancestors of the one it works in (Codex's `projects` trust map)
+  [/(?:\/private)?\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+(?=[\s"'`]|$)/g, '<tmp-parent>'],
+  [/(?:\/private)?\/var\/folders\/[^/\s"'`]+(?=[\s"'`]|$)/g, '<tmp-parent>'],
   [/\b[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'`<>]+/g, '<home>'],
   [/(?<![\w<])(?:\\|\/)?Users[\\/]+(?!Shared\b)[^\\/\s"'`<>]+(?=[\\/])/g, '<home>'],
   [/\/home\/[^/\s"'`<>]+/g, '<home>'],
@@ -52,7 +59,15 @@ const FOREIGN: readonly [RegExp, string][] = [
 /** The kinds of update whose text an agent streams in pieces */
 const CHUNKED = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
 
-export type ScrubPlaces = { cwd: string; home?: string; tmp?: string; user?: string }
+export type ScrubPlaces = {
+  cwd: string
+  home?: string
+  tmp?: string
+  user?: string
+  /** What a UUID in a text becomes, so that one cut across two streamed chunks (a path with a session id in it) is replaced whole */
+  uuid?: (id: string) => string
+}
+export type ScrubOptions = Omit<ScrubPlaces, 'cwd' | 'home'> & { /** A text longer than this is cut to its start and the number of characters left out: a bulky output that only fills a context */ cutText?: number }
 
 /** A Windows path also appears without its drive (measured: an OpenCode tool title), and with `/` for `\` */
 function variants(p: string): string[] {
@@ -61,7 +76,7 @@ function variants(p: string): string[] {
 }
 
 /** Where in `s` something must be replaced, earliest first and never overlapping */
-function spans(s: string, places: Required<ScrubPlaces>): { start: number; end: number; with: string }[] {
+function spans(s: string, places: Places): { start: number; end: number; with: string }[] {
   const found: { start: number; end: number; with: string }[] = []
   const literal = (needle: string, replacement: string) => {
     for (let i = s.indexOf(needle); i >= 0; i = s.indexOf(needle, i + needle.length)) found.push({ start: i, end: i + needle.length, with: replacement })
@@ -79,6 +94,7 @@ function spans(s: string, places: Required<ScrubPlaces>): { start: number; end: 
   }
   for (const [re, replacement] of FOREIGN) pattern(re, replacement)
   if (places.user.length >= 3) pattern(new RegExp(`\\b${places.user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '<user>')
+  if (places.uuid) for (const m of s.matchAll(UUID_ANYWHERE)) found.push({ start: m.index, end: m.index + m[0].length, with: places.uuid(m[0].toLowerCase()) })
   pattern(SECRET, '<secret>')
   pattern(EMAIL, '<email>')
   // Earliest first, the longest where two start together; one that overlaps a kept one is dropped
@@ -152,8 +168,10 @@ function separatorsAfterFolders(joined: string, found: readonly { start: number;
   return { slashes, drops }
 }
 
-function withDefaults(p: ScrubPlaces): Required<ScrubPlaces> {
-  return { cwd: p.cwd, home: p.home ?? homedir(), tmp: p.tmp ?? tmpdir(), user: p.user ?? safeUser() }
+type Places = Required<Omit<ScrubPlaces, 'uuid'>> & Pick<ScrubPlaces, 'uuid'>
+
+function withDefaults(p: ScrubPlaces): Places {
+  return { cwd: p.cwd, home: p.home ?? homedir(), tmp: p.tmp ?? tmpdir(), user: p.user ?? safeUser(), ...(p.uuid ? { uuid: p.uuid } : {}) }
 }
 
 function safeUser(): string {
@@ -164,8 +182,8 @@ function safeUser(): string {
   }
 }
 
-export function scrub(frames: readonly Frame[], cwd: string, home: string = homedir(), more: Omit<ScrubPlaces, 'cwd' | 'home'> = {}): unknown[] {
-  const places: ScrubPlaces = { cwd, home, ...more }
+export function scrub(frames: readonly Frame[], cwd: string, home: string = homedir(), more: ScrubOptions = {}): unknown[] {
+  const { cutText, ...rest } = more
   const ids = new Map<string, string>()
   const counters: Record<string, number> = {}
   const stable = (kind: string, value: string) => {
@@ -180,11 +198,25 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     if (!ids.has(key)) ids.set(key, String((counters[kind] = (counters[kind] ?? 0) + 1)))
     return ids.get(key)!
   }
+  // One already a placeholder (a text scrubbed joined, then each piece again) is not numbered twice
+  const placeholderId = (u: string): string => /^0{4}\d{4}-0000-4000-8000-/.test(u) ? u : `${numbered('uuid', u).padStart(8, '0')}-0000-4000-8000-${u.endsWith(CENTRALU_INPUT_MARK) ? CENTRALU_INPUT_MARK : numbered('tail', u).padStart(12, '0')}`
+  // Ids in a streamed text are replaced where the text is scrubbed joined, so one cut across two chunks goes whole
+  const places: ScrubPlaces = { cwd, home, ...rest, ...(rest.uuid ? {} : { uuid: placeholderId }) }
   const claudeIds = (s: string): string =>
     s
-      .replace(UUID_ANYWHERE, (u) => `${numbered('uuid', u.toLowerCase()).padStart(8, '0')}-0000-4000-8000-${u.toLowerCase().endsWith(CENTRALU_INPUT_MARK) ? CENTRALU_INPUT_MARK : numbered('tail', u.toLowerCase()).padStart(12, '0')}`)
+      .replace(UUID_ANYWHERE, (u) => placeholderId(u.toLowerCase()))
+      // OpenCode's ids: `tool_…` names a tool output's file, and its leading digits are a time
+      .replace(/\btool_[A-Za-z0-9]{16,}/g, (t) => `tool_${numbered('tool', t).padStart(6, '0')}`)
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
-      .replace(/^(msg|req)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
+      // A model response's items (Codex: `msg_`, `rs_` reasoning, `call_` and `fc_` tool calls) carry the provider's ids
+      .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
+      // The directory the run's settings and threads were in, whose name is random
+      .replace(/frames-data-[A-Za-z0-9]+/g, 'frames-data')
+      // The folder a recording run works in, which a tool also names without its path (a project's name, a session's title)
+      .replace(/(frames-record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g, '$1')
+      // The ids of a host's mailbox: the hub's (one per host) and a message's (a ULID)
+      .replace(/\bhub-[0-9a-f]{8}\b/g, 'hub-00000001')
+      .replace(/\bm_[0-9A-Z]{26}\b/g, (m) => `m_${numbered('mail', m).padStart(26, '0')}`)
   // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server and its apps' are not
   const mcpNames = (s: string): string =>
     s.replace(/\bmcp__(.+?)__(\w+)/g, (all, server: string, tool: string) =>
@@ -208,8 +240,21 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'messageId') return stable('msg', v)
       if (key === 'request_id' && !/^req_/.test(v)) return stable('rid', v)
       if (key === 'serverName') return stable('server', v)
+      // Codex: the account's plan, which says more of the person than the recording needs
+      if (key === 'planType') return '<plan>'
+      // Centralu's bridge, as the host puts it in a Codex thread's config: the program, its file, the host's address and the session's credential
+      if (key === 'CC_BRIDGE_TOKEN' || key === 'CC_HOST_CREDENTIAL') return '<secret>'
+      if (key === 'CC_HOST_URL') return 'ws://127.0.0.1:<port>'
+      if (/orchestrator-bridge\.mjs$/.test(v)) return '<bridge>'
+      if (key === 'command' && /(?:^|[\\/])node(?:\.exe)?$/.test(v)) return '<node>'
+      // Codex: a thread's rollout file is named for the minute it began in local time, which says the time zone
+      if (key === 'path' && /rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/.test(v)) return walk(v.replace(/rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/, 'rollout-2000-01-01T00-00-00-'), 'rolloutPath')
+      // Codex: the machine's system, as `initialize` answers with it
+      if (key === 'userAgent') return v.replace(/\([^)]*\d+\.\d+[^)]*; [\w-]+\)/, '(<os>; <arch>)')
       if (key === 'signature' && v.length > 40) return '<signature>'
-      return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      const scrubbed = mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      // Cut after scrubbing: the start that stays has lost its paths and ids like the rest
+      return cutText !== undefined && scrubbed.length > cutText ? `${scrubbed.slice(0, 200)}…<cut ${scrubbed.length - 200} characters>` : scrubbed
     }
     if (Array.isArray(v)) {
       // Size, not secrecy: the picture of the window as a grid, and the connectors' tools, are the bulk of a context reading and of the init lists
@@ -217,10 +262,19 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'tools') return v.filter((t) => typeof t !== 'string' || !t.startsWith('mcp__') || t.startsWith('mcp__centralu__') || t.startsWith('mcp__app-')).map((t) => walk(t))
       if (key === 'models') return v.slice(0, 3).map((m) => walk(m))
       if (key === 'commands' || key === 'agents' || key === 'skillFrontmatter') return v.map((item) => ownSetup(key, item, command, agent, walk))
+      // Codex's `skills/list`: those of the CLI stay (scope `system`); the person's own (`user`, `repo`: from their home folder, a plugin, the project) keep a number and nothing else
+      if (key === 'skills' && v.some((x) => x && typeof x === 'object' && 'scope' in x && 'path' in x)) {
+        return v.map((item) => {
+          const i = (item ?? {}) as Record<string, unknown>
+          return i.scope === 'system' || typeof i.name !== 'string' ? walk(item) : { name: stable('skill', i.name), description: '', path: '<skill>', scope: i.scope, enabled: i.enabled, pluginId: null }
+        })
+      }
       return v.map((x) => walk(x, key === 'user_message_uuids' ? key : undefined))
     }
     if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>
+      // Antigravity: the account's plan, as `initialize` and `session/new` answer with it (`_meta.antigravity.tier`)
+      if (key === 'tier' && typeof o.name === 'string') return { ...o, name: '<plan>', id: '<plan>', upgradeUri: '<url>' }
       if (key === 'account') return { email: '<email>', organization: '<organization>', subscriptionType: '<plan>', apiProvider: o.apiProvider }
       if (o.type === 'system' && o.subtype === 'init') {
         const plugins = asList(o.plugins).map((p) => (p && typeof p === 'object' && 'path' in p && p.path !== 'builtin' ? { name: stable('plugin', String((p as { name?: unknown }).name)), path: '<plugin>', source: '<plugin>' } : p))
@@ -234,8 +288,12 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
         const list = Array.isArray(o.availableCommands) ? o.availableCommands : []
         return { ...o, availableCommands: list.map((_c, i) => ({ name: `command-${i + 1}` })) }
       }
-      return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, walk(x, k)]))
+      // A name that is a path (Codex's `projects` trust map is keyed by folder) is a path like any other text
+      return Object.fromEntries(Object.entries(o).map(([k, x]) => [/[\\/]/.test(k) ? scrubPieces([k], places)[0]! : k, walk(x, k)]))
     }
+    // Codex: how much of the account's allowance was used, and when it resets, are the person's, not the protocol's
+    if (typeof v === 'number' && key === 'usedPercent') return 12
+    if (typeof v === 'number' && key === 'resetsAt') return 1_800_000_000
     return v
   }
   const out: { t: number; dir: string; msg?: unknown; code?: number | null; signal?: string | null }[] = []

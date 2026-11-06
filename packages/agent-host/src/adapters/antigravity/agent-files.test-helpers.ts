@@ -93,9 +93,9 @@ export async function endHosts(): Promise<void> {
   for (const end of hosts.splice(0)) await end()
 }
 
-/** One of the committed recordings of 1.4.3 (`recordings/antigravity-1.4.3/<name>.jsonl`) */
-export function agyRecording(name: string): Recording {
-  return loadRecording(fileURLToPath(new URL(`./recordings/antigravity-1.4.3/${name}.jsonl`, import.meta.url)))
+/** One of the committed recordings (`recordings/antigravity-<version>/<name>.jsonl`; 1.4.3, the release Centralu pins, unless a version is asked) */
+export function agyRecording(name: string, version = '1.4.3'): Recording {
+  return loadRecording(fileURLToPath(new URL(`./recordings/antigravity-${version}/${name}.jsonl`, import.meta.url)))
 }
 
 export type Driven = {

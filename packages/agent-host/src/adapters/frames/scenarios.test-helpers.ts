@@ -1,5 +1,6 @@
 import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
+import { fakeApps, fakeCentraluTools } from './fakes.test-helpers.js'
 
 /**
  * The scenarios a recording is made of, at the level of the adapter contract (`SessionHandle`), so any adapter (ACP or a
@@ -15,7 +16,7 @@ export type Driver = {
   /** The session's working folder */
   readonly cwd: string
   /** Files the real tool is to find in its working folder; a replay has nothing to write them with */
-  seed(files: Record<string, string>): void
+  seed(files: Record<string, string | Buffer>): void
   session(): SessionHandle
   /** The next event after the ones already waited for that `pick` accepts: resolved when it is emitted, never polled */
   waitFor(label: string, pick: (e: NormalizedEvent) => boolean): Promise<NormalizedEvent>
@@ -27,7 +28,9 @@ export type Driver = {
 
 /** The tools whose recordings come from the scenarios that name no tool of their own */
 const ACP_TOOLS: readonly string[] = ['cursor-agent', 'opencode']
-const ANY_TOOL: readonly string[] = [...ACP_TOOLS, 'claude']
+const ANY_TOOL: readonly string[] = [...ACP_TOOLS, 'claude', 'codex']
+/** The tools that are not ACP: the same scenarios, but each is recorded with its own presets and prompts */
+const CLI_TOOLS: readonly string[] = ['claude', 'codex']
 
 export type Scenario = {
   name: string
@@ -38,8 +41,17 @@ export type Scenario = {
   /** A model the scenario asks for in place of the run's (a failed turn names one that does not exist) */
   model?: string
   preset?: PermissionPreset
+  /** The tool is to refuse to open a session (it is signed out): the run opens none and the scenario is the refusal */
+  signedOut?: boolean
+  /**
+   * The tool's own settings for the run (Codex: its settings folder holds them): `mcp` sets it up with a small MCP server,
+   * `probe`, whose one tool `ping` answers `pong`
+   */
+  settings?: 'mcp'
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
+  /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */
+  session?: () => Partial<CreateSessionOpts>
   run(d: Driver): Promise<void>
 }
 
@@ -48,8 +60,8 @@ const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
   d.session().send(text, opts)
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
-/** A command the tool asks about: Claude Code runs a read-only one such as echo without asking, so it is given one that writes */
-const commandAsked = (d: Driver, n: number | string) => (d.tool === 'claude' ? `touch probe-${n}.txt` : `echo probe-${n}`)
+/** A command the tool asks about: Claude Code and Codex run a read-only one such as echo without asking, so they are given one that writes */
+const commandAsked = (d: Driver, n: number | string) => (CLI_TOOLS.includes(d.tool) ? `touch probe-${n}.txt` : `echo probe-${n}`)
 /** A turn in which every card asked is answered `decide` until the turn ends; the kinds of card asked, in order */
 const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): Promise<string[]> => {
   d.session().send(text)
@@ -61,6 +73,9 @@ const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): 
     d.session().respondApproval(e.requestId, decide)
   }
 }
+
+/** A 2x2 red PNG: an image for a tool to read */
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==', 'base64')
 
 export const SCENARIOS: readonly Scenario[] = [
   {
@@ -90,7 +105,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // A model the API does not have: the turn fails at once
     name: 'failed',
-    tools: ['claude'],
+    tools: CLI_TOOLS,
     model: 'no-such-model-xyz',
     async run(d) {
       d.session().send('Reply with exactly: hello')
@@ -99,12 +114,13 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'interrupt-tool',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     preset: 'auto',
     async run(d) {
       // Not `sleep 120`: Claude Code refuses a long sleep before it runs (measured), and nothing would be interrupted
       d.session().send('Run this shell command and wait for it: node -e "setTimeout(() => {}, 120000)"')
-      await d.waitFor('the command call', (e) => e.type === 'tool_call' && (e.summary.tool === 'Bash' || e.summary.tool === 'PowerShell'))
+      // Claude Code may look up a tool first (ToolSearch); the ACP tools name their shell their own way, so there it is any call that is not a file read
+      await d.waitFor('the command call', (e) => e.type === 'tool_call' && (d.tool === 'claude' ? e.summary.tool === 'Bash' || e.summary.tool === 'PowerShell' : e.summary.tool !== 'Read'))
       d.session().interrupt()
       await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
       await turn(d, 'Say ok.')
@@ -112,17 +128,211 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'big-output',
-    tools: ['claude'],
+    tools: CLI_TOOLS,
     async run(d) {
       await turn(d, 'Count from 1 to 150, one number per line, and nothing else.')
     },
+  },
+  {
+    // A subagent with a tool of its own, and its result
+    name: 'subagent',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.seed({ 'note.txt': 'The sky is red.\n' })
+      await turn(d, 'Use the Agent tool to start a subagent. Run it in the foreground (not in the background) and wait for its result. The subagent is to use the Read tool on note.txt and report its text. Then tell me in one sentence what it reported.')
+    },
+  },
+  {
+    // AskUserQuestion answered with its first option
+    name: 'question',
+    tools: ['claude'],
+    async run(d) {
+      d.session().send('Use the AskUserQuestion tool to ask me which colour to use, with exactly two options: red and blue. Then tell me which one I chose.')
+      const card = await d.waitFor('a question card', (e) => e.type === 'question_request')
+      if (card.type !== 'question_request') return
+      const q = card.questions[0]!
+      d.session().answerQuestion!(card.requestId, [{ question: q.question, answers: [q.options[0]!.label] }])
+      await d.waitFor('the end of the turn', ended)
+    },
+  },
+  {
+    // The question card closed with a Stop instead of an answer
+    name: 'question-declined',
+    tools: ['claude'],
+    async run(d) {
+      d.session().send('Use the AskUserQuestion tool to ask me which colour to use, with exactly two options: red and blue.')
+      await d.waitFor('a question card', (e) => e.type === 'question_request')
+      d.session().interrupt()
+      await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
+    },
+  },
+  {
+    // Plan mode: a plan proposed, then approved
+    name: 'plan',
+    tools: ['claude'],
+    async run(d) {
+      d.session().send('Use the EnterPlanMode tool, then plan how you would add a file named plan-done.txt containing the word ok, and present the plan with the ExitPlanMode tool. Do not write the file.')
+      for (;;) {
+        const e = await d.waitFor('a card or the end of the turn', (x) => x.type === 'approval_request' || x.type === 'question_request' || ended(x))
+        if (e.type === 'approval_request') d.session().respondApproval(e.requestId, 'allow')
+        else if (e.type === 'question_request') d.session().answerQuestion!(e.requestId, [{ question: e.questions[0]!.question, answers: [e.questions[0]!.options[0]!.label] }])
+        else return
+      }
+    },
+  },
+  {
+    // A task started in the background, polled for its output, finished
+    name: 'background-poll',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send('Start this in the background with the Bash tool (run_in_background): sleep 3 && echo poll-done . Then run `sleep 6` in the foreground, then read the output file that the background start reported with the Read tool, and tell me what it holds.')
+      await d.waitFor('the task ended', (e) => e.type === 'background_tasks' && (e.ended?.length ?? 0) > 0)
+      await d.waitFor('the end of the turn', ended)
+    },
+  },
+  {
+    // A task still running when the turn ends, and the session closed with it running
+    name: 'background-open',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send('Start this in the background with the Bash tool (run_in_background): sleep 90 . Then say started and end your turn.')
+      await d.waitFor('the background task', (e) => e.type === 'background_tasks' && e.live.length > 0)
+      await d.waitFor('the end of the turn', ended)
+    },
+  },
+  {
+    name: 'centralu-mail',
+    tools: ['claude', ...ACP_TOOLS, 'antigravity'],
+    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    async run(d) {
+      await turn(d, 'Use the mail tool of the centralu server to read your inbox, then send a message to "Docs worker" saying: use LICENSE. Then say done.')
+    },
+  },
+  {
+    name: 'centralu-agents',
+    tools: ['claude', ...ACP_TOOLS, 'antigravity'],
+    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    async run(d) {
+      await turn(d, 'Use the recall tool of the centralu server to search for "naming". Then use its read_session tool on the session it found. Then use its start_agent tool with the task "list the notes". Then summarise all three in two sentences.')
+    },
+  },
+  {
+    name: 'centralu-compact',
+    tools: ['claude'],
+    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    async run(d) {
+      await turn(d, 'Call the compact_self tool of the centralu server with the focus "the naming decision", and tell me what it answered.')
+    },
+  },
+  {
+    // A tool of an attached app (another MCP server)
+    name: 'mcp-app',
+    tools: ['claude'],
+    session: () => ({ apps: fakeApps() }),
+    async run(d) {
+      await turn(d, 'Use the forecast tool of the weather app for the city Paris, and tell me what it says.')
+    },
+  },
+  {
+    // A command that exits with a non-zero code, and a Read of a file that is not there
+    name: 'tool-error',
+    tools: ['claude', ...ACP_TOOLS],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command and tell me its exit code: node -e "console.error(\'boom\'); process.exit(3)" . Then use the Read tool on missing-file.txt and tell me what happened.')
+    },
+  },
+  {
+    // A command whose output is far past what the CLI hands the model
+    name: 'long-output',
+    tools: ['claude', ...ACP_TOOLS],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command and say only how many lines you saw at the end: node -e "for (let i = 1; i <= 6000; i++) console.log(\'line \' + i)"')
+    },
+  },
+  {
+    name: 'markdown',
+    tools: ['claude', ...ACP_TOOLS],
+    async run(d) {
+      await turn(d, 'Without using any tool, answer in Markdown: a heading, a short bulleted list of three items, a TypeScript code block of a two-line function, and a table of three rows with columns Name and Value.')
+    },
+  },
+  {
+    // An image the agent reads
+    name: 'image',
+    tools: ['claude'],
+    preset: 'edits',
+    async run(d) {
+      d.seed({ 'picture.png': PNG })
+      await turn(d, 'Use the Read tool on picture.png and tell me, in one word, its colour.')
+    },
+  },
+  {
+    // A turn on the PowerShell tool, which Claude Code offers on Windows
+    name: 'powershell',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Use the PowerShell tool to run: Write-Output "ps-ok". Then say done.')
+    },
+  },
+  {
+    // Cursor out of its plan's quota answers every prompt with a plain sentence and ends the turn; recorded on an account in that state
+    name: 'out-of-quota',
+    tools: ['cursor-agent'],
+    async run(d) {
+      await turn(d, 'Reply with exactly: hello')
+    },
+  },
+  {
+    // Antigravity: a command and an edit allowed, and a read outside the folder that its harness refuses
+    name: 'permissions',
+    tools: ['antigravity'],
+    async run(d) {
+      const outside = `${d.cwd}-outside/secret.txt`
+      // A folder of its own beside the working folder, named for it, so two runs never share one
+      d.seed({ 'notes.txt': 'line one\n', [`../${d.cwd.split(/[\\/]/).at(-1)}-outside/secret.txt`]: 'The secret word is plover.\n' })
+      const asked = await answeredTurn(d, `Do these three steps in order, using your tools: 1) run the shell command \`echo hello-from-shell\`; 2) append a new line with the text \`edited\` to notes.txt in the current folder; 3) read the file ${outside} and tell me its exact contents. Then summarise in one line.`, 'allow')
+      if (asked.length === 0) throw new Error('permissions: nothing was asked about')
+    },
+  },
+  {
+    // Antigravity: a read, then a command denied; the turn goes on to its end
+    name: 'deny',
+    tools: ['antigravity'],
+    async run(d) {
+      d.seed({ 'decoy.json': '{"decoy_client_id": "none", "decoy_note": "recording decoy"}\n' })
+      await answeredTurn(d, 'Use your file viewing tool (not the shell) to read the file decoy.json in the current folder and tell me its top-level JSON keys and the value of decoy_note.', 'allow')
+      await answeredTurn(d, 'Run the shell command `echo answer-deny` once. If it is not allowed, do not retry and do not use any other tool; just say so.', 'deny')
+    },
+  },
+  {
+    // Antigravity: the conversation opened again in a new process (session/load), whose replay is not shown again
+    name: 'load',
+    tools: ['antigravity'],
+    async run(d) {
+      await answeredTurn(d, 'Run the shell command `echo hello-from-shell`. Then say done.', 'allow')
+      await d.reopen()
+      await answeredTurn(d, 'What exact shell command did you run earlier in this conversation? One line.', 'allow')
+    },
+  },
+  {
+    // Antigravity with no sign-in of its own: session/new is refused, which is a sign-in in Centralu
+    name: 'signed-out',
+    tools: ['antigravity'],
+    signedOut: true,
+    async run() {},
   },
   {
     name: 'basic',
     tools: ANY_TOOL,
     // Claude Code asks before it writes a file unless the preset grants edits in the folder, and OpenCode before every write under Normal;
     // this scenario answers no card (it would wait for ever)
-    presetFor: { claude: 'edits', opencode: 'auto' },
+    presetFor: { claude: 'edits', opencode: 'auto', codex: 'auto' },
     async run(d) {
       await turn(d, 'Reply with exactly: hello')
       await turn(d, 'Create a file named probe.txt containing the word hi, using your tools. Then say done.')
@@ -159,6 +369,67 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // A command that outlasts the first wait for its output (Codex hands it back as a process it keeps running), then the answer after it
+    name: 'long-command',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command and wait until it finishes: sleep 12 && echo long-done . Then say done.')
+    },
+  },
+  {
+    // A call to a tool of an MCP server the person set up: its arguments and its answer
+    name: 'mcp-call',
+    tools: ['codex'],
+    preset: 'auto',
+    settings: 'mcp',
+    async run(d) {
+      await turn(d, 'Call the ping tool of the probe MCP server once, then tell me in one word what it answered.')
+    },
+  },
+  {
+    // A command that exits with an error: the card ends not ok with the command's own words, and the turn goes on to say so
+    name: 'command-failed',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command: ls /no-such-folder-xyz . It is expected to fail. Then say what happened in one sentence.')
+    },
+  },
+  {
+    // A command whose output is long: the card keeps the output whole while the screen shows the start of it
+    name: 'long-output',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command: seq 1 3000 . Then say done.')
+    },
+  },
+  {
+    // The thread's state when it is opened again after a turn the person stopped: what the tool answers `thread/resume` with
+    name: 'resume-interrupted',
+    tools: ['codex'],
+    async run(d) {
+      d.session().send('Count from 1 to 300, one number per line.')
+      await d.waitFor('the first output', (e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
+      d.session().interrupt()
+      await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
+      await d.reopen()
+      await turn(d, 'Say ok.')
+    },
+  },
+  {
+    // ... and after a turn that failed: a model the API does not have
+    name: 'resume-failed',
+    tools: ['codex'],
+    model: 'no-such-model-xyz',
+    async run(d) {
+      d.session().send('Reply with exactly: hello')
+      await d.waitFor('the failure', (e) => e.type === 'error')
+      await d.reopen()
+    },
+  },
+  {
     name: 'interrupt-approval',
     tools: ANY_TOOL,
     asksForCommands: true,
@@ -187,6 +458,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'die',
+    tools: ANY_TOOL,
     async run(d) {
       d.session().send('Write a 300-word essay on tides.')
       await d.waitFor('the first output', (e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
@@ -206,6 +478,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562 review)
     name: 'files',
+    tools: ANY_TOOL,
     preset: 'auto',
     async run(d) {
       await turn(d, 'Using your file tools, not the shell: create a file named gone.txt containing x, then delete gone.txt. Then say done.')
@@ -238,7 +511,7 @@ export async function drive(
   sessionId: string,
   bound: number,
   killer: () => void,
-  how: { tool?: string; session?: Partial<CreateSessionOpts>; seed?: (files: Record<string, string>) => void } = {},
+  how: { tool?: string; session?: Partial<CreateSessionOpts>; seed?: (files: Record<string, string | Buffer>) => void } = {},
 ): Promise<NormalizedEvent[]> {
   const events: NormalizedEvent[] = []
   let seen = 0
@@ -254,7 +527,13 @@ export async function drive(
       }
     }
   }
-  const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
+  const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...scenario.session?.(), ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
+  if (scenario.signedOut) {
+    // The refusal is the recording: no session opens
+    const refusal = await adapter.createSession(opts, emit).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string })
+    if (refusal?.code !== 'not_logged_in') throw new Error(`${scenario.name}: expected a refusal as signed out, got ${refusal ? JSON.stringify(refusal.code) : 'a session'}`)
+    return events
+  }
   let handle = await adapter.createSession(opts, emit)
   const driver: Driver = {
     events,
