@@ -205,6 +205,23 @@ describe('a turn ends without finishing', () => {
     expect(stopNotices(asker)[0]!.message.body).not.toContain(QUOTE_INTRO)
   })
 
+  it('quotes nothing of the asker’s own turn that took in a message the person sent before the CLI marked the turn’s start', async () => {
+    const asker = await w.callerSession()
+    const child = await w.callerSession()
+    // A turn before, so the rows looked at start where that turn began (`latestTurnInputs`)
+    handleOf(child).answer('earlier work done')
+    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+    // The asker's mail starts the turn; the person's message is stored before the tool says it works, so its row is at the turn's start row
+    const question = m.service.send(addr(asker), { to: [addr(child)], text: 'which branch is the release on?', needsReply: true }).message
+    const seq = m.turns.begin(child, { workMessage: null, starter: question.id })
+    w.store.mailbox.markDelivered(addr(child), [question.id], Date.now(), seq)
+    await w.mgr.send(child, 'the key is k3y', undefined, undefined, true)
+    says(child, 'Using the key k3y on the release branch.')
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.body).not.toContain('Using the key')
+  })
+
   it('quotes the asker’s own turn that took in only more of the asker’s own messages', async () => {
     const { asker, child } = await askedOwnTurn()
     await w.mgr.send(child, 'also check CI', undefined, { sessionId: asker, name: 'Asker' })

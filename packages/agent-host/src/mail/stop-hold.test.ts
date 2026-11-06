@@ -8,8 +8,8 @@ import { parseAddress } from './address.js'
 import { MessageService, OLD_PATH_WAIT_MS } from './messages.js'
 import { A, B, C, HOST, W, world } from './messages.test-helpers.js'
 
-/** A message service over the helpers' store with the stop notice's hooks under the test's control */
-function stops() {
+/** A message service over the helpers' store with the stop notice's hooks under the test's control; `noInputs`: with no `turnInputs` */
+function stops(o: { noInputs?: boolean } = {}) {
   const w = world()
   const words = { now: 'Rebased onto main; running the tests.' as string | null }
   const reads = { ok: true }
@@ -20,7 +20,7 @@ function stops() {
     now: () => w.clock.t,
     stoppedWords: () => words.now,
     mayRead: () => reads.ok,
-    turnInputs: (id) => entered.get(id) ?? [],
+    ...(o.noInputs ? {} : { turnInputs: (id: string) => entered.get(id) ?? [] }),
   })
   /** `sender` asks `to` a question that starts `to`'s next turn (`own`), or is given into a turn the CLI started */
   const askInTurn = (sender: string, to: string, own = true) => {
@@ -112,5 +112,38 @@ describe('what a stop notice quotes of the cut turn', () => {
     const [notice] = s.notices(A)
     expect(notice?.ids).toEqual([q.id])
     expect(notice?.body).not.toContain(QUOTED)
+  })
+
+  /** The sender's question given into `B`'s turn `seq`, then the stop: the notice's body */
+  const stopAfterAsking = (s: ReturnType<typeof stops>, seq: number) => {
+    s.w.clock.t += 10
+    const q = s.mail.send(A, { to: [B], text: `which branch? (${s.w.clock.t})`, needsReply: true }).message
+    s.w.store.mailbox.markDelivered(B, [q.id], s.w.clock.t, seq)
+    s.mail.sessionStopped(B, 'stopped', { turnSeq: seq })
+    return s.notices(A)[0]?.body
+  }
+
+  it('a task turn another sender’s task started, with nothing of that sender among the turn’s rows: nothing quoted to the sender that only asked in it', () => {
+    const s = stops()
+    const task = s.mail.send(C, { to: [B], text: 'migrate the table', needsReply: true }).message
+    const { turnSeq } = s.w.startTurn(B, task.id, { by: 'caller' })
+    expect(stopAfterAsking(s, turnSeq)).not.toContain(QUOTED)
+  })
+
+  it('a turn the CLI started by itself, which a task of the sender’s was attached to afterwards: nothing quoted', () => {
+    const s = stops()
+    const task = s.mail.send(A, { to: [B], text: 'migrate the table', needsReply: true }).message
+    const { turnSeq } = s.w.startTurn(B, null)
+    // `MailTurns.attach`: the CLI's turn goes on with the task's work, and the store names the task as its starter
+    s.w.store.mailbox.setTurnMessage(idOf(B), turnSeq, task.id)
+    expect(s.w.store.mailbox.turn(idOf(B), turnSeq)).toMatchObject({ startedBy: 'cli', starterId: task.id })
+    expect(stopAfterAsking(s, turnSeq)).not.toContain(QUOTED)
+  })
+
+  it('with no record of what else entered the turn, nothing is quoted', () => {
+    const s = stops({ noInputs: true })
+    const { seq } = s.askInTurn(A, B)
+    s.mail.sessionStopped(B, 'stopped', { turnSeq: seq })
+    expect(s.notices(A)[0]?.body).not.toContain(QUOTED)
   })
 })
