@@ -2250,6 +2250,13 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    (`scripts/frames-record-host.mts`: the host from source in a temporary data folder, its own `HOME` and `CODEX_HOME`, driven over
    its WebSocket like a window; `codex/centralu-scenarios.test-helpers.ts`) and replayed by `codex/centralu.test.ts`, which does
    not compare a thread's `config` and tool instructions (the bridge's address and credential, words that change with the build).
+   Past the host's own rules, the same script records the situations a host creates around a session: a context filled past
+   `COMPACT_FLOOR_TOKENS` by four commands' output so `compact_self` really compacts (`centralu-compact-real`: the nudge steered into a
+   running turn, refused by the app-server when the turn was ending, then `thread/compact/start` and the context falling from 124k to 6k;
+   a bulky output is cut in the recording, `cutText`); a session woken by mail (`centralu-wake`); `agent_session` send and wait;
+   and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
+   session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
+   compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

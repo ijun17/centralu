@@ -174,3 +174,35 @@ describe('scrubbing Codex’s frames', () => {
     expect(JSON.stringify(seen)).toBe(JSON.stringify({ id: 'r-3', result: { text: 'Sent hub-00000001.m_00000000000000000000000001 to x; project frames-record-centralu-read' } }))
   })
 })
+
+describe('cutting a bulky text out of a recording', () => {
+  it('keeps the start of a text over the limit and says how much was left out, in every place it appears, and leaves shorter text alone', () => {
+    const big = 'x'.repeat(5000)
+    const [out, delta, short] = scrub(
+      [
+        line('in', { method: 'item/completed', params: { item: { type: 'commandExecution', aggregatedOutput: big } } }),
+        line('in', { method: 'item/commandExecution/outputDelta', params: { delta: big } }),
+        line('in', { method: 'item/completed', params: { item: { type: 'agentMessage', text: 'short' } } }),
+      ],
+      CWD,
+      HOME,
+      { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice', cutText: 2000 },
+    ).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(out)).toContain(`${'x'.repeat(200)}…<cut 4800 characters>`)
+    expect(JSON.stringify(delta)).toContain('<cut 4800 characters>')
+    expect(JSON.stringify(short)).toContain('"text":"short"')
+    expect(JSON.stringify([out, delta]).length).toBeLessThan(1000)
+  })
+
+  it('scrubs the text first, so the start that stays holds no path of the person’s', () => {
+    const [kept] = scrub([line('in', { method: 'item/commandExecution/outputDelta', params: { delta: `${HOME}\\Docs\\a.txt and ${'z'.repeat(5000)}` } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice', cutText: 2000 }).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(kept)).toContain('<home>/Docs/a.txt and zzz')
+    expect(JSON.stringify(kept)).not.toContain('alice')
+  })
+
+  it('cuts nothing unless asked to', () => {
+    const big = 'y'.repeat(5000)
+    const [kept] = scrub([line('in', { id: 'r-1', result: { text: big } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice' }).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(kept)).toContain(big)
+  })
+})
