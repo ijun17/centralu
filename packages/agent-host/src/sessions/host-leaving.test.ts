@@ -92,7 +92,7 @@ beforeEach(async () => {
   projectId = (await mgr.projectCreation.addProject(tmpdir())).id
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
 })
 
@@ -115,7 +115,7 @@ const leaveHeld = (live: Handle, leave: 'disposeAll' | 'detachAll') => {
   const gate = new Promise<void>((r) => (release = r))
   live.disposeGate = gate
   live.detachGate = gate
-  const leaving = mgr[leave]()
+  const leaving = mgr.tenure[leave]()
   return async () => {
     release()
     await leaving
@@ -170,7 +170,7 @@ describe('a host leaving (#839)', () => {
     await mgr.updateSettings(id, { model: 'other' })
     let release!: () => void
     kept.detachGate = new Promise<void>((r) => (release = r))
-    const leaving = mgr.detachAll()
+    const leaving = mgr.tenure.detachAll()
     // The turn ends while the host is letting go of the process
     kept.emit({ type: 'turn_complete', sessionId: id })
     release()
@@ -185,7 +185,7 @@ describe('a host leaving (#839)', () => {
     const release = holdNextStart()
     const waking = mgr.processes.resumeSession(id)
     const kept = new FakeProcess()
-    const adopting = mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
+    const adopting = mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
     release()
     await Promise.all([waking, adopting])
     expect(kept.kills).toEqual(['SIGTERM'])
@@ -195,7 +195,7 @@ describe('a host leaving (#839)', () => {
   it('a kept process offered for a session already live is stopped', async () => {
     const id = await session()
     const kept = new FakeProcess()
-    await mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
+    await mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
     expect(kept.kills).toEqual(['SIGTERM'])
     expect(claude.created).toHaveLength(1)
   })
@@ -207,13 +207,13 @@ describe('a host leaving (#839)', () => {
     // The tool can no longer resume (a build that dropped it, a project removed meanwhile): the start answers `resumed: false`
     Object.assign(claude.capabilities, { resume: false })
     const kept = new FakeProcess()
-    await mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
+    await mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
     expect(kept.kills).toEqual(['SIGTERM'])
     expect(claude.created).toHaveLength(3)
     // Handing over, the same refusal leaves the process for the next host
     const left = leaveHeld(claude.last, 'detachAll')
     const next = new FakeProcess()
-    await mgr.adoptKept([{ sessionId: other, tool: 'claude', process: next }])
+    await mgr.tenure.adoptKept([{ sessionId: other, tool: 'claude', process: next }])
     await left()
     expect(next.kills).toEqual([])
   })

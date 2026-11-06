@@ -39,7 +39,7 @@ async function remoteHost(store = new Store()) {
   })
   const port = await server.listen()
   cleanups.push(async () => {
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   return { mgr, store, port, server, adapters }
@@ -131,7 +131,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   links.start()
   cleanups.push(async () => {
     await links.stop()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   const call = (method: string, params: unknown = {}) => router.handle(method, params) as Promise<any>

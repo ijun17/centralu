@@ -19,7 +19,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * What making a project reaches of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ProjectCreationHost = Pick<DelegationHost, 'askHost' | 'emit' | 'onEvent' | 'store'> & Pick<SessionTrashHost, 'appsHub' | 'projectInfo'>
+export type ProjectCreationHost = Pick<DelegationHost, 'hostCards' | 'emit' | 'onEvent' | 'store'> & Pick<SessionTrashHost, 'appsHub' | 'projectInfo'>
 
 /** What a folder is, as `projects.inspect` answers (#1220) */
 export type FolderFacts = RpcResult<'projects.inspect'>
@@ -142,7 +142,7 @@ export class ProjectCreation {
    */
   private async askFolderAdd(sessionId: string, facts: FolderFacts, machine: string | undefined, signal?: AbortSignal): Promise<string | null> {
     const card = { name: folderName(facts.path), path: facts.path, ...(machine ? { machine } : {}), exists: facts.exists, folder: facts.folder, git: facts.git, origin: facts.origin }
-    const decision = await this.host.askHost(sessionId, { kind: 'project_add', ...card, text: projectAddQuestion(card) }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'project_add', ...card, text: projectAddQuestion(card) }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing was added.'
     return null
@@ -341,7 +341,7 @@ export class ProjectCreation {
     where: string,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    const decision = await this.host.askHost(sessionId, { kind: 'project_create', name: card.name, path: card.path, ...(source ? { source } : {}), ...(card.machine ? { machine: card.machine } : {}) }, signal)
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'project_create', name: card.name, path: card.path, ...(source ? { source } : {}), ...(card.machine ? { machine: card.machine } : {}) }, signal)
     if (decision === 'deny') return 'The person did not approve it. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing was made.'
     if (source) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${source.git} into ${where}…` })

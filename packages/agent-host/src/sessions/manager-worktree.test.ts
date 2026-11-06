@@ -158,7 +158,7 @@ describe('worktree sessions', () => {
     const s = (await createRpcHandler(first, adapters)('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
     })) as SessionInfo
-    await first.disposeAll()
+    await first.tenure.disposeAll()
 
     a.toolHistory = [{ role: 'user', text: 'something said in the worktree terminal' }]
     const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
@@ -1117,7 +1117,7 @@ describe('worktree sessions', () => {
       const { s, managerId } = await makeChild('feat/asleep-occupant')
       const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
       wtMgr.rename(helper.id, 'helper')
-      await wtMgr.detachAll()
+      await wtMgr.tenure.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
         expect(next.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
@@ -1130,7 +1130,7 @@ describe('worktree sessions', () => {
         expect((await next.runOrchestratorTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })).isError).not.toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(false)
       } finally {
-        await next.disposeAll()
+        await next.tenure.disposeAll()
       }
     })
 
@@ -1198,7 +1198,7 @@ describe('worktree sessions', () => {
       writeFileSync(join(s.worktree!.path, 'wip'), 'kept\n')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       renameSync(worktreeRecoveryDir(s.id), `${worktreeRecoveryDir(s.id)}.purging-1`)
-      await wtMgr.detachAll()
+      await wtMgr.tenure.detachAll()
       const recoveryModule = await import('../dev-services/worktree-recovery.js')
       const repair = recoveryModule.repairWorktreeRecoveryRemovals
       let release!: () => void
@@ -1216,7 +1216,7 @@ describe('worktree sessions', () => {
         const back = await restoring
         expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('kept\n')
       } finally {
-        await next.disposeAll()
+        await next.tenure.disposeAll()
       }
     })
 
@@ -1231,7 +1231,7 @@ describe('worktree sessions', () => {
       renameSync(worktreeRecoveryDir(kept.s.id), `${worktreeRecoveryDir(kept.s.id)}.purging-1`)
       renameSync(worktreeRecoveryDir(gone.s.id), `${worktreeRecoveryDir(gone.s.id)}.purging-2`)
       await store.trash.purgeSession(gone.s.id)
-      await wtMgr.detachAll()
+      await wtMgr.tenure.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
         await vi.waitFor(() => expect(existsSync(`${worktreeRecoveryDir(gone.s.id)}.purging-2`)).toBe(false))
@@ -1240,7 +1240,7 @@ describe('worktree sessions', () => {
         const back = await next.trash.restoreSession(kept.s.id)
         expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('kept\n')
       } finally {
-        await next.disposeAll()
+        await next.tenure.disposeAll()
       }
     })
 
@@ -1264,14 +1264,14 @@ describe('worktree sessions', () => {
       }
       expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
-      await wtMgr.detachAll()
+      await wtMgr.tenure.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
         await vi.waitFor(() => expect(existsSync(saved(s).dir)).toBe(true))
         const back = await next.trash.restoreSession(s.id)
         expect(readFileSync(join(back.session.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       } finally {
-        await next.disposeAll()
+        await next.tenure.disposeAll()
       }
     })
 

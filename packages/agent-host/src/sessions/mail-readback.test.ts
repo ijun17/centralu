@@ -59,7 +59,7 @@ describe('the catch-up after a restart with a mail wake in the CLI’s record', 
     const call = createRpcHandler(first, adapters)
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await first.disposeAll() // The host went down: the record exists, the process does not
+    await first.tenure.disposeAll() // The host went down: the record exists, the process does not
 
     const second = new SessionManager(store, adapters, (e) => events.push(e))
     await createRpcHandler(second, adapters)('agents.send', { sessionId: s.id, text: 'continue' })

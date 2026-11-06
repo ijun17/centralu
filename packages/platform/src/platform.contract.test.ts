@@ -225,7 +225,7 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
     },
     cleanup: async () => {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await server.close()
       themes.close()
       store.close()
@@ -1219,7 +1219,7 @@ describe('Platform contract: app screen (web + real host)', () => {
       expect(reads.at(-1)).toBe('p1/notes ui://notes/data')
     } finally {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await views.dispose()
       await server.close()
       store.close()
@@ -1311,7 +1311,7 @@ describe('Platform contract: tool call from a screen (web + real host + real app
       off()
       changes.dispose()
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await views.dispose()
       await rt.dispose()
       await server.close()
@@ -1363,7 +1363,7 @@ describe('Platform contract: external app list (web + real host)', () => {
     } finally {
       off()
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await rt.dispose()
       await server.close()
       store.close()
@@ -1441,7 +1441,7 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
       await expect(platform.apps.restart('ghost', project.id)).rejects.toThrow(/ghost/)
     } finally {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await views.dispose()
       await rt.dispose()
       await server.close()
@@ -1513,7 +1513,7 @@ describe('Platform contract: new app (web + real host)', () => {
       await expect(platform.apps.sendError('notes', project.id, latest!.at)).rejects.toThrow('This error was already sent to the builder')
     } finally {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await rt.dispose()
       await server.close()
       store.close()
@@ -1565,7 +1565,7 @@ describe('Platform contract: app secrets (web + real host)', () => {
     } finally {
       off()
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await rt.dispose()
       await server.close()
       store.close()
@@ -1616,7 +1616,7 @@ describe('Platform contract: app import (web + real host)', () => {
       await expect(platform.apps.importPrepare('http://example.com/a.zip')).rejects.toThrow('Only folders and .zip files on this machine, or https links, can be imported')
     } finally {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await rt.dispose()
       await server.close()
       store.close()
@@ -1660,7 +1660,7 @@ describe('Platform contract: an image a reply names (web + real host)', () => {
       expect(reveal.reason).toMatch(/\S/)
     } finally {
       await platform.dispose()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await server.close()
       store.close()
       rmSync(dir, { recursive: true, force: true })

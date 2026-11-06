@@ -523,7 +523,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
       }
       const mgr = new SessionManager(store, scriptedAdapters(), () => {})
       mgr.useLinkedReader(linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 }))
-      cleanupSeat.push(() => mgr.disposeAll())
+      cleanupSeat.push(() => mgr.tenure.disposeAll())
       return { mgr, asked }
     }
     const cleanupSeat: (() => Promise<void>)[] = []
@@ -790,7 +790,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
         expect(Date.now() - t0).toBeLessThan(400 * SLOW)
         expect(tried.count).toBe(0)
       } finally {
-        await mgr.disposeAll()
+        await mgr.tenure.disposeAll()
       }
     })
   })
@@ -858,7 +858,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await new Promise((r) => setTimeout(r, 50))
     }
     const send = (reportBack: boolean) => mgr.runOrchestratorTool('orch', 'send_to_session', { sessionId: 'm1.w1', text: 'go', reportBack })
-    cleanup.push(() => mgr.disposeAll())
+    cleanup.push(() => mgr.tenure.disposeAll())
     return {
       mgr, reports, settle, send,
       /** What the orchestrator's agent answered: "echo: <what its model read>" for the scripted agent */

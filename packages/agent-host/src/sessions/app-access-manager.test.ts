@@ -119,7 +119,7 @@ const card = (sessionId: string) => {
 }
 
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await rt.dispose()
   await removeTree(root)
 })

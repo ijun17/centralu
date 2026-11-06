@@ -142,7 +142,7 @@ function openManager(): void {
 }
 
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await rt.dispose()
   rmSync(root, { recursive: true, force: true })
 })
@@ -183,7 +183,7 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   coordinator: async (tool) => {
     const member = (await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo
     const id = plantOldCoordinator(store, { name: 'Crew', memberSessionIds: [member.id], roleAppend: 'Coordinating session', tool })
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     openManager()
     await mgr.processes.resumeSession(id)
     return id

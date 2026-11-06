@@ -438,7 +438,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     w = await crossWorld()
   })
   afterEach(async () => {
-    for (const h of hosts.splice(0)) await h.disposeAll()
+    for (const h of hosts.splice(0)) await h.tenure.disposeAll()
     await w.dispose()
   })
 
@@ -453,13 +453,13 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     answering(w.adapters.get('claude')!.handles.get(child)!).ask('q-1')
     const told = () => w.store.messages.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
     await w.until(() => told().length === 1)
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     expect(w.store.children.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
 
     const claude = new CrossAdapter('claude')
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, { keptSessions: new Set([child]) })
     hosts.push(next)
-    await next.adoptKept([{ sessionId: child, tool: 'claude', process: {} as never }])
+    await next.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: {} as never }])
     // The kept CLI sends its standing card again to the new host
     const cards = answering(claude.handles.get(child)!)
     cards.ask('q-1')
@@ -484,7 +484,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude')]]), () => {}, undefined, undefined, {})
     hosts.push(next)
     expect(w.store.children.listDelegatedTurns()).toEqual([])

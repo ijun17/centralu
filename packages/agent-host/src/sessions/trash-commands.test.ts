@@ -43,7 +43,7 @@ beforeEach(async () => {
   projectId = project.id
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })

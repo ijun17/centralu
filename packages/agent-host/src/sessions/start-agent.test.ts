@@ -303,7 +303,7 @@ describe('starting another agent in the same project', () => {
       reports.push(p)
       return p
     })
-    await w.mgr.disposeAll()
+    await w.mgr.tenure.disposeAll()
     await new Promise((r) => setTimeout(r, 50))
     await Promise.all(reports)
     expect(said()).toEqual([])
@@ -1362,7 +1362,7 @@ describe('starting another agent in the same project', () => {
       allowProject()
       const s = await session()
       const c = await startRunning(s)
-      await w.mgr.detachAll()
+      await w.mgr.tenure.detachAll()
       const row = w.store.sessions.listSessions().find((child) => child.id === c)!
       w.store.sessions.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
       const next = new SessionManager(w.store, w.adapters, (e) => w.events.push(e))
@@ -1370,14 +1370,14 @@ describe('starting another agent in the same project', () => {
         expect(await next.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
         expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ [link]: s })
       } finally {
-        await next.detachAll()
+        await next.tenure.detachAll()
       }
       const reloaded = new SessionManager(w.store, w.adapters, () => {})
       try {
         expect(reloaded.listSessions().some((child) => child.id === c)).toBe(false)
         expect(reloaded.listSessions().some((parent) => parent.id === s)).toBe(true)
       } finally {
-        await reloaded.disposeAll()
+        await reloaded.tenure.disposeAll()
       }
     })
   })
@@ -1625,7 +1625,7 @@ describe('starting another agent in the same project', () => {
       expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('still working') })
       handleOf(c.id)!.answer('done')
       await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
-      await w.mgr.detachAll()
+      await w.mgr.tenure.detachAll()
       const next = new SessionManager(w.store, w.adapters, () => {})
       // Its startup merge check would otherwise ask the machine's gh about the branch (#415)
       next.prLookup = async () => null
@@ -1636,7 +1636,7 @@ describe('starting another agent in the same project', () => {
         expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)
       } finally {
-        await next.disposeAll()
+        await next.tenure.disposeAll()
       }
     })
 
@@ -1709,7 +1709,7 @@ describe('starting another agent in the same project', () => {
       allowProject()
       const s = await session()
       await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/checked', wait: false })
-      await w.mgr.detachAll()
+      await w.mgr.tenure.detachAll()
       for (const letGo of ['disposeAll', 'detachAll'] as const) {
         const next = new SessionManager(w.store, w.adapters, () => {})
         let asked = false
@@ -1726,7 +1726,7 @@ describe('starting another agent in the same project', () => {
           }, 50))
         })
         await w.until(() => asked, 10_000)
-        await next[letGo]()
+        await next.tenure[letGo]()
         expect(stopped).toBe(true)
         expect(answered).toBe(true)
       }

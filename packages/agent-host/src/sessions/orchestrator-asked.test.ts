@@ -47,7 +47,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   m.delivery.stop()
-  await w.mgr.disposeAll()
+  await w.mgr.tenure.disposeAll()
   w.store.close()
 })
 

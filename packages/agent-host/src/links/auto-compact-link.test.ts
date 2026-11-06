@@ -36,7 +36,7 @@ async function machineHost(o: { older?: boolean } = {}) {
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc, build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION } })
   const port = await server.listen()
   cleanups.push(async () => {
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   return { mgr, port }
@@ -69,7 +69,7 @@ async function hubHost(machinePort: number) {
   links.start()
   cleanups.push(async () => {
     await links.stop()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   return { mgr, router, links, machine: () => links.list()[0]! }

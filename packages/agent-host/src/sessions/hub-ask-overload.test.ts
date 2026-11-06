@@ -74,7 +74,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   vi.useRealTimers()
   vi.unstubAllEnvs()
   await removeTree(root)

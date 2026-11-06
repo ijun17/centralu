@@ -220,7 +220,7 @@ of the thread's turn, the session that gave the turn or started it) is **held**:
 paths ended (`MailSessionsView.mailStopTold`, `MessageService.oldPathEnded`). Each path resolves to the session it told (`deliverReport` is
 true once the report is mailed, relayed or left for the mailbox to deliver); a held session it told is marked told, one it did not (a
 report already settled, the person's own turn, an error with no mark, #1377) gets the stop notice then. At the start a quit is the same
-(`SessionManager.quitTold`): the older path usually ran before the mailbox's release, so the release reads whether it told the requester;
+(`HostTenure.quitTold`): the older path usually ran before the mailbox's release, so the release reads whether it told the requester;
 one told later (a requester the keeper kept or an update cut) is held until it is. A path that has not ended within 10 minutes
 (`OLD_PATH_WAIT_MS`) counts as not having told, and a later stop of a session and sender while an earlier one is held is told at once: a double
 notice at worst, never a lost one. The quit found at the start has no timer of its own: `quitTellEnded` waits for `tellQuitNotices`,

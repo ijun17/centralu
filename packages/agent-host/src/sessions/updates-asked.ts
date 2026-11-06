@@ -8,7 +8,7 @@ import type { RoutedCardsHost } from './routed-cards.js'
  * What an agent's update_centralu reaches of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type UpdatesAskedHost = Pick<DelegationHost, 'askHost' | 'meta'> & Pick<RoutedCardsHost, 'apps' | 'toolProfileOf'>
+export type UpdatesAskedHost = Pick<DelegationHost, 'hostCards' | 'meta'> & Pick<RoutedCardsHost, 'apps' | 'toolProfileOf'>
 
 /**
  * An agent's update_centralu (#665): check and install through the same service the window calls, and apply through a
@@ -47,7 +47,7 @@ export class UpdatesAsked {
     const updates = this.updates
     if (!updates) return { ok: false, error: 'Update checks are unavailable' }
     if (this.host.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
-      const decision = await this.host.askHost(sessionId, { kind: 'centralu_update', action })
+      const decision = await this.host.hostCards.askHost(sessionId, { kind: 'centralu_update', action })
       if (decision === 'always') this.updateConsents.add(sessionId)
       else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
     }
@@ -91,7 +91,7 @@ export class UpdatesAsked {
         return null
       }
       // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
-      const decision = await this.host.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
+      const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
       if (decision === 'always') this.updateApplyConsents.add(sessionId)
       else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
       else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'

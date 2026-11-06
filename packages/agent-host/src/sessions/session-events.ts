@@ -27,6 +27,7 @@ import type { SessionRecordHost } from './session-record.js'
 import type { SessionStartsHost } from './session-start.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { WorktreeHost } from './worktree-sessions.js'
+import type { SelfCompaction } from './self-compaction.js'
 
 function untrustedSourceSessionNotification(sourceSessionId: string): string {
   return (
@@ -76,7 +77,7 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
-    compactTurn: (sessionId: string) => boolean
+    readonly selfCompaction: Pick<SelfCompaction, 'compactTurn'>
     resumeSession: (sessionId: string, adopt?: AgentProcess) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
@@ -327,7 +328,7 @@ export class SessionEvents {
     const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.(), processWent) : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
-    const turnBy = e.sessionId && endedTurn && this.host.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
+    const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
     const since = turnBy && e.sessionId ? this.host.children.turnRows(e.sessionId)?.after : undefined
     const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: since === undefined ? turnBy : { ...turnBy, since } } : e
@@ -357,7 +358,7 @@ export class SessionEvents {
      * A turn that ends without finishing leaves the questions delivered into it unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
      * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
      */
-    const stopWhy = endedTurn && e.sessionId && !this.host.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
+    const stopWhy = endedTurn && e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
     const stopTold = stopWhy && e.sessionId ? this.stopTold(e.sessionId, { mailOwner: mailTurn?.ownerId, waited, caller: delegation?.callerId }) : undefined
     if (stopWhy && e.sessionId && stopTold) this.host.mailStopped(e.sessionId, stopWhy, stopTold)
     /** The older report paths that may tell of this turn's end, each resolving to the session it told */
@@ -443,7 +444,7 @@ export class SessionEvents {
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   /**
    * A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a turn, here
-   * and by a turn the host ends itself (`SessionManager.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
+   * and by a turn the host ends itself (`HostTenure.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
    * the one that takes the mark (`LinkedHost.sendFromHub`)
    */
   endHubAsk(sessionId: string): void {

@@ -13,6 +13,7 @@ import type { SessionTrashHost } from './session-trash.js'
 import { agentFrame, canMailParent, presetWithin } from './start-agent.js'
 import { errorKind } from './error-kind.js'
 import { labelOf, progressOf } from './transcript-view.js'
+import type { AskProjectFlow } from './ask-project-flow.js'
 
 /**
  * What the request queue reaches of the session manager (#428), typed as the manager declares each member. The manager
@@ -25,7 +26,7 @@ export type QueuedRequestsHost = Pick<
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
   Pick<RestartHost, 'inputsHeld'> & {
     /** ask_project's gates on the caller, read again when its queued request is delivered (ask-project-flow.ts) */
-    askGateError: (callerId: string, quiet?: boolean) => string | null
+    readonly askProjectFlow: Pick<AskProjectFlow, 'askGateError'>
     /** A registered project's row, read now */
     projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['projects']['listProjects']>[number] | undefined
     /** Whether a turn runs in the session for anyone: its state, or a wait on it not settled yet */
@@ -222,7 +223,7 @@ export class QueuedRequests {
     const auto = caller.permissionPreset === 'auto'
     if (r.via === 'ask_project') {
       const project = this.host.projectRow(target.projectId)
-      const gate = this.host.askGateError(caller.id, quiet) ?? (project ? null : 'The project asked was removed from Centralu.')
+      const gate = this.host.askProjectFlow.askGateError(caller.id, quiet) ?? (project ? null : 'The project asked was removed from Centralu.')
       if (gate) return gate
       if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
         return "The asking session is no longer auto, and the person has not allowed its project to ask this one."

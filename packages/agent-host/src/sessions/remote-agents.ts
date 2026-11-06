@@ -168,7 +168,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
+  'hostCards' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
 >
 
 /**
@@ -446,14 +446,14 @@ export class RemoteAgents {
     const unasked = there?.auto === true && this.host.autoBoundaryOpen(callerId, `start an agent on ${machine.name} under auto`)
     // The card is bounded as a local start's setup is (#660): past it the card goes and nothing is made
     const ctl = new AbortController()
-    let decision: Awaited<ReturnType<RemoteAgentsHost['askHost']>> = 'allow'
+    let decision: Awaited<ReturnType<RemoteAgentsHost['hostCards']['askHost']>> = 'allow'
     if (!unasked) {
       const onAbort = () => ctl.abort()
       signal?.addEventListener('abort', onAbort, { once: true })
       if (signal?.aborted) ctl.abort()
       const timer = setTimeout(() => ctl.abort(), START_AGENT_SETUP_MS)
       try {
-        decision = await this.host.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
+        decision = await this.host.hostCards.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
       } finally {
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
@@ -1176,7 +1176,7 @@ export class RemoteAgents {
     // That turn's words (#1812), though the next one has begun or ended by the time the read is there
     const words = await this.lastWords(rec, reader, r.since)
     // The turn left the child's own background work running there (#721): the report waits for that work's end
-    const running: BackgroundTask[] = this.host.linkedTasksRunning(rec.sessionId)
+    const running: BackgroundTask[] = this.host.linkedReports.ownTasksRunning(rec.sessionId)
     if (running.length) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false, paused: running })
     return {
       ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, readable: [], outside: [],
@@ -1368,7 +1368,7 @@ export class RemoteAgents {
       const report = this.host.children.linkedReports.get(rec.sessionId)
       const told = this.toldDown.get(rec.sessionId)
       // A report paused on work that has ended is settled by the linked reports now (`LinkedReports.linkChanged`); on work still going it is kept, and the caller told
-      const settling = !!report?.paused && !report.busy && this.host.linkedTasksRunning(rec.sessionId).length === 0
+      const settling = !!report?.paused && !report.busy && this.host.linkedReports.ownTasksRunning(rec.sessionId).length === 0
       if (!report || report.orchestratorId !== rec.callerId || settling || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
       /*
@@ -1527,7 +1527,7 @@ export class RemoteAgents {
     project: { id: string; name: string },
     reader: LinkedSessions,
   ): Promise<{ project: LinkedProject } | { error: string }> {
-    const origin = await this.host.projectOrigin(project.id)
+    const origin = await this.host.files.projectOrigin(project.id)
     const key = origin ? gitRemoteKey(origin) : null
     if (!origin || !key) {
       return { error: `This project has ${origin ? 'a local folder as its origin remote' : 'no origin remote'}, so no checkout of it on ${machine.name} can be told apart. Start the agent here, without machine.` }

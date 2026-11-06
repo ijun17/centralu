@@ -89,7 +89,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  for (const h of hosts) await h.disposeAll().catch(() => {})
+  for (const h of hosts) await h.tenure.disposeAll().catch(() => {})
   vi.useRealTimers()
   vi.unstubAllEnvs()
   await removeTree(root)
@@ -125,7 +125,7 @@ describe('a kept Codex process adopted after the host died during a capacity ret
     const id = await crashedDuringWait()
     const b = host(new Set([id]))
     expect(b.session(id).state).toBe('working')
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
     expect(b.session(id).state).toBe('idle')
     expect(b.session(id).interruption).toMatchObject({ reason: 'quit' })
     expect(events.some((e) => e.type === 'notice' && e.sessionId === id && e.label === 'stopped')).toBe(true)
@@ -138,7 +138,7 @@ describe('a kept Codex process adopted after the host died during a capacity ret
     const id = await crashedDuringWait()
     state.status = 'idle'
     const b = host(new Set([id]))
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
     expect(b.session(id).state).toBe('idle')
   })
 
@@ -147,7 +147,7 @@ describe('a kept Codex process adopted after the host died during a capacity ret
     // What the host of #2015's fix leaves behind when it dies in the wait: the mark outlives the failed input
     store.settings.setAppSetting(`hub_ask_depth:${id}`, '2')
     const b = host(new Set([id]))
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
     expect(b.session(id).state).toBe('idle')
     expect(store.settings.appSetting(`hub_ask_depth:${id}`)).toBeNull()
   })
@@ -157,7 +157,7 @@ describe('a kept Codex process adopted after the host died during a capacity ret
     let answer!: () => void
     state.resumeGate = new Promise<void>((resolve) => (answer = resolve))
     const b = host(new Set([id]))
-    const adopting = b.mgr.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
+    const adopting = b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'codex', process: new FakeProcess() }])
     await vi.advanceTimersByTimeAsync(5_000)
     answer()
     await adopting
@@ -181,7 +181,7 @@ describe('a kept Codex process adopted after the host died during a capacity ret
       return s.id
     })()
     const b = host(new Set([idle, active, buffered, claudeSession]))
-    const adopt = (sessionId: string, tool: ToolName) => b.mgr.adoptKept([{ sessionId, tool, process: new FakeProcess() }])
+    const adopt = (sessionId: string, tool: ToolName) => b.mgr.tenure.adoptKept([{ sessionId, tool, process: new FakeProcess() }])
 
     await adopt(idle, 'codex')
     expect(b.session(idle).state).toBe('idle')

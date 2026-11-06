@@ -463,7 +463,7 @@ if (held) {
   commandRuns.adopt(held.kept.runs)
 }
 // The terminals and Run commands a linked hub's update ended come back (#1902), before any screen asks for them
-restartEnded(mgr.takeUpdateEnded(), {
+restartEnded(mgr.tenure.takeUpdateEnded(), {
   projectFolders: new Set(store.projects.listProjects().map((p) => mgr.cwdOfProject(p.id))),
   terminals,
   runs: commandRuns,
@@ -617,7 +617,7 @@ let stopAsked = false
 let stoppingForUpdate = false
 /** The one start of a stop for an update: the turns it ends are listed for the host that starts next (#1618) */
 const beginStopForUpdate = () => {
-  mgr.stopForUpdate()
+  mgr.tenure.stopForUpdate()
   stoppingForUpdate = true
 }
 const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop') => {
@@ -867,7 +867,7 @@ const server = new HostServer({
   logon: () => logon,
   handover: () => handover,
   // The turns this host continued after an update cut them, for a linked hub's callers (#1618)
-  updateContinued: () => mgr.updateContinued(),
+  updateContinued: () => mgr.tenure.updateContinued(),
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })
@@ -911,7 +911,7 @@ const shutdown = new Shutdown({
       git: { stopAll: () => stopGitChildren() },
       links,
       apps: externalApps,
-      sessions: mgr,
+      sessions: mgr.tenure,
       appChanges,
       themes,
       inlineViews,
@@ -999,7 +999,7 @@ sleeper.start()
 mgr.startSelfCompaction()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
-if (held) void mgr.adoptKept(held.kept.agents).then(() => mgr.launches.refreshToolDefinitions())
+if (held) void mgr.tenure.adoptKept(held.kept.agents).then(() => mgr.launches.refreshToolDefinitions())
 else void mgr.launches.refreshToolDefinitions()
 
 /*

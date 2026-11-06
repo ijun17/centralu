@@ -197,7 +197,7 @@ export class AgentSessionActions {
           // A timer the tool held (`/loop`) does not hold the cleanup (#718): it ends with the process, and the caller is told
           const timers = this.host.handles.has(child.id) ? liveBackgroundTasks(child.backgroundTasks).filter((t) => t.timer) : []
           if (!observing) this.host.children.finishedWith(callerId, child.id)
-          const r = await this.host.cleanUpWorktreeChild(child)
+          const r = await this.host.worktrees.cleanUpWorktreeChild(child)
           if (!r.ok) return r
           if (d) this.host.children.dropDelegation(key, d)
           const note = [r.note, timers.length ? `Its timers ended with its process: ${taskList(timers)}.` : ''].filter(Boolean).join(' ')
@@ -260,7 +260,7 @@ export class AgentSessionActions {
             const releaseHold = wait.holdInput()
             const release = () => {
               releaseHold()
-              this.host.applyDeferredRestart(child.id)
+              this.host.restartPolicy.applyDeferredRestart(child.id)
             }
             try {
               await this.host.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input, inputId) => {

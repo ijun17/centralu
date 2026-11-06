@@ -7,6 +7,7 @@ import { rpcError } from '../rpc-error.js'
 import { atAdoptedFolder } from '../user-app-adoption.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { orchestratorHome } from './orchestrator-home.js'
+import type { MergeChecks } from './merge-checks.js'
 
 /**
  * What the project registry reaches of the session manager (#1143), typed as the manager declares each member. The
@@ -16,7 +17,7 @@ export type ProjectRegistryHost = Pick<DelegationHost, 'store' | 'emit' | 'first
   /** Root under which worktrees are created, one of "our own folders" (`folderRoots`) */
   readonly worktreeRoot: string
   /** Merge detection (#69, merge-checks.ts), started without waiting for it */
-  checkMergedInBackground: (projectId: string) => void
+  readonly merges: Pick<MergeChecks, 'checkMergedInBackground'>
   /** The folders of the user folder that were registered as projects in place (#1141), for the mark on `ProjectInfo` (#1301); none without the app runtime */
   userAppFolders: () => readonly string[]
 }
@@ -210,7 +211,7 @@ export class ProjectRegistry {
      * terminal is caught on the next refresh too. It does not block the response: the badge flows
      * separately as an event.
      */
-    this.host.checkMergedInBackground(projectId)
+    this.host.merges.checkMergedInBackground(projectId)
     return this.projectInfo(p.id, p.path)
   }
 

@@ -681,7 +681,7 @@ describe('a queued request across a host swap (#677)', () => {
     w = await crossWorld()
   })
   afterEach(async () => {
-    for (const h of hosts.splice(0)) await h.disposeAll()
+    for (const h of hosts.splice(0)) await h.tenure.disposeAll()
     await w.dispose()
   })
 
@@ -708,10 +708,10 @@ describe('a queued request across a host swap (#677)', () => {
 
   it('is delivered by the next host when the kept session\'s turn ends there', async () => {
     const { a } = await queuedFor()
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     expect(w.store.children.listQueuedRequests()).toHaveLength(1)
     const { host, claude } = next([a])
-    await host.adoptKept([{ sessionId: a, tool: 'claude', process: {} as never }])
+    await host.tenure.adoptKept([{ sessionId: a, tool: 'claude', process: {} as never }])
     await new Promise((r) => setTimeout(r, 30))
     // Still the person's turn: nothing yet
     expect(claude.handles.get(a)!.sent).toEqual([])
@@ -732,7 +732,7 @@ describe('a queued request across a host swap (#677)', () => {
       w.adapters.get('claude')!.handles.get(target)!.externalId = 'ext-t'
       await w.mgr.inputs.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
-      await w.mgr.detachAll()
+      await w.mgr.tenure.detachAll()
       // Lowered where no settings change ran on a host that held the queue (as when it was lowered mid-delivery)
       w.store.sessions.upsertSession({ ...w.store.sessions.listSessions().find((x) => x.id === asker)!, permissionPreset: 'normal' })
       if (row === 'written by an older build') {
@@ -754,7 +754,7 @@ describe('a queued request across a host swap (#677)', () => {
   it('is not delivered by a next host that does not know the tool it was queued through, and stays for one that does', async () => {
     const { a, b } = await queuedFor()
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'second in line', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare(`UPDATE queued_requests SET via = 'hand_off' WHERE text = 'queued work'`).run()
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { claude } = next([])
@@ -768,7 +768,7 @@ describe('a queued request across a host swap (#677)', () => {
 
   it('is delivered at once by a next host that finds the session at rest', async () => {
     const { a } = await queuedFor()
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     const { claude } = next([])
     await w.until(() => (claude.handles.get(a)?.sent.length ?? 0) === 1)
     expect(claude.handles.get(a)!.sent[0]).toContain('queued work')
@@ -782,7 +782,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
     w = await crossWorld()
   })
   afterEach(async () => {
-    for (const h of hosts.splice(0)) await h.disposeAll()
+    for (const h of hosts.splice(0)) await h.tenure.disposeAll()
     await w.dispose()
   })
 
@@ -833,7 +833,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
 
   it('keeps the session busy while it wakes for a queued request, and lets one request in at a time', async () => {
     const { a, orch } = await queuedBehindThePerson()
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     // The next host finds the session asleep, with the request still queued: waking it takes a while
     const next = nextHost(true)
     await w.until(() => next.starts.includes(a))
@@ -855,11 +855,11 @@ describe('the queue delivers each request once, in turn, through restarts and sw
 
   it('is delivered by the next host when a swap comes while the session wakes for it', async () => {
     const { a } = await queuedBehindThePerson()
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     const waking = nextHost(true)
     await w.until(() => waking.starts.includes(a))
     // The host leaves before the session took the request
-    await waking.host.detachAll()
+    await waking.host.tenure.detachAll()
     expect(w.store.children.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first' })])
     const after = nextHost(false)
     await w.until(() => after.adapter.handles.get(a)?.sent.includes('first') ?? false)

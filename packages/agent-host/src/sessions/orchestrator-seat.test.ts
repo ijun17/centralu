@@ -448,7 +448,7 @@ describe('over the real manager', () => {
       const b = await create()
       expect((await tools.listSessions()).map((s) => s.sessionId).sort()).toEqual([a, b].sort())
     } finally {
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       real.close()
     }
   })

@@ -34,7 +34,7 @@ async function host() {
   })
   const port = await server.listen()
   cleanups.push(async () => {
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   const dir = mkdtempSync(join(tmpdir(), 'cc-settings-events-'))

@@ -184,7 +184,7 @@ describe('a record unchanged outside is not read again', () => {
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
       id: string
     }
-    await m.disposeAll() // The state after a host restart: the record exists, only the process is missing.
+    await m.tenure.disposeAll() // The state after a host restart: the record exists, only the process is missing.
     return s.id
   }
 
@@ -202,7 +202,7 @@ describe('a record unchanged outside is not read again', () => {
     */
     expect(a.lists).toBe(1)
 
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
     const second = relaunch(a)
     await second.call('agents.send', { sessionId: id, text: 'once more' })
     expect(a.reads).toBe(1) // Nothing changed outside, so the 48.6MB is not fetched again.
@@ -216,7 +216,7 @@ describe('a record unchanged outside is not read again', () => {
     await first.call('agents.send', { sessionId: id, text: 'continue' })
     expect(a.reads).toBe(1)
 
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
     a.updatedAt = 200 // The conversation continued in the terminal.
     const second = relaunch(a)
     await second.call('agents.send', { sessionId: id, text: 'once more' })
@@ -229,7 +229,7 @@ describe('a record unchanged outside is not read again', () => {
 
     const first = relaunch(a)
     await first.call('agents.send', { sessionId: id, text: 'continue' })
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
     const second = relaunch(a)
     await second.call('agents.send', { sessionId: id, text: 'once more' })
 
@@ -258,7 +258,7 @@ describe('a record unchanged outside is not read again', () => {
     // Talked inside the app — the tool's updatedAt climbs (all of it is ours, since it is before release).
     await first.call('agents.send', { sessionId: s.id, text: 'do the work' })
     a.updatedAt = Date.now() - 1000
-    await first.m.disposeAll() // The marker gets stamped here.
+    await first.m.tenure.disposeAll() // The marker gets stamped here.
 
     const second = relaunch(a)
     await second.call('agents.send', { sessionId: s.id, text: 'continue' })
@@ -272,7 +272,7 @@ describe('a record unchanged outside is not read again', () => {
     const s = (await first.call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
       id: string
     }
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
 
     a.updatedAt = Date.now() + 60_000 // Continued in the terminal after release.
     const second = relaunch(a)
@@ -289,7 +289,7 @@ describe('a record unchanged outside is not read again', () => {
     }
     // Also written outside while alive (possible because claude has no lock).
     a.updatedAt = Date.now() - 1000
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
 
     const second = relaunch(a)
     await second.call('agents.send', { sessionId: s.id, text: 'continue' })
@@ -393,7 +393,7 @@ describe('when the tool cannot find the conversation', () => {
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     const startedIn = a.lastCwd
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     a.present = [] // the tool no longer lists it — an absence is all we actually know
     const r = await m.processes.resumeSession(s.id)
@@ -423,7 +423,7 @@ describe('when the tool cannot find the conversation', () => {
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     a.failCreate = Object.assign(new Error('This conversation is already open elsewhere'), {
       code: 'conversation_locked',
@@ -439,7 +439,7 @@ describe('when the tool cannot find the conversation', () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     a.failList = true
     a.failCreate = Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
@@ -456,7 +456,7 @@ describe('when the tool cannot find the conversation', () => {
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     const before = m.listSessions().find((x) => x.id === s.id)!.externalId
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     const r = await m.processes.forkConversation(s.id)
 
@@ -484,7 +484,7 @@ describe('when the tool cannot find the conversation', () => {
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     a.failList = true
     const r = await m.processes.resumeSession(s.id)
@@ -501,7 +501,7 @@ describe('when the tool cannot find the conversation', () => {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })) as { id: string }
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     // Resume issues a new id so external_id is not ext-1, but the original still exists.
     a.present = ['ext-1']
@@ -553,7 +553,7 @@ describe('the same conversation is not opened by two at once', () => {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })
 
-    await m.disposeAll() // Once the process is cleaned up, nothing holds it.
+    await m.tenure.disposeAll() // Once the process is cleaned up, nothing holds it.
 
     const second = await call('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
@@ -603,7 +603,7 @@ describe('catching up on a conversation continued outside', () => {
     expect(await texts(call, s.id)).toEqual(['First question', 'First answer'])
 
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
 
     // Work continued in the terminal in the meantime.
     a.toolHistory.push({ role: 'user', text: 'something said in the terminal' }, { role: 'assistant', text: 'a terminal answer' })
@@ -626,7 +626,7 @@ describe('catching up on a conversation continued outside', () => {
     })) as { id: string }
 
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     await m.processes.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['First question'])
@@ -662,7 +662,7 @@ describe('catching up on a conversation continued outside', () => {
     })) as { id: string }
     // A /compact while the app watched: the adapter's marker is stored live
     a.last!.emitEvent({ type: 'compaction', sessionId: s.id, failed: false })
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     // The tool's record has that compaction too, then work continued in the terminal, compacting once more there
     a.toolHistory.push(compaction, { role: 'user', text: 'said in the terminal' }, compaction, { role: 'assistant', text: 'a terminal answer' })
     await m.processes.resumeSession(s.id)
@@ -716,7 +716,7 @@ describe('catching up on a conversation continued outside', () => {
     a.last!.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Let me look' })
     a.last!.emitEvent({ ...toolCall('tu1', 'ls'), sessionId: s.id })
     a.last!.emitEvent({ ...toolResult('tu1', 'a.txt'), sessionId: s.id })
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     // The tool's record has that call too, then work went on in the terminal with a call of its own
     a.toolHistory.push(
       { role: 'assistant', text: 'Let me look' },
@@ -750,7 +750,7 @@ describe('catching up on a conversation continued outside', () => {
     })) as { id: string }
     a.last!.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Let me look' })
     for (const e of live) a.last!.emitEvent({ ...e, sessionId: s.id } as NormalizedEvent)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     a.toolHistory.push({ role: 'assistant', text: 'Let me look' }, ...outside)
     await m.processes.resumeSession(s.id)
     return ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
@@ -819,7 +819,7 @@ describe('catching up on a conversation continued outside', () => {
       toolCall('tc2', 'sleep 6'), toolResult('tc2', ''), toolCall('tc3', 'sleep 6'),
     ]
     for (const e of live) a.last!.emitEvent({ ...e, sessionId: s.id })
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     a.toolHistory.push(
       recorded(toolCall('tc1', 'sleep 6')), recorded(toolResult('tc1', '')),
       { role: 'assistant', text: 'No response requested.' },
@@ -851,7 +851,7 @@ describe('catching up on a conversation continued outside', () => {
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1' })) as { id: string }
     a.last!.emitEvent({ type: 'notice', sessionId: s.id, level: 'info', from: 'Centralu', label: 'mail', text: 'Mail went in' })
     a.last!.emitEvent({ ...toolCall('tc1', 'ls'), sessionId: s.id })
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     a.toolHistory = [{ role: 'user', text: '[Centralu] mail', sent: true }, recorded(toolCall('tc1', 'ls')), { role: 'user', text: 'typed in a terminal' }]
     await m.processes.resumeSession(s.id)
     const stored = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
@@ -867,7 +867,7 @@ describe('catching up on a conversation continued outside', () => {
     })) as { id: string }
 
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     // The tool's whole history changed (e.g. the earlier part was lost to compaction).
     a.toolHistory = [{ role: 'user', text: 'a completely different conversation' }]
     await m.processes.resumeSession(s.id)
@@ -899,7 +899,7 @@ describe('catches up a session even when its cwd differs from the project path (
     try {
       const p = (await call('projects.add', { path: projectDir })) as { id: string }
       const s = (await call('agents.createSession', { projectId: p.id, cwd: appDir, tool: 'claude' })) as { id: string }
-      await m.disposeAll() // put to sleep (the same state as a host restart)
+      await m.tenure.disposeAll() // put to sleep (the same state as a host restart)
 
       // The conversation continued in the terminal in the meantime — the record piled up under the folder the
       // session was born in.
@@ -942,7 +942,7 @@ describe('when resuming hangs', () => {
     const s = await rpc('agents.createSession', { projectId: (await addProject()).id, cwd: tmpdir(), tool: 'claude' }) as { id: string }
     // Bring down only the process (the same state as a host restart) — this used to be produced by
     // archive/restore.
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
 
     vi.useFakeTimers()
     try {
@@ -1051,7 +1051,7 @@ describe('resumes from the original it was imported from when there is no identi
     expect((await call('messages.load', { sessionId: s.id, limit: 10 })) as unknown[]).not.toHaveLength(0)
 
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     a.resumedWith = undefined
 
     const r = await m.processes.resumeSession(s.id)
@@ -1086,7 +1086,7 @@ describe('resuming happens once even with simultaneous messages', () => {
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     a.creations = 0
 
     await Promise.all([
@@ -1135,7 +1135,7 @@ describe('catches up even from history accumulated as deltas', () => {
     a.toolHistory.push({ role: 'assistant', text: 'the first half and second half of the answer' })
 
     // Bring down only the process (the same state as a host restart)
-    await m.disposeAll()
+    await m.tenure.disposeAll()
     // Work continued in the terminal in the meantime.
     a.toolHistory.push({ role: 'user', text: 'something said in the terminal' }, { role: 'assistant', text: 'a terminal answer' })
 

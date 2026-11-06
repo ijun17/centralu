@@ -10,7 +10,7 @@ export type { TrashRequest }
 export type TrashAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the session archive commands reach of the session manager: its cards */
-export type TrashFlowHost = Pick<HostCards, 'askHost'> & { readonly meta: ReadonlyMap<string, { permissionPreset: PermissionPreset }> }
+export type TrashFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> } & { readonly meta: ReadonlyMap<string, { permissionPreset: PermissionPreset }> }
 
 /** What `delete_session` reaches of this host's own sessions (`SessionTrash`): what a delete drops, and the delete decided in the step that moves the session */
 export type SessionOps = {
@@ -362,7 +362,7 @@ export class TrashFlow {
 
   /** The delete card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal, notDone: 'deleted' | 'restored' | 'archived' = 'deleted'): Promise<string | null> {
-    const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it, so nothing was ' + notDone + '. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing was ' + notDone + '.'
     return null

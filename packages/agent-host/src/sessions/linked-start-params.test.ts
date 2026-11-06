@@ -28,7 +28,7 @@ beforeEach(() => {
   rpc = (method, params) => handler(method, params)
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -127,7 +127,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     const back = (await rpc('trash.restore', { sessionId: child.id })) as { session: { startedFromHub?: boolean } }
     expect(back.session.startedFromHub).toBe(true)
     expect(mgr.listSessions().find((s) => s.id === child.id)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     mgr = new SessionManager(store, scriptedAdapters(), () => {})
     expect(mgr.listSessions().find((s) => s.id === child.id)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
   })

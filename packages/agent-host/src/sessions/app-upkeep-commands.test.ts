@@ -53,7 +53,7 @@ beforeEach(() => {
   rt.refresh()
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await rt.dispose()
   store.close()
   rmSync(root, { recursive: true, force: true })

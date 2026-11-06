@@ -27,7 +27,7 @@ beforeEach(() => {
   events = []
 })
 afterEach(async () => {
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -70,13 +70,13 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
   it('reaches the parent from the next host, which adopted the kept child and found the mark in the store', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     // Letting go is not the end of the child's turn: no failure report, and the mark stays for the next host
     expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     // Only the next host's handles exist now: the parent hears nothing through the old host's
     b.claude.handles.get(child)!.answer('finished under the new host')
@@ -99,11 +99,11 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     expect(store.sessions.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(store.children.listReportMarks()).toEqual([])
     expect(b.mgr.processes.waitsOn(parent)).not.toContain(child)
     // The answer it finished with is there for the parent to read
@@ -125,7 +125,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
   it('is dropped by a host that finds no process for the child: that turn died with the old host', async () => {
     const a = host()
     const { child } = await parentAndChild(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const c = host()
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
@@ -141,10 +141,10 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     // At rest, yet still owing: the verify runs on in the kept process
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
@@ -180,10 +180,10 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(await call).toMatchObject({ ok: true, state: 'done', paused: expect.stringContaining('pnpm verify') })
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(store.settings.appSetting(`report_paused:${child}`)).not.toBeNull()
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // At rest, yet still owing: the verify runs on in the kept process
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
@@ -213,10 +213,10 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(a.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'person' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     // Their turn ends under the new host: reported to nobody, the report still open
@@ -239,9 +239,9 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const a = host()
     const { parent, child } = await parentAndChild(a)
     expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'work' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     b.claude.handles.get(child)!.answer('finished under the new host')
     await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
     expect(stored(parent)[0]).toContain('finished under the new host')
@@ -254,7 +254,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const c = host()
     expect(store.children.listReportMarks()).toEqual([])

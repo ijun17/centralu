@@ -14,7 +14,7 @@ import { lastActiveOf } from './transcript-view.js'
  * What a linked machine's ask reaches of the session manager (#550), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
  */
-export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'askHost' | 'builderRefOf' | 'deliver' | 'emit' | 'meta' | 'store'>
+export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'builderRefOf' | 'deliver' | 'emit' | 'meta' | 'store'>
 
 /** The machine a call came from, as the link it came in on names it: never what the call says */
 export type AskingMachine = { id: string; name: string }
@@ -135,7 +135,7 @@ export class MachineAsks {
       let mine = this.standing.get(machine.id)
       if (!mine) this.standing.set(machine.id, (mine = new Set()))
       mine.add(closing)
-      const decision = await this.host.askHost(
+      const decision = await this.host.hostCards.askHost(
         chosen.id,
         {
           kind: 'project_access',

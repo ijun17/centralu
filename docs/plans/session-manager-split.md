@@ -245,6 +245,38 @@ Manager line counts are after each pull request.
   not compile. `parts()` gains the `starts` and `inputs` getters and `refuseWhileLettingGo`, which stays with host tenure.
   A failed fork's reason is read with `errorMessage(err)` instead of `(err as Error).message` (lint counts a moved assertion
   as new): the same text for anything with a `message`, and the thrown value's text, not `undefined`, for anything else.
+- **10, host tenure** (`manager.ts` 1,972 to 1,427; `sessions/host-tenure.ts`, 640 lines, a move of 545): the
+  constructor's restore at start (`restoreAtStart`, called where the block stood), `adoptKept`, `turnLostInSwap`, the
+  turns an update cut (`continueCutTurns`, `sendUpdateNote`, `continueLostTurn`, `notContinued`, `stopForUpdate`,
+  `takeUpdateEnded`, `updateContinued`), the quit notices (`tellQuitNotices`, `quitTold`, `quitTellEnded`), `keptInTurn`,
+  `endKept`, the letting go (`lettingGo`, `refuseWhileLettingGo`, `disposeAll`, `disposeEverything`, `detachAll`,
+  `leaveHost`) and the eleven fields they own, as they were, on `HostTenure` (`mgr.tenure`), with `KeptAgent` and the
+  adoption's idle wait. Nothing in it is extended (#1895). `disposing`, `handingOver`, `quitNotices`, `lettingGo` and
+  `refuseWhileLettingGo` are public: `parts()` and the constructor's lambdas read them. The shutdown plan takes
+  `sessions: mgr.tenure`; `parts()` gains the `processes`, `mail`, `merges`, `files` and `selfCompaction` getters and
+  `stopSelfCompaction`. `HostTenure` is made first in the constructor, so every getter that reads it finds it. Two moved
+  lines are rewritten because lint counts a moved finding as new: an adapter with no `settle` gives `Promise.resolve()`
+  rather than `undefined` to `Promise.allSettled` (settled the same), and the queued requests' check reads the session
+  without `!` (`restoreQueued` asks only of a request whose session is here).
+- **8, the rest of the forwards** (`manager.ts` 1,427 to 1,410): after PRs 6 to 10 `parts()` exposed more modules by a
+  getter, so 70 of its entries forwarded to one. 18 go. In 17 of them, the host types that named them pick the module, typed by it
+  (`hostCards`, `restartPolicy`, `worktrees`, `files` and `linkedReports` in `DelegationHost`; `selfCompaction`,
+  `delegationFlow`, `askProjectFlow`, `merges`, `cardRests`, `record`, `approvalRules` and `processes` in the host of the
+  one module that used them), which removes a second copy of each signature. `listAgents` is the orchestrator seat's own
+  entry, since no other host names it. The other 52 stay, for these reasons:
+  - **An import cycle:** 46 are declared in a host type that the module they forward to reaches by its own imports
+    (`DelegationHost` and the modules built on it: `queue`, `reports`, `cards`, `events`, `inputs`, `processes`, `mail`, …).
+    dependency-cruiser counts type imports (`tsPreCompilationDeps`), so picking the module there is a cycle. Writing the
+    signatures out under the module's name instead would be the same lines with a wider pick for each consumer.
+  - **A narrower signature of its own:** `askHost`, `send`, `exportHandoffNote` and `exportHandoffRecord` of
+    `HandoffFlowHost`, which its test builds and changes by hand. Picking the modules would widen the signatures and
+    nest that fake, for no line saved.
+  - **No plain forward:** `hasSession` reads `meta`, not a module, and `settleLinkedTurn` builds the event it passes on.
+
+  Each module's constructor takes its own host type, so a module sees only what that type names. `parts()` is one object
+  for all of them by design (§3). Of the getters PR 10 added (`processes`, `mail`, `merges`, `files`, `selfCompaction`),
+  `HostTenureHost` names them whole, and the hosts above pick only the one method each uses. Giving each module a narrower
+  object at run time would bring back the per-module objects `parts()` replaced, which is more code.
 
 ### 6.2 Work in flight
 

@@ -638,7 +638,7 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(a1.opts.systemPromptAppend).toBeUndefined()
     expect(mgr.tools.toolProfileOf(a1.id)).toBe('reader')
 
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await rpc('agents.send', { sessionId: a1.id, text: 'wake up' })
     expect(adapter.lastOpts?.sessionId).toBe(a1.id)
     expect(adapter.lastOpts?.toolProfile).toBe('reader')
