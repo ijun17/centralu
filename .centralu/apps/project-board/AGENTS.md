@@ -995,7 +995,7 @@ and refuses with every reason at once, sending nothing.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure. One this
-  machine's merge queue holds (`findItem` on its file, as itself or a stack's top) stays ready
+  machine's merge queue holds (its file: as itself, a stack's top, or a lower under a queued top, #2098) stays ready
   (#1673): the queue never merges a draft it did not make, so drafting it would stall it. The answer
   says so, and that the new one moves onto the default branch with `rebase_stack` once it landed.
 - **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,

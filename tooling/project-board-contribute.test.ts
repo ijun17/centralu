@@ -468,6 +468,27 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(ghCalls().filter((c) => c.args[1] === 'ready')).toEqual([])
   })
 
+  // #2098: a lower of a queued stack is held by the queue as much as a queued top is: drafting it stalled the stack
+  it('leaves the pull request it is stacked on ready when it is a lower under a stack the merge queue holds', async () => {
+    patchState((s) => {
+      s.prs['5'] = pr(5, { headRefName: 'feat/low' })
+    })
+    const dir = join(root, 'data', 'app-data', 'p1', 'project-board')
+    mkdirSync(dir, { recursive: true })
+    const queued = { repo: 'ijun17/centralu', pr: 9, lowers: [5], owner: 'lander', state: 'ci', queuedAt: new Date().toISOString(), reruns: {} }
+    writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items: [queued], events: [], batches: [], batchSeq: 0, batchOff: null }))
+    runtime()
+    const r = await call('open_pr', { ...PR, base: 'feat/low' })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain('#5, which this one is stacked on, is in the merge queue, so it stays ready')
+    expect(r.data.drafted).toBeUndefined()
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toEqual([])
+    // Landed or closed, the queue holds it no more: it is drafted as any lower
+    writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items: [{ ...queued, state: 'merged' }], events: [], batches: [], batchSeq: 0, batchOff: null }))
+    const again = await call('open_pr', { ...PR, base: 'feat/low' })
+    expect(again.data.drafted).toBe(5)
+  })
+
   it('refuses a pull request with an empty Not exercised, a bad title or a heading the template lacks, sending nothing', async () => {
     runtime()
     const empty = await call('open_pr', { ...PR, notExercised: '  ' })
