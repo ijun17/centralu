@@ -56,6 +56,17 @@ export function recordedFolders(root: string): { dir: string; names: string[]; f
   }))
 }
 
+/** The folder of the newest tool version under `root`, of those that hold `scenario` if one is named: a re-recording on a version bump replaces the old one */
+export function newestVersion(root: string, scenario?: string): string {
+  const numbers = (dir: string) => dir.replace(/^[a-z-]+-/, '').split('.').map(Number)
+  const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
+  return recordedFolders(root)
+    .filter((f) => scenario === undefined || f.names.includes(scenario))
+    .map((f) => f.dir)
+    .sort(newer)
+    .at(-1)!
+}
+
 /** A new folder for a replay to run in, and the way to take it away */
 export function temporaryFolder(prefix: string): { path: string; remove(): void } {
   const path = mkdtempSync(join(tmpdir(), prefix))
@@ -83,6 +94,11 @@ export type FrameCodec = {
    * order differs between runs; what a line is answered with does not depend on it
    */
   readonly unordered?: (sent: Record<string, unknown>) => boolean
+  /**
+   * A line the adapter sends when it likes, a moment after the tool has finished (Claude: the plan's usage, asked of the CLI once a turn has ended):
+   * a recording may end with it, and a replay that finishes before the adapter asks is not short of it. If the adapter does send it, it is compared
+   */
+  readonly optionalAtEnd?: (recorded: Record<string, unknown>) => boolean
   /**
    * A query the adapter makes when it likes, not because the tool said something (Claude: a context reading, sent when
    * the previous one has been answered, so how many go out and where depends on timing). Neither it nor its answer is
@@ -191,6 +207,7 @@ const withoutOwnWords = (response: unknown) => {
 export const streamJsonCodec = (cwd: string, opts: { own?: OwnAnswers; hostAnswers?: boolean } = {}): FrameCodec => ({
   // Two inputs of the person are in the order they were sent; the lines around them are not
   unordered: (line) => line.type !== 'user',
+  optionalAtEnd: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_usage',
   probe: {
     is: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_context_usage',
     answers: (line, asked) => line.type === 'control_response' && asked.has(String(record(line.response).request_id)),
@@ -239,7 +256,7 @@ export const streamJsonCodec = (cwd: string, opts: { own?: OwnAnswers; hostAnswe
 })
 
 /** A recorded value as it reads in the folder the replay runs in: its `<cwd>` is that folder */
-function inFolder<T>(v: T, cwd: string): T {
+export function inFolder<T>(v: T, cwd: string): T {
   if (typeof v === 'string') return v.split('<cwd>').join(cwd) as T
   if (Array.isArray(v)) return v.map((x) => inFolder(x, cwd)) as T
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, inFolder(x, cwd)])) as T
@@ -272,11 +289,16 @@ const describeLine = (m: Record<string, unknown>): string => {
   return typeof subtype === 'string' ? `${String(m.type)} ${subtype}` : String(m.type)
 }
 
-export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
+/** `onProblem`: told of each problem as it happens, for a host that no test is waiting on to read `state.problems` after */
+export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec, onProblem?: (problem: string) => void): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
   let cursor = 0
   const frames = recording.frames
   const peers: ReplayPeer[] = []
   const state = { problems: [] as string[], spawned: 0 }
+  if (onProblem) {
+    const push = state.problems.push.bind(state.problems)
+    state.problems.push = (...found) => (found.forEach(onProblem), push(...found))
+  }
   let fail!: (e: Error) => void
   const failed = new Promise<never>((_, reject) => (fail = reject))
   // A replay that ends well never reads it
@@ -357,7 +379,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   }
 
   left(): number {
-    return this.frames.length - this.i
+    const rest = this.frames.slice(this.i)
+    return rest.every((f) => f.dir === 'out' && f.msg && this.codec.optionalAtEnd?.(f.msg)) ? 0 : rest.length
   }
 
   /** What the replay waits for next, for a failure message */

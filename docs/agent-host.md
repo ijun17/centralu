@@ -2323,6 +2323,21 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled
    --thinking-display summarized`, since the adapter never asks for the text and the CLI sends it empty otherwise; `'tasks'`: `--tools TaskCreate,...`,
    since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
+   The recordings also drive the UI's e2e scenarios (#1498): `adapters/frames/replay-agent.test-helpers.ts` makes a
+   recorded session the agent of a running host (`--agent replay` of `e2e/fixtures/linked-host-main.ts`), the real
+   adapter on a recording in place of the tool's process, and a session replays the scenario its working folder is
+   named after. `e2e/replay.spec.ts` plays each entry of `REPLAYS` (`e2e/fixtures/replay-scenarios.ts`) through the real
+   UI: it types the prompts the recording holds, presses Stop and restarts the agent where it holds them, and checks
+   against what the recording holds the bubbles in their order, the tool calls (their number and names, and that they fold
+   into lines), the Centralu call marks and the compaction marks, and that the adapter sent the tool nothing the
+   recording does not hold. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
+   Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line); a question card is
+   answered with the option the recording holds. A test fails for a
+   recording that has no entry and no reason in `NOT_PLAYED`. A new recording of a tool already in `REPLAYED` is one entry
+   of `REPLAYS`; a new tool is one row of `REPLAYED` (its adapter, its `FrameCodec`, the options its session is given, its
+   recordings folder) and one reader of its frames in `HELD`. A check that a tool's new version sends frames the recordings lack would read the same table: the
+   version folder `newestVersion` picks against the installed tool's version, and the kinds of frame the host logs as
+   unmapped (`unmapped message type`) against those the recordings hold.
 
    **What a replay compares (#2068).** Every line the adapter sends the tool is compared with the recorded one, and a difference
    fails the run at once, naming the recording, its line and the JSON path (`claude-code-2.1.296/centralu-mail.jsonl line 26: the

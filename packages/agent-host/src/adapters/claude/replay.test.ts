@@ -4,9 +4,8 @@ import { instructionsFor, toolDefsFor } from '../../sessions/orchestrator-tools.
 import type { AgentSpawnSpec, CreateSessionOpts } from '../contract.js'
 import { callOrder, differs, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type OwnAnswers, type Recording } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
-import { ClaudeAdapter } from './index.js'
 import { CLAUDE_SUBAGENT_TOOL, ORCHESTRATOR_MCP_NAME } from './orchestrator-mcp.js'
-import { CLAUDE_RECORDINGS, recordedMessages, recordedVersion } from './recorded.test-helpers.js'
+import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
 
 /**
  * The Claude adapter against recordings of the real CLI (#1498): the CLI's stream-json, recorded at its process by
@@ -47,11 +46,11 @@ async function replay(dir: string, name: string, edit?: (recording: Recording) =
   const { spawn: replayed, state, peers } = replaySpawner(recording, streamJsonCodec(cwd, { own: centraluAnswers(scenario.session?.() ?? {}) }))
   const started: AgentSpawnSpec[] = []
   const spawn = (spec: AgentSpawnSpec) => (started.push(spec), replayed(spec))
-  const adapter = new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' })
+  const adapter = replayedClaudeAdapter()
   // A step the adapter never reaches fails with what it sent instead of the recording's next line, not with a timeout
   const events = await drive(adapter, scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'claude',
-    session: { noSettingFiles: true, model: 'haiku', processSource: { spawn } },
+    session: { ...CLAUDE_REPLAY_SESSION, processSource: { spawn } },
     replay: state,
   }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), spawned: state.spawned, started }
