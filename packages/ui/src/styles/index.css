@@ -907,6 +907,23 @@
   animation: cc-hang 180ms ease-out;
 }
 
+/*
+ * A short pane's composer opening (a note holds it open, or the pane grew): the card comes up from below the pane's edge
+ * into its place in the layout, the way it went down when the pane folded (300ms, the same ease). The pane clips while
+ * it does (SessionView). Like cc-hang it leaves no fill-mode: the transform must be gone once it ends.
+ */
+@keyframes cc-composer-rise {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.cc-composer-rise {
+  animation: cc-composer-rise 300ms ease-out;
+}
+
 /* Steps up out of the way as the next user message approaches — must not stay over the bubble
    and cover it. */
 @keyframes cc-hang-out-up {
@@ -942,7 +959,8 @@
 @media (prefers-reduced-motion: reduce) {
   .cc-hang,
   .cc-hang-out-up,
-  .cc-hang-in-down {
+  .cc-hang-in-down,
+  .cc-composer-rise {
     animation: none;
   }
   /* Even with animation off, a conflicting banner steps out of the way immediately. */
