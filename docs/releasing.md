@@ -177,7 +177,7 @@ script rehearses by default and why nothing publishes automatically.
   summary, and uploads the reports as the `e2e-report` artifact, a folder per engine.
 - **Time limits** (2026-10-19: one e2e shard hung 35 minutes and held a merge batch). Every job
   that does real work has a `timeout-minutes` near its slowest green run of the last 20 full runs
-  with about half again on top: the e2e shards 15 minutes (slowest 9.7), `verify` 20 (10.8), the
+  with about half again on top: the e2e shards' tests 12 minutes (slowest 7.2 on 10 shards), `verify` 20 (10.8), the
   Windows unit tests 25 (13.1); the Rust builds more, for a run that misses the cache (bundles
   30, keeper end to end 20). `build.yml`'s comment above the `e2e` job has every number. A job
   that hits its limit ends with GitHub's "has exceeded the maximum execution time" annotation

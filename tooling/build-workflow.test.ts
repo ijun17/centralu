@@ -234,10 +234,17 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       const step = body.slice(body.indexOf('- name: pnpm e2e'))
       expect(step, id).toMatch(/^ {8}id: e2e$/m)
       // One run of the shard: the whole-shard retry (#1035) is gone with its first-attempt artifact
-      expect(step, id).toMatch(/^ {8}run: pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} --reporter=list,blob,\.\/e2e\/flaky-report\.ts --trace=retain-on-failure$/m)
+      expect(step, id).toMatch(/^ {8}run: bash \.github\/scripts\/e2e-shard\.sh \$\{\{ matrix\.shard \}\} \$\{\{ matrix\.shards \}\}$/m)
+      expect(step, id).not.toContain('PLAYWRIGHT_BLOB_OUTPUT_NAME')
       expect(body, id).not.toContain('e2e-first-attempt')
       expect(body, id).toMatch(/^ {4}outputs:\n {6}(?:#.*\n {6})?flaky: \$\{\{ steps\.e2e\.outputs\.flaky \}\}$/m)
     }
+    // The script runs the replay's share and the rest's, each with the reporters and a blob name of its own
+    const shard = readFileSync(new URL('../.github/scripts/e2e-shard.sh', import.meta.url), 'utf8')
+    expect(shard).toContain('pnpm e2e --shard="$shard/$shards" --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure')
+    expect(shard).toContain('name="report-$shard.zip"')
+    expect(shard).toContain('name="report-$shard-replay.zip"')
+    expect(shard).toMatch(/for part in skip only/)
     const report = job('e2e-report').body
     for (const id of ['e2e', 'e2e-chromium']) {
       expect(report).toContain(`needs.${id}.result == 'failure'`)
@@ -245,6 +252,20 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     }
     expect(report).toMatch(/E2E_FLAKY_LABEL="\$engine" .*merge-reports --reporter html,\.\/e2e\/flaky-report\.ts /)
     expect(workflow).toContain('pattern: e2e-blob-*')
+  })
+
+  // The merge queue reads a shard that GitHub never created as a hole, and the stand-in must report the names the shards do
+  it('cuts both engines, and the Chromium stand-in, into the same shards', () => {
+    const matrix = (id: string) => {
+      const body = job(id).body
+      const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(body)?.[1])
+      expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(body)?.[1], id).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+      return shards
+    }
+    const shards = matrix('e2e')
+    expect(shards).toBeGreaterThan(1)
+    expect(matrix('e2e-chromium')).toBe(shards)
+    expect(matrix('e2e-chromium-skipped')).toBe(shards)
   })
 
   // 2026-10-19 (owner): one e2e shard hung 35 minutes and held a merge batch; GitHub's default limit is 6 hours
