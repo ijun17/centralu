@@ -25,7 +25,7 @@ describe('WebKit in the macOS Codex sandbox (#592)', () => {
   })
 
   it('the runner declares mixed mode when E2E_BROWSER is unset, so twins cannot bypass the guard', () => {
-    expect(config.metadata?.e2eBrowser).toBe(process.env.E2E_BROWSER ?? 'mixed')
+    expect(config.metadata?.e2eBrowser).toBe(process.env.E2E_BROWSER ?? (process.platform === 'win32' ? 'chromium' : 'mixed'))
   })
 
   it('catches a project that selects WebKit despite Chromium metadata', async () => {

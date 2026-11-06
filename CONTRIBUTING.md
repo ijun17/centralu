@@ -240,7 +240,8 @@ no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
 CI's full tier runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
 (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus
-the `-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
+the `-webkit.spec.ts` twins in WebKit (on Windows in Chromium alone: Playwright's WebKit there keeps only the
+text types of a drag, so every scenario that drags fails in it, #2022); `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
 e2e` runs it the way one CI engine does. When a shard fails, the `e2e report` job uploads
 one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed tests (`pnpm exec playwright show-report
 <folder>` after unzipping it). A twin repeats its base spec in WebKit and adds nothing, since CI
