@@ -135,6 +135,39 @@ export function updateQueue(dir, fn) {
   return out
 }
 
+/** The file in the data folder that tells this instance whether it guards main: `{ "drive": true }` or `{ "drive": false }` (#2087) */
+export const DRIVER_FILE = 'queue-driver.json'
+/** How long after it landed something an instance goes on watching main's full run for it (a hunt or a retraction under way holds it longer) */
+export const GUARD_LANDED_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_LANDED_MS) || 3 * 3600_000
+
+/** What a person told this instance about guarding main: true (always), false (never), or null (as it holds work, below) */
+export function driverRole(dir) {
+  try {
+    const v = JSON.parse(readFileSync(join(dir, DRIVER_FILE), 'utf8'))
+    return typeof v?.drive === 'boolean' ? v.drive : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether this instance guards main (#2087, 2026-11-06: the board app on a second machine, started because its sessions open
+ * pull requests, also ran the guard and filed reverts #2079 and #2084 that the maintainer's queue knew nothing of). The lease
+ * is per data folder, so it cannot stop another machine; this does: an instance guards main only for work it holds. Told so
+ * (`driverRole`) it does or does not whatever it holds; else when it has an item or a batch queued, a hunt or a revert and an
+ * issue of its own to follow, or landed something in the last `GUARD_LANDED_MS`. Anything else watches nothing and acts on nothing.
+ */
+export function guardDrives(q, now, role = null) {
+  if (role === false) return { drives: false, why: `${DRIVER_FILE} says this instance does not drive` }
+  if (role === true) return { drives: true }
+  if (q.items.some((i) => ACTIVE.has(i.state)) || activeBatch(q)) return { drives: true }
+  const g = q.guard ?? {}
+  const own = g.hunt && (!g.hunt.endedAt || ((g.hunt.issue != null || g.hunt.revert) && !g.hunt.retracted?.done))
+  if (g.acting || own) return { drives: true }
+  if (q.items.some((i) => i.state === 'merged' && now - Date.parse(i.updatedAt) < GUARD_LANDED_MS)) return { drives: true }
+  return { drives: false, why: 'it holds no queued work and landed nothing lately' }
+}
+
 /**
  * What the server tells Centralu it is busy with (#1236), or null when the queue has no work of its own: an item
  * waiting or in CI, or a batch with its end still to do. An item needing attention is not: it waits on a session, and
@@ -147,7 +180,8 @@ export function queueBusy(q, now = clock()) {
   const active = q.items.filter((i) => WORKING.has(i.state) || holdsApp(i, now)).length
   if (active) return `merge queue, ${plural(active, 'item')}`
   if (activeBatch(q)) return 'merge queue, a batch finishing'
-  // The main guard (#1259): main's full run after a landing not judged yet, or a culprit being looked for
+  // The main guard (#1259): main's full run after a landing not judged yet, or a culprit being looked for; not for an instance that does not guard (#2087)
+  if (q.guard?.passive) return null
   if (q.guard?.hunt && !q.guard.hunt.outcome) return 'main guard, finding what broke main'
   return q.guard?.pending ? "main guard, waiting for main's full run" : null
 }
@@ -162,6 +196,13 @@ export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act
   // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
   if (!q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
   if (q.guard?.nextAt && Date.parse(q.guard.nextAt) > now) return { did: 'wait' }
+  // One guard per repository (#2087): an instance with no queued work and no landing of its own watches nothing, and says so
+  const { drives, why } = guardDrives(q, now, driverRole(dir))
+  if (!drives) {
+    if (!q.guard?.passive) updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), pending: false, unfinished: 0, passive: { at: new Date(now).toISOString(), why } }))
+    return { did: 'passive', why }
+  }
+  if (q.guard?.passive) updateQueue(dir, (fq) => void delete fq.guard?.passive)
   // The lease is between processes, on the system's clock (a stepped test moves only the queue's)
   if (!takeLease(dir, holder, systemNow())) return { did: 'busy' }
   try {

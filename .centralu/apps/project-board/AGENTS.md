@@ -742,6 +742,17 @@ looked into).
   unfinished, the queue lands nothing and moves nothing (`tick` answers `held`; `merge_queue` says
   "Landing held: N of main's full runs unfinished"): each landing adds a full run, and the runners
   are shared.
+- **One guard per repository (#2087, 2026-11-06)**: reverts #2079 and #2084 were filed by the guard of the board app on a second
+  machine, started because sessions there open pull requests; the maintainer's queue knew nothing of them. The lease is per data
+  folder, so it cannot tell two machines apart; the guard therefore runs only in an instance that has work of its own
+  (`guardDrives`, queue-driver.mjs): an item or a batch queued in it, a hunt of its own, or a revert and issue it filed and has
+  not taken back, or something it landed in the last 3 hours (`GUARD_LANDED_MS`), which covers main's full run for it. Any other
+  instance is passive: `runGuard` answers `passive`, reads nothing of main, files and reruns nothing, writes `guard.passive`
+  (when and why) and no longer holds the app running for "main's full run" (`queueBusy`); the queue loop was already local to
+  the items an instance holds. A person's word overrides both ways: `queue-driver.json` in the app's data folder, `{ "drive": true }`
+  to guard always (an instance that should watch main though it landed nothing lately, for a merge made by hand) or `{ "drive": false }`
+  to never (an instance that must stay out although it queues). Read at every step, so no restart. What this does not do: two
+  instances that both land within the same 3 hours both guard; set `{ "drive": false }` on the one that should not.
 - **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
   and the queue opened a revert of reviewed work. The guard reads the failed run's jobs and steps as the
   queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run

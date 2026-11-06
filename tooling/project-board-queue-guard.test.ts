@@ -6,6 +6,8 @@ import { gitWrapper } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { SLOW } from './test-timing.js'
 import { g, GIT_ENV, githubStandIn } from './git-fixture.test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
+import { guardDrives, queueBusy } from '../.centralu/apps/project-board/queue-driver.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
 import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 import { REPO_ROOT, R, SHA, ghCheck, ghRun, ghPr, type Gh, ghState, appRef, root, rt, fake, IDLE_SERVER, NO_TIERS, FAST_LAND, runtime, call, gh, patchGh, writes, ghCalls, filesNamed, queueFile, queueOnDisk, notices, until, polls, stateOf, short2, watch, seedQueue, landed, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
@@ -1129,3 +1131,91 @@ describe('the main guard blames a commit only for a test that fails again on a r
   })
 })
 
+
+describe('only one instance guards main, the one with work of its own (#2087)', { timeout: 120_000 * SLOW }, () => {
+  const NOW = Date.parse('2026-11-06T20:00:00Z')
+  const hour = 3600_000
+  const merged = (hoursAgo: number) => ({ state: 'merged', updatedAt: new Date(NOW - hoursAgo * hour).toISOString() })
+  const reruns = () => writes().filter((w) => w[0] === 'rerun-failed')
+  const dataDirOnDisk = () => join(root, 'data', 'app-data', 'p1', 'project-board')
+
+  it('guards for queued work, a batch, a hunt or an issue of its own, or a landing in the last hours; for nothing else', () => {
+    const none = { items: [], batches: [], guard: {} }
+    expect(guardDrives(none, NOW)).toMatchObject({ drives: false })
+    // A second machine whose queue once landed something, long ago
+    expect(guardDrives({ ...none, items: [merged(30)] }, NOW)).toMatchObject({ drives: false, why: expect.stringContaining('landed nothing lately') })
+    expect(guardDrives({ ...none, items: [{ state: 'closed', updatedAt: new Date(NOW).toISOString() }] }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [merged(2)] }, NOW)).toEqual({ drives: true })
+    for (const state of ['waiting', 'ci', 'attention']) expect(guardDrives({ ...none, items: [{ state }] }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, batches: [{ state: 'ci', members: [] }] }, NOW)).toEqual({ drives: true })
+    // Its own hunt, and the revert and issue it filed until it has taken them back
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a' } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5 } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5, retracted: { done: 'x' } } } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', outcome: 'explained' } } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, guard: { acting: { red: 'a' } } }, NOW)).toEqual({ drives: true })
+    // A person's word decides, either way
+    expect(guardDrives(none, NOW, true)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, items: [{ state: 'waiting' }] }, NOW, false)).toMatchObject({ drives: false })
+  })
+
+  const redRun = (repo: ReturnType<typeof mainRepo>, sha: string) => ({
+    branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+    jobs: { 990: [failedJob(31, 'verify')] },
+  })
+  const oneCommit = () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    return { repo, sha: repo.shas[0]! }
+  }
+  const seedOld = (sha: string) => seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: '2026-10-01T00:00:00Z', reruns: {} }])
+
+  it('stays passive on a red main when it landed nothing lately: no rerun, no hunt, no revert, no issue, and the app is not held for it', async () => {
+    const { repo, sha } = oneCommit()
+    seedOld(sha)
+    guardRuntime(repo, redRun(repo, sha))
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().passive, 'the passive mark')
+    await polls(12)
+    expect(reruns()).toEqual([])
+    expect(writes().filter((w) => ['pr-create', 'issue', 'dispatch', 'branch'].includes(w[0]))).toEqual([])
+    expect(guardOnDisk().hunt ?? null).toBe(null)
+    expect(guardOnDisk().passive.why).toContain('landed nothing lately')
+    expect(queueBusy(queueOnDisk())).toBe(null)
+    // main is not even read for it
+    expect(ghCalls().filter((a) => a.join(' ').includes('/actions/workflows/build.yml/runs'))).toEqual([])
+  })
+
+  it('guards again when a person says so, or it lands something, without a restart', async () => {
+    const { repo, sha } = oneCommit()
+    seedOld(sha)
+    guardRuntime(repo, redRun(repo, sha))
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().passive, 'the passive mark')
+    writeFileSync(join(dataDirOnDisk(), 'queue-driver.json'), JSON.stringify({ drive: true }))
+    await until(() => reruns().length > 0, 'the guard at work')
+    expect(guardOnDisk().passive).toBeUndefined()
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+  })
+
+  it('stays passive though it landed a moment ago when the data folder says it does not drive', async () => {
+    const { repo, sha } = oneCommit()
+    landed(sha)
+    mkdirSync(dataDirOnDisk(), { recursive: true })
+    writeFileSync(join(dataDirOnDisk(), 'queue-driver.json'), JSON.stringify({ drive: false }))
+    guardRuntime(repo, redRun(repo, sha))
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().passive, 'the passive mark')
+    await polls(8)
+    expect(reruns()).toEqual([])
+    expect(guardOnDisk().passive.why).toContain('queue-driver.json')
+  })
+
+  it('guards the main run of what it landed a moment ago, as before', async () => {
+    const { repo, sha } = oneCommit()
+    landed(sha)
+    guardRuntime(repo, redRun(repo, sha))
+    await call('merge_queue')
+    await until(() => reruns().length > 0, 'the rerun')
+    expect(guardOnDisk().passive).toBeUndefined()
+  })
+})
