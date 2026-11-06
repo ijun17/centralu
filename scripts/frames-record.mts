@@ -13,19 +13,21 @@
  * link) is a temporary one; so are OpenCode's XDG folders. A scenario that gives an ACP agent Centralu's tools (`centralu-*`) runs
  * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AcpAdapter } from '../packages/agent-host/src/adapters/acp/adapter.js'
 import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.js'
 import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
-import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts } from '../packages/agent-host/src/adapters/contract.js'
+import { driveSwap, SWAP_SCENARIOS, type SwapScenario } from '../packages/agent-host/src/adapters/codex/swap-scenarios.test-helpers.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
+import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
+import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
@@ -50,7 +52,12 @@ async function main(): Promise<number> {
     console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
     return 2
   }
-  const chosen = scenariosFor(tool).filter((s) => names.length === 0 || names.includes(s.name))
+  const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
+  const chosen: { name: string; drive?: Scenario; swap?: SwapScenario }[] = [
+    ...scenariosFor(tool).filter(wanted).map((drive) => ({ name: drive.name, drive })),
+    // A conversation that changes hands with its app-server still running (a host swap under the keeper): Codex's
+    ...(tool === 'codex' ? SWAP_SCENARIOS.filter(wanted).map((swap) => ({ name: swap.name, swap })) : []),
+  ]
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
@@ -68,23 +75,36 @@ async function main(): Promise<number> {
   try {
     codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
     for (const scenario of chosen) {
+      codexHome?.settings(scenario.drive?.settings)
       // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
-      process.env.CC_RECORD_FRAMES = raw
+      // A swap scenario records from the swap on: the host that adopts a process taps it from then
+      if (scenario.swap) delete process.env.CC_RECORD_FRAMES
+      else process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
       const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(spec))
       const adapter = adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
       let bridge: BridgeHost | null = null
+      const outside: string[] = []
       try {
-        const run = runAs(tool, scenario)
-        // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
-        const given = ACP_TOOLS.includes(tool) ? scenario.session?.() : undefined
-        if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
-        const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
-        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => seedFiles(cwd, files), tool, session })
+        let run: { preset?: string }
+        let events
+        if (scenario.swap) {
+          const swap = scenario.swap
+          run = { preset: swap.preset }
+          const first = { sessionId: `${sessionId}-first`, cwd, permissionPreset: swap.preset ?? ('normal' as const), projectTrusted: true, ...sessionFor(tool, spawn).session, ...(swap.model ? { model: swap.model } : {}) }
+          events = await driveSwap(adapter, swap, first, sessionId, () => last, () => void (process.env.CC_RECORD_FRAMES = raw), 300_000)
+        } else {
+          run = runAs(tool, scenario.drive!)
+          // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
+          const given = ACP_TOOLS.includes(tool) ? scenario.drive!.session?.() : undefined
+          if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
+          const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
+          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
+        }
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
@@ -99,6 +119,7 @@ async function main(): Promise<number> {
         failed++
         console.error(`[record] ${tool} ${scenario.name}: ${(e as Error).message}`)
       } finally {
+        for (const path of outside) rmSync(path, { recursive: true, force: true })
         await bridge?.close()
         await removeDir(cwd)
         if (!keepRaw) rmSync(raw, { recursive: true, force: true })
@@ -122,38 +143,6 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
 }
 
 /**
- * A Codex settings folder of its own for the run (`CODEX_HOME`), so no setting, skill, hook or thread of the person's is read or
- * written. It holds a copy of the sign-in alone. Codex rotates the refresh token when it refreshes one, which would leave the
- * person's own file with a token it no longer accepts: if the copy changed, `finish` puts it back into the person's file, unless
- * that file changed meanwhile (another Codex refreshed it: its token is the newer one and stays). The put-back is a rename, so
- * the file is never half written.
- */
-function temporaryCodexHome(parent: string): { finish(): void } {
-  const real = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'auth.json')
-  const home = join(parent, 'codex-home')
-  mkdirSync(home, { recursive: true })
-  const copy = join(home, 'auth.json')
-  if (!existsSync(real)) throw new Error('codex is not signed in: run `codex login` first')
-  copyFileSync(real, copy)
-  const before = readFileSync(copy, 'utf8')
-  process.env.CODEX_HOME = home
-  let done = false
-  return {
-    finish() {
-      if (done) return
-      done = true
-      const now = readFileSync(copy, 'utf8')
-      if (now === before) return
-      if (readFileSync(real, 'utf8') !== before) return console.error('[record] the sign-in was refreshed during the run, and the person\'s own file was too: left as it is')
-      const next = `${real}.${process.pid}.tmp`
-      writeFileSync(next, now, { mode: 0o600 })
-      renameSync(next, real)
-      console.log('[record] the sign-in was refreshed during the run: kept in the person\'s auth file')
-    },
-  }
-}
-
-/**
  * The bridge a session is opened with names this machine's node, the bridge script's place in the checkout and this run's host port:
  * a recording keeps what the agent was told to start, in words that read the same wherever it is replayed
  */
@@ -171,25 +160,16 @@ function bridgeAsPlaceholders(frames: unknown[]): unknown[] {
   return frames
 }
 
-/** The files a scenario asks the tool to find in its working folder */
-function seedFiles(cwd: string, files: Record<string, string | Buffer>): void {
+/** The files a scenario asks the tool to find in its working folder, and the folders it made outside it */
+function seedFiles(cwd: string, files: Record<string, string | Buffer>): string[] {
+  const outside: string[] = []
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(cwd, name)), { recursive: true })
     writeFileSync(join(cwd, name), text)
+    // A file the scenario puts beside the working folder (a read outside it) is taken away with the run
+    if (name.startsWith('..')) outside.push(dirname(join(cwd, name)))
   }
-}
-
-/** Removes a folder a tool's process may still hold for a moment after the session closed (Windows will not remove a folder that is some process's working folder) */
-async function removeDir(dir: string): Promise<void> {
-  for (let tries = 0; ; tries++) {
-    try {
-      rmSync(dir, { recursive: true, force: true })
-      return
-    } catch (e) {
-      if (tries >= 60) return console.error(`[record] could not remove ${dir}: ${(e as Error).message}`)
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
+  return outside
 }
 
 function adapterFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): AgentAdapter {
