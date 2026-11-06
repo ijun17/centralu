@@ -15,7 +15,7 @@ import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
-import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
@@ -631,11 +631,8 @@ export class RemoteAgents {
         const text = opts.text?.trim()
         if (!text) return { ok: false, error: 'Give the text to send.' }
         // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)
-        const childPreset = rec.preset ?? 'normal'
-        const own = this.callerPreset(callerId)
-        if (!presetWithin(childPreset, own)) {
-          return { ok: false, error: `"${rec.name}" now has more permissions (${childPreset}) than this session (${own}), so this session cannot give it work. Tell the person.` }
-        }
+        const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
+        if (above) return { ok: false, error: above }
         const now = await stateOf()
         if (!now.ok) return now
         if (now.running) {

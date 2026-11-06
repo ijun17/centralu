@@ -433,7 +433,7 @@ describe("a child's turn and the call waiting on it", () => {
     for (const id of ['theirs', 'far']) {
       expect(await flow.agentSession('caller', { sessionId: id, action: 'stop' })).toEqual({
         ok: false,
-        error: `${id} is not a session this session started. agent_session works only on sessions start_agent started here.`,
+        error: `${id} is not a session this session started. agent_session works only on sessions start_agent started from here.`,
       })
     }
   })
