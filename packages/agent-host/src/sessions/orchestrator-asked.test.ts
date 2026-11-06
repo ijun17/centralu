@@ -491,6 +491,8 @@ describe('a request whose turn is stopped or cut by a quit', () => {
     await eventually(() => read.reportsOn(request.id).length === 1)
     await settle()
     expect(read.reportsOn(request.id)[0]!.body).toContain("The orchestrator's turn on your request did not finish")
+    // Released with the quit, held for that report and marked told by it: the asker reads of this quit once
+    expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
     expect(stopNotices(asker)).toEqual([])
   })
 

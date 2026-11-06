@@ -278,7 +278,7 @@ describe('a session stops without answering a question', () => {
     expect(notices[1]).toContain(`gamma stopped with an error before it answered ${yours.id}`)
   })
 
-  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered', () => {
+  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered; a request to the orchestrator is one', () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
     // Even a task that were marked as needing a reply is the report path's, not this one's
@@ -287,12 +287,17 @@ describe('a session stops without answering a question', () => {
     const waiting = w.send(A, { to: [B], text: 'not delivered', needsReply: true }).message
     const answered = w.ask(C, B, 'answered one')
     w.send(B, { replyTo: answered.id, text: 'here' })
+    const request = w.ask(C, ORC, 'can you look at CI?')
 
     expect(w.stops.sessionStopped(B, 'error')).toBe(0)
     for (const id of [task.id, fyi.id, waiting.id]) expect(w.rowOf(id, B)).toMatchObject({ releasedAt: null, toldAt: null })
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: null })
     expect(w.noticesTo(A)).toEqual([])
     expect(w.noticesTo(C)).toEqual([])
+    // Its sender always learns it will not be answered (owner, #1186)
+    expect(w.stops.sessionStopped(ORC, 'error')).toBe(1)
+    expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: 'error', toldAt: w.clock.t })
+    expect(w.noticesTo(C)).toHaveLength(1)
   })
 
   it.each(CAUSES)("$why: a request to the orchestrator is released with that cause and its sender told, as a crash's turnsLost tells it 'lost'", ({ why }) => {
