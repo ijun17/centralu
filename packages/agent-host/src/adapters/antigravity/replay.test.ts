@@ -287,6 +287,21 @@ describe("Antigravity's agent as `agy acp` 1.5.0 runs it, replayed", () => {
     for (const call of mail) expect(of(w.events, 'tool_result').find((r) => r.callId === call.callId)).toMatchObject({ ok: true, summary: '(Antigravity did not return the output)' })
   })
 
+  it("centralu-agents: recall, read_session and start_agent are three tool rows named as the agent names them, each ended ok and asked about nothing (#2048)", async () => {
+    const w = world(recording15('centralu-agents'))
+    const handle = await open(w, 'normal', undefined, { orchestratorTools: fakeCentraluTools(), orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' }, toolProfile: 'reader' })
+    await turn(w, handle, 'Use the recall tool, then read_session, then start_agent', 'allow')
+    await handle.dispose()
+    expect(w.state.problems).toEqual([])
+    expect(w.state.left()).toBe(0)
+    expect(callOrder(w.events)).toEqual([])
+    const calls = of(w.events, 'tool_call')
+    expect(calls.map((c) => c.summary.tool)).toEqual(['Run mcp_centralu_recall', 'Run mcp_centralu_read_session', 'Run mcp_centralu_start_agent'])
+    expect(of(w.events, 'tool_result').map((r) => r.ok)).toEqual([true, true, true])
+    expect(of(w.events, 'approval_request')).toEqual([])
+    expect(of(w.events, 'turn_complete')).toHaveLength(1)
+  })
+
   it('signed out: session/new refused (-32000) with no detail is the same sign-in in Centralu', async () => {
     const w = world(recording15('signed-out'))
     const err = await open(w).catch((e: unknown) => e as Error & { code?: string })

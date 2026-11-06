@@ -515,11 +515,11 @@ the ones that matter):
 | `usage_update` (`used`, `size`) | after every step | none; only the prompt's final `usage` |
 | Centralu's bridge call | `_meta.mcp.server`, a card, result text | `name` `mcp_centralu_mail`, no `_meta`, no card, no result text |
 | Tool call | `pending`, then its request | `in_progress` with `name` and `args`; a shell call turns `pending` and asks |
-| Shell result | `rawOutput.combinedOutput`, `exitCode` | `rawOutput.output` ("Command exited with code 0." first), `exit_code` |
+| Shell result | `rawOutput` with `combinedOutput` and `exitCode` (and `exit_code`) | `rawOutput` with `output` ("Command exited with code 0." first) and `exit_code` alone |
 | Permission options | `allow_always` for a command, with a warning | `allow` and `deny` only |
 | Modes, config | `default`, `auto_edit`, `yolo`; `thinking_level` | `default`, `accept-edits`, `plan`; `thought_level` |
 | `initialize` | `mcpCapabilities`, `agentInfo` `antigravity-acp` | no `mcpCapabilities`; `agentInfo` `Antigravity ACP Server`; `close` and `load` in `sessionCapabilities` |
-| New updates | none | `session_info_update` (the title), `agent_thought_chunk`, the prompt echoed as `user_message_chunk` |
+| New updates | `user_message_chunk` only in a load's replay | `session_info_update` (the title), `agent_thought_chunk`, the prompt echoed live as `user_message_chunk` |
 | Signed out | `-32000` with `data.message` naming the settings file | `-32000 Authentication required`, no `data` |
 
 ## 11. Open questions and follow-ups

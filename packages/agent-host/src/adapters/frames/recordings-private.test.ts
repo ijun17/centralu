@@ -24,6 +24,7 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a macOS temp folder', /\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+\/T\b/],
   ['a Linux home folder', /(?<![\w<])\/home\/(?!<)[^/\s"'`]+/],
   ['a bridge token', /ccb\d+:[\w-]+:[\w-]{16,}/],
+  ['the account’s plan in Antigravity’s `tier`', /"tier":\{"name":"(?!<plan>|Antigravity Starter Quota")/],
   ['an OpenCode tool output id that is not a placeholder', /\btool_(?!\d{6}\b)[A-Za-z0-9]{16,}/],
   ['a secret in an environment entry', /\\?"name\\?":\\?"[A-Z_]*(?:TOKEN|SECRET|PASSWORD|KEY)[A-Z_]*\\?",\\?"value\\?":\\?"(?!<secret>)/],
 ]

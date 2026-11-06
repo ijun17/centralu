@@ -70,12 +70,14 @@ async function main(): Promise<number> {
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
+  let agy: ReturnType<typeof temporaryAgy> | null = null
   // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
   if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
   let failed = 0
   // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
   const stop = () => {
     codexHome?.finish()
+    agy?.finish()
     rmSync(data, { recursive: true, force: true })
     process.exit(130)
   }
@@ -93,8 +95,8 @@ async function main(): Promise<number> {
       else process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
       const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(spec))
-      const agy = tool === 'antigravity' ? temporaryAgy(data, scenario.name, scenario.drive?.signedOut === true) : null
-      const adapter = agy?.adapter(spawn) ?? adapterFor(tool, spawn)
+      agy = tool === 'antigravity' ? temporaryAgy(data, scenario.name, scenario.drive?.signedOut === true) : null
+      const adapter = agy ? agy.adapter(spawn) : adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
       let bridge: BridgeHost | null = null
@@ -129,11 +131,16 @@ async function main(): Promise<number> {
         failed++
         console.error(`[record] ${tool} ${scenario.name}: ${(e as Error).message}`)
       } finally {
-        agy?.finish()
         for (const path of outside) rmSync(path, { recursive: true, force: true })
         await bridge?.close()
         await removeDir(cwd)
         if (!keepRaw) rmSync(raw, { recursive: true, force: true })
+        // Last: a token file that is gone or changed must not stop the rest of the cleanup
+        try {
+          agy?.finish()
+        } catch (e) {
+          console.error(`[record] could not put the sign-in back: ${(e as Error).message}`)
+        }
       }
     }
   } finally {
@@ -196,6 +203,7 @@ function temporaryAgy(parent: string, scenario: string, signedOut: boolean): { a
     finish() {
       if (done || signedOut) return
       done = true
+      if (!existsSync(copy) || !existsSync(real)) return
       const now = readFileSync(copy, 'utf8')
       if (now === before) return
       if (readFileSync(real, 'utf8') !== before) return console.error("[record] the sign-in was refreshed during the run, and the person's own file was too: left as it is")

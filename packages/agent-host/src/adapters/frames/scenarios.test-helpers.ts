@@ -293,8 +293,9 @@ export const SCENARIOS: readonly Scenario[] = [
     name: 'permissions',
     tools: ['antigravity'],
     async run(d) {
-      const outside = `${d.cwd}/../frames-outside/secret.txt`
-      d.seed({ 'notes.txt': 'line one\n', '../frames-outside/secret.txt': 'The secret word is plover.\n' })
+      const outside = `${d.cwd}-outside/secret.txt`
+      // A folder of its own beside the working folder, named for it, so two runs never share one
+      d.seed({ 'notes.txt': 'line one\n', [`../${d.cwd.split(/[\\/]/).at(-1)}-outside/secret.txt`]: 'The secret word is plover.\n' })
       const asked = await answeredTurn(d, `Do these three steps in order, using your tools: 1) run the shell command \`echo hello-from-shell\`; 2) append a new line with the text \`edited\` to notes.txt in the current folder; 3) read the file ${outside} and tell me its exact contents. Then summarise in one line.`, 'allow')
       if (asked.length === 0) throw new Error('permissions: nothing was asked about')
     },
@@ -529,8 +530,8 @@ export async function drive(
   const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...scenario.session?.(), ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
   if (scenario.signedOut) {
     // The refusal is the recording: no session opens
-    const opened = await adapter.createSession(opts, emit).then((h) => h.dispose().then(() => true), () => false)
-    if (opened) throw new Error(`${scenario.name}: a session opened`)
+    const refusal = await adapter.createSession(opts, emit).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string })
+    if (refusal?.code !== 'not_logged_in') throw new Error(`${scenario.name}: expected a refusal as signed out, got ${refusal ? JSON.stringify(refusal.code) : 'a session'}`)
     return events
   }
   let handle = await adapter.createSession(opts, emit)

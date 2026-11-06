@@ -269,6 +269,8 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     }
     if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>
+      // Antigravity: the account's plan, as `initialize` and `session/new` answer with it (`_meta.antigravity.tier`)
+      if (key === 'tier' && typeof o.name === 'string') return { ...o, name: '<plan>', id: '<plan>', upgradeUri: '<url>' }
       if (key === 'account') return { email: '<email>', organization: '<organization>', subscriptionType: '<plan>', apiProvider: o.apiProvider }
       if (o.type === 'system' && o.subtype === 'init') {
         const plugins = asList(o.plugins).map((p) => (p && typeof p === 'object' && 'path' in p && p.path !== 'builtin' ? { name: stable('plugin', String((p as { name?: unknown }).name)), path: '<plugin>', source: '<plugin>' } : p))
