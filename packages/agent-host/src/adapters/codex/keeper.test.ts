@@ -30,7 +30,7 @@ class FakeAppServer extends EventEmitter {
    * knowing the method.
    */
   constructor(
-    private readonly mode: 'paginated' | 'legacy' | 'idle' = 'legacy',
+    private readonly mode: 'paginated' | 'legacy' | 'idle' | 'systemError' = 'legacy',
     /** A process this host spawned answers `initialize`; an adopted one already was initialized */
     private readonly fresh = false,
   ) {
@@ -58,8 +58,9 @@ class FakeAppServer extends EventEmitter {
       return this.reply(m.id, this.fresh ? { result: {} } : { error: { code: -32600, message: 'Already initialized' } })
     }
     if (m.method === 'thread/resume') {
-      const turns = this.mode === 'paginated' || this.mode === 'idle' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
-      if (this.mode === 'idle') return this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'idle' }, turns } } })
+      const turns = this.mode === 'paginated' || this.mode === 'idle' || this.mode === 'systemError' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
+      // Measured (codex-cli 0.160.0): `idle` after a completed or interrupted turn, `systemError` after a failed one (a capacity error)
+      if (this.mode === 'idle' || this.mode === 'systemError') return this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: this.mode }, turns } } })
       this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'active', activeFlags: ['waitingOnApproval'] }, turns } } })
       // The approval the old host never answered, re-sent under its old id
       this.stdout.write(`${JSON.stringify({ id: 0, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-9', itemId: 'i1', command: 'touch x', cwd: '/tmp' } })}\n`)
@@ -68,7 +69,7 @@ class FakeAppServer extends EventEmitter {
     if (m.method === 'thread/goal/get') return this.reply(m.id, { result: { goal: null } })
     if (m.method === 'thread/turns/list') {
       if (this.mode === 'legacy') return this.reply(m.id, { error: { code: -32601, message: 'Method not found' } })
-      if (this.mode === 'idle') return this.reply(m.id, { result: { data: [], nextCursor: null, backwardsCursor: null } })
+      if (this.mode === 'idle' || this.mode === 'systemError') return this.reply(m.id, { result: { data: [], nextCursor: null, backwardsCursor: null } })
       return this.reply(m.id, { result: { data: [{ id: 'turn-9', status: 'inProgress', items: [], itemsView: 'notLoaded' }], nextCursor: 'c1', backwardsCursor: null } })
     }
     this.reply(m.id, { result: {} })
@@ -87,7 +88,7 @@ class FakeAppServer extends EventEmitter {
   }
 }
 
-async function adopt(mode: 'paginated' | 'legacy' | 'idle' = 'legacy') {
+async function adopt(mode: 'paginated' | 'legacy' | 'idle' | 'systemError' = 'legacy') {
   const server = new FakeAppServer(mode)
   const events: { type: string; requestId?: string }[] = []
   const handle = await new CodexAdapter().createSession(
@@ -103,7 +104,7 @@ async function adopt(mode: 'paginated' | 'legacy' | 'idle' = 'legacy') {
         adopt: { process: server as unknown as AgentProcess, openCalls: [] },
       },
     },
-    (e) => events.push(e as never),
+    (e) => events.push(e),
   )
   return { server, handle, events }
 }
@@ -221,7 +222,7 @@ describe('codex under the keeper', () => {
         cwd: '/tmp',
         permissionPreset: 'safe',
         resumeExternalId: 'thread-1',
-        processSource: { spawn: () => server as unknown as AgentProcess },
+        processSource: { spawn: () => server },
       },
       () => {},
     )
@@ -254,6 +255,24 @@ describe('codex under the keeper', () => {
       code: 'adapter_crashed',
       message: 'codex app-server exited (code 1). stderr: Error: thread already has an active writer',
     })
+  })
+
+  // The host that adopts it asks once whether the turn its record names can still be running (#2020)
+  it.each(['idle', 'systemError'] as const)('says an adopted thread the app-server calls %s runs no turn, until something is sent to it', async (mode) => {
+    const idle = await adopt(mode)
+    await eventually(() => idle.server.received.some((m) => m.method === 'thread/goal/get'))
+    expect(await idle.handle.adoptedIdle?.()).toBe(true)
+    idle.server.hold.add('turn/start')
+    idle.handle.send('please do the thing')
+    expect(await idle.handle.adoptedIdle?.()).toBe(false)
+  })
+
+  it('does not call a thread idle while the app-server says a turn runs', async () => {
+    for (const mode of ['paginated', 'legacy'] as const) {
+      const running = await adopt(mode)
+      await eventually(() => running.server.received.some((m) => m.method === 'thread/goal/get'))
+      expect(await running.handle.adoptedIdle?.()).toBe(false)
+    }
   })
 
   /**
