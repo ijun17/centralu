@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { fakeApps, fakeCentraluTools } from './fakes.test-helpers.js'
@@ -46,6 +47,8 @@ export type Scenario = {
    * `probe`, whose one tool `ping` answers `pong`
    */
   settings?: 'mcp'
+  /** The tool is to refuse to open a session (it is signed out): the run opens none and the scenario is the refusal */
+  signedOut?: boolean
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */
@@ -203,7 +206,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'centralu-mail',
-    tools: ['claude', ...ACP_TOOLS],
+    tools: ['claude', ...ACP_TOOLS, 'antigravity'],
     session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the mail tool of the centralu server to read your inbox, then send a message to "Docs worker" saying: use LICENSE. Then say done.')
@@ -211,7 +214,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'centralu-agents',
-    tools: ['claude', ...ACP_TOOLS],
+    tools: ['claude', ...ACP_TOOLS, 'antigravity'],
     session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the recall tool of the centralu server to search for "naming". Then use its read_session tool on the session it found. Then use its start_agent tool with the task "list the notes". Then summarise all three in two sentences.')
@@ -285,6 +288,44 @@ export const SCENARIOS: readonly Scenario[] = [
     async run(d) {
       await turn(d, 'Reply with exactly: hello')
     },
+  },
+  {
+    // Antigravity: a command and an edit allowed, and a read outside the folder that its harness refuses
+    name: 'permissions',
+    tools: ['antigravity'],
+    async run(d) {
+      const outside = join(d.cwd, '..', 'frames-outside', 'secret.txt')
+      d.seed({ 'notes.txt': 'line one\n', [join('..', 'frames-outside', 'secret.txt')]: 'The secret word is plover.\n' })
+      const asked = await answeredTurn(d, `Do these three steps in order, using your tools: 1) run the shell command \`echo hello-from-shell\`; 2) append a new line with the text \`edited\` to notes.txt in the current folder; 3) read the file ${outside} and tell me its exact contents. Then summarise in one line.`, 'allow')
+      if (asked.length === 0) throw new Error('permissions: nothing was asked about')
+    },
+  },
+  {
+    // Antigravity: a read, then a command denied; the turn goes on to its end
+    name: 'deny',
+    tools: ['antigravity'],
+    async run(d) {
+      d.seed({ 'decoy.json': '{"decoy_client_id": "none", "decoy_note": "recording decoy"}\n' })
+      await answeredTurn(d, 'Use your file viewing tool (not the shell) to read the file decoy.json in the current folder and tell me its top-level JSON keys and the value of decoy_note.', 'allow')
+      await answeredTurn(d, 'Run the shell command `echo answer-deny` once. If it is not allowed, do not retry and do not use any other tool; just say so.', 'deny')
+    },
+  },
+  {
+    // Antigravity: the conversation opened again in a new process (session/load), whose replay is not shown again
+    name: 'load',
+    tools: ['antigravity'],
+    async run(d) {
+      await answeredTurn(d, 'Run the shell command `echo hello-from-shell`. Then say done.', 'allow')
+      await d.reopen()
+      await answeredTurn(d, 'What exact shell command did you run earlier in this conversation? One line.', 'allow')
+    },
+  },
+  {
+    // Antigravity with no sign-in of its own: session/new is refused, which is a sign-in in Centralu
+    name: 'signed-out',
+    tools: ['antigravity'],
+    signedOut: true,
+    async run() {},
   },
   {
     name: 'basic',
@@ -487,6 +528,12 @@ export async function drive(
     }
   }
   const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...scenario.session?.(), ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
+  if (scenario.signedOut) {
+    // The refusal is the recording: no session opens
+    const opened = await adapter.createSession(opts, emit).then((h) => h.dispose().then(() => true), () => false)
+    if (opened) throw new Error(`${scenario.name}: a session opened`)
+    return events
+  }
   let handle = await adapter.createSession(opts, emit)
   const driver: Driver = {
     events,
