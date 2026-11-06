@@ -19,7 +19,7 @@ export const MACHINE = 'm1'
 
 export type Side = { dir: string; db: string; home: string; project: string }
 
-function side(name: string): Side {
+export function side(name: string): Side {
   const dir = mkdtempSync(join(tmpdir(), `centralu-e2e-linked-${name}-`))
   const s = { dir, db: join(dir, 'data', 'store.db'), home: join(dir, 'home'), project: join(dir, `${name}-project`) }
   mkdirSync(join(dir, 'data'))
@@ -30,10 +30,11 @@ function side(name: string): Side {
 
 export type LinkedHost = { port: number } & SpawnedHost
 
-export async function startLinkedHost(s: Side, port: number, link?: { port: number }, opts: { hubVersion?: string } = {}): Promise<LinkedHost> {
+export async function startLinkedHost(s: Side, port: number, link?: { port: number }, opts: { hubVersion?: string; agent?: 'replay' } = {}): Promise<LinkedHost> {
   const args = ['--import', 'tsx', 'e2e/fixtures/linked-host-main.ts', '--port', String(port), '--db', s.db, '--token', LINKED_TOKEN]
   if (link) args.push('--link', JSON.stringify({ id: MACHINE, name: 'Remote box', port: link.port, token: LINKED_TOKEN }))
   if (opts.hubVersion) args.push('--hub-version', opts.hubVersion)
+  if (opts.agent) args.push('--agent', opts.agent)
   // What the host starts (the tool probes `agents.detect` runs, with the home in `s`) is waited for before `s` is removed (#368)
   const env = { CC_DATA_DIR: join(s.dir, 'data'), ...homeEnv(s.home), CC_HOST_ALLOWED_ORIGINS: LINKED_UI_ORIGIN }
   return { port, ...(await spawnHost(args, env, 'linked host')) }

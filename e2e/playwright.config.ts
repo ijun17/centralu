@@ -36,7 +36,8 @@ const RECOVERY_SPEC = /(recovery|older-host)\.spec\.ts/
  */
 const LINKED_PORT = 5179
 const LINKED_URL = `http://127.0.0.1:${LINKED_PORT}`
-const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
+// The replay suite (#1498) plays recorded sessions on a host of the same kind, so it shares this project: the real web platform, one worker
+const LINKED_SPEC = /(^|[\\/])(linked-hosts(-webkit)?|replay)\.spec\.ts$/
 
 /**
  * The engine the suite runs in. Unset (`pnpm e2e`), Chromium, with the scenarios that most depend

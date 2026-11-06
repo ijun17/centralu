@@ -12,6 +12,7 @@ import { Router } from '../../packages/agent-host/src/links/router.js'
 import { DirectTunnel, SshTunnel, type RemoteSpec } from '../../packages/agent-host/src/links/tunnel.js'
 import { storeMirror, storeProjectOrder, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
 import { scriptedAdapters } from '../../packages/agent-host/src/links/scripted-agent.test-helpers.js'
+import { replayAdapters } from '../../packages/agent-host/src/adapters/frames/replay-agent.test-helpers.js'
 import { projectsHome } from '../../packages/agent-host/src/dev-services/project-folder.js'
 import { linkedViews } from '../../packages/agent-host/src/links/linked-views.js'
 import { ExternalApps } from '../../packages/agent-host/src/apps/external/runtime.js'
@@ -25,7 +26,8 @@ import { randomBytes } from 'node:crypto'
 /**
  * A host for the linked-hosts e2e (#82): the real store, session manager, RPC handler, terminals,
  * server and router, composed as `main.ts` composes them, with a scripted agent instead of Claude
- * or Codex so no model is involved (`scripted-agent.test-helpers.ts`).
+ * or Codex so no model is involved (`scripted-agent.test-helpers.ts`). `--agent replay` puts the real
+ * adapters on recorded sessions instead (#1498, `replay-agent.test-helpers.ts`).
  *
  * `--link '{"id":"m1","name":"Remote","port":N,"token":"…"}'` links it to another such host,
  * reached directly on loopback: the transport is the one thing that differs from a real link, and
@@ -45,12 +47,14 @@ const { values } = parseArgs({
      * then compares versions with a machine instead of connecting whatever they are (plan §4)
      */
     'hub-version': { type: 'string' },
+    /** `replay`: the real adapters on recorded sessions (replay-agent.test-helpers.ts) in place of the scripted agent */
+    agent: { type: 'string' },
   },
 })
 
 const token = values.token!
 const store = new Store(values.db!)
-const adapters = scriptedAdapters()
+const adapters = values.agent === 'replay' ? replayAdapters() : scriptedAdapters()
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
 // A new project's ~/Centralu (#515) is the one in this host's temporary HOME, never the home of whoever runs the suite
 mgr.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))

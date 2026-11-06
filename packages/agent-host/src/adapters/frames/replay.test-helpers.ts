@@ -34,6 +34,17 @@ export function recordedFolders(root: string): { dir: string; names: string[]; f
   }))
 }
 
+/** The folder of the newest tool version under `root`, of those that hold `scenario` if one is named: a re-recording on a version bump replaces the old one */
+export function newestVersion(root: string, scenario?: string): string {
+  const numbers = (dir: string) => dir.replace(/^[a-z-]+-/, '').split('.').map(Number)
+  const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
+  return recordedFolders(root)
+    .filter((f) => scenario === undefined || f.names.includes(scenario))
+    .map((f) => f.dir)
+    .sort(newer)
+    .at(-1)!
+}
+
 /** A new folder for a replay to run in, and the way to take it away */
 export function temporaryFolder(prefix: string): { path: string; remove(): void } {
   const path = mkdtempSync(join(tmpdir(), prefix))
@@ -179,7 +190,7 @@ export const streamJsonCodec = (cwd: string): FrameCodec => ({
 })
 
 /** A recorded value as it reads in the folder the replay runs in: its `<cwd>` is that folder */
-function inFolder<T>(v: T, cwd: string): T {
+export function inFolder<T>(v: T, cwd: string): T {
   if (typeof v === 'string') return v.split('<cwd>').join(cwd) as T
   if (Array.isArray(v)) return v.map((x) => inFolder(x, cwd)) as T
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, inFolder(x, cwd)])) as T
@@ -212,11 +223,16 @@ const describeLine = (m: Record<string, unknown>): string => {
   return typeof subtype === 'string' ? `${String(m.type)} ${subtype}` : String(m.type)
 }
 
-export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
+/** `onProblem`: told of each problem as it happens, for a host that no test is waiting on to read `state.problems` after */
+export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec, onProblem?: (problem: string) => void): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
   let cursor = 0
   const frames = recording.frames
   const peers: ReplayPeer[] = []
   const state: ReplayState = { problems: [], left: () => frames.length - cursor, spawned: 0 }
+  if (onProblem) {
+    const push = state.problems.push.bind(state.problems)
+    state.problems.push = (...found) => (found.forEach(onProblem), push(...found))
+  }
   const probe = codec.probe
   const asked = new Set(probe ? frames.flatMap((f) => (f.dir === 'out' && f.msg && probe.is(f.msg) ? [probe.requestId(f.msg)] : [])) : [])
   const answer = probe ? frames.find((f) => f.dir === 'in' && f.msg && probe.answers(f.msg, asked))?.msg : undefined

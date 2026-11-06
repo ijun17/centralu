@@ -1,4 +1,5 @@
-import { loadRecording, recordedFolders } from '../frames/replay.test-helpers.js'
+import { loadRecording, newestVersion, recordedFolders } from '../frames/replay.test-helpers.js'
+import { ClaudeAdapter } from './index.js'
 import type { ClaudeMessage } from './json.js'
 
 /**
@@ -10,19 +11,17 @@ import type { ClaudeMessage } from './json.js'
 
 export const CLAUDE_RECORDINGS = `${import.meta.dirname}/recordings`
 
+/** The adapter a replay drives: no start gap, and no `claude` looked for on the machine */
+export const replayedClaudeAdapter = (): ClaudeAdapter => new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' })
+
+/** What a recording was made with, which a replay's session is given again: the smallest model, and no settings file read */
+export const CLAUDE_REPLAY_SESSION = { noSettingFiles: true, model: 'haiku' } as const
+
 /**
  * The recorded CLI version's folder: the newest, as a re-recording on a version bump replaces the old one. Of `scenario`: the
  * newest that holds it, since a scenario recorded later comes from a later CLI than the rest
  */
-export const recordedVersion = (scenario?: string): string => {
-  const numbers = (dir: string) => dir.replace(/^claude-code-/, '').split('.').map(Number)
-  const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
-  return recordedFolders(CLAUDE_RECORDINGS)
-    .filter((f) => scenario === undefined || f.names.includes(scenario))
-    .map((f) => f.dir)
-    .sort(newer)
-    .at(-1)!
-}
+export const recordedVersion = (scenario?: string): string => newestVersion(CLAUDE_RECORDINGS, scenario)
 
 const fileOf = (scenario: string): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === recordedVersion(scenario))!.file(scenario)
 
